@@ -1,0 +1,98 @@
+module: data-ingestion
+platform: android
+version: 1
+
+behaviors:
+  - id: ING-001
+    type: lifecycle
+    description: "ContentObserver가 Samsung Voice Recorder 신규 녹음 파일 저장을 감지하면 Room raw_ingestion_events에 pending 레코드를 INSERT한다"
+    trigger: "Samsung Voice Recorder가 새 .m4a 파일을 /storage/emulated/0/VoiceRecorder/ 또는 SAF-granted URI에 저장"
+    precondition: "앱이 FOREGROUND 또는 BACKGROUND 상태, SAF 권한 보유, Room DB 초기화 완료"
+    expected: "Room raw_ingestion_events에 {source_type:'voice', sync_status:'pending', retry_count:0} 레코드 1건 INSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-002
+    type: lifecycle
+    description: "WorkManager UploadWorker가 pending 레코드를 Supabase raw_ingestion_events에 업로드하고 sync_status를 synced로 업데이트한다"
+    trigger: "WorkManager UploadWorker 실행 (네트워크 연결 있음)"
+    precondition: "Room에 sync_status='pending' raw_ingestion_events 레코드 1건 존재, Supabase 인증 토큰 유효"
+    expected: "Supabase raw_ingestion_events에 해당 레코드 INSERT 성공 → Room sync_status='synced'로 UPDATE됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-003
+    type: lifecycle
+    description: "네트워크 없을 때 UploadWorker는 Room 레코드를 삭제하지 않고 retry_count를 증가시킨 뒤 exponential backoff로 재시도한다"
+    trigger: "WorkManager UploadWorker 실행 (네트워크 없음 또는 Supabase 응답 오류)"
+    precondition: "Room에 sync_status='pending', retry_count=0인 레코드 1건 존재, 네트워크 연결 없음"
+    expected: "Room 레코드 sync_status='failed', retry_count=1로 UPDATE됨. 레코드 DELETE 없음. WorkManager 재시도 스케줄 등록됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-004
+    type: api
+    description: "Supabase raw_ingestion_events INSERT 성공 시 HTTP 201 응답을 반환하며 서버 측 RLS가 user_id를 검증한다"
+    endpoint: "POST /rest/v1/raw_ingestion_events"
+    precondition: "Supabase Bearer 토큰 유효, body에 {source_type, source_ref, timestamp, user_id} 포함"
+    expected: "HTTP 201, {id: uuid} — user_id가 토큰의 sub과 일치할 때만 성공"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-005
+    type: api
+    description: "Supabase raw_ingestion_events INSERT 시 인증 토큰 없으면 401 반환"
+    endpoint: "POST /rest/v1/raw_ingestion_events"
+    precondition: "Authorization 헤더 없음"
+    expected: "HTTP 401, {message: 'JWT required'}"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-006
+    type: lifecycle
+    description: "Gmail OAuth WorkManager periodic sync가 신규 이메일을 Room EmailBody + RawIngestionEvent로 저장한다"
+    trigger: "WorkManager GmailSyncWorker 실행 (15분 주기)"
+    precondition: "Gmail OAuth 토큰 유효, Room DB 초기화, 마지막 sync 이후 신규 메시지 1건 존재"
+    expected: "Room raw_ingestion_events 1건(source_type='gmail') + EmailBody 1건 INSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-007
+    type: lifecycle
+    description: "Outlook Mail Microsoft Graph WorkManager periodic sync가 신규 이메일을 Room에 저장한다"
+    trigger: "WorkManager OutlookSyncWorker 실행 (15분 주기)"
+    precondition: "Microsoft Graph OAuth 토큰 유효, 신규 메시지 1건 존재"
+    expected: "Room raw_ingestion_events 1건(source_type='outlook_mail') + EmailBody 1건 INSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-008
+    type: lifecycle
+    description: "네이버 IMAP sync가 신규 이메일을 Room에 저장한다"
+    trigger: "WorkManager NaverImapSyncWorker 실행"
+    precondition: "Keystore에 네이버 IMAP credential 저장됨, IMAP 연결 성공, 신규 메시지 1건"
+    expected: "Room raw_ingestion_events 1건(source_type='naver_imap') + EmailBody 1건 INSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-009
+    type: lifecycle
+    description: "Google Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다"
+    trigger: "WorkManager CalendarSyncWorker 실행 (1시간 주기)"
+    precondition: "Google Calendar OAuth 토큰 유효, 오늘 캘린더 이벤트 1건 존재"
+    expected: "Room calendar_events 1건(source_type='google_calendar') INSERT 또는 UPSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-010
+    type: lifecycle
+    description: "Outlook Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다"
+    trigger: "WorkManager OutlookCalendarSyncWorker 실행"
+    precondition: "Microsoft Graph Calendar 토큰 유효, 오늘 이벤트 1건 존재"
+    expected: "Room calendar_events 1건(source_type='outlook_calendar') INSERT 또는 UPSERT됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "raw_ingestion_events는 sync_status='synced' 확인 전까지 Room에서 DELETE되지 않는다"
+  - "Transcript 및 EmailBody는 Supabase로 업로드되지 않는다 (로컬 only)"

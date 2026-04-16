@@ -1,0 +1,122 @@
+version: 1
+# BeCalm Android MVP — API Contract (client_primary profile)
+# The app is a client consuming Supabase REST + Auth APIs.
+# These are the client-side usage contracts: which endpoints the app calls,
+# what auth it sends, what columns it reads/writes, and what response shapes it expects.
+
+base_path: https://<supabase-project>.supabase.co
+auth: bearer_jwt
+
+endpoints:
+  # ---- Auth ----
+
+  - method: POST
+    path: /auth/v1/token
+    auth: none
+    body:
+      grant_type: string    # "password" | "refresh_token" | "id_token"
+      email?: string
+      password?: string
+      refresh_token?: string
+      id_token?: string     # Google OAuth
+    response:
+      200: { access_token: string, refresh_token: string, user: { id: uuid, email: string } }
+      400: { error: string, error_description: string }
+    spec_refs: [AUTH-001, AUTH-002, AUTH-003, AUTH-004]
+
+  - method: POST
+    path: /auth/v1/logout
+    auth: required
+    response:
+      204: {}
+      401: { message: string }
+    spec_refs: [AUTH-005]
+
+  # ---- raw_ingestion_events ----
+
+  - method: POST
+    path: /rest/v1/raw_ingestion_events
+    auth: required
+    body:
+      source_type: string
+      source_ref?: string
+      timestamp: datetime
+    response:
+      201: { id: uuid }
+      401: { message: string }
+      403: { message: string }
+    spec_refs: [ING-004, ING-005, SYNC-003, SYNC-005]
+
+  - method: GET
+    path: /rest/v1/raw_ingestion_events
+    auth: required
+    query:
+      user_id: uuid
+      sync_status?: string
+      select?: string
+    response:
+      200: { data: "RawIngestionEvent[]" }
+      401: { message: string }
+    spec_refs: [SYNC-005]
+
+  # ---- commitments ----
+
+  - method: POST
+    path: /rest/v1/commitments
+    auth: required
+    body:
+      direction: string       # give | take
+      counterparty_raw?: string
+      title: string
+      description?: string
+      due_date?: string       # ISO date
+      status: string
+      source_type: string
+      source_ref?: string
+      confidence: float
+    response:
+      201: { id: uuid }
+      401: { message: string }
+    spec_refs: [SYNC-001]
+
+  - method: GET
+    path: /rest/v1/commitments
+    auth: required
+    query:
+      due_date?: string       # eq.{date}
+      status?: string         # eq.pending
+      select?: string
+    response:
+      200: { data: "Commitment[]" }
+      401: { message: string }
+    spec_refs: [DASH-004]
+
+  # ---- calendar_events ----
+
+  - method: POST
+    path: /rest/v1/calendar_events
+    auth: required
+    body:
+      source_type: string
+      source_ref?: string
+      title: string
+      start_at: datetime
+      end_at: datetime
+      attendees_raw?: string
+    response:
+      201: { id: uuid }
+      200: { id: uuid }     # upsert path
+      401: { message: string }
+    spec_refs: [SYNC-002]
+
+  - method: GET
+    path: /rest/v1/calendar_events
+    auth: required
+    query:
+      start_at: string      # gte.{today_start}
+      end_at?: string       # lte.{today_end}
+      select?: string
+    response:
+      200: { data: "CalendarEvent[]" }
+      401: { message: string }
+    spec_refs: [DASH-005]

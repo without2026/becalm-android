@@ -1,0 +1,176 @@
+version: 1
+
+# BeCalm Android MVP — Data Model Contract
+# Persistence is split: Room (local primary) + Supabase (mirror, structured only).
+# Transcript and EmailBody live in Room only — never uploaded to Supabase.
+
+tables:
+  # ---- Supabase tables (mirrored from Room) ----
+
+  - name: raw_ingestion_events
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: source_type
+        type: text
+        nullable: false
+        # enum: voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+      - name: source_ref
+        type: text
+        nullable: true
+        # email message_id, file URI, calendar event id, etc.
+      - name: timestamp
+        type: timestamptz
+        nullable: false
+      - name: sync_status
+        type: text
+        nullable: false
+        default: "'pending'"
+        # enum: pending | synced | failed
+      - name: retry_count
+        type: int
+        nullable: false
+        default: "0"
+      - name: last_attempt_at
+        type: timestamptz
+        nullable: true
+    indexes:
+      - columns: [user_id, sync_status]
+        type: btree
+      - columns: [user_id, timestamp]
+        type: btree
+    rls: true
+
+  - name: commitments
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: direction
+        type: text
+        nullable: false
+        # enum: give | take
+      - name: counterparty_raw
+        type: text
+        nullable: true
+        # phone# | email | attendee name
+      - name: title
+        type: text
+        nullable: false
+      - name: description
+        type: text
+        nullable: true
+      - name: due_date
+        type: date
+        nullable: true
+      - name: status
+        type: text
+        nullable: false
+        default: "'pending'"
+        # enum: pending | done | overdue (MVP: pending only)
+      - name: source_type
+        type: text
+        nullable: false
+      - name: source_ref
+        type: text
+        nullable: true
+        fk: "raw_ingestion_events.source_ref"
+      - name: confidence
+        type: float
+        nullable: false
+        default: "0.0"
+      - name: sync_status
+        type: text
+        nullable: false
+        default: "'pending'"
+      - name: created_at
+        type: timestamptz
+        nullable: false
+        default: now()
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+        default: now()
+    indexes:
+      - columns: [user_id, due_date, status]
+        type: btree
+      - columns: [user_id, sync_status]
+        type: btree
+    rls: true
+
+  - name: calendar_events
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+        fk: "auth.users.id"
+      - name: source_type
+        type: text
+        nullable: false
+        # enum: google_calendar | outlook_calendar
+      - name: source_ref
+        type: text
+        nullable: true
+        # External calendar event ID for upsert
+      - name: title
+        type: text
+        nullable: false
+      - name: start_at
+        type: timestamptz
+        nullable: false
+      - name: end_at
+        type: timestamptz
+        nullable: false
+      - name: attendees_raw
+        type: text
+        nullable: true
+      - name: sync_status
+        type: text
+        nullable: false
+        default: "'pending'"
+    indexes:
+      - columns: [user_id, start_at]
+        type: btree
+    rls: true
+
+relationships:
+  - from: "raw_ingestion_events.user_id"
+    to: "auth.users.id"
+    type: many-to-one
+    on_delete: cascade
+
+  - from: "commitments.user_id"
+    to: "auth.users.id"
+    type: many-to-one
+    on_delete: cascade
+
+  - from: "calendar_events.user_id"
+    to: "auth.users.id"
+    type: many-to-one
+    on_delete: cascade
+
+migration_notes:
+  - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
+  - "Room 전용 엔티티 (Room 스키마에는 존재, Supabase에는 없음): Transcript, EmailBody — 개인정보(원본 텍스트) 보호 목적으로 로컬 only"
+  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 대응 mirror. sync_status 컬럼으로 업로드 추적"
+  - "Room DB 마이그레이션은 Room migration DSL 사용 (별도 Supabase migration 불필요)"
+  - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
+  - "리텐션 정책: Room 데이터 보관 기간 미정 (spec 단계 이월 항목)"

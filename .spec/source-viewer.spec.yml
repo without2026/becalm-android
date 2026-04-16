@@ -1,0 +1,47 @@
+module: source-viewer
+platform: android
+version: 1
+
+behaviors:
+  - id: SRC-001
+    type: ui_interaction
+    description: "원문보기 화면에서 날짜별로 그룹핑된 미팅/전화 transcript와 이메일 원문 목록이 표시된다"
+    screen: "SourceViewerScreen"
+    interaction: "화면 진입"
+    precondition: "Room에 transcript 2건(날짜 다름) + EmailBody 1건 존재"
+    expected: "날짜별 그룹 헤더 표시됨. 각 그룹 내 미팅/전화 아이콘(🤝/📞) + 이메일 아이콘(📧) 항목 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-002
+    type: ui_interaction
+    description: "미팅/전화 항목 탭 시 transcript 전체 텍스트가 표시된다"
+    screen: "TranscriptDetailScreen"
+    interaction: "transcript 항목 탭"
+    precondition: "SourceViewerScreen에 transcript 항목 1건 표시됨"
+    expected: "TranscriptDetailScreen으로 이동됨. Room transcript.text 전체 내용 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-003
+    type: ui_interaction
+    description: "이메일 항목 탭 시 subject + body_plain이 표시된다"
+    screen: "EmailDetailScreen"
+    interaction: "이메일 항목 탭"
+    precondition: "SourceViewerScreen에 EmailBody 항목 1건 표시됨"
+    expected: "EmailDetailScreen으로 이동됨. Room email_body.subject + body_plain 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-004
+    type: ui_interaction
+    description: "원문보기 항목이 없을 때 빈 상태 메시지를 표시한다"
+    screen: "SourceViewerScreen"
+    interaction: "화면 진입"
+    precondition: "Room transcript 0건, EmailBody 0건"
+    expected: "'수집된 원문이 없습니다' 빈 상태 메시지 표시됨. 크래시 없음"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "원문보기 데이터는 Room에서만 조회한다 — Supabase 조회 없음"

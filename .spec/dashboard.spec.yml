@@ -1,0 +1,75 @@
+module: dashboard
+platform: android
+version: 1
+
+behaviors:
+  - id: DASH-001
+    type: ui_interaction
+    description: "DashboardScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다"
+    screen: "DashboardScreen"
+    interaction: "화면 진입"
+    precondition: "인증 완료, Room에 오늘 CalendarEvent 2건 + due_date=오늘 Commitment 1건 존재"
+    expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-002
+    type: ui_interaction
+    description: "오늘 항목이 없을 때 빈 상태 메시지를 표시한다"
+    screen: "DashboardScreen"
+    interaction: "화면 진입"
+    precondition: "인증 완료, Room에 오늘 CalendarEvent 0건 + due_date=오늘 Commitment 0건"
+    expected: "'오늘 예정된 항목이 없습니다' 빈 상태 메시지 표시됨. 크래시 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-003
+    type: ui_interaction
+    description: "상단 소스 체크리스트에서 연결된 소스는 활성 아이콘으로, 미연결 소스는 비활성(도넛지) 아이콘으로 표시된다"
+    screen: "DashboardScreen"
+    interaction: "화면 진입"
+    precondition: "Gmail 연결됨, Outlook 미연결, 나머지 소스 미연결"
+    expected: "Gmail 아이콘 활성(체크마크), Outlook 아이콘 비활성(도넛지) 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-004
+    type: api
+    description: "Supabase commitments 테이블에서 오늘 due인 항목을 조회한다"
+    endpoint: "GET /rest/v1/commitments"
+    precondition: "Bearer 토큰 유효, query: due_date=eq.{today}, status=eq.pending"
+    expected: "HTTP 200, {data: Commitment[]} — user_id 기준 RLS 적용됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-005
+    type: api
+    description: "Supabase calendar_events 테이블에서 오늘 이벤트를 조회한다"
+    endpoint: "GET /rest/v1/calendar_events"
+    precondition: "Bearer 토큰 유효, query: start_at=gte.{today_start}, start_at=lte.{today_end}"
+    expected: "HTTP 200, {data: CalendarEvent[]} — user_id 기준 RLS 적용됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-006
+    type: gesture
+    description: "타임라인을 아래로 당겨 새로고침하면 Room 데이터가 갱신된다"
+    gesture: "pull-to-refresh"
+    screen: "DashboardScreen"
+    precondition: "DashboardScreen 표시됨"
+    expected: "Room에서 CalendarEvent + Commitment 재조회됨. 리스트 갱신됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: DASH-007
+    type: ui_interaction
+    description: "사이드탭(햄버거) 메뉴를 열면 원문보기와 설정 항목이 표시된다"
+    screen: "DashboardScreen"
+    interaction: "햄버거 버튼 탭"
+    precondition: "DashboardScreen 표시됨"
+    expected: "사이드 드로어 열림. '원문보기', '설정' 메뉴 항목 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "DashboardScreen은 Room(로컬) 데이터를 primary source로 사용한다 — Supabase 직접 조회 없음"

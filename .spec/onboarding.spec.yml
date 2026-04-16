@@ -1,0 +1,76 @@
+module: onboarding
+platform: android
+version: 1
+
+behaviors:
+  - id: ONB-001
+    type: ui_interaction
+    description: "첫 실행 시 TermsScreen이 가장 먼저 표시되고 [동의] 탭 시 LoginScreen으로 이동한다"
+    screen: "TermsScreen"
+    interaction: "[동의] 버튼 탭"
+    precondition: "앱 신규 설치 후 첫 실행, DataStore onboarding_completed=false"
+    expected: "LoginScreen으로 네비게이션됨. DataStore terms_accepted=true 저장됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-002
+    type: ui_interaction
+    description: "로그인/가입 완료 후 녹음 폴더 자동 감지 화면으로 이동하며 Samsung Voice Recorder 기본 경로를 자동 탐색한다"
+    screen: "RecordingFolderScreen"
+    interaction: "화면 진입 (자동)"
+    precondition: "Supabase Auth 로그인 완료, READ_MEDIA_AUDIO 권한 미부여"
+    expected: "RecordingFolderScreen 표시됨. 자동 탐색 후 기본 경로('/storage/emulated/0/VoiceRecorder') 발견 시 경로 텍스트 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-003
+    type: permission
+    description: "녹음 폴더 권한 요청 시 READ_MEDIA_AUDIO + SAF URI 권한을 요청한다"
+    os_permission: "READ_MEDIA_AUDIO"
+    precondition: "RecordingFolderScreen 표시됨, READ_MEDIA_AUDIO 미부여"
+    expected: "시스템 READ_MEDIA_AUDIO 권한 다이얼로그 표시됨. 승인 시 SAF folder picker 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-004
+    type: ui_interaction
+    description: "Gmail OAuth 연결 화면에서 [스킵] 탭 시 다음 온보딩 단계로 이동한다"
+    screen: "GmailOAuthScreen"
+    interaction: "[스킵] 버튼 탭"
+    precondition: "온보딩 4단계 (GmailOAuthScreen), Gmail 미연결"
+    expected: "OutlookMailOAuthScreen으로 이동됨. DataStore gmail_connected=false 유지"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-005
+    type: ui_interaction
+    description: "배터리 최적화 예외 요청 화면에서 거부 시 경고 메시지를 표시하고 다음 단계로 진행한다"
+    screen: "BatteryOptimizationScreen"
+    interaction: "[나중에] 또는 시스템 다이얼로그 거부"
+    precondition: "온보딩 9단계 (BatteryOptimizationScreen)"
+    expected: "'백그라운드 수집이 불안정할 수 있습니다' 경고 Snackbar 표시됨. DashboardScreen으로 이동됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-006
+    type: ui_interaction
+    description: "온보딩 완료 후 재실행 시 TermsScreen을 건너뛰고 DashboardScreen으로 바로 이동한다"
+    screen: "SplashScreen"
+    interaction: "앱 재실행"
+    precondition: "DataStore onboarding_completed=true, terms_accepted=true, Supabase Auth 세션 유효"
+    expected: "DashboardScreen으로 바로 이동됨 (TermsScreen, LoginScreen 건너뜀)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-007
+    type: lifecycle
+    description: "온보딩 실패 이벤트가 Sentry에 전송된다"
+    trigger: "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생"
+    precondition: "Sentry DSN 설정됨, 온보딩 진행 중"
+    expected: "Sentry에 onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "이용약관 미동의 시 절대 앱 기능에 접근할 수 없다"
+  - "온보딩은 순차 진행이며 건너뛴 OAuth 소스는 설정 화면에서 재연결 가능하다"

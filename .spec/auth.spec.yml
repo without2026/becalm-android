@@ -1,0 +1,63 @@
+module: auth
+platform: android
+version: 1
+
+behaviors:
+  - id: AUTH-001
+    type: api
+    description: "이메일+비밀번호로 Supabase Auth 로그인 성공 시 access_token + refresh_token을 EncryptedSharedPreferences에 저장한다"
+    endpoint: "POST /auth/v1/token?grant_type=password"
+    precondition: "Supabase 프로젝트 초기화, 가입된 user (email=test@becalm.com, password=ValidPass1!)"
+    expected: "HTTP 200, {access_token: string, refresh_token: string} — 토큰이 EncryptedSharedPreferences에 저장됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: AUTH-002
+    type: api
+    description: "잘못된 비밀번호로 로그인 시 Supabase Auth가 400을 반환하고 앱은 LoginScreen에 에러 메시지를 표시한다"
+    endpoint: "POST /auth/v1/token?grant_type=password"
+    precondition: "가입된 user, 잘못된 password='wrongpass'"
+    expected: "HTTP 400, {error: 'invalid_grant'} — LoginScreen에 '이메일 또는 비밀번호가 올바르지 않습니다' 메시지 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: AUTH-003
+    type: api
+    description: "Google OAuth 소셜 로그인 성공 시 Supabase Auth 세션이 생성되고 토큰이 저장된다"
+    endpoint: "POST /auth/v1/token?grant_type=id_token"
+    precondition: "Google OAuth client_id 설정됨, Google 계정으로 로그인 성공"
+    expected: "HTTP 200, {access_token: string} — 세션 생성, 토큰 EncryptedSharedPreferences 저장됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: AUTH-004
+    type: api
+    description: "access_token 만료 시 refresh_token으로 자동 갱신하고 재시도한다"
+    endpoint: "POST /auth/v1/token?grant_type=refresh_token"
+    precondition: "access_token 만료, refresh_token 유효"
+    expected: "HTTP 200, 새 access_token 발급됨 — EncryptedSharedPreferences 업데이트됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: AUTH-005
+    type: api
+    description: "로그아웃 시 Supabase Auth 세션이 종료되고 로컬 토큰이 삭제된다"
+    endpoint: "POST /auth/v1/logout"
+    precondition: "유효한 access_token"
+    expected: "HTTP 204 — EncryptedSharedPreferences의 토큰 삭제됨, Room DB는 유지됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: AUTH-006
+    type: ui_interaction
+    description: "이용약관 미동의 시 앱이 종료된다"
+    screen: "TermsScreen"
+    interaction: "[미동의] 버튼 탭"
+    precondition: "앱 첫 실행 (onboarding_completed = false), TermsScreen 표시됨"
+    expected: "앱 프로세스 종료됨 (finish() 호출). DataStore onboarding_completed = false 유지"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "인증 토큰은 EncryptedSharedPreferences 또는 Android Keystore에만 저장된다 — plaintext 저장 금지"
+  - "로그아웃 시 Room DB 데이터는 삭제하지 않는다 (로컬 데이터 보존)"

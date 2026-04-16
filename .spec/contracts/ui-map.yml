@@ -1,0 +1,126 @@
+version: 1
+# BeCalm Android MVP — UI Map Contract
+# Navigation: Jetpack Compose Navigation (NavHost)
+# Language: Korean only
+
+routes:
+  - path: /splash
+    screen: SplashScreen
+    data: []
+    components: [SplashLogo]
+    auth: public
+    # Decides: onboarding vs dashboard based on DataStore state
+
+  - path: /terms
+    screen: TermsScreen
+    data: []
+    components: [TermsBody, AgreeButton, DisagreeButton]
+    auth: public
+
+  - path: /login
+    screen: LoginScreen
+    data: [POST /auth/v1/token]
+    components: [EmailField, PasswordField, LoginButton, GoogleSignInButton, SignUpLink]
+    auth: public
+
+  - path: /onboarding/recording-folder
+    screen: RecordingFolderScreen
+    data: []
+    components: [FolderPathText, GrantPermissionButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/gmail
+    screen: GmailOAuthScreen
+    data: [POST /auth/v1/token]
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/outlook-mail
+    screen: OutlookMailOAuthScreen
+    data: [POST /auth/v1/token]
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/imap
+    screen: ImapSetupScreen
+    data: []
+    components: [ImapProviderSelector, UsernameField, AppPasswordField, ConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/google-calendar
+    screen: GoogleCalendarOAuthScreen
+    data: [POST /auth/v1/token]
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/outlook-calendar
+    screen: OutlookCalendarOAuthScreen
+    data: [POST /auth/v1/token]
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/battery
+    screen: BatteryOptimizationScreen
+    data: []
+    components: [BatteryExemptButton, SkipButton, WarningSnackbar]
+    auth: required
+
+  - path: /dashboard
+    screen: DashboardScreen
+    data: [GET /rest/v1/commitments, GET /rest/v1/calendar_events]
+    components: [SourceStatusStrip, TodayTimeline, CommitmentItem, CalendarEventItem, HamburgerMenu]
+    auth: required
+
+  - path: /source-viewer
+    screen: SourceViewerScreen
+    data: []
+    # Data loaded from Room directly (local only — no Supabase query)
+    components: [DateGroupHeader, TranscriptItem, EmailBodyItem]
+    auth: required
+
+  - path: /source-viewer/transcript/:id
+    screen: TranscriptDetailScreen
+    data: []
+    components: [TranscriptText, BackButton]
+    auth: required
+
+  - path: /source-viewer/email/:id
+    screen: EmailDetailScreen
+    data: []
+    components: [EmailSubject, EmailBodyText, BackButton]
+    auth: required
+
+  - path: /settings
+    screen: SettingsScreen
+    data: [POST /auth/v1/logout]
+    components: [SourceConnectionList, ReconnectButton, LogoutButton]
+    auth: required
+
+shared_components:
+  - name: SourceStatusStrip
+    props:
+      sources: "SourceStatus[]"
+      onSourceTap: "(sourceType: string) => void"
+    description: "6개 소스(Gmail, Outlook Mail, 네이버, 다음, Google Calendar, Outlook Calendar) 연결 상태를 아이콘 체크리스트로 표시"
+
+  - name: TodayTimeline
+    props:
+      items: "TodayItem[]"
+      onRefresh: "() -> Unit"
+    description: "오늘 캘린더 이벤트 + due=오늘 commitment 통합 시간순 목록. pull-to-refresh 지원"
+
+  - name: CommitmentItem
+    props:
+      commitment: "Commitment"
+    description: "direction 배지(give=파랑/take=주황) + title + counterparty_raw + due_date 표시"
+
+  - name: CalendarEventItem
+    props:
+      event: "CalendarEvent"
+    description: "캘린더 아이콘 + title + start_at~end_at 표시"
+
+  - name: HamburgerMenu
+    props:
+      onSourceViewer: "() -> Unit"
+      onSettings: "() -> Unit"
+    description: "사이드 드로어 메뉴. 원문보기 + 설정 진입점"
