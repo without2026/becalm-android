@@ -7,10 +7,12 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import kotlin.time.Duration.Companion.days
 
 // ─── Domain models ────────────────────────────────────────────────────────────
 
@@ -131,6 +133,23 @@ public interface MsGraphClient {
      * @param deltaOrNextLink Same semantics as [messagesDelta].
      */
     public suspend fun eventsDelta(deltaOrNextLink: String?): BecalmResult<GraphDeltaResponse<GraphCalendarEvent>>
+
+    /**
+     * Fetches a page of calendar event deltas via the `/me/calendarView/delta` endpoint.
+     *
+     * This endpoint is preferred over [eventsDelta] for time-bounded calendar sync because
+     * `/me/calendarView/delta` honours `startDateTime` / `endDateTime` query parameters,
+     * whereas `/me/events/delta` returns all events regardless of time window.
+     *
+     * Cursor semantics are identical to [messagesDelta]: pass `null` for the initial full
+     * sync and the opaque URL from [CalendarViewDeltaPage.nextLink] or
+     * [CalendarViewDeltaPage.deltaLink] for subsequent pages / sync passes.
+     *
+     * @param cursor If `null`, issues the initial full sync request.
+     *   If non-null, must be a URL previously returned as [CalendarViewDeltaPage.nextLink]
+     *   or [CalendarViewDeltaPage.deltaLink].
+     */
+    public suspend fun calendarViewDelta(cursor: String?): BecalmResult<CalendarViewDeltaPage>
 }
 
 // ─── Moshi JSON DTOs (private; not exposed outside this file) ─────────────────
@@ -198,6 +217,24 @@ private data class GraphLocationDto(
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
+/**
+ * Paginated response envelope returned by the `/me/calendarView/delta` endpoint (SP-27b).
+ *
+ * Semantics mirror [GraphDeltaResponse]: exactly one of [nextLink] or [deltaLink] is
+ * non-null on any successful response. Both null indicates a parse failure.
+ *
+ * @param value  List of calendar events in this page.
+ * @param nextLink Cursor for the next page within the current sync batch. Non-null when
+ *   more pages remain in this pass.
+ * @param deltaLink Cursor to persist as the starting point for the next sync pass. Non-null
+ *   when this is the last page of the current batch.
+ */
+public data class CalendarViewDeltaPage(
+    val value: List<GraphCalendarEvent>,
+    val nextLink: String?,
+    val deltaLink: String?,
+)
+
 private const val INITIAL_MESSAGES_URL =
     "https://graph.microsoft.com/v1.0/me/messages/delta" +
         "?\$select=id,internetMessageId,subject,from,bodyPreview,receivedDateTime"
@@ -205,6 +242,10 @@ private const val INITIAL_MESSAGES_URL =
 private const val INITIAL_EVENTS_URL =
     "https://graph.microsoft.com/v1.0/me/events/delta" +
         "?\$select=id,subject,start,end,location,attendees"
+
+private const val INITIAL_CALENDAR_VIEW_DELTA_URL =
+    "https://graph.microsoft.com/v1.0/me/calendarView/delta" +
+        "?\$select=id,subject,start,end,attendees"
 
 /**
  * OkHttp-direct implementation of [MsGraphClient].
@@ -275,6 +316,36 @@ public class MsGraphClientImpl(
             val events = dto.value.map { parseEventMap(it) }
             BecalmResult.Success(
                 GraphDeltaResponse(
+                    value = events,
+                    nextLink = dto.nextLink,
+                    deltaLink = dto.deltaLink,
+                ),
+            )
+        } catch (e: Exception) {
+            BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+    }
+
+    override suspend fun calendarViewDelta(
+        cursor: String?,
+    ): BecalmResult<CalendarViewDeltaPage> {
+        // When cursor is null this is the initial sync request. Build the URL dynamically with
+        // a 30-day-back to 90-day-forward window; Graph returns HTTP 400 without these params.
+        val url = cursor ?: run {
+            val start = (Clock.System.now() - 30.days).toString()
+            val end = (Clock.System.now() + 90.days).toString()
+            "$INITIAL_CALENDAR_VIEW_DELTA_URL&startDateTime=$start&endDateTime=$end"
+        }
+        val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
+
+        return try {
+            @Suppress("UNCHECKED_CAST")
+            val dto = eventListAdapter.fromJson(rawJson) as? GraphListDto<Map<String, Any?>>
+                ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null DTO for calendarView delta")))
+
+            val events = dto.value.map { parseEventMap(it) }
+            BecalmResult.Success(
+                CalendarViewDeltaPage(
                     value = events,
                     nextLink = dto.nextLink,
                     deltaLink = dto.deltaLink,

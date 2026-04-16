@@ -50,6 +50,10 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  * on the next sync worker pass. This is acceptable because all tables are caches of server
  * data, and [PersonEnrichmentEntity] is re-populated from on-device contacts.
  *
+ * NOTE (PIPA + UX): `commitmentState` column is NOT mirrored to Railway.
+ * On a forced downgrade (`fallbackToDestructiveMigrationOnDowngrade`), user-confirmed
+ * commitment lifecycle state is lost. Track: KTR-COMMITMENT-STATE-SYNC (SP-29b).
+ *
  * ## Obtaining an instance
  * Use [build] inside a Hilt [com.becalm.android.core.di.DatabaseModule] provider.
  * Never call [build] directly from application code — always inject the database via Hilt.
@@ -88,7 +92,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 1
+        public const val DATABASE_VERSION: Int = 2
 
         /**
          * Creates and opens the [BeCalmDatabase] using the standard Room builder.

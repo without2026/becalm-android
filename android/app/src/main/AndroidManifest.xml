@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ── Permissions ──────────────────────────────────────────────────────── -->
+
+    <!-- Voice recording and transcription (SP-35, VOI-005) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Alarm reminders (SP-37) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- API 33+: runtime permission required to post notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+
+        <!-- ── Receivers ──────────────────────────────────────────────────── -->
+
+        <!--
+            SP-37 reminder receiver.
+            exported=false: alarms are only fired by the system via PendingIntent; no
+            external app should be able to trigger this receiver directly.
+        -->
+        <receiver
+            android:name="com.becalm.android.receiver.ReminderBroadcastReceiver"
+            android:exported="false" />
+
+    </application>
+
+</manifest>

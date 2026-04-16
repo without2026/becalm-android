@@ -12,51 +12,12 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.stt.SttBackend
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
-
-// ─── STT interfaces (implemented by SP-33/34/35 in Round 5) ──────────────────
-
-/**
- * Abstraction over a single speech-to-text back-end.
- *
- * Implementations are provided by SP-34 (Whisper.cpp native) and SP-35
- * (Android SpeechRecognizer) in Round 5. Until those ship, any injection of
- * [SttBackendSelector] will fail at runtime — the worker is not enqueued before
- * onboarding completes, so this is a no-op until R5 ships.
- *
- * TODO: SttBackendSelector impl bound by SP-33/34/35 in Round 5.
- */
-public interface SttBackend {
-    /**
-     * Transcribes a single decoded [AudioChunk] and returns the recognised text.
-     *
-     * @param chunk 16 kHz 16-bit mono PCM window to transcribe.
-     * @return [BecalmResult.Success] carrying the transcript string (may be empty),
-     *         or [BecalmResult.Failure] on codec / network / permission error.
-     */
-    public suspend fun transcribe(chunk: AudioChunk): BecalmResult<String>
-}
-
-/**
- * Selects the appropriate [SttBackend] for the current device / network conditions.
- *
- * Prefers Android [android.speech.SpeechRecognizer] when online; falls back to the
- * Whisper.cpp native engine (SP-34) when offline or when the on-device recogniser is
- * unavailable.
- *
- * TODO: SttBackendSelector impl bound by SP-33/34/35 in Round 5.
- */
-public interface SttBackendSelector {
-    /**
-     * Returns the [SttBackend] that should handle the next transcription request.
-     */
-    public fun select(): SttBackend
-}
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
@@ -102,7 +63,7 @@ public class VoiceTranscriptionWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val voiceChunker: VoiceChunker,
-    private val sttBackendSelector: SttBackendSelector,
+    private val sttBackend: SttBackend,
     private val sourceStatusRepository: SourceStatusRepository,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -140,17 +101,14 @@ public class VoiceTranscriptionWorker @AssistedInject constructor(
         val audioUri = Uri.parse(audioUriString)
 
         // Steps 2–3: Decode + transcribe
-        val transcriptResult = runCatching {
-            transcribeAudio(audioUri)
-        }
+        val transcriptResult = transcribeAudio(audioUri)
 
-        if (transcriptResult.isFailure) {
-            val ex = transcriptResult.exceptionOrNull()
-            logger.e(TAG, "transcription failed id=${redact(rawEventId)} attempt=$runAttemptCount", ex)
+        if (transcriptResult is BecalmResult.Failure) {
+            logger.e(TAG, "transcription failed id=${redact(rawEventId)} attempt=$runAttemptCount error=${transcriptResult.error}")
             return@withContext handleFailure(entity)
         }
 
-        val transcript = transcriptResult.getOrDefault("")
+        val transcript = (transcriptResult as BecalmResult.Success).value
 
         // Step 4: Persist snippet and re-queue for upload (VOI-004)
         val updatedEntity = entity.copy(
@@ -169,43 +127,21 @@ public class VoiceTranscriptionWorker @AssistedInject constructor(
     // ── Internals ─────────────────────────────────────────────────────────────
 
     /**
-     * Decodes [uri] into chunks and accumulates the full transcript string.
+     * Delegates transcription of [uri] to [sttBackend].
      *
-     * @param uri MediaStore URI of the audio file.
-     * @return Concatenated transcript text (may be empty if no speech is detected).
-     * @throws Exception if [VoiceChunker] or [SttBackend] throws unexpectedly.
+     * Returns the [BecalmResult] from the backend directly so the caller's existing
+     * error-handling (retry mapping via [handleFailure]) can decide what to do —
+     * no exception is thrown here.
+     *
+     * @param uri MediaStore URI of the audio file; its string form is passed to the backend.
+     * @return [BecalmResult.Success] with transcript text, or [BecalmResult.Failure] on error.
      */
-    private suspend fun transcribeAudio(uri: Uri): String {
-        val backend = sttBackendSelector.select()
-        val chunks = voiceChunker.chunks(appContext, uri).toList()
-
-        if (chunks.isEmpty()) {
-            logger.d(TAG, "no chunks produced for uri=${redact(uri.toString())}")
-            return ""
+    private suspend fun transcribeAudio(uri: Uri): BecalmResult<String> {
+        val result = sttBackend.transcribeAudio(uri.toString())
+        if (result is BecalmResult.Failure) {
+            logger.w(TAG, "STT failure uri=${redact(uri.toString())}: ${result.error}")
         }
-
-        val builder = StringBuilder()
-        for (chunk in chunks) {
-            when (val result = backend.transcribe(chunk)) {
-                is BecalmResult.Success -> {
-                    val text = result.value.trim()
-                    if (text.isNotEmpty()) {
-                        if (builder.isNotEmpty()) builder.append(' ')
-                        builder.append(text)
-                    }
-                    logger.d(TAG, "chunk [${chunk.startMs}–${chunk.endMs}ms] len=${text.length}")
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(
-                        TAG,
-                        "STT failure for chunk [${chunk.startMs}–${chunk.endMs}ms]: ${result.error}",
-                    )
-                    // Continue with next chunk; partial transcript is better than none.
-                }
-            }
-        }
-
-        return builder.toString()
+        return result
     }
 
     /**

@@ -10,7 +10,13 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
+import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentStateMachine
+import com.becalm.android.domain.commitment.TransitionError
+import com.becalm.android.domain.commitment.TransitionResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
@@ -85,7 +91,22 @@ public interface CommitmentRepository {
      */
     public suspend fun fetchSingle(id: String): BecalmResult<CommitmentEntity>
 
-    // ── State machine (CMT-005..007) ─────────────────────────────────────────
+    // ── State machine (CMT-005..007 / SP-36) ────────────────────────────────
+
+    /**
+     * Loads the commitment with [id], applies [event] via [CommitmentStateMachine], and
+     * persists the resulting [com.becalm.android.domain.commitment.CommitmentState] to Room.
+     *
+     * Error mapping:
+     * - Row absent                           → [BecalmError.NotFound]
+     * - [TransitionError.IllegalTransition]  → [BecalmError.Validation]
+     * - [TransitionError.MissingSchedule]    → [BecalmError.Validation]
+     *
+     * @param id    UUID of the commitment to transition.
+     * @param event The [CommitmentEvent] to apply.
+     * @return The updated [CommitmentEntity] on success, or a typed failure.
+     */
+    public suspend fun transitionState(id: String, event: CommitmentEvent): BecalmResult<CommitmentEntity>
 
     /**
      * Optimistically writes [newState] to Room, then PATCHes Railway.
@@ -251,6 +272,36 @@ public class CommitmentRepositoryImpl @Inject constructor(
     }
 
     // ── State machine ─────────────────────────────────────────────────────────
+
+    override suspend fun transitionState(
+        id: String,
+        event: CommitmentEvent,
+    ): BecalmResult<CommitmentEntity> = withContext(Dispatchers.IO) {
+        val entity = dao.findById(id)
+            ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+
+        when (val result = CommitmentStateMachine.transition(entity.commitmentState, event)) {
+            is TransitionResult.Err -> BecalmResult.Failure(
+                when (result.error) {
+                    is TransitionError.IllegalTransition ->
+                        BecalmError.Validation(
+                            field = "commitmentState",
+                            message = "Illegal transition: ${result.error.from} + ${result.error.event::class.simpleName}",
+                        )
+                    TransitionError.MissingSchedule ->
+                        BecalmError.Validation(
+                            field = "at",
+                            message = "Schedule event requires a non-null future instant",
+                        )
+                }
+            )
+            is TransitionResult.Ok -> {
+                val updated = entity.copy(commitmentState = result.state)
+                dao.update(updated)
+                BecalmResult.Success(updated)
+            }
+        }
+    }
 
     override suspend fun updateActionState(
         id: String,
