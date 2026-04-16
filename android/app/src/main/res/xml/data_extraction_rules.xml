@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- spec: auth invariant — tokens are NOT backed up; EncryptedSharedPreferences uses device-bound keys -->
+        <exclude domain="sharedpref" path="becalm_auth_prefs.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="becalm_auth_prefs.xml"/>
+    </device-transfer>
+</data-extraction-rules>
