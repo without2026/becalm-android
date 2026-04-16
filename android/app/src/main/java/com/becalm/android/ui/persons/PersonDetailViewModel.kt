@@ -93,7 +93,7 @@ public data class PersonDetailUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "PersonDetailViewModel"
-internal const val ARG_PERSON_REF = "personRef"
+internal const val ARG_PERSON_REF = "person_id"
 private const val RAW_EVENTS_LIMIT = 100
 private const val CALENDAR_EVENTS_LIMIT = 50
 

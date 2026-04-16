@@ -157,6 +157,13 @@ public class CommitmentManagementViewModel @Inject constructor(
     // ─── Actions ──────────────────────────────────────────────────────────────
 
     /**
+     * Clears the current error from [CommitmentUiState.error].
+     */
+    public fun onErrorDismissed() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    /**
      * Switches the active filter and re-applies it to the currently loaded items.
      *
      * This is a pure in-memory operation; no Room query is issued.

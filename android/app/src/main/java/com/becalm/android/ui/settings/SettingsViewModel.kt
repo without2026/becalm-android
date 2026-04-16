@@ -111,6 +111,13 @@ public class SettingsViewModel @Inject constructor(
     // ─── Actions ──────────────────────────────────────────────────────────────
 
     /**
+     * Clears the current error from [SettingsUiState.error].
+     */
+    public fun onErrorDismissed() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    /**
      * Persists [lang] as the preferred locale tag via [UserPrefsStore.setLocaleTag].
      *
      * An empty string is treated as "follow system locale" and stored as null. Valid

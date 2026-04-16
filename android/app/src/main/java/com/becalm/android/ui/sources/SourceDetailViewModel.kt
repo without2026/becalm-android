@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -128,6 +129,10 @@ public class SourceDetailViewModel @Inject constructor(
         MutableStateFlow(
             SourceDetailUiState(error = "sourceType argument is missing or blank"),
         )
+    } else if (sourceType !in SourceType.ALL) {
+        MutableStateFlow(
+            SourceDetailUiState(error = "Invalid source type"),
+        )
     } else {
         combine(
             statusFlow,
@@ -161,6 +166,8 @@ public class SourceDetailViewModel @Inject constructor(
         logger.d(TAG, "init sourceType=$sourceType")
         if (sourceType.isBlank()) {
             logger.e(TAG, "sourceType argument missing from SavedStateHandle")
+        } else if (sourceType !in SourceType.ALL) {
+            logger.w(TAG, "rejected unknown sourceType")
         }
     }
 

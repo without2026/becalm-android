@@ -1,14 +1,9 @@
 package com.becalm.android.ui.navigation
 
-// R1 SCAFFOLD — ALL SCREEN COMPOSABLE CALLS ARE COMMENTED OUT.
-// This file declares the complete NavHost skeleton matching ui-map.yml v1.
-// Each composable block contains the argument-extraction logic that R7 will need;
-// the actual screen composable invocation is marked with a "// R7:" TODO comment.
-// R7 removes those TODO markers and writes the real screen calls once the
-// composable implementations land.
-//
-// Expected compile state at R1 ship: CLEAN (no phantom import errors because
-// screen references are inside comments only).
+// R8 IMPLEMENTATION — All screen composable calls wired.
+// Previously every composable block contained a "// R7:" TODO placeholder.
+// This file replaces every placeholder with the real screen composable call.
+// Argument-extraction logic from R1 is preserved unchanged.
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -17,16 +12,35 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.becalm.android.ui.auth.LoginScreen
+import com.becalm.android.ui.auth.SplashScreen
+import com.becalm.android.ui.auth.TermsScreen
+import com.becalm.android.ui.commitments.CommitmentManagementScreen
+import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
+import com.becalm.android.ui.onboarding.ColdSyncScreen
+import com.becalm.android.ui.onboarding.ContactsPermissionScreen
+import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
+import com.becalm.android.ui.onboarding.GmailOAuthScreen
+import com.becalm.android.ui.onboarding.ImapSetupScreen
+import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
+import com.becalm.android.ui.onboarding.OutlookMailOAuthScreen
+import com.becalm.android.ui.onboarding.RecordingFolderScreen
+import com.becalm.android.ui.persons.PersonDetailScreen
+import com.becalm.android.ui.persons.PersonsScreen
+import com.becalm.android.ui.persons.RawEventDetailSheet
+import com.becalm.android.ui.persons.UnassignedEventsScreen
+import com.becalm.android.ui.settings.SettingsScreen
+import com.becalm.android.ui.sources.SourceDetailScreen
+import com.becalm.android.ui.sources.SourcesListScreen
+import com.becalm.android.ui.today.TodayTimelineScreen
 
 /**
  * Root navigation host for the BeCalm Android app.
  *
- * ## R1 scaffold state
+ * ## R8 implementation state
  * Every route declared in `.spec/contracts/ui-map.yml` (version 1, 21 routes) is
- * registered here. The actual screen composables are **not yet implemented** — they
- * land in R7. Until then, each `composable { }` block contains only argument-extraction
- * logic and a `// R7:` placeholder comment showing exactly which composable R7 must
- * drop in. Do not remove argument-extraction logic while filling in R7 screens.
+ * registered and wired to its real screen composable. Argument-extraction logic
+ * introduced in R1 is preserved; screen composable calls replace the R7 placeholders.
  *
  * ## Usage
  * ```kotlin
@@ -56,70 +70,70 @@ public fun BecalmNavHost(
         // ── Auth / Public ──────────────────────────────────────────────────────
 
         composable(route = BecalmRoute.Splash.path) {
-            // R7: SplashScreen(navController = navController)
+            SplashScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.Terms.path) {
-            // R7: TermsScreen(navController = navController)
+            TermsScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.Login.path) {
-            // R7: LoginScreen(navController = navController)
+            LoginScreen(navController = navController)
         }
 
         // ── Onboarding ─────────────────────────────────────────────────────────
 
         composable(route = BecalmRoute.OnboardingRecordingFolder.path) {
-            // R7: RecordingFolderScreen(navController = navController)
+            RecordingFolderScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingContacts.path) {
-            // R7: ContactsPermissionScreen(navController = navController)
+            ContactsPermissionScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingGmail.path) {
-            // R7: GmailOAuthScreen(navController = navController)
+            GmailOAuthScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingOutlookMail.path) {
-            // R7: OutlookMailOAuthScreen(navController = navController)
+            OutlookMailOAuthScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingImap.path) {
-            // R7: ImapSetupScreen(navController = navController)
+            ImapSetupScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingGoogleCalendar.path) {
-            // R7: GoogleCalendarOAuthScreen(navController = navController)
+            GoogleCalendarOAuthScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingOutlookCalendar.path) {
-            // R7: OutlookCalendarOAuthScreen(navController = navController)
+            OutlookCalendarOAuthScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingBattery.path) {
-            // R7: BatteryOptimizationScreen(navController = navController)
+            BatteryOptimizationScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingColdSync.path) {
-            // R7: ColdSyncScreen(navController = navController)
+            ColdSyncScreen(navController = navController)
         }
 
         // ── Main app — 3-tab bottom nav ────────────────────────────────────────
 
         composable(route = BecalmRoute.Today.path) {
-            // R7: TodayTimelineScreen(navController = navController)
+            TodayTimelineScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.Persons.path) {
-            // R7: PersonsScreen(navController = navController)
+            PersonsScreen(navController = navController)
         }
 
         // /persons/unassigned must be registered BEFORE /persons/{person_id} so that
         // the literal segment "unassigned" is matched first and is not consumed as a
         // person_id argument.
         composable(route = BecalmRoute.PersonsUnassigned.path) {
-            // R7: UnassignedEventsScreen(navController = navController)
+            UnassignedEventsScreen(navController = navController)
         }
 
         composable(
@@ -131,7 +145,7 @@ public fun BecalmNavHost(
             val personId = backStackEntry.arguments
                 ?.getString(BecalmNavArgs.PERSON_ID)
                 ?: return@composable
-            // R7: PersonDetailScreen(navController = navController, personId = personId)
+            PersonDetailScreen(navController = navController, personId = personId)
         }
 
         composable(
@@ -147,21 +161,21 @@ public fun BecalmNavHost(
             val eventId = backStackEntry.arguments
                 ?.getString(BecalmNavArgs.EVENT_ID)
                 ?: return@composable
-            // R7: RawEventDetailSheet(navController = navController, personId = personId, eventId = eventId)
+            RawEventDetailSheet(navController = navController, personId = personId, eventId = eventId)
         }
 
         composable(route = BecalmRoute.Commitments.path) {
-            // R7: CommitmentManagementScreen(navController = navController)
+            CommitmentManagementScreen(navController = navController)
         }
 
         // ── Settings ───────────────────────────────────────────────────────────
 
         composable(route = BecalmRoute.Settings.path) {
-            // R7: SettingsScreen(navController = navController)
+            SettingsScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.SettingsSources.path) {
-            // R7: SourcesListScreen(navController = navController)
+            SourcesListScreen(navController = navController)
         }
 
         composable(
@@ -173,7 +187,7 @@ public fun BecalmNavHost(
             val sourceId = backStackEntry.arguments
                 ?.getString(BecalmNavArgs.SOURCE_ID)
                 ?: return@composable
-            // R7: SourceDetailScreen(navController = navController, sourceId = sourceId)
+            SourceDetailScreen(navController = navController, sourceId = sourceId)
         }
     }
 }

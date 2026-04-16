@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
  */
 public enum class OnboardingStep {
     WELCOME,
+    RECORDING_FOLDER,
     SMS_PERM,
     CALL_PERM,
     CONTACTS_PERM,

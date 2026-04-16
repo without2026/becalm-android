@@ -2,8 +2,10 @@ package com.becalm.android.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,6 +13,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
@@ -30,8 +33,13 @@ public sealed class AuthUiState {
      *
      * @param userId Supabase `auth.users` UUID.
      * @param email  User's email address, or `null` when not available in the session.
+     * @param onboardingCompleted Whether the user has already completed onboarding.
      */
-    public data class SignedIn(val userId: String, val email: String?) : AuthUiState()
+    public data class SignedIn(
+        val userId: String,
+        val email: String?,
+        val onboardingCompleted: Boolean = false,
+    ) : AuthUiState()
 
     /**
      * An error occurred during a sign-in or sign-out operation.
@@ -57,6 +65,7 @@ private const val TAG = "AuthViewModel"
 @HiltViewModel
 public class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -84,12 +93,17 @@ public class AuthViewModel @Inject constructor(
             _uiState.value = AuthUiState.Loading
             when (val result = authRepository.signInWithEmail(email, password)) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "email sign-in succeeded for user ${result.value.userId}")
+                    logger.d(TAG, "email sign-in succeeded")
                     // uiState will update via onObserveSession; no explicit transition needed.
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "email sign-in failed: ${result.error}")
-                    _uiState.value = AuthUiState.Error(result.error.toString())
+                    logger.w(TAG, "email sign-in failed")
+                    val userMessage = when (result.error) {
+                        is BecalmError.Unauthorized -> "Invalid email or password"
+                        is BecalmError.Network -> "Network error. Please try again."
+                        else -> "Sign-in failed. Please try again."
+                    }
+                    _uiState.value = AuthUiState.Error(userMessage)
                 }
             }
         }
@@ -106,11 +120,16 @@ public class AuthViewModel @Inject constructor(
             _uiState.value = AuthUiState.Loading
             when (val result = authRepository.signInWithGoogle(idToken)) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "google sign-in succeeded for user ${result.value.userId}")
+                    logger.d(TAG, "google sign-in succeeded")
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "google sign-in failed: ${result.error}")
-                    _uiState.value = AuthUiState.Error(result.error.toString())
+                    logger.w(TAG, "google sign-in failed")
+                    val userMessage = when (result.error) {
+                        is BecalmError.Unauthorized -> "Invalid email or password"
+                        is BecalmError.Network -> "Network error. Please try again."
+                        else -> "Sign-in failed. Please try again."
+                    }
+                    _uiState.value = AuthUiState.Error(userMessage)
                 }
             }
         }
@@ -135,8 +154,8 @@ public class AuthViewModel @Inject constructor(
                     // publishes AuthState.Unauthenticated.
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "sign-out failed: ${result.error}")
-                    _uiState.value = AuthUiState.Error(result.error.toString())
+                    logger.w(TAG, "sign-out failed")
+                    _uiState.value = AuthUiState.Error("Sign-out failed. Please try again.")
                 }
             }
         }
@@ -157,6 +176,7 @@ public class AuthViewModel @Inject constructor(
                     is AuthState.Authenticated -> AuthUiState.SignedIn(
                         userId = authState.session.userId,
                         email = authState.session.email,
+                        onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
                     )
                     is AuthState.Unauthenticated -> AuthUiState.SignedOut
                 }
