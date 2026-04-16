@@ -1,0 +1,76 @@
+# BeCalm Android MVP — zero-to-deploy platform declaration.
+# Generated 2026-04-16 from BeCalmv4/docs/becalm-mvp-design.md v2.
+# Design authority: CTO @jakekang28.
+
+project_root: .                       # gradle project at ./android/ (workflows append /android)
+platform: android-native
+display_name: "BeCalm"
+
+github:
+  repo: without2026/becalm-android
+  base_branch: main
+
+languages:
+  native: kotlin
+
+spec:
+  dir: .spec
+  # client_primary: Android client + Supabase BaaS (no custom backend we author).
+  contracts_profile: client_primary
+  comment_patterns:
+    kotlin: "// spec:"
+  test_file_patterns:
+    kotlin:
+      - "android/**/src/test/**/*.kt"
+      - "android/**/src/androidTest/**/*.kt"
+
+ci:
+  adapter: android
+  platform_version: v0.1.0-alpha
+  runners:
+    primary: ubuntu-latest
+    platform_matrix: [ubuntu-latest]
+
+governance:
+  cto_handle: jakekang28
+
+build:
+  android: gradle
+
+deploy:
+  # No custom backend — Supabase is BaaS, not authored here.
+  # deploy-staging.yml / deploy-production.yml skip deploy-api when backend != 'railway'.
+  backend: none
+  target: play-console
+  play_console:
+    # Confirm final package_name during L0 Phase 2 spec.
+    package_name: com.becalm.android
+    track: internal
+  staging:
+    mechanism: firebase_app_distribution
+  release:
+    name: "BeCalm Android MVP"
+    prerelease: true
+  provenance:
+    checksum_manifest: true
+    sbom: true
+  signing:
+    android: play_app_signing
+  rollout:
+    strategy: direct
+    canary_percentage: 100
+
+test:
+  android_unit: gradle
+  android_instrumented: espresso
+  a11y: android-lint
+
+monitoring:
+  crash_reporting: sentry
+  analytics: null
+  deploy_gate:
+    max_failed_health_checks: 3
+    max_p95_latency_ms: 2000
+    # BeCalm-specific MVP gate (design §2, §11): raw_ingestion_events Supabase arrival rate.
+    raw_ingestion_arrival_min_pct: 100
+    onboarding_failure_max_pct: 10

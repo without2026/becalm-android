@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://without.dev/pipeline/orchestrator/l0-result-schema.json",
+  "title": "Layer 0 Result",
+  "description": "Structured return value from the Layer 0 subagent to the orchestrator.",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["complete", "gate_blocked", "failed", "segment_complete"],
+      "description": "segment_complete = Phases 1–4 done; zero-to-deploy dispatches a second subagent for 5–7 only."
+    },
+    "segment": {
+      "type": ["string", "null"],
+      "enum": ["post_phase4", null],
+      "description": "Set when status is segment_complete; null otherwise."
+    },
+    "gate": {
+      "type": ["string", "null"],
+      "enum": ["phase2", "phase4", "phase5", null],
+      "description": "Which gate blocked execution. Null unless status is gate_blocked."
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "pattern": "^(feat|fix|refactor|security|docs|spike)/[a-z0-9-]+$",
+      "description": "Git branch name. Set once the branch is created."
+    },
+    "commits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["hash", "message"],
+        "properties": {
+          "hash": {
+            "type": "string",
+            "minLength": 7,
+            "description": "Abbreviated commit hash."
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message in type(scope): description format."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "List of commits made during Layer 0. Empty until completion."
+    },
+    "specs_created": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "module", "description"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]+$",
+            "description": "Spec behavior ID (e.g. TODO-001)."
+          },
+          "module": {
+            "type": "string",
+            "description": "Module name matching the .spec/{module}.spec.yml filename."
+          },
+          "description": {
+            "type": "string",
+            "description": "One-line behavior description."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Specs created during Layer 0."
+    },
+    "tests_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of test cases created."
+    },
+    "spec_coverage": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]+/[0-9]+$",
+      "description": "Spec coverage ratio (e.g. '8/8'). Null before completion."
+    },
+    "files_changed_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of files created or modified."
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "maxLength": 500,
+      "description": "2-3 line implementation summary. Null before completion."
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Known risks or limitations identified during implementation."
+    },
+    "payload": {
+      "description": "Gate-specific payload. Null unless status is gate_blocked.",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/phase2Payload" },
+        { "$ref": "#/$defs/phase4Payload" },
+        { "$ref": "#/$defs/phase5Payload" }
+      ]
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Error description when status is failed."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "complete" } } },
+      "then": {
+        "required": ["status", "branch", "commits", "specs_created", "tests_count", "spec_coverage", "files_changed_count", "summary"]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "gate_blocked" } } },
+      "then": {
+        "required": ["status", "gate", "payload"]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": {
+        "required": ["status", "error"]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "segment_complete" } } },
+      "then": {
+        "required": ["status", "segment", "branch", "summary"],
+        "properties": {
+          "segment": { "const": "post_phase4" }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "dataModelCore": {
+      "type": "object",
+      "required": ["version", "tables", "migration_notes"],
+      "properties": {
+        "version": { "type": "integer", "const": 1 },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "columns"],
+            "properties": {
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "type"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "type": "string" },
+                    "primary": { "type": "boolean" },
+                    "nullable": { "type": "boolean" },
+                    "default": { "type": "string" },
+                    "fk": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "indexes": { "type": "array", "items": { "type": "object" } },
+              "rls": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "relationships": { "type": "array", "items": { "type": "object" } },
+        "migration_notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "apiContractCore": {
+      "type": "object",
+      "required": ["version", "endpoints"],
+      "properties": {
+        "version": { "type": "integer", "const": 1 },
+        "base_path": { "type": "string" },
+        "auth": { "type": "string" },
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["method", "path", "response", "spec_refs"],
+            "properties": {
+              "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              "path": { "type": "string" },
+              "auth": { "type": "string", "enum": ["required", "optional", "none"] },
+              "query": { "type": "object" },
+              "body": { "type": "object" },
+              "response": { "type": "object" },
+              "spec_refs": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiMapCore": {
+      "type": "object",
+      "required": ["version", "routes"],
+      "properties": {
+        "version": { "type": "integer", "const": 1 },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "screen", "data"],
+            "properties": {
+              "path": { "type": "string" },
+              "screen": { "type": "string" },
+              "data": { "type": "array", "items": { "type": "string" } },
+              "components": { "type": "array", "items": { "type": "string" } },
+              "auth": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "shared_components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "props"],
+            "properties": {
+              "name": { "type": "string" },
+              "props": { "type": "object" },
+              "description": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "contractsFullstack": {
+      "type": "object",
+      "required": ["contracts_profile", "data_model", "api_contract"],
+      "properties": {
+        "contracts_profile": { "type": "string", "const": "fullstack" },
+        "data_model": {
+          "allOf": [
+            { "$ref": "#/$defs/dataModelCore" },
+            {
+              "type": "object",
+              "properties": {
+                "tables": { "type": "array", "minItems": 1 }
+              },
+              "required": ["tables"]
+            }
+          ]
+        },
+        "api_contract": { "$ref": "#/$defs/apiContractCore" },
+        "ui_map": {
+          "description": "Null only for api-only surfaces; default fullstack assumes a UI contract when the product has a UI.",
+          "oneOf": [{ "$ref": "#/$defs/uiMapCore" }, { "type": "null" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "contractsClientPrimary": {
+      "type": "object",
+      "required": ["contracts_profile", "data_model", "api_contract"],
+      "properties": {
+        "contracts_profile": { "type": "string", "const": "client_primary" },
+        "data_model": {
+          "allOf": [
+            { "$ref": "#/$defs/dataModelCore" },
+            {
+              "description": "Either at least one persisted table/entity, OR migration_notes explain local-only/offline persistence (e.g. Room) and why server DDL is absent.",
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "tables": { "type": "array", "minItems": 1 }
+                  },
+                  "required": ["tables"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "migration_notes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+                  },
+                  "required": ["migration_notes"]
+                }
+              ]
+            }
+          ]
+        },
+        "api_contract": { "$ref": "#/$defs/apiContractCore" },
+        "ui_map": {
+          "description": "Screen/navigation contract when the client has UI; null for headless clients.",
+          "oneOf": [{ "$ref": "#/$defs/uiMapCore" }, { "type": "null" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "contractsApiOnly": {
+      "type": "object",
+      "required": ["contracts_profile", "data_model", "api_contract", "ui_map"],
+      "properties": {
+        "contracts_profile": { "type": "string", "const": "api_only" },
+        "data_model": {
+          "allOf": [
+            { "$ref": "#/$defs/dataModelCore" },
+            {
+              "type": "object",
+              "properties": {
+                "tables": { "type": "array", "minItems": 1 }
+              },
+              "required": ["tables"]
+            }
+          ]
+        },
+        "api_contract": { "$ref": "#/$defs/apiContractCore" },
+        "ui_map": { "type": "null" }
+      },
+      "additionalProperties": false
+    },
+    "phase2Payload": {
+      "type": "object",
+      "required": ["subproblems", "spec_drafts", "contracts"],
+      "properties": {
+        "subproblems": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "required": ["id", "statement", "type", "dependencies", "done_when"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^SP-[0-9]+$"
+              },
+              "statement": {
+                "type": "string",
+                "description": "One-line problem statement."
+              },
+              "type": {
+                "type": "string",
+                "enum": ["research", "design", "build", "integrate", "validate"]
+              },
+              "dependencies": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "IDs of dependent subproblems, or ['none']."
+              },
+              "done_when": {
+                "type": "string",
+                "description": "Crisp grading criterion."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "spec_drafts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["file", "behaviors"],
+            "properties": {
+              "file": {
+                "type": "string",
+                "pattern": "^\\.spec/.+\\.spec\\.yml$",
+                "description": "Path to the spec file."
+              },
+              "behaviors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "type", "description", "precondition", "expected", "source"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Z]+-[0-9]+$"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["api", "ui_interaction", "lifecycle", "permission", "gesture"]
+                    },
+                    "description": { "type": "string" },
+                    "precondition": { "type": "string" },
+                    "expected": { "type": "string" },
+                    "source": {
+                      "type": "string",
+                      "const": "phase2-acceptance"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "contracts": {
+          "description": "Discriminated by contracts_profile. api_contract always has >=1 endpoint (API-shaped surface). DB shape depends on profile.",
+          "oneOf": [
+            { "$ref": "#/$defs/contractsFullstack" },
+            { "$ref": "#/$defs/contractsClientPrimary" },
+            { "$ref": "#/$defs/contractsApiOnly" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "phase4Payload": {
+      "type": "object",
+      "required": ["agent_table"],
+      "properties": {
+        "agent_table": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["subproblem", "agent", "layers_touched", "justification", "blast_radius"],
+            "properties": {
+              "subproblem": {
+                "type": "string",
+                "description": "Subproblem ID (e.g. SP-1)."
+              },
+              "agent": {
+                "type": "string",
+                "description": "Chosen subagent type."
+              },
+              "layers_touched": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["DB", "API", "UI"] },
+                "minItems": 1,
+                "description": "Which architectural layers this subproblem affects, derived from .spec/contracts/."
+              },
+              "justification": {
+                "type": "string",
+                "description": "One-sentence reason for this choice."
+              },
+              "blast_radius": {
+                "type": "string",
+                "enum": ["local", "shared", "external"]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "phase5Payload": {
+      "type": "object",
+      "required": ["topic", "positions"],
+      "properties": {
+        "topic": {
+          "type": "string",
+          "description": "Subproblem or decision under debate."
+        },
+        "positions": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["name", "summary"],
+            "properties": {
+              "name": { "type": "string" },
+              "summary": { "type": "string" },
+              "risks": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        },
+        "why_no_convergence": {
+          "type": "string",
+          "description": "Short explanation from expert-debate for the orchestrator to show the user."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

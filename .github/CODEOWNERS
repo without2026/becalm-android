@@ -1,0 +1,39 @@
+# CODEOWNERS — BeCalm Android MVP
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-security/managing-repository-settings/about-code-owners
+#
+# Single CODEOWNER (@jakekang28) because the org is 1 person.
+# TODO(hiring): when a 2nd engineer joins, add their @handle to Tier 1 paths below
+# to enforce a real 2-person rule via branch protection.
+
+*                                                       @jakekang28
+
+# ─── Tier 1: Security / governance / deploy (hard-blacklisted for auto-fix) ──
+/.github/CODEOWNERS                                     @jakekang28
+/.github/workflows/deploy-staging.yml                   @jakekang28
+/.github/workflows/deploy-production.yml                @jakekang28
+/.github/workflows/sbom-sign.yml                        @jakekang28
+/.github/workflows/security-sast.yml                    @jakekang28
+/.github/workflows/dependency-review.yml                @jakekang28
+/tools/setup-branch-protection.sh                       @jakekang28
+/.pipeline/orchestrator/required-pr-checks.yml          @jakekang28
+/.pipeline/orchestrator/env-protection.md               @jakekang28
+/.pipeline/orchestrator/session-schema.json             @jakekang28
+/.pipeline/core/authority.yml                           @jakekang28
+
+# ─── Tier 2: CI tuning / policy / docs (advisory-PR path for auto-fix) ──────
+/.semgrep/                                              @jakekang28
+/.github/dependabot.yml                                 @jakekang28
+/.github/workflows/ci-auto-fix.yml                      @jakekang28
+/.github/workflows/ci-review.yml                        @jakekang28
+/.github/workflows/ci-scenario-gen.yml                  @jakekang28
+/.pipeline/orchestrator/                                @jakekang28
+/.pipeline/core/                                        @jakekang28
+
+# ─── Spec (contract source-of-truth) ────────────────────────────────────────
+/.spec/                                                 @jakekang28
+
+# ─── Android app ────────────────────────────────────────────────────────────
+/android/                                               @jakekang28
+
+# ─── Supabase (migrations, RLS, functions) ──────────────────────────────────
+/supabase/                                              @jakekang28

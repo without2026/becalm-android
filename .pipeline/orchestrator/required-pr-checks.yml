@@ -1,0 +1,60 @@
+# Required PR checks for zero-to-deploy Layer 1 monitoring.
+# Each category must match at least one check run whose `name` contains one of
+# these substrings (case-insensitive). Update when CI job display names change.
+#
+# As of PR 3c-6: CI is deterministic only. LLM-based review, auto-fix, and
+# scenario-gen moved to the local Claude Code session (Claude Opus + /codex:
+# adversarial-review). The orchestrator reaches MERGE_GATE when the remaining
+# categories here are all green; the merge gate itself is orchestrator-side
+# (human-review pre-check), not a CI job.
+version: 3
+
+required_name_substrings:
+  deterministic_gates:
+    - deterministic
+    - gate
+  adapter_tests:
+    - test
+  # ─── P0 security hardening (future — workflows not yet added) ──────────
+  sast:
+    - codeql
+    - semgrep
+    - sast
+  sca:
+    - dependency-review
+    - dependabot
+    - osv
+  # supply_chain (SBOM + cosign + SLSA) runs on main/release, not on PRs, so
+  # it is not a PR merge blocker. Declared here for completeness.
+  supply_chain:
+    - sbom
+    - cosign
+    - provenance
+    - slsa
+
+# Check names containing any of these are excluded from required matching.
+ignore_name_substrings:
+  - classify
+  - load-config
+
+# Categories where conclusion "skipped" still counts as success.
+skip_counts_as_success:
+  # supply_chain is only produced on main/release pushes.
+  - supply_chain
+
+# Categories where "skipped" does NOT count as success if a matching job ran.
+# A skip here means a required gate was bypassed — treat as fail.
+never_skip_as_success:
+  - deterministic_gates
+  - adapter_tests
+  - sast
+  - sca
+
+# Categories whose absence (no matching check at all on the PR) is fatal to L1.
+# Catches the case where a workflow got silently disabled or renamed — without
+# this, the orchestrator could mark L1_PASSED on a PR that ran zero gates.
+required_presence:
+  - deterministic_gates
+  - adapter_tests
+  - sast
+  - sca

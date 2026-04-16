@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://without.dev/pipeline/orchestrator/session-schema.json",
+  "title": "Zero-to-Deploy Session State",
+  "description": "The orchestrator's entire persistent memory for one pipeline run.",
+  "type": "object",
+  "required": ["session_id", "created_at", "idea", "status", "platform_summary", "layer0", "layer1", "layer2", "gates_confirmed"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this pipeline session."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of session creation."
+    },
+    "idea": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The user's one-line idea that initiated the pipeline."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "IDLE",
+        "REPO_BOOTSTRAP",
+        "L0_BRIEFING",
+        "L0_GATE_2",
+        "L0_GATE_4",
+        "L0_HANDOFF_57",
+        "L0_RUNNING",
+        "L0_GATE_5",
+        "L0_DONE",
+        "L0_CODEX_REVIEW",
+        "L0_FIX_LOCAL",
+        "PR_CREATED",
+        "L1_MONITORING",
+        "L1_PASSED",
+        "L1_FAILED",
+        "MERGE_GATE",
+        "MERGE_GATE_BLOCKED",
+        "MERGED",
+        "L2_STAGING",
+        "L2_STAGING_PASSED",
+        "L2_STAGING_FAILED",
+        "L2_PROD_GATE",
+        "L2_PROD_AWAITING_APPROVAL",
+        "L2_PROD_DEPLOYING",
+        "COMPLETE",
+        "FAILED"
+      ],
+      "description": "Current state machine position."
+    },
+    "branch": {
+      "type": ["string", "null"],
+      "pattern": "^(feat|fix|refactor|security|docs|spike)/[a-z0-9-]+$",
+      "description": "Git branch name created by Layer 0. Null before L0 starts."
+    },
+    "pr_number": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "GitHub PR number. Null before PR creation."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Error description when status is FAILED."
+    },
+    "platform_summary": {
+      "type": "object",
+      "required": ["project_root", "platform", "adapter"],
+      "properties": {
+        "project_root": {
+          "type": "string",
+          "description": "Relative path to the active project directory."
+        },
+        "platform": {
+          "type": "string",
+          "description": "Platform identifier from platform.yml."
+        },
+        "adapter": {
+          "type": "string",
+          "description": "CI adapter name from platform.yml."
+        }
+      },
+      "additionalProperties": false
+    },
+    "layer0": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "subagent_id": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Task subagent ID for resume. Null before dispatch."
+        },
+        "bootstrap_completed": {
+          "type": "boolean",
+          "default": false,
+          "description": "True after REPO_BOOTSTRAP successfully pushed initial main. Distinguishes first-run vs resume-against-existing-app."
+        },
+        "bootstrap_scratch_path": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Filesystem path of the bootstrap scratch dir (for debugging; safe to delete after push succeeds)."
+        },
+        "phase": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 7,
+          "default": null,
+          "description": "Current WithoutCTO phase (1-7). Null before start."
+        },
+        "specs_created": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "List of spec IDs created (e.g. ['TODO-001', 'TODO-002'])."
+        },
+        "tests_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Total number of tests created by Layer 0."
+        },
+        "files_changed_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Total number of files changed by Layer 0."
+        },
+        "summary": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "2-3 line implementation summary from the subagent."
+        }
+      },
+      "additionalProperties": false
+    },
+    "layer1": {
+      "type": "object",
+      "required": ["check_runs", "failure_summary"],
+      "properties": {
+        "check_runs": {
+          "type": "object",
+          "required": ["deterministic_gates", "adapter_tests", "sast", "sca"],
+          "properties": {
+            "deterministic_gates": { "$ref": "#/$defs/checkStatus" },
+            "adapter_tests": { "$ref": "#/$defs/checkStatus" },
+            "sast": { "$ref": "#/$defs/checkStatus" },
+            "sca": { "$ref": "#/$defs/checkStatus" },
+            "supply_chain": { "$ref": "#/$defs/checkStatus" }
+          },
+          "additionalProperties": false
+        },
+        "human_reviewers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "GitHub logins that submitted APPROVED review (non-bot, non-author). Populated before MERGE_GATE; orchestrator refuses merge if empty."
+        },
+        "merge_block_reason": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Set when status is MERGE_GATE_BLOCKED. Human-readable reason (e.g. 'no human CODEOWNERS approval')."
+        },
+        "local_fix_iterations": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Count of local fix-and-push cycles after a CI failure. Incremented each time the orchestrator resumes from L1_FAILED, applies a fix in the same Claude Code session, and re-pushes. Soft cap = 5 (informational; not schema-enforced)."
+        },
+        "failure_summary": {
+          "type": ["string", "null"],
+          "description": "Condensed failure description when checks fail after auto-fix budget."
+        },
+        "failure_log_snippet": {
+          "type": ["string", "null"],
+          "maxLength": 12000,
+          "description": "Last ~80 lines of the first failing required check (gh run view --log-failed), for RCA."
+        }
+      },
+      "additionalProperties": false
+    },
+    "layer2": {
+      "type": "object",
+      "required": ["staging_run_id", "staging_status", "prod_run_id", "prod_status"],
+      "properties": {
+        "staging_run_id": {
+          "type": ["integer", "null"],
+          "description": "GitHub Actions run ID for deploy-staging.yml."
+        },
+        "staging_status": { "$ref": "#/$defs/deployStatus" },
+        "prod_run_id": {
+          "type": ["integer", "null"],
+          "description": "GitHub Actions run ID for deploy-production.yml."
+        },
+        "prod_status": { "$ref": "#/$defs/deployStatus" },
+        "prod_approval_waiting_since": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "default": null,
+          "description": "ISO 8601 timestamp when the prod run entered GitHub environment 'waiting' state. Used for 1h timeout on L2_PROD_AWAITING_APPROVAL."
+        },
+        "prod_approver": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "GitHub login of the reviewer who approved the production deployment via environment protection. Distinct from the orchestrator CTO (prevent_self_review)."
+        },
+        "artifact_signature_verified": {
+          "type": ["boolean", "null"],
+          "default": null,
+          "description": "True after cosign verify-blob succeeds on the AAB/backend artifact before Railway push. Required for prod_status pass."
+        }
+      },
+      "additionalProperties": false
+    },
+    "gates_confirmed": {
+      "type": "object",
+      "required": ["phase2_specs", "phase4_agents", "merge", "prod_deploy"],
+      "properties": {
+        "phase2_specs": { "type": "boolean" },
+        "phase4_agents": { "type": "boolean" },
+        "phase5_debate": {
+          "type": "boolean",
+          "description": "True after CTO confirms expert-debate tiebreak (when gate phase5 was used)."
+        },
+        "merge": { "type": "boolean" },
+        "prod_deploy": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "checkStatus": {
+      "type": "string",
+      "enum": ["pending", "pass", "fail", "skipped"],
+      "description": "Status of a CI check run category."
+    },
+    "deployStatus": {
+      "type": "string",
+      "enum": ["pending", "pass", "fail"],
+      "description": "Status of a deploy workflow run."
+    }
+  }
+}
