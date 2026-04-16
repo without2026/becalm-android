@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Base app theme. Extends Material3 DayNight with no action bar.
+        Status/navigation bars are transparent so Compose edge-to-edge can
+        manage them via WindowInsets.
+    -->
+    <style name="Theme.Becalm" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <!--
+        Splash theme: extends base theme with a solid cosmic-navy background for
+        the Android 12 splash screen window. The activity transitions to the
+        real Compose theme once onCreate completes.
+    -->
+    <style name="Theme.Becalm.Splash" parent="Theme.Becalm">
+        <!-- API ≤ 30 fallback: without this the window flashes white before first frame. -->
+        <item name="android:windowBackground">#111111</item>
+        <!-- API 31+: Android 12 splash screen background colour. -->
+        <item name="android:windowSplashScreenBackground">#111111</item>
+        <!-- No animated icon at this stage — asset TODO tracked below. -->
+        <!-- TODO(BECALM-ASSET-001): replace with final brand launcher icon (designer deliverable) -->
+    </style>
+
+</resources>

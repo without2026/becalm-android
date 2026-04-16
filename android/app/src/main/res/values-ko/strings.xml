@@ -186,6 +186,11 @@
     <string name="sources_last_sync_label">마지막 동기화</string>
     <string name="sources_never_synced">동기화 없음</string>
 
+    <!-- Bottom navigation -->
+    <string name="nav_today">오늘</string>
+    <string name="nav_persons">사람</string>
+    <string name="nav_commitments">약속</string>
+
     <!-- Source detail -->
     <string name="source_detail_title">소스 상세</string>
     <string name="source_detail_status_section">상태</string>

@@ -186,6 +186,11 @@
     <string name="sources_last_sync_label">Last sync</string>
     <string name="sources_never_synced">Never synced</string>
 
+    <!-- Bottom navigation -->
+    <string name="nav_today">Today</string>
+    <string name="nav_persons">People</string>
+    <string name="nav_commitments">Commitments</string>
+
     <!-- Source detail -->
     <string name="source_detail_title">Source Detail</string>
     <string name="source_detail_status_section">Status</string>
