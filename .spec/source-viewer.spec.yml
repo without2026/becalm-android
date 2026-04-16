@@ -1,3 +1,4 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 module: source-viewer
 platform: android
 version: 1
@@ -5,43 +6,73 @@ version: 1
 behaviors:
   - id: SRC-001
     type: ui_interaction
-    description: "원문보기 화면에서 날짜별로 그룹핑된 미팅/전화 transcript와 이메일 원문 목록이 표시된다"
-    screen: "SourceViewerScreen"
+    description: "PersonsScreen 진입 시 인터랙션이 있는 인물 목록이 most_recent_event_time 내림차순으로 표시된다. 각 카드에 표시 이름·채널 아이콘 클러스터·최근 메시지 미리보기·타임스탬프 표시됨"
+    screen: "PersonsScreen"
     interaction: "화면 진입"
-    precondition: "Room에 transcript 2건(날짜 다름) + EmailBody 1건 존재"
-    expected: "날짜별 그룹 헤더 표시됨. 각 그룹 내 미팅/전화 아이콘(🤝/📞) + 이메일 아이콘(📧) 항목 표시됨"
+    precondition: "인증 완료, Room에 person_ref='010-1234-5678' raw_ingestion_events 2건(voice 1, gmail 1) + person_ref='lee@corp.com' 1건 존재"
+    expected: "인물 카드 2개 표시됨. 010-1234-5678 카드: 음성+이메일 채널 아이콘 표시됨. 더 최근 이벤트를 가진 인물이 상단. 커서 기반 페이지네이션 지원(첫 로드 시 limit=20)"
     source: phase2-acceptance
     tests: []
 
   - id: SRC-002
     type: ui_interaction
-    description: "미팅/전화 항목 탭 시 transcript 전체 텍스트가 표시된다"
-    screen: "TranscriptDetailScreen"
-    interaction: "transcript 항목 탭"
-    precondition: "SourceViewerScreen에 transcript 항목 1건 표시됨"
-    expected: "TranscriptDetailScreen으로 이동됨. Room transcript.text 전체 내용 표시됨"
+    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 해당 person_ref의 모든 소스(voice/email/calendar) 이벤트가 event_time 내림차순으로 통합 표시된다"
+    screen: "PersonDetailScreen"
+    interaction: "인물 카드 탭"
+    precondition: "PersonsScreen에 person_ref='010-1234-5678' 카드 표시됨. Room에 해당 person_ref의 voice 1건 + gmail 1건 존재"
+    expected: "PersonDetailScreen 이동됨. 통합 타임라인에 2건(voice + gmail) event_time 내림차순 표시됨. 각 항목에 소스 아이콘(📞/📧) 표시됨"
     source: phase2-acceptance
     tests: []
 
   - id: SRC-003
     type: ui_interaction
-    description: "이메일 항목 탭 시 subject + body_plain이 표시된다"
-    screen: "EmailDetailScreen"
-    interaction: "이메일 항목 탭"
-    precondition: "SourceViewerScreen에 EmailBody 항목 1건 표시됨"
-    expected: "EmailDetailScreen으로 이동됨. Room email_body.subject + body_plain 표시됨"
+    description: "인물 검색 — 이름·이메일·전화번호 substring으로 필터링됨 (서버측 GET /v1/persons?q= 또는 Room 캐시 클라이언트 필터)"
+    screen: "PersonsScreen"
+    interaction: "검색창에 'lee' 입력"
+    precondition: "Room에 person_ref='lee@corp.com' 1건 + person_ref='010-1234-5678' 1건 존재"
+    expected: "'lee@corp.com' 카드만 표시됨. '010-1234-5678' 카드 숨겨짐. 검색어 지우면 전체 목록 복원됨"
     source: phase2-acceptance
     tests: []
 
   - id: SRC-004
     type: ui_interaction
-    description: "원문보기 항목이 없을 때 빈 상태 메시지를 표시한다"
-    screen: "SourceViewerScreen"
+    description: "이벤트 항목 탭 시 원시 이벤트 상세 시트가 표시된다 — 소스 타입, 원시 페이로드(transcript 또는 이메일 제목+본문), 수집 타임스탬프"
+    screen: "RawEventDetailSheet"
+    interaction: "PersonDetailScreen의 이벤트 항목 탭"
+    precondition: "PersonDetailScreen에 voice 이벤트 1건 표시됨"
+    expected: "바텀 시트 열림. source_type='voice' + transcript.text 전체 표시됨 + ingestion timestamp 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-005
+    type: ui_interaction
+    description: "Unassigned 버킷 — person_ref IS NULL인 이벤트를 별도 섹션으로 표시한다"
+    screen: "PersonsScreen"
     interaction: "화면 진입"
-    precondition: "Room transcript 0건, EmailBody 0건"
-    expected: "'수집된 원문이 없습니다' 빈 상태 메시지 표시됨. 크래시 없음"
+    precondition: "Room에 person_ref=NULL raw_ingestion_events 2건 존재"
+    expected: "'미분류' 섹션 표시됨. 2건의 이벤트 목록 표시됨. person_ref가 있는 인물 카드와 분리됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-006
+    type: gesture
+    description: "pull-to-refresh 시 Railway GET /v1/persons를 재요청하고 Room 캐시를 갱신한다"
+    gesture: "pull-to-refresh"
+    screen: "PersonsScreen"
+    precondition: "PersonsScreen 표시됨, 네트워크 연결됨"
+    expected: "GET /v1/persons 호출됨. Room 데이터 갱신됨. 인물 목록 업데이트됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-007
+    type: lifecycle
+    description: "오프라인 모드 — 네트워크 없을 때 Room 캐시로 렌더링하고 헤더에 '오프라인 — 마지막 동기화 <ts>' 배지를 표시한다"
+    trigger: "PersonsScreen 진입 또는 refresh 시도 (네트워크 없음)"
+    precondition: "네트워크 연결 없음, Room에 캐시된 person 데이터 존재"
+    expected: "인물 목록 Room 캐시로 표시됨. 상단에 '오프라인 — 마지막 동기화 HH:mm' 배지 표시됨. 크래시 없음"
     source: phase2-acceptance
     tests: []
 
 invariants:
-  - "원문보기 데이터는 Room에서만 조회한다 — Supabase 조회 없음"
+  - "원문보기(PersonDetailScreen) 데이터는 Room에서 primary 조회한다. Railway GET /v1/persons는 새로고침 시에만 호출됨"
+  - "person_ref 그룹핑은 Room 쿼리 레벨에서 수행됨 — 별도 persons 테이블 없음 (MVP)"

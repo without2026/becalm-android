@@ -1,122 +1,146 @@
 version: 1
 # BeCalm Android MVP — API Contract (client_primary profile)
-# The app is a client consuming Supabase REST + Auth APIs.
-# These are the client-side usage contracts: which endpoints the app calls,
-# what auth it sends, what columns it reads/writes, and what response shapes it expects.
+#
+# TWO API surfaces:
+#   1. Supabase Auth  — base: https://<supabase-project>.supabase.co  (client calls directly for Auth only)
+#   2. Railway API    — base: ${BECALM_API_BASE_URL} (BuildConfig; all data R/W goes through here)
+#
+# Android does NOT call Supabase REST (rest/v1/*) directly for data.
+# All commitments, raw events, and calendar data flow through Railway.
+# Railway holds the Supabase service_role key; Android sends only its Supabase JWT as Bearer.
+#
+# Error envelope for all Railway endpoints:
+#   4xx/5xx: { error: string, message: string, request_id?: string }
+# Rate limiting: HTTP 429 with Retry-After header (seconds).
 
-base_path: https://<supabase-project>.supabase.co
+base_path: ${BECALM_API_BASE_URL}
 auth: bearer_jwt
 
 endpoints:
-  # ---- Auth ----
+  # ========== SUPABASE AUTH (client calls directly) ==========
 
   - method: POST
-    path: /auth/v1/token
+    path: https://<supabase-project>.supabase.co/auth/v1/token
     auth: none
     body:
-      grant_type: string    # "password" | "refresh_token" | "id_token"
+      grant_type: string      # "password" | "refresh_token" | "id_token"
       email?: string
       password?: string
       refresh_token?: string
-      id_token?: string     # Google OAuth
+      id_token?: string       # Google OAuth
     response:
       200: { access_token: string, refresh_token: string, user: { id: uuid, email: string } }
       400: { error: string, error_description: string }
-    spec_refs: [AUTH-001, AUTH-002, AUTH-003, AUTH-004]
+    spec_refs: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-007]
 
   - method: POST
-    path: /auth/v1/logout
+    path: https://<supabase-project>.supabase.co/auth/v1/logout
     auth: required
     response:
       204: {}
-      401: { message: string }
+      401: { error: string, message: string }
     spec_refs: [AUTH-005]
 
-  # ---- raw_ingestion_events ----
+  # ========== RAILWAY — RAW INGESTION EVENTS ==========
 
   - method: POST
-    path: /rest/v1/raw_ingestion_events
+    path: /v1/raw_ingestion_events:batch
     auth: required
     body:
-      source_type: string
-      source_ref?: string
-      timestamp: datetime
+      events:
+        - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
+          source_type: string         # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+          source_ref?: string
+          person_ref?: string         # Canonicalized counterparty; null if unidentifiable
+          timestamp: datetime
     response:
-      201: { id: uuid }
-      401: { message: string }
-      403: { message: string }
-    spec_refs: [ING-004, ING-005, SYNC-003, SYNC-005]
+      200: { acknowledged: int, failed: "FailedEvent[]" }
+      401: { error: string, message: string }
+      429: { error: string, message: string }
+    spec_refs: [ING-004, ING-005, SYNC-001, SYNC-002, SYNC-003, SYNC-005]
+
+  # ========== RAILWAY — COMMITMENTS ==========
 
   - method: GET
-    path: /rest/v1/raw_ingestion_events
+    path: /v1/commitments
     auth: required
     query:
-      user_id: uuid
-      sync_status?: string
-      select?: string
+      cursor?: string         # Opaque cursor for pagination
+      limit?: int             # Default 20
+      since?: string          # ISO datetime — commitments updated after this time
+      person_ref?: string     # Filter by person
+      direction?: string      # give | take
     response:
-      200: { data: "RawIngestionEvent[]" }
-      401: { message: string }
-    spec_refs: [SYNC-005]
-
-  # ---- commitments ----
-
-  - method: POST
-    path: /rest/v1/commitments
-    auth: required
-    body:
-      direction: string       # give | take
-      counterparty_raw?: string
-      title: string
-      description?: string
-      due_date?: string       # ISO date
-      status: string
-      source_type: string
-      source_ref?: string
-      confidence: float
-    response:
-      201: { id: uuid }
-      401: { message: string }
-    spec_refs: [SYNC-001]
-
-  - method: GET
-    path: /rest/v1/commitments
-    auth: required
-    query:
-      due_date?: string       # eq.{date}
-      status?: string         # eq.pending
-      select?: string
-    response:
-      200: { data: "Commitment[]" }
-      401: { message: string }
+      200: { data: "Commitment[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
     spec_refs: [DASH-004]
 
-  # ---- calendar_events ----
-
-  - method: POST
-    path: /rest/v1/calendar_events
+  - method: GET
+    path: /v1/commitments/{id}
     auth: required
-    body:
-      source_type: string
-      source_ref?: string
-      title: string
-      start_at: datetime
-      end_at: datetime
-      attendees_raw?: string
     response:
-      201: { id: uuid }
-      200: { id: uuid }     # upsert path
-      401: { message: string }
-    spec_refs: [SYNC-002]
+      200: { data: Commitment }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [DASH-004]
+
+  # ========== RAILWAY — CALENDAR EVENTS ==========
 
   - method: GET
-    path: /rest/v1/calendar_events
+    path: /v1/calendar_events
     auth: required
     query:
-      start_at: string      # gte.{today_start}
-      end_at?: string       # lte.{today_end}
-      select?: string
+      cursor?: string
+      since?: string          # ISO datetime
+      limit?: int
     response:
-      200: { data: "CalendarEvent[]" }
-      401: { message: string }
+      200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
     spec_refs: [DASH-005]
+
+  - method: POST
+    path: /v1/calendar_events:sync
+    auth: required
+    response:
+      200: { synced: int }
+      401: { error: string, message: string }
+      429: { error: string, message: string }
+    spec_refs: [DASH-005]
+
+  # ========== RAILWAY — PERSONS (virtual grouping — no persons table in MVP) ==========
+
+  - method: GET
+    path: /v1/persons
+    auth: required
+    query:
+      cursor?: string
+      limit?: int             # Default 20
+      q?: string              # Substring search on display_name, email, phone
+    response:
+      200: { data: "Person[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+    spec_refs: [SRC-001, SRC-003, SRC-006]
+
+  - method: GET
+    path: /v1/persons/{person_id}/events
+    auth: required
+    query:
+      cursor?: string
+      limit?: int
+    response:
+      200: { data: "RawIngestionEvent[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [SRC-002]
+
+  - method: GET
+    path: /v1/persons/{person_id}/commitments
+    auth: required
+    query:
+      cursor?: string
+      limit?: int
+    response:
+      200: { data: "Commitment[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [SRC-002]

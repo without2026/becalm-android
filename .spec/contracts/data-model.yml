@@ -1,11 +1,12 @@
 version: 1
 
 # BeCalm Android MVP — Data Model Contract
-# Persistence is split: Room (local primary) + Supabase (mirror, structured only).
-# Transcript and EmailBody live in Room only — never uploaded to Supabase.
+# Persistence: Room (local primary) + Supabase Postgres (mirror via Railway FastAPI).
+# Railway is the ONLY writer to Supabase — Android does NOT call Supabase REST directly for data R/W.
+# Transcript and EmailBody live in Room only — never uploaded to Railway or Supabase.
 
 tables:
-  # ---- Supabase tables (mirrored from Room) ----
+  # ---- Supabase tables (written by Railway; mirrored from Room via Railway batch API) ----
 
   - name: raw_ingestion_events
     columns:
@@ -18,6 +19,10 @@ tables:
         type: uuid
         nullable: false
         fk: "auth.users.id"
+      - name: client_event_id
+        type: uuid
+        nullable: false
+        # Client-generated idempotency key (UUID v4). Railway uses this for upsert deduplication.
       - name: source_type
         type: text
         nullable: false
@@ -26,6 +31,11 @@ tables:
         type: text
         nullable: true
         # email message_id, file URI, calendar event id, etc.
+      - name: person_ref
+        type: text
+        nullable: true
+        # Canonicalized counterparty identifier. Precedence: phone (E.164) > email (lowercase) > display_name (normalized).
+        # NULL for events with no identifiable counterparty (e.g., self-dictated note). Groups under "Unassigned" in UI.
       - name: timestamp
         type: timestamptz
         nullable: false
@@ -33,7 +43,7 @@ tables:
         type: text
         nullable: false
         default: "'pending'"
-        # enum: pending | synced | failed
+        # enum: pending | synced | failed — Room-side tracking column, not uploaded to Supabase
       - name: retry_count
         type: int
         nullable: false
@@ -46,6 +56,9 @@ tables:
         type: btree
       - columns: [user_id, timestamp]
         type: btree
+      - columns: [user_id, person_ref, timestamp]
+        type: btree
+        # idx_raw_events_user_person_time — supports PersonDetailScreen timeline query
     rls: true
 
   - name: commitments
@@ -66,7 +79,12 @@ tables:
       - name: counterparty_raw
         type: text
         nullable: true
-        # phone# | email | attendee name
+        # phone# | email | attendee name — raw, uncanonized
+      - name: person_ref
+        type: text
+        nullable: true
+        # Canonicalized counterparty identifier. Same precedence rule as raw_ingestion_events.person_ref.
+        # NULL for commitments where counterparty is not identifiable.
       - name: title
         type: text
         nullable: false
@@ -87,7 +105,6 @@ tables:
       - name: source_ref
         type: text
         nullable: true
-        fk: "raw_ingestion_events.source_ref"
       - name: confidence
         type: float
         nullable: false
@@ -109,6 +126,9 @@ tables:
         type: btree
       - columns: [user_id, sync_status]
         type: btree
+      - columns: [user_id, person_ref, due_date]
+        type: btree
+        # idx_commitments_user_person_due — supports /v1/persons/{id}/commitments
     rls: true
 
   - name: calendar_events
@@ -169,8 +189,10 @@ relationships:
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
-  - "Room 전용 엔티티 (Room 스키마에는 존재, Supabase에는 없음): Transcript, EmailBody — 개인정보(원본 텍스트) 보호 목적으로 로컬 only"
-  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 대응 mirror. sync_status 컬럼으로 업로드 추적"
-  - "Room DB 마이그레이션은 Room migration DSL 사용 (별도 Supabase migration 불필요)"
+  - "Room 전용 엔티티 (Supabase 없음): Transcript, EmailBody — 개인정보(원본 텍스트) 보호 목적으로 로컬 only"
+  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 mirror. sync_status·retry_count·last_attempt_at는 Room-side tracking 컬럼으로 Supabase에는 존재하지 않음"
+  - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
+  - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
+  - "person_ref 컬럼: MVP는 별도 persons 테이블 없이 raw_ingestion_events·commitments의 person_ref TEXT로 가상 그룹핑. 정규화 우선순위: 전화번호(E.164) > 이메일(소문자) > 표시이름(정규화). 동일 연락처가 채널별 다른 식별자를 가질 경우 중복 그룹핑 위험 있음 — post-MVP에서 persons 테이블 + 수동 병합 UI로 해결"
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
   - "리텐션 정책: Room 데이터 보관 기간 미정 (spec 단계 이월 항목)"

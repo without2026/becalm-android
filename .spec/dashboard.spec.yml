@@ -1,3 +1,4 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 module: dashboard
 platform: android
 version: 1
@@ -5,11 +6,11 @@ version: 1
 behaviors:
   - id: DASH-001
     type: ui_interaction
-    description: "DashboardScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다"
+    description: "DashboardScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다. commitment 카드에 counterparty 표시 시 person_ref 기반 표시명 사용"
     screen: "DashboardScreen"
     interaction: "화면 진입"
-    precondition: "인증 완료, Room에 오늘 CalendarEvent 2건 + due_date=오늘 Commitment 1건 존재"
-    expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 표시됨"
+    precondition: "인증 완료, Room에 오늘 CalendarEvent 2건 + due_date=오늘 Commitment 1건(person_ref='lee@corp.com') 존재"
+    expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 + person_ref 기반 표시명 표시됨"
     source: phase2-acceptance
     tests: []
 
@@ -35,19 +36,19 @@ behaviors:
 
   - id: DASH-004
     type: api
-    description: "Supabase commitments 테이블에서 오늘 due인 항목을 조회한다"
-    endpoint: "GET /rest/v1/commitments"
-    precondition: "Bearer 토큰 유효, query: due_date=eq.{today}, status=eq.pending"
-    expected: "HTTP 200, {data: Commitment[]} — user_id 기준 RLS 적용됨"
+    description: "Railway GET /v1/commitments에서 오늘 due인 항목을 조회한다"
+    endpoint: "GET /v1/commitments"
+    precondition: "Supabase JWT Bearer 토큰 유효, query: since={today_start}, direction 생략(전체)"
+    expected: "HTTP 200, {data: Commitment[], cursor: string|null} — 서버 측 user 격리 적용됨"
     source: phase2-acceptance
     tests: []
 
   - id: DASH-005
     type: api
-    description: "Supabase calendar_events 테이블에서 오늘 이벤트를 조회한다"
-    endpoint: "GET /rest/v1/calendar_events"
-    precondition: "Bearer 토큰 유효, query: start_at=gte.{today_start}, start_at=lte.{today_end}"
-    expected: "HTTP 200, {data: CalendarEvent[]} — user_id 기준 RLS 적용됨"
+    description: "Railway GET /v1/calendar_events에서 오늘 이벤트를 조회한다"
+    endpoint: "GET /v1/calendar_events"
+    precondition: "Supabase JWT Bearer 토큰 유효, query: since={today_start}"
+    expected: "HTTP 200, {data: CalendarEvent[], cursor: string|null} — 서버 측 user 격리 적용됨"
     source: phase2-acceptance
     tests: []
 
@@ -72,4 +73,5 @@ behaviors:
     tests: []
 
 invariants:
-  - "DashboardScreen은 Room(로컬) 데이터를 primary source로 사용한다 — Supabase 직접 조회 없음"
+  - "DashboardScreen은 Room(로컬) 데이터를 primary source로 사용한다"
+  - "Supabase REST에 직접 쿼리하지 않는다 — 모든 서버 조회는 Railway API를 통한다"

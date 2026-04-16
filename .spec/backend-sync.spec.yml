@@ -1,0 +1,56 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+# Renamed from supabase-sync.spec.yml — upload target is now Railway FastAPI, not Supabase REST directly.
+module: backend-sync
+platform: android
+version: 1
+
+behaviors:
+  - id: SYNC-001
+    type: api
+    description: "UploadWorker가 Room의 pending raw_ingestion_events + commitments를 Railway batch 엔드포인트에 한 번에 업로드하고 sync_status를 synced로 업데이트한다"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "Room에 sync_status='pending' raw_ingestion_events 1건 이상, Supabase JWT 유효, 네트워크 연결됨"
+    expected: "HTTP 200, {acknowledged: N, failed: []} — N건 모두 Room sync_status='synced'로 UPDATE됨. failed[]가 비어있음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SYNC-002
+    type: api
+    description: "batch upload는 client_event_id 기준으로 멱등(idempotent)하다 — 동일 client_event_id 재업로드 시 중복 INSERT되지 않는다"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "동일 client_event_id를 가진 이벤트 1건을 두 번 연속 POST"
+    expected: "HTTP 200, {acknowledged: 1, failed: []} — Supabase에 레코드 1건만 존재 (중복 없음)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SYNC-003
+    type: api
+    description: "Railway 5xx 응답 시 Room 레코드의 retry_count가 증가하고 sync_status='failed'로 업데이트된다. WorkManager exponential backoff 재시도 등록됨"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "Railway 서버 500 응답 모킹, Room 레코드 retry_count=0"
+    expected: "Room 레코드 sync_status='failed', retry_count=1로 UPDATE됨. 레코드 DELETE 없음. WorkManager 재시도 등록됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SYNC-004
+    type: lifecycle
+    description: "앱 백그라운드 전환 후 WorkManager UploadWorker가 네트워크 연결 시 재실행되어 pending 레코드를 처리한다"
+    trigger: "앱이 BACKGROUND로 전환됨"
+    precondition: "Room에 sync_status='pending' 레코드 존재, WorkManager 제약: NETWORK_CONNECTED"
+    expected: "네트워크 연결 시 WorkManager UploadWorker 재실행됨. pending 레코드 POST /v1/raw_ingestion_events:batch로 처리됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SYNC-005
+    type: api
+    description: "Railway 429(rate limit) 응답 시 Retry-After 헤더 값만큼 대기 후 재시도한다"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "Railway API 429 응답, Retry-After: 60 헤더 존재"
+    expected: "WorkManager가 최소 60초 후 재시도 스케줄 등록됨. Room sync_status='failed', retry_count 증가됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "raw_ingestion_events 도달률 100% — Railway ack(sync_status='synced') 확인 전까지 Room 레코드 유지"
+  - "Railway 업로드 대상: raw_ingestion_events batch, commitments. transcripts·email_bodies는 절대 업로드 안 됨"
+  - "모든 Railway 호출 실패는 Room sync_status·retry_count·last_attempt_at에 기록된다 — 무음 실패 금지"

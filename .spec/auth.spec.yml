@@ -1,3 +1,4 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 module: auth
 platform: android
 version: 1
@@ -58,6 +59,16 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-007
+    type: api
+    description: "Railway API 호출 시 401 수신하면 Supabase Auth로 토큰 갱신 후 동일 요청을 1회 재시도한다. 재시도도 401이면 로그인 화면으로 이동한다"
+    endpoint: "POST /auth/v1/token?grant_type=refresh_token"
+    precondition: "Railway API 호출 → HTTP 401 수신, refresh_token 유효"
+    expected: "Supabase Auth refresh 성공 → 동일 Railway API 요청 재시도 1회 수행됨. 재시도 성공 시 정상 응답 반환됨. 재시도도 401이면 LoginScreen으로 이동됨"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "인증 토큰은 EncryptedSharedPreferences 또는 Android Keystore에만 저장된다 — plaintext 저장 금지"
   - "로그아웃 시 Room DB 데이터는 삭제하지 않는다 (로컬 데이터 보존)"
+  - "모든 Railway API 호출에는 Authorization: Bearer <supabase_jwt> 헤더가 첨부된다"
