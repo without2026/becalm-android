@@ -13,13 +13,33 @@ import com.becalm.android.data.local.dao.TranscriptDao
 import com.becalm.android.data.local.entities.Transcript
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 
 // spec: VOI-001 — STT Worker: on-device STT for Samsung Voice Recorder files
 // spec: VOI-004 — READ_MEDIA_AUDIO permission check
 // spec: VOI-005 — chunk audio > 60s into segments before STT
 // Invariant: Transcript is NEVER uploaded to Railway or Supabase
+
+// ---- Injectable STT engine interface (enables unit testing without Android SpeechRecognizer) ----
+// spec: VOI-001, VOI-002
+interface SttEngine {
+    // Transcribe audio from [offsetMs, offsetMs+durationMs). Returns null if STT fails.
+    suspend fun transcribeSegment(fileUri: Uri, offsetMs: Long, durationMs: Long): String?
+}
+
+// Default engine backed by Android SpeechRecognizer (no-op in unit tests)
+class AndroidSttEngine(private val context: Context) : SttEngine {
+    override suspend fun transcribeSegment(fileUri: Uri, offsetMs: Long, durationMs: Long): String? {
+        // spec: VOI-001 — use Android SpeechRecognizer in offline mode
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            // spec: VOI-003 — if STT unavailable, raw_ingestion_event still flows to Railway
+            return null
+        }
+        // Full implementation requires RecognitionService bound connection with
+        // RecognizerIntent.EXTRA_AUDIO_SOURCE pointing to a sliced audio segment.
+        // Wired in SP-10 (VOI-001) or Samsung AICore (VOI-002) depending on device capability.
+        return null
+    }
+}
 
 @HiltWorker
 class SttWorker @AssistedInject constructor(
@@ -29,12 +49,15 @@ class SttWorker @AssistedInject constructor(
     private val transcriptDao: TranscriptDao
 ) : CoroutineWorker(context, workerParams) {
 
+    // sttEngine is overridable for testing; production uses AndroidSttEngine
+    internal var sttEngine: SttEngine = AndroidSttEngine(context)
+
     companion object {
         const val KEY_RAW_INGESTION_ID = "raw_ingestion_id"
         const val KEY_FILE_URI = "file_uri"
-        // spec: VOI-005 — chunk threshold
-        private const val CHUNK_THRESHOLD_SECONDS = 60
-        private const val CHUNK_SIZE_SECONDS = 30
+        // spec: VOI-005 — chunk threshold and chunk size in seconds
+        internal const val CHUNK_THRESHOLD_SECONDS = 60
+        internal const val CHUNK_SIZE_SECONDS = 30
     }
 
     override suspend fun doWork(): Result {
@@ -60,7 +83,7 @@ class SttWorker @AssistedInject constructor(
         val transcriptText = if (durationSeconds > CHUNK_THRESHOLD_SECONDS) {
             transcribeInChunks(fileUri, durationSeconds)
         } else {
-            transcribeFull(fileUri)
+            transcribeSingle(fileUri, durationSeconds)
         }
 
         if (transcriptText == null || transcriptText.isEmpty()) {
@@ -83,41 +106,27 @@ class SttWorker @AssistedInject constructor(
         return Result.success()
     }
 
-    // spec: VOI-005 — merge chunked transcripts
-    private suspend fun transcribeInChunks(fileUri: Uri, durationSeconds: Int): String? {
-        // On Android, SpeechRecognizer does not support arbitrary file positions.
-        // Chunking is implemented by Android MediaExtractor to slice the audio,
-        // then running STT on each slice. MVP uses Android SpeechRecognizer.
-        // Full chunked implementation requires platform-specific audio splitting.
-        // For MVP: attempt full transcription; fallback to chunked if OOM.
-        return transcribeFull(fileUri)
-    }
+    // spec: VOI-005 — split into CHUNK_SIZE_SECONDS segments, run STT on each, concatenate
+    internal suspend fun transcribeInChunks(fileUri: Uri, durationSeconds: Int): String? {
+        val chunkMs = CHUNK_SIZE_SECONDS * 1000L
+        val totalMs = durationSeconds * 1000L
+        val results = mutableListOf<String>()
 
-    // Transcribe full audio using Android SpeechRecognizer offline mode
-    private suspend fun transcribeFull(fileUri: Uri): String? {
-        // spec: VOI-001 — use Android SpeechRecognizer in offline mode
-        // Samsung devices have SpeechRecognizer.isRecognitionAvailable() == true
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            // Fall back: no STT available — transcript will be empty
-            // spec: VOI-003 — if STT unavailable, raw_ingestion_event still flows to Railway
-            return null
+        var offsetMs = 0L
+        while (offsetMs < totalMs) {
+            val segmentDurationMs = minOf(chunkMs, totalMs - offsetMs)
+            val segment = sttEngine.transcribeSegment(fileUri, offsetMs, segmentDurationMs)
+                ?: return null  // Any chunk failure → abort (STT not available)
+            results.add(segment)
+            offsetMs += chunkMs
         }
 
-        // SpeechRecognizer is UI-thread bound; for background STT we use
-        // Android's RecognitionService intent with file URI input.
-        // This is a skeleton — full implementation requires platform-specific
-        // intent construction with RecognizerIntent.EXTRA_AUDIO_SOURCE.
-        // MVP delegates to a suspending wrapper.
-        return runSpeechRecognizer(fileUri)
+        return results.joinToString(" ").trim().ifEmpty { null }
     }
 
-    private suspend fun runSpeechRecognizer(fileUri: Uri): String? {
-        // Placeholder: actual SpeechRecognizer invocation requires UI thread + Activity context.
-        // Background STT in WorkManager context uses RecognitionService bound connection.
-        // Full implementation: SP-10 spec VOI-001 wires this to Android SpeechRecognizer
-        // or Samsung AICore (Gemini Nano) depending on device capability (VOI-002).
-        // For scaffold: return null (worker fails gracefully; event preserved for Railway upload).
-        return null
+    // Single-segment transcription for audio ≤ CHUNK_THRESHOLD_SECONDS
+    internal suspend fun transcribeSingle(fileUri: Uri, durationSeconds: Int): String? {
+        return sttEngine.transcribeSegment(fileUri, 0L, durationSeconds * 1000L)
     }
 
     private fun getAudioDurationSeconds(fileUri: Uri): Int {

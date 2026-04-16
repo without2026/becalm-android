@@ -53,21 +53,21 @@ class NaverImapSyncWorker @AssistedInject constructor(
         }
     }
 
+    // TODO(ING-013): scaffold only — full IMAP impl in follow-up sprint
     override suspend fun doWork(): Result {
         val prefs = dataStore.data.first()
         if (prefs[DataStoreKeys.NAVER_IMAP_CONNECTED] != true) return Result.success()
 
-        // IMAP implementation scaffold — full implementation requires:
+        // TODO(ING-013): scaffold only — full impl in follow-up sprint
+        // Full implementation requires:
         // 1. Retrieve IMAP app password from Android Keystore (NOT DataStore)
         // 2. Connect to imap.naver.com:993 (SSL)
         // 3. Parse cursor: "UIDVALIDITY:lastUID" composite
-        // 4. EXAMINE INBOX, check UIDVALIDITY
-        // spec: ING-013 — UIDVALIDITY mismatch → cursor reset + 30-day re-sync
+        // 4. EXAMINE INBOX, check UIDVALIDITY → mismatch → resetCursorAndFullSync()
         // 5. UID FETCH (lastUID+1:*) for new messages
         // 6. Insert RawIngestionEvent(source_type='naver_imap') + EmailBody into Room
         // 7. Update DataStore cursor_naver_imap = "newUIDVALIDITY:newLastUID"
-
-        return Result.success()
+        throw NotImplementedError("NaverImapSyncWorker: full IMAP implementation pending (TODO ING-013)")
     }
 
     // spec: ING-013 — reset cursor on UIDVALIDITY mismatch

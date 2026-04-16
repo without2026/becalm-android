@@ -8,6 +8,7 @@ import com.becalm.android.data.remote.api.ApiCallResult
 import com.becalm.android.data.remote.api.AuthenticatedApiCaller
 import com.becalm.android.data.remote.api.BeCalmApi
 import com.becalm.android.data.remote.dto.PatchActionStateRequest
+import com.becalm.android.domain.CommitmentTransitions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,6 +85,13 @@ class CommitmentViewModel @Inject constructor(
     // Invariant: Room UPDATE first, Railway PATCH async
     private fun updateActionState(commitmentId: String, newState: String) {
         viewModelScope.launch {
+            // spec: CMT-005..CMT-007 — enforce transition guard before writing to Room
+            val current = commitmentDao.getById(commitmentId)
+            if (current != null && !CommitmentTransitions.isValid(current.actionState, newState)) {
+                // Silent no-op: invalid transitions are ignored (not surfaced as errors in MVP)
+                return@launch
+            }
+
             // 1. Optimistic Room update (immediate UI feedback)
             commitmentDao.updateActionState(commitmentId, newState)
             // Refresh the list

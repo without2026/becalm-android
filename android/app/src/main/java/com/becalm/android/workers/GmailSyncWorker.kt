@@ -37,6 +37,9 @@ class GmailSyncWorker @AssistedInject constructor(
     private val dataStore: DataStore<Preferences>
 ) : CoroutineWorker(context, workerParams) {
 
+    // gmailClient is overridable for testing; production uses NoOpGmailClient until SP-4
+    internal var gmailClient: GmailClient = NoOpGmailClient
+
     companion object {
         const val WORK_NAME = "sync-gmail"
 
@@ -62,23 +65,73 @@ class GmailSyncWorker @AssistedInject constructor(
         if (prefs[DataStoreKeys.GMAIL_CONNECTED] != true) return Result.success()
 
         val lastHistoryId = prefs[DataStoreKeys.CURSOR_GMAIL]
+        return syncGmail(lastHistoryId)
+    }
 
-        // Gmail API integration scaffold — full implementation requires:
-        // 1. Retrieve OAuth token from Android Keystore (not DataStore)
-        // 2. Call Gmail API history.list(startHistoryId=lastHistoryId) or messages.list for cold start
-        // 3. For each new message: fetch RFC 2822 content, parse headers for person_ref (From:)
-        // 4. Insert RawIngestionEvent + EmailBody into Room
-        // 5. Update DataStore cursor_gmail to new historyId
+    // Internal: injectable for testing (spec: ING-012 / ING-013)
+    suspend fun syncGmail(lastHistoryId: String?): Result {
+        return if (lastHistoryId == null) {
+            // Cold start: no cursor → full 30-day sync
+            performFullResync()
+        } else {
+            // spec: ING-012 — incremental via history.list(startHistoryId)
+            val fetchResult = gmailClient.fetchHistory(lastHistoryId)
+            when (fetchResult) {
+                is GmailFetchResult.Messages -> {
+                    persistMessages(fetchResult.messages)
+                    if (fetchResult.newHistoryId != null) {
+                        persistCursor(fetchResult.newHistoryId)
+                    }
+                    Result.success()
+                }
+                is GmailFetchResult.Gone -> {
+                    // spec: ING-013 — 410 historyId expiry → reset cursor + 30-day re-sync
+                    dataStore.edit { it.remove(DataStoreKeys.CURSOR_GMAIL) }
+                    performFullResync()
+                }
+                is GmailFetchResult.Error -> Result.retry()
+            }
+        }
+    }
 
-        // spec: ING-013 — 410 expiry handling (skeleton)
-        // If Gmail returns 410: reset cursor to null, perform 30-day full re-sync
-        // For scaffold: return success; SP-4 implementation adds actual API calls
+    // spec: ING-013 — 30-day full re-sync after cursor expiry
+    private suspend fun performFullResync(): Result {
+        val thirtyDaysAgoSec = (System.currentTimeMillis() / 1000L) - (30 * 24 * 3600L)
+        val fetchResult = gmailClient.fetchMessagesSince(thirtyDaysAgoSec)
+        return when (fetchResult) {
+            is GmailFetchResult.Messages -> {
+                persistMessages(fetchResult.messages)
+                if (fetchResult.newHistoryId != null) {
+                    persistCursor(fetchResult.newHistoryId)
+                }
+                Result.success()
+            }
+            is GmailFetchResult.Gone -> Result.failure() // unexpected on full resync
+            is GmailFetchResult.Error -> Result.retry()
+        }
+    }
 
-        return Result.success()
+    private suspend fun persistMessages(messages: List<GmailMessage>) {
+        for (msg in messages) {
+            val (event, body) = parseEmailToEvent(
+                messageId = msg.messageId,
+                subject = msg.subject,
+                fromEmail = msg.fromEmail,
+                snippetText = msg.snippet,
+                bodyText = msg.bodyText,
+                timestampMillis = msg.timestampMillis
+            )
+            rawIngestionEventDao.insert(event)   // IGNORE on duplicate client_event_id
+            emailBodyDao.insert(body)
+        }
+    }
+
+    private suspend fun persistCursor(newHistoryId: String) {
+        dataStore.edit { it[DataStoreKeys.CURSOR_GMAIL] = newHistoryId }
     }
 
     // spec: ING-006 — parse email into RawIngestionEvent
-    private fun parseEmailToEvent(
+    internal fun parseEmailToEvent(
         messageId: String,
         subject: String,
         fromEmail: String,
@@ -103,4 +156,37 @@ class GmailSyncWorker @AssistedInject constructor(
         )
         return Pair(event, body)
     }
+}
+
+// ---- Gmail API abstraction (injectable for testing) ----
+
+data class GmailMessage(
+    val messageId: String,
+    val subject: String,
+    val fromEmail: String,
+    val snippet: String,
+    val bodyText: String,
+    val timestampMillis: Long
+)
+
+sealed class GmailFetchResult {
+    data class Messages(val messages: List<GmailMessage>, val newHistoryId: String?) : GmailFetchResult()
+    object Gone : GmailFetchResult()      // HTTP 410 — historyId expired
+    data class Error(val code: Int) : GmailFetchResult()
+}
+
+interface GmailClient {
+    // spec: ING-012 — incremental history.list
+    suspend fun fetchHistory(startHistoryId: String): GmailFetchResult
+    // spec: ING-013 — messages.list?q=after:{epochSec}
+    suspend fun fetchMessagesSince(afterEpochSec: Long): GmailFetchResult
+}
+
+// Default no-op: replaced by real OAuth client in SP-4 implementation
+private object NoOpGmailClient : GmailClient {
+    override suspend fun fetchHistory(startHistoryId: String): GmailFetchResult =
+        GmailFetchResult.Messages(emptyList(), null)
+
+    override suspend fun fetchMessagesSince(afterEpochSec: Long): GmailFetchResult =
+        GmailFetchResult.Messages(emptyList(), null)
 }

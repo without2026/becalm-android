@@ -32,9 +32,10 @@ CREATE TABLE IF NOT EXISTS raw_ingestion_events (
 );
 
 -- spec: data-model indexes
+-- spec: SYNC-001 — UploadWorker query: pending events by user, supports sync_status filter
 CREATE INDEX IF NOT EXISTS idx_raw_events_user_sync_status
-    ON raw_ingestion_events (user_id, created_at DESC)
-    WHERE user_id IS NOT NULL;
+    ON raw_ingestion_events (user_id, sync_status)
+    WHERE sync_status IN ('pending', 'failed');
 
 CREATE INDEX IF NOT EXISTS idx_raw_events_user_timestamp
     ON raw_ingestion_events (user_id, timestamp DESC);
@@ -84,6 +85,11 @@ CREATE INDEX IF NOT EXISTS idx_commitments_user_created
 -- spec: SRC-002, /v1/persons/{id}/commitments
 CREATE INDEX IF NOT EXISTS idx_commitments_user_person_due
     ON commitments (user_id, person_ref, due_date ASC);
+
+-- spec: SYNC-001 — UploadWorker query for pending commitment sync
+CREATE INDEX IF NOT EXISTS idx_commitments_user_sync_status
+    ON commitments (user_id, sync_status)
+    WHERE sync_status IN ('pending', 'failed');
 
 -- ============================================================
 -- calendar_events

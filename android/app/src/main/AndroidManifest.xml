@@ -24,6 +24,10 @@
     <!-- RECEIVE_BOOT_COMPLETED — re-register WorkManager jobs after reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- spec: CMT-008 — exact alarms for commitment due-date reminders (API 31+) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <application
         android:name=".BeCalmApplication"
         android:allowBackup="false"
@@ -46,6 +50,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- spec: CMT-008 — commitment due-date alarm receiver -->
+        <receiver
+            android:name=".notifications.CommitmentDueReceiver"
+            android:exported="false" />
 
         <!-- WorkManager workers — Hilt injection via HiltWorker -->
         <provider

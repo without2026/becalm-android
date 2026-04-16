@@ -93,28 +93,26 @@ class CalendarSyncWorker @AssistedInject constructor(
         }
     }
 
-    // spec: ING-009 — Google Calendar sync
+    // TODO(ING-013): scaffold only — full Google Calendar OAuth impl in follow-up sprint
     private suspend fun syncGoogleCalendar(prefs: Preferences): Result {
-        val syncToken = prefs[DataStoreKeys.CURSOR_GOOGLE_CALENDAR]
-        // Google Calendar implementation scaffold:
+        // Full implementation requires:
         // 1. Retrieve OAuth token from Keystore
         // 2. Call events.list(syncToken=syncToken) or events.list(timeMin=30daysAgo) if no token
         // spec: ING-013 — 410 → reset cursor + 30-day re-sync
         // 3. Insert CalendarEvent + RawIngestionEvent into Room
         // 4. Update DataStore cursor_google_calendar = new syncToken
-        return Result.success()
+        throw NotImplementedError("CalendarSyncWorker.syncGoogleCalendar: implementation pending (TODO ING-013)")
     }
 
-    // spec: ING-010 — Outlook Calendar sync
+    // TODO(ING-013): scaffold only — full Outlook Calendar OAuth impl in follow-up sprint
     private suspend fun syncOutlookCalendar(prefs: Preferences): Result {
-        val deltaLink = prefs[DataStoreKeys.CURSOR_OUTLOOK_CALENDAR]
-        // Microsoft Graph implementation scaffold:
+        // Full implementation requires:
         // 1. Retrieve OAuth token from Keystore
         // 2. GET /me/calendarView/delta?deltaToken=... or initial request
         // spec: ING-013 — 410 → reset cursor + 30-day re-sync
         // 3. Insert CalendarEvent + RawIngestionEvent into Room
         // 4. Update DataStore cursor_outlook_calendar = new deltaLink
-        return Result.success()
+        throw NotImplementedError("CalendarSyncWorker.syncOutlookCalendar: implementation pending (TODO ING-013)")
     }
 
     // spec: ING-009, ING-010 — create Room entities from calendar event data
