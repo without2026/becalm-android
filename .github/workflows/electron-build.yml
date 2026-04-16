@@ -1,0 +1,23 @@
+# Stub: this repo's adapter is 'android'. Electron adapter is not configured.
+name: Electron Build (stub)
+
+on:
+  workflow_call:
+    inputs:
+      build_target:
+        required: false
+        type: string
+        default: "all"
+      require_signing:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  unsupported:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Adapter not configured
+        run: |
+          echo "::error::electron adapter is not configured in this repo (platform.yml adapter=android)"
+          exit 1
