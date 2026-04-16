@@ -8,9 +8,12 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.secure.DeviceKeyStore
+import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
+import com.becalm.android.worker.ContentObserverBootstrap
+import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.io.IOException
@@ -104,6 +107,10 @@ public class AuthRepositoryImpl @Inject constructor(
     private val syncCursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
     private val database: BeCalmDatabase,
+    private val workScheduler: WorkScheduler,
+    private val contentObserverBootstrap: ContentObserverBootstrap,
+    private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val imapCredentialStore: ImapCredentialStore,
     private val logger: Logger,
 ) : AuthRepository {
 
@@ -119,6 +126,7 @@ public class AuthRepositoryImpl @Inject constructor(
     override suspend fun signOut(): BecalmResult<Unit> {
         // PIPA wipe — every step runs regardless of prior step failures.
         // The first failure is captured and returned after all steps complete.
+        // Order: cancel workers first, then clear enrichment + IMAP creds, then clear tokens.
         var firstFailure: BecalmResult.Failure? = null
 
         fun recordIfFirst(result: BecalmResult<*>) {
@@ -139,18 +147,34 @@ public class AuthRepositoryImpl @Inject constructor(
                 }
             }
 
-        // Step 2: best-effort server-side revoke; always returns Success per authClient contract.
+        // Step 2: cancel all WorkManager jobs so no worker runs against the stale session.
+        recordIfFirst(runStep(2) { workScheduler.cancelAll() })
+
+        // Step 3: stop content observers so no ghost callbacks fire after sign-out.
+        recordIfFirst(runStep(3) { contentObserverBootstrap.stop() })
+
+        // Step 4: best-effort server-side revoke; always returns Success per authClient contract.
         if (session != null) {
-            val result = runStep(2) { authClient.signOut(session.accessToken) }
+            val result = runStep(4) { authClient.signOut(session.accessToken) }
             recordIfFirst(result)
         }
 
-        // Steps 3–7: local wipe — must all run even after an earlier failure.
-        recordIfFirst(runStep(3) { sessionStore.clear() })
-        recordIfFirst(runStep(4) { deviceKeyStore.clear() })
-        recordIfFirst(runStep(5) { syncCursorStore.clearAll() })
-        recordIfFirst(runStep(6) { userPrefsStore.clearAll() })
-        recordIfFirst(runStep(7) { database.clearAllTables() })
+        // Steps 5–11: local wipe — must all run even after an earlier failure.
+        // personEnrichmentRepository.deleteAll() already returns BecalmResult<Int>;
+        // call it directly rather than wrapping it in runStep to avoid double-wrapping.
+        recordIfFirst(
+            runCatching { personEnrichmentRepository.deleteAll() }
+                .getOrElse { e ->
+                    logger.e(TAG, "signOut step 5 unexpected error", e)
+                    BecalmResult.Failure(BecalmError.Unknown(e))
+                },
+        )
+        recordIfFirst(runStep(6) { imapCredentialStore.clear() })
+        recordIfFirst(runStep(7) { sessionStore.clear() })
+        recordIfFirst(runStep(8) { deviceKeyStore.clear() })
+        recordIfFirst(runStep(9) { syncCursorStore.clearAll() })
+        recordIfFirst(runStep(10) { userPrefsStore.clearAll() })
+        recordIfFirst(runStep(11) { database.clearAllTables() })
 
         return firstFailure ?: BecalmResult.Success(Unit)
     }

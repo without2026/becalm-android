@@ -225,4 +225,25 @@ public interface RawIngestionEventDao {
         """,
     )
     public suspend fun deleteAllForUser(userId: String): Int
+
+    /**
+     * Looks up a single event by its primary key [id].
+     *
+     * Added in SP-31 (VoiceTranscriptionWorker) to resolve a [RawIngestionEventEntity]
+     * from the row UUID received as WorkManager input data, independent of user_id or
+     * sync_status.
+     *
+     * Uses index: primary key lookup on `id` — O(1).
+     *
+     * @param id The [RawIngestionEventEntity.id] UUID to look up.
+     * @return The matching entity, or null if no row exists with this [id].
+     */
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE id = :id
+        LIMIT 1
+        """,
+    )
+    public suspend fun findById(id: String): RawIngestionEventEntity?
 }
