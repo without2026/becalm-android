@@ -76,6 +76,19 @@ public interface CalendarEventRepository {
     public suspend fun refreshSince(userId: String, since: Instant?): BecalmResult<RefreshStats>
 
     /**
+     * Upserts [entities] into the local `calendar_events` table in a single transaction.
+     *
+     * Used by on-device ingestion workers (e.g. OutlookCalendarWorker) that fetch events
+     * directly from a provider API rather than via Railway. Idempotent under the Room
+     * unique index on `(user_id, source_type, source_ref)` — re-ingesting the same Graph
+     * event replaces the existing row rather than creating a duplicate.
+     *
+     * @return [BecalmResult.Success] with the count of rows written, or a typed failure
+     *   on local I/O error.
+     */
+    public suspend fun insertLocalBatch(entities: List<CalendarEventEntity>): BecalmResult<Int>
+
+    /**
      * Triggers a server-side calendar-provider sync (Google/Outlook → Supabase).
      *
      * Idempotent — multiple calls merge rather than duplicate. Callers (SP-26/SP-27
@@ -211,6 +224,21 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
         } catch (e: Throwable) {
             logger.e(TAG, "refreshSince unexpected error", e)
+            BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+    }
+
+    override suspend fun insertLocalBatch(entities: List<CalendarEventEntity>): BecalmResult<Int> {
+        if (entities.isEmpty()) return BecalmResult.Success(0)
+        return try {
+            val rowIds = dao.insertAll(entities)
+            logger.d(TAG, "insertLocalBatch wrote=${rowIds.size}")
+            BecalmResult.Success(rowIds.size)
+        } catch (e: IOException) {
+            logger.e(TAG, "insertLocalBatch IO error", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
+        } catch (e: Throwable) {
+            logger.e(TAG, "insertLocalBatch unexpected error", e)
             BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }

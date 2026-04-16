@@ -75,6 +75,18 @@ public interface RawIngestionRepository {
      */
     public suspend fun findByClientEventId(userId: String, clientEventId: String): RawIngestionEventEntity?
 
+    /**
+     * Returns the event with the given primary-key [id], or null when no row exists.
+     *
+     * The primary key is a UUID assigned at insert time. Because every UUID is unique across
+     * the entire table, no userId filter is needed — the PK itself scopes the row to a single
+     * user by virtue of the composite unique index on (user_id, client_event_id).
+     *
+     * @param id The [RawIngestionEventEntity.id] UUID to look up.
+     * @return The matching entity, or null.
+     */
+    public suspend fun findById(id: String): RawIngestionEventEntity?
+
     // ── Sync queue ────────────────────────────────────────────────────────────
 
     /**
@@ -204,6 +216,9 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         clientEventId: String,
     ): RawIngestionEventEntity? =
         dao.findByClientEventId(userId, clientEventId)
+
+    override suspend fun findById(id: String): RawIngestionEventEntity? =
+        dao.findById(id)
 
     // ── Sync queue ────────────────────────────────────────────────────────────
 

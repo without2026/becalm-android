@@ -1,6 +1,7 @@
 package com.becalm.android.data.local.db
 
 import androidx.room.TypeConverter
+import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -88,6 +89,30 @@ public class Converters {
     @TypeConverter
     public fun toLocalDate(value: String?): LocalDate? =
         value?.let { LocalDate.parse(it) }
+
+    // ─── CommitmentState ↔ String (enum name) ────────────────────────────────
+
+    /**
+     * Encodes a [CommitmentState] as its enum [name] for SQLite TEXT storage.
+     *
+     * @param value The [CommitmentState] to encode, or null.
+     * @return The enum name (e.g. "DRAFT"), or null when [value] is null.
+     */
+    @TypeConverter
+    public fun fromCommitmentState(value: CommitmentState?): String? = value?.name
+
+    /**
+     * Reconstructs a [CommitmentState] from its stored enum name.
+     *
+     * Falls back to [CommitmentState.DRAFT] when the stored string is unrecognized,
+     * so that a future server-side state unknown to an older app version does not crash.
+     *
+     * @param value The stored string (e.g. "DRAFT"), or null.
+     * @return The decoded [CommitmentState], or null when [value] is null.
+     */
+    @TypeConverter
+    public fun toCommitmentState(value: String?): CommitmentState? =
+        value?.let { runCatching { CommitmentState.valueOf(it) }.getOrDefault(CommitmentState.DRAFT) }
 
     // ─── LocalDateTime ↔ String (ISO "YYYY-MM-DDTHH:MM:SS") ──────────────────
 

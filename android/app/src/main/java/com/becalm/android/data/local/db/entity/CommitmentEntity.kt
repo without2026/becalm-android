@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 
@@ -50,6 +51,9 @@ import kotlinx.datetime.LocalDate
  *   Null when no stable external reference exists.
  * @property confidence LLM confidence score for this extraction, in [0.0, 1.0].
  *   Higher values indicate greater extraction confidence. Default: 0.0.
+ * @property commitmentState SP-36 lifecycle state managed by [com.becalm.android.domain.commitment.CommitmentStateMachine].
+ *   Stored as a TEXT column containing the [CommitmentState] name (e.g. "DRAFT").
+ *   Default: [CommitmentState.DRAFT]. Added in DB migration 1 → 2.
  * @property syncStatus Room-only tracking column for Railway upload state.
  *   Valid values: "pending" | "synced" | "failed". Never uploaded to Supabase.
  *   Default: "pending".
@@ -115,6 +119,9 @@ public data class CommitmentEntity(
 
     @ColumnInfo(name = "confidence", defaultValue = "0.0")
     val confidence: Double = 0.0,
+
+    @ColumnInfo(name = "commitment_state", defaultValue = "DRAFT")
+    val commitmentState: CommitmentState = CommitmentState.DRAFT,
 
     @ColumnInfo(name = "sync_status", defaultValue = "pending")
     val syncStatus: String = "pending",

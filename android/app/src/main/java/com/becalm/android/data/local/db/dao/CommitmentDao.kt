@@ -133,6 +133,26 @@ public interface CommitmentDao {
     // ─── List reads ────────────────────────────────────────────────────────────
 
     /**
+     * Emits every commitment for [userId] regardless of action_state or commitment_state,
+     * ordered by the source event timestamp descending (newest first).
+     *
+     * Re-emits on any write to the `commitments` table that affects [userId]. Used by
+     * CommitmentManagementScreen so that a single Room subscription drives all filter tabs
+     * without maintaining a separate flow per action_state value.
+     *
+     * @param userId Supabase auth.users UUID of the owning user.
+     * @return A [Flow] that emits a list and re-emits on every qualifying table write.
+     */
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+        ORDER BY source_event_occurred_at DESC
+        """
+    )
+    public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
+
+    /**
      * Emits all commitments for [userId] with the given [actionState], ordered by
      * due date ascending (nulls last) then creation timestamp descending.
      *

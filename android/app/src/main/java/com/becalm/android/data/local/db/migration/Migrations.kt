@@ -1,6 +1,7 @@
 package com.becalm.android.data.local.db.migration
 
 import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * Central registry of all Room database [Migration] objects for [com.becalm.android.data.local.db.BeCalmDatabase].
@@ -33,17 +34,17 @@ import androidx.room.migration.Migration
  * }
  * ```
  */
-public val MIGRATIONS: Array<Migration> = emptyArray()
+// ─── Migration 1 → 2 (SP-36: commitment_state column) ────────────────────────
+//
+// Adds the `commitment_state` TEXT column to the `commitments` table.
+// The DEFAULT 'DRAFT' ensures existing rows are placed in the DRAFT state,
+// which is the correct starting point for the SP-36 state machine.
+private val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE commitments ADD COLUMN commitment_state TEXT NOT NULL DEFAULT 'DRAFT'"
+        )
+    }
+}
 
-// ─── Example migration (keep as a reference template) ────────────────────────
-//
-// When version 1 → 2 requires adding a new column, add an entry like:
-//
-// private val MIGRATION_1_2 = Migration(1, 2) { db ->
-//     db.execSQL(
-//         "ALTER TABLE raw_ingestion_events ADD COLUMN new_column TEXT"
-//     )
-// }
-//
-// Then update the array:
-// public val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+public val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)

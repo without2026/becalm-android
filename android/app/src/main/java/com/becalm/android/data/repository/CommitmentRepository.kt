@@ -42,6 +42,17 @@ public interface CommitmentRepository {
 
     // ── Reactive reads (local Room) ──────────────────────────────────────────
 
+    /**
+     * Emits every commitment for [userId] regardless of action_state or commitment_state,
+     * re-emitting on any table change.
+     *
+     * Drives the CommitmentManagementScreen list so that a single Room subscription covers
+     * all filter tabs without a combine chain over fixed action_state strings.
+     *
+     * @param userId Supabase auth.users UUID of the owning user.
+     */
+    public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
+
     /** Emits commitments for [userId] filtered by [actionState], re-emits on change. */
     public fun observeByActionState(userId: String, actionState: String): Flow<List<CommitmentEntity>>
 
@@ -169,6 +180,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
 ) : CommitmentRepository {
 
     // ── Reactive reads ────────────────────────────────────────────────────────
+
+    override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> =
+        dao.observeAllForUser(userId)
 
     override fun observeByActionState(userId: String, actionState: String): Flow<List<CommitmentEntity>> =
         dao.observeByActionState(userId, actionState)

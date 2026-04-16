@@ -115,6 +115,21 @@ public interface UserPrefsStore {
     public suspend fun setDozePromptDismissedAt(epochMs: Long?)
 
     /**
+     * Emits `true` when the user has notifications enabled, `false` when disabled.
+     *
+     * Defaults to `true` on first install. The value is persisted across process deaths
+     * under the `notifications_enabled` key. [clearAll] resets it to the default.
+     */
+    public fun observeNotificationsEnabled(): Flow<Boolean>
+
+    /**
+     * Persists the notifications [enabled] preference.
+     *
+     * @param enabled `true` to enable notifications; `false` to disable.
+     */
+    public suspend fun setNotificationsEnabled(enabled: Boolean)
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
@@ -139,6 +154,7 @@ public interface UserPrefsStore {
  * | Theme mode                       | String   | `theme_mode`                     | "system"   |
  * | Locale tag                       | String   | `locale_tag`                     | null       |
  * | Doze prompt dismissed at         | Long     | `doze_whitelist_prompt_dismissed`| null       |
+ * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
  */
 public class UserPrefsStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
@@ -149,6 +165,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val themeModeKey = stringPreferencesKey("theme_mode")
     private val localeTagKey = stringPreferencesKey("locale_tag")
     private val dozePromptDismissedAtKey = longPreferencesKey("doze_whitelist_prompt_dismissed")
+    private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
@@ -191,6 +208,13 @@ public class UserPrefsStoreImpl @Inject constructor(
             if (epochMs != null) prefs[dozePromptDismissedAtKey] = epochMs
             else prefs.remove(dozePromptDismissedAtKey)
         }
+    }
+
+    override fun observeNotificationsEnabled(): Flow<Boolean> =
+        dataStore.data.map { it[notificationsEnabledKey] ?: true }
+
+    override suspend fun setNotificationsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[notificationsEnabledKey] = enabled }
     }
 
     override suspend fun clearAll() {
