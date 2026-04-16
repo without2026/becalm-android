@@ -32,10 +32,10 @@ behaviors:
 
   - id: ING-003
     type: lifecycle
-    description: "네트워크 없을 때 UploadWorker는 Room 레코드를 삭제하지 않고 retry_count를 증가시킨 뒤 exponential backoff로 재시도한다"
-    trigger: "WorkManager UploadWorker 실행 (네트워크 없음 또는 Railway 응답 오류)"
-    precondition: "Room에 sync_status='pending', retry_count=0인 레코드 1건 존재, 네트워크 연결 없음"
-    expected: "Room 레코드 sync_status='failed', retry_count=1로 UPDATE됨. 레코드 DELETE 없음. WorkManager 재시도 스케줄 등록됨"
+    description: "UploadWorker는 HTTP 응답 코드에 따라 Room 레코드를 차등 처리한다: (1) 네트워크 없음 또는 5xx/429/408/503 → retry_count 증가, exponential backoff 재시도 (2) 401 → AUTH-007 refresh 후 1회 재시도, 실패 시 재시도 (3) 400/413/422 → sync_status='quarantined'로 UPDATE, 재시도 중단 (4) 200 + failed[]에 포함된 개별 이벤트 → retryable:true면 pending 유지, retryable:false면 quarantined."
+    trigger: "UploadWorker 실행 (네트워크 없음 / Railway 4xx/5xx / 200 with failed[])"
+    precondition: "Room에 sync_status='pending' 레코드 존재"
+    expected: "응답 코드별 분기: 5xx/429/408/503/network → sync_status='failed', retry_count+=1, WorkManager backoff 재시도 등록. 400/413/422 → sync_status='quarantined', retry_count 동결. 레코드 DELETE 없음. 200 failed[] 이벤트는 retryable 플래그에 따라 pending 유지 또는 quarantined로 UPDATE."
     source: phase2-acceptance
     tests: []
 
@@ -129,6 +129,24 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: ING-014
+    type: api
+    description: "Railway batch upload 시 body가 max_batch_size(100) 또는 max_body_bytes(1 MiB)를 초과하면 413 반환. 클라이언트는 events[]를 50건씩 chunk하여 재전송한다"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "events[] 길이 > 100 또는 payload > 1 MiB"
+    expected: "HTTP 413. UploadWorker가 events[]를 50건 단위로 분할하여 순차 재호출. Room sync_status는 분할 재전송 성공 이벤트만 synced로 UPDATE됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ING-015
+    type: api
+    description: "중복 client_event_id 재전송 시 서버는 200 ack 반환 — 신규 INSERT 없이 기존 레코드 유지. 이는 ING-003의 재시도가 안전하게 반복 실행될 수 있도록 하는 멱등성 계약이다"
+    endpoint: "POST /v1/raw_ingestion_events:batch"
+    precondition: "이미 서버에 (user_id, client_event_id) 레코드 존재"
+    expected: "HTTP 200, acknowledged 카운트에 포함됨. 서버 raw_ingestion_events에 신규 INSERT 없음. Room sync_status='synced'로 UPDATE됨"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "raw_ingestion_events는 Railway ack(sync_status='synced') 확인 전까지 Room에서 DELETE되지 않는다"
   - "Transcript 및 EmailBody는 Railway 또는 Supabase로 업로드되지 않는다 (로컬 only)"
@@ -136,3 +154,5 @@ invariants:
   - "이메일/캘린더 데이터는 Android 기기에서 직접 로컬 파싱 후 구조화된 이벤트만 Railway로 업로드된다"
   - "6개 소스 어댑터는 병렬 실행되며 한 어댑터의 실패가 다른 어댑터의 실행을 중단시키지 않는다"
   - "커서는 로그아웃 또는 앱 삭제 시 DataStore에서 삭제된다"
+  - "Railway 응답 4xx(401 제외)는 영구 실패로 간주 — sync_status='quarantined'로 격리, 재시도하지 않음"
+  - "동일 client_event_id의 재전송은 서버에서 멱등 처리되며 항상 200 ack 반환 (ING-015)"

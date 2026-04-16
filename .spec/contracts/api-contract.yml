@@ -16,6 +16,14 @@ version: 1
 base_path: ${BECALM_API_BASE_URL}
 auth: bearer_jwt
 
+# Shared types
+types:
+  FailedEvent:
+    client_event_id: uuid       # 실패한 이벤트의 멱등 키
+    reason: string              # "schema_invalid" | "source_type_unknown" | "timestamp_parse_error" | "internal_error"
+    message: string             # 사람이 읽을 수 있는 상세
+    retryable: boolean          # true면 client가 재시도, false면 quarantine
+
 endpoints:
   # ========== SUPABASE AUTH (client calls directly) ==========
 
@@ -46,6 +54,7 @@ endpoints:
   - method: POST
     path: /v1/raw_ingestion_events:batch
     auth: required
+    idempotency: client_event_id   # 서버는 (user_id, client_event_id) UNIQUE로 dedupe. 중복 전송은 200 ack로 처리 (새 INSERT 없음).
     body:
       events:
         - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
@@ -58,11 +67,19 @@ endpoints:
           location?: string           # calendar only
           commitments_extracted_count?: int  # default 0; updated after LLM extraction
           timestamp: datetime
+    constraints:
+      max_batch_size: 100              # events[] 길이. 초과 시 413.
+      max_body_bytes: 1048576          # 1 MiB. 초과 시 413.
     response:
-      200: { acknowledged: int, failed: "FailedEvent[]" }
-      401: { error: string, message: string }
-      429: { error: string, message: string }
-    spec_refs: [ING-004, ING-005, SYNC-001, SYNC-002, SYNC-003, SYNC-005]
+      200: { acknowledged: int, failed: "FailedEvent[]" }   # 부분 성공 — failed[]는 재전송 대상(retryable:true)과 quarantine 대상(retryable:false)을 구분
+      400: { error: string, message: string }               # 잘못된 JSON / 필수 필드 누락 / body events=[]
+      401: { error: string, message: string }               # 토큰 없음/만료 — AUTH-007 refresh 트리거
+      413: { error: string, message: string }               # max_batch_size 또는 max_body_bytes 초과 — client chunk 후 재전송
+      422: { error: string, message: string }               # 전체 스키마 검증 실패(개별 이벤트가 아닌 batch 수준)
+      429: { error: string, message: string }               # Retry-After 헤더 존중
+      500: { error: string, message: string }               # 서버 내부 오류 — retryable
+      503: { error: string, message: string }               # 일시적 downstream 장애 — retryable
+    spec_refs: [ING-003, ING-004, ING-005, ING-011, ING-012, ING-013, SYNC-001, SYNC-002, SYNC-003, SYNC-005, SYNC-006]
 
   # ========== RAILWAY — COMMITMENTS ==========
 
