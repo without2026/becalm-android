@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+/local.properties
+/build/
+/app/build/
+/.idea/
+/captures/
+/app/release/
+*.apk
+*.aab
+# Room schema snapshots are kept in git — they form part of the migration contract.
+# /app/schemas/ is intentionally NOT excluded.
