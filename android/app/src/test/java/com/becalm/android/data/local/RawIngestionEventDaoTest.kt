@@ -20,7 +20,7 @@ import org.robolectric.RobolectricTestRunner
 // spec: ING-002 — query pending batch
 // spec: ING-003 — differential status update (synced/failed/quarantined)
 // spec: ING-015 — idempotency: duplicate client_event_id inserts are ignored
-// spec: data-model — invariant: records not deleted before Railway ack
+// spec: ING-002 — invariant: records not deleted before Railway ack (sync_status='synced')
 
 @RunWith(RobolectricTestRunner::class)
 class RawIngestionEventDaoTest {
@@ -93,7 +93,7 @@ class RawIngestionEventDaoTest {
         assertEquals(0, pending.size)
     }
 
-    // spec: data-model invariant — records are NOT deleted before Railway ack
+    // spec: ING-002 — records are NOT deleted before Railway ack (sync_status stays failed, not deleted)
     @Test
     fun `records persist after failed upload attempt`() = runTest {
         val event = makeEvent("ev-persist")

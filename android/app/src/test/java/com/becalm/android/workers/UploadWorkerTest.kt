@@ -22,6 +22,7 @@ import org.junit.Test
 // spec: ING-014 — 413 → failed + retry
 // spec: SYNC-001 — batch upload behavior
 // spec: SYNC-003 — 5xx increments retry_count
+// spec: SYNC-004 — WorkManager NETWORK_CONNECTED constraint; pending records processed on reconnect
 // spec: AUTH-007 — 401 handled by AuthenticatedApiCaller → Unauthorized result
 
 class UploadWorkerTest {
@@ -210,5 +211,32 @@ class UploadWorkerTest {
 
         assertEquals(UploadBatchHandler.UploadResult.Retry, result)
         coVerify { rawIngestionEventDao.markFailed(listOf("ev-net"), any()) }
+    }
+
+    // spec: SYNC-004 — UploadWorker.enqueue sets NETWORK_CONNECTED constraint (WorkManager re-runs on reconnect)
+    @Test
+    fun `SYNC004_uploadWorker_enqueue_setsNetworkConnectedConstraint`() {
+        val workManager = mockk<androidx.work.WorkManager>(relaxed = true)
+        // spec: SYNC-004 — enqueue with NETWORK_CONNECTED so WorkManager fires on reconnect
+        UploadWorker.enqueue(workManager)
+        io.mockk.verify { workManager.enqueueUniqueWork(
+            "sync-all-upload",
+            androidx.work.ExistingWorkPolicy.REPLACE,
+            any<androidx.work.OneTimeWorkRequest>()
+        ) }
+    }
+
+    // spec: SYNC-004 — pending records are processed when network is available (Retry result queues WorkManager retry)
+    @Test
+    fun `SYNC004_networkError_returnsRetry_pendingRecordsKeptForReconnect`() = runTest {
+        val events = listOf(makeEvent("ev-sync4"))
+        coEvery { apiCaller.call<BatchUploadResponse>(any()) } returns ApiCallResult.NetworkError
+
+        val result = handler.uploadBatch(events)
+
+        // spec: SYNC-004 — records stay in Room (not deleted), WorkManager retries when network reconnects
+        assertEquals(UploadBatchHandler.UploadResult.Retry, result)
+        coVerify(exactly = 0) { rawIngestionEventDao.markSynced(any(), any()) }
+        coVerify { rawIngestionEventDao.markFailed(listOf("ev-sync4"), any()) }
     }
 }

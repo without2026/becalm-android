@@ -138,7 +138,7 @@ class CommitmentDaoTest {
         assertEquals("cmt-s2", batch[0].id)
     }
 
-    // spec: data-model — quote field is preserved exactly (legally sensitive)
+    // spec: CMT-003 — quote field is preserved verbatim (legally sensitive; no summarization)
     @Test
     fun `commitment quote is stored and retrieved verbatim`() = runTest {
         val quote = "나는 내일까지 보고서를 제출하겠습니다."

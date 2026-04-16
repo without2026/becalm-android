@@ -6,11 +6,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
-// spec: data-model invariants — entity constants and defaults
+// Entity invariant tests — constants and defaults per spec
 
 class EntityInvariantsTest {
 
-    // spec: data-model — RawIngestionEvent.SyncStatus constants
+    // spec: SYNC-001 — RawIngestionEvent.SyncStatus constants match backend-sync spec
     @Test
     fun `RawIngestionEvent SyncStatus constants match spec`() {
         assertEquals("pending", RawIngestionEvent.SyncStatus.PENDING)
@@ -19,7 +19,7 @@ class EntityInvariantsTest {
         assertEquals("quarantined", RawIngestionEvent.SyncStatus.QUARANTINED)
     }
 
-    // spec: data-model — SourceType constants cover all 7 sources
+    // spec: ING-001 — SourceType constants cover all 7 sources
     @Test
     fun `RawIngestionEvent SourceType constants cover all 7 sources`() {
         val types = setOf(
@@ -34,7 +34,7 @@ class EntityInvariantsTest {
         assertEquals(7, types.size)
     }
 
-    // spec: data-model — Commitment defaults pending action_state
+    // spec: CMT-001 — Commitment defaults to pending action_state
     @Test
     fun `Commitment defaults to pending action_state`() {
         val cmt = Commitment(
@@ -61,7 +61,7 @@ class EntityInvariantsTest {
         assertEquals("take", Commitment.Direction.TAKE)
     }
 
-    // spec: data-model — RawIngestionEvent defaults to pending sync_status, retry_count=0
+    // spec: ING-001 — RawIngestionEvent defaults to pending sync_status, retry_count=0
     @Test
     fun `RawIngestionEvent defaults to pending sync_status and zero retry_count`() {
         val event = RawIngestionEvent(

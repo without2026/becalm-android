@@ -76,4 +76,19 @@ class SyncWorkerCursorTest {
     fun `UploadWorker WORK_NAME is sync-all-upload`() {
         assertEquals("sync-all-upload", UploadWorker.WORK_NAME)
     }
+
+    // spec: ING-007 — Outlook Mail cursor key is String (odata.deltaLink)
+    @Test
+    fun `outlook mail cursor key is String for deltaLink`() {
+        // spec: ING-007 — OutlookSyncWorker uses cursor_outlook_mail (messages/delta deltaLink)
+        assertNotNull(DataStoreKeys.CURSOR_OUTLOOK_MAIL)
+        assertEquals("cursor_outlook_mail", DataStoreKeys.CURSOR_OUTLOOK_MAIL.name)
+    }
+
+    // spec: ING-007 — source_type constant for Outlook Mail is 'outlook_mail'
+    @Test
+    fun `outlook mail source type constant is outlook_mail`() {
+        // spec: ING-007 — Room records ingested by Outlook worker use source_type='outlook_mail'
+        assertEquals("outlook_mail", com.becalm.android.data.local.entities.RawIngestionEvent.SourceType.OUTLOOK_MAIL)
+    }
 }
