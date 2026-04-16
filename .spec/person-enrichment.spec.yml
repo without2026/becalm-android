@@ -1,0 +1,89 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+# PIPA INVARIANT: persons_enrichment 데이터는 절대 Railway 또는 Supabase로 업로드되지 않는다.
+# Android 기기 내에서만 존재하며 person_ref와의 조인은 순수 온디바이스로 처리된다.
+module: person-enrichment
+platform: android
+version: 1
+
+behaviors:
+  - id: ENR-001
+    type: permission
+    description: "온보딩 중 CONTACTS 권한 요청 — PIPA 사유를 명확히 고지하고 [허용] / [나중에] 선택지를 제공한다"
+    screen: "ContactsPermissionScreen"
+    interaction: "화면 진입 (온보딩 자동 순서)"
+    precondition: "온보딩 RecordingFolderScreen 완료 후, READ_CONTACTS 미부여"
+    expected: "ContactsPermissionScreen 표시됨. 고지문: '연락처 접근은 약속 상대방의 이름·회사·직함을 앱 안에서만 표시하는 데 사용되며 서버로 전송되지 않습니다'. [허용] 탭 시 시스템 READ_CONTACTS 권한 다이얼로그 표시됨. [나중에] 탭 시 다음 온보딩 단계 진행됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-002
+    type: permission
+    description: "[허용] 탭 후 시스템 다이얼로그에서 거부 선택 시 graceful skip — 앱은 정상 진행되며 persons_enrichment 테이블은 빈 상태로 유지된다"
+    screen: "ContactsPermissionScreen"
+    interaction: "시스템 다이얼로그에서 [거부] 선택"
+    precondition: "ContactsPermissionScreen에서 [허용] 탭 후 시스템 다이얼로그 표시됨"
+    expected: "다음 온보딩 단계로 진행됨. persons_enrichment 테이블 빈 상태 유지됨. PersonsScreen에서 person_ref 원본값이 표시명으로 fallback 사용됨. 크래시 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-003
+    type: lifecycle
+    description: "CONTACTS 권한 부여 직후 EnrichmentWorker가 ContactsContract.Data를 읽어 persons_enrichment Room 테이블을 채운다 — 전화번호(E.164)/이메일 기준으로 기존 person_ref와 매칭"
+    trigger: "READ_CONTACTS 권한 부여됨 (온보딩 또는 설정에서)"
+    precondition: "Room에 person_ref='010-1234-5678' raw_ingestion_events 존재. 기기 연락처에 전화번호 '010-1234-5678'을 가진 연락처(display_name='김철수', company='ABC Corp', title='팀장') 존재"
+    expected: "persons_enrichment에 {person_ref='+821012345678', display_name='김철수', company='ABC Corp', title='팀장', last_synced_at=now()} 레코드 INSERT됨. source_contact_id: ContactsContract 조회 ID. Railway/Supabase로 전송 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-004
+    type: lifecycle
+    description: "persons_enrichment는 many-to-one — 동일 연락처가 전화번호와 이메일 두 person_ref로 인식되는 경우 각각 별도 enrichment 레코드 생성됨 (post-MVP에서 수동 병합으로 해결)"
+    trigger: "EnrichmentWorker 실행"
+    precondition: "기기 연락처에 person A(phone='+821012345678', email='kim@corp.com'). Room에 person_ref='+821012345678' 2건 + person_ref='kim@corp.com' 1건"
+    expected: "persons_enrichment 2건 INSERT됨: {person_ref='+821012345678', display_name='김철수'} + {person_ref='kim@corp.com', display_name='김철수'}. UI는 두 person_ref를 별도 인물로 표시함 (MVP 제약)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-005
+    type: lifecycle
+    description: "EnrichmentWorker — 1일 주기 WorkManager PeriodicWorkRequest로 연락처 변경 사항을 재동기화한다. 앱 foreground 진입 시 ContentObserver로 연락처 변경을 실시간 감지하여 즉시 재실행한다"
+    trigger: "WorkManager EnrichmentWorker 실행 (1일 주기) 또는 ContentObserver 연락처 변경 감지"
+    precondition: "READ_CONTACTS 권한 부여됨, persons_enrichment에 기존 레코드 존재"
+    expected: "변경된 연락처 정보 persons_enrichment에 UPSERT됨. last_synced_at 갱신됨. 삭제된 연락처: persons_enrichment 레코드 삭제됨. Railway/Supabase 전송 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-006
+    type: lifecycle
+    description: "매칭 실패 fallback — persons_enrichment에 해당 person_ref 레코드가 없으면 UI에서 person_ref 원본값(전화번호/이메일/표시이름)을 그대로 표시한다"
+    trigger: "PersonsScreen 또는 CommitmentManagementScreen 렌더링 시 persons_enrichment 조인 결과 없음"
+    precondition: "Room에 person_ref='unknown@domain.com' 이벤트 존재. persons_enrichment에 해당 레코드 없음"
+    expected: "UI에서 'unknown@domain.com' 그대로 표시됨. 크래시 없음. 앱 기능 정상 동작"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-007
+    type: lifecycle
+    description: "로그아웃 또는 앱 삭제 시 persons_enrichment 테이블 전체 삭제됨"
+    trigger: "사용자 로그아웃 또는 앱 삭제"
+    precondition: "persons_enrichment에 레코드 존재"
+    expected: "persons_enrichment 테이블 전체 레코드 삭제됨. 다음 로그인 후 ENR-003 재실행 시 재구성됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ENR-008
+    type: ui_interaction
+    description: "설정 화면 Sources 목록에 '연락처' 의사 소스 행이 표시된다. CONTACTS 권한 부여 여부에 따라 connected / disconnected 상태 표시됨. 탭 시 ContactsPermissionScreen(미부여) 또는 연락처 enrichment 상태 상세(부여)로 이동"
+    screen: "SourcesListScreen"
+    interaction: "화면 진입"
+    precondition: "설정 → Sources 목록 표시됨. READ_CONTACTS 부여됨"
+    expected: "'연락처' 행: '연결됨', last_synced_at 표시됨, enriched_count N건 표시됨. 탭 시 연락처 enrichment 상세 화면 표시됨(last_synced_at, enriched_count, [권한 해제] 버튼)"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "persons_enrichment 데이터는 절대 Railway 또는 Supabase로 전송되지 않는다 — 온디바이스 전용 (PIPA 한국 개인정보보호법 준수)"
+  - "CONTACTS 권한 거부 시 앱 기능에 영향 없음 — persons_enrichment 없이 person_ref 원본값으로 fallback"
+  - "EnrichmentWorker는 ContactsContract.Data만 읽는다 — SMS, 통화 기록, 기타 민감 데이터 접근 없음"
+  - "persons_enrichment UPSERT 키는 person_ref (TEXT PRIMARY KEY) — 동일 person_ref의 연락처 정보는 항상 최신으로 덮어씀"
+  - "로그아웃 시 persons_enrichment 전체 삭제 — 타인 기기 공유 환경에서 개인 연락처 유출 방지"

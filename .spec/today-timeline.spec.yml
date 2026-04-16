@@ -1,40 +1,40 @@
 # Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
-module: dashboard
+module: today-timeline
 platform: android
 version: 1
 
 behaviors:
-  - id: DASH-001
+  - id: TDY-001
     type: ui_interaction
-    description: "DashboardScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다. commitment 카드에 counterparty 표시 시 person_ref 기반 표시명 사용"
-    screen: "DashboardScreen"
+    description: "TodayTimelineScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다. commitment 카드에 counterparty 표시 시 person_ref 기반 표시명 사용"
+    screen: "TodayTimelineScreen"
     interaction: "화면 진입"
     precondition: "인증 완료, Room에 오늘 CalendarEvent 2건 + due_date=오늘 Commitment 1건(person_ref='lee@corp.com') 존재"
     expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 + 'lee@corp.com' 표시됨"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-002
+  - id: TDY-002
     type: ui_interaction
     description: "오늘 항목이 없을 때 빈 상태 메시지를 표시한다"
-    screen: "DashboardScreen"
+    screen: "TodayTimelineScreen"
     interaction: "화면 진입"
     precondition: "인증 완료, Room에 오늘 CalendarEvent 0건 + due_date=오늘 Commitment 0건"
     expected: "'오늘 예정된 항목이 없습니다' 빈 상태 메시지 표시됨. 크래시 없음"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-003
+  - id: TDY-003
     type: ui_interaction
     description: "SourceStatusStrip은 읽기 전용 진단 표시다. 6개 칩(voice/gmail/outlook_mail/imap/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
-    screen: "DashboardScreen"
+    screen: "TodayTimelineScreen"
     interaction: "화면 진입"
     precondition: "Gmail 어댑터 synced 상태, Outlook 어댑터 error 상태, voice/imap/google_calendar/outlook_calendar idle"
     expected: "Gmail 칩: 초록 체크 + 마지막 sync 시각 표시됨. Outlook 칩: 빨간 점 표시됨. 나머지 4개 칩: 회색 idle. 어떤 칩도 탭 시 네비게이션 없음"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-004
+  - id: TDY-004
     type: api
     description: "Railway GET /v1/commitments에서 오늘 due인 항목을 조회한다"
     endpoint: "GET /v1/commitments"
@@ -43,7 +43,7 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-005
+  - id: TDY-005
     type: api
     description: "Railway GET /v1/calendar_events에서 오늘 이벤트를 조회한다"
     endpoint: "GET /v1/calendar_events"
@@ -52,58 +52,59 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-006
+  - id: TDY-006
     type: gesture
     description: "타임라인을 아래로 당겨 새로고침하면 Room 데이터가 갱신된다"
     gesture: "pull-to-refresh"
-    screen: "DashboardScreen"
-    precondition: "DashboardScreen 표시됨"
+    screen: "TodayTimelineScreen"
+    precondition: "TodayTimelineScreen 표시됨"
     expected: "Room에서 CalendarEvent + Commitment 재조회됨. 리스트 갱신됨"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-007
+  - id: TDY-007
     type: ui_interaction
-    description: "사이드탭(햄버거) 메뉴를 열면 원문보기와 설정 항목이 표시된다"
-    screen: "DashboardScreen"
-    interaction: "햄버거 버튼 탭"
-    precondition: "DashboardScreen 표시됨"
-    expected: "사이드 드로어 열림. '원문보기', '설정' 메뉴 항목 표시됨"
+    description: "TodayTimelineScreen 우상단 설정 아이콘 탭 시 SettingsScreen으로 이동한다. 사이드 드로어 없음"
+    screen: "TodayTimelineScreen"
+    interaction: "우상단 설정 아이콘 탭"
+    precondition: "TodayTimelineScreen 표시됨"
+    expected: "SettingsScreen으로 네비게이션됨. 사이드 드로어 미표시"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-008
+  - id: TDY-008
     type: ui_interaction
     description: "OverallSyncIndicator가 6개 어댑터 상태를 집계하여 4가지 상태 중 하나를 표시한다: idle(전체 idle) / 'syncing N/6'(1개 이상 syncing) / 'synced HH:mm'(전체 synced, 오류 없음, min(last_sync_at) 표시) / '일부 소스 실패 — 설정에서 확인'(1개 이상 error, 경고색)"
-    screen: "DashboardScreen"
+    screen: "TodayTimelineScreen"
     interaction: "화면 진입"
     precondition: "6개 어댑터 중 gmail=synced(10:30), voice=syncing, 나머지 idle"
     expected: "OverallSyncIndicator가 'syncing 1/6' 상태로 표시됨. voice 어댑터 완료 후 'synced 10:30'으로 변경됨"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-009
+  - id: TDY-009
     type: gesture
-    description: "Dashboard pull-to-refresh가 ING-011 병렬 6소스 catch-up + SYNC-006 즉시 업로드를 트리거한다. 동기화 중에도 TodayTimeline은 Room 캐시로 즉시 렌더링된다 — 블로킹 없음"
+    description: "TodayTimeline pull-to-refresh가 ING-011 병렬 6소스 catch-up + SYNC-006 즉시 업로드를 트리거한다. 동기화 중에도 TodayTimeline은 Room 캐시로 즉시 렌더링된다 — 블로킹 없음"
     gesture: "pull-to-refresh"
-    screen: "DashboardScreen"
-    precondition: "DashboardScreen 표시됨, Room에 CalendarEvent 2건 캐시됨"
+    screen: "TodayTimelineScreen"
+    precondition: "TodayTimelineScreen 표시됨, Room에 CalendarEvent 2건 캐시됨"
     expected: "pull-to-refresh 즉시 TodayTimeline이 Room 캐시로 렌더링됨. 동시에 ING-011 병렬 어댑터 실행 시작됨. OverallSyncIndicator가 'syncing N/6'으로 전환됨. 어댑터 완료 후 Room 신규 데이터로 TodayTimeline 갱신됨"
     source: phase2-acceptance
     tests: []
 
-  - id: DASH-010
+  - id: TDY-010
     type: ui_interaction
     description: "최초 온보딩 완료 직후 cold sync 상태 전용 화면 — Room에 raw_ingestion_events + commitments + calendar_events가 모두 0건일 때만 표시된다. 비블로킹 전체화면 로더 '초기 데이터를 가져오는 중 (N/6 완료)' + 소스별 진행 목록 + [나중에 하기] 버튼. 이후 앱 재실행 시 절대 표시하지 않는다"
     screen: "ColdSyncScreen"
     interaction: "화면 진입 (온보딩 완료 직후 자동)"
     precondition: "DataStore onboarding_completed=false(아직 미완료), Room의 raw_ingestion_events + commitments + calendar_events 모두 0건"
-    expected: "ColdSyncScreen 표시됨. 6개 소스별 진행 항목(완료 체크 / 진행 중 스피너) 표시됨. [나중에 하기] 탭 시 빈 DashboardScreen으로 이동됨. cold sync 완료 또는 [나중에 하기] 후 DataStore onboarding_completed=true 저장됨"
+    expected: "ColdSyncScreen 표시됨. 6개 소스별 진행 항목(완료 체크 / 진행 중 스피너) 표시됨. [나중에 하기] 탭 시 빈 TodayTimelineScreen으로 이동됨. cold sync 완료 또는 [나중에 하기] 후 DataStore onboarding_completed=true 저장됨"
     source: phase2-acceptance
     tests: []
 
 invariants:
-  - "DashboardScreen은 Room(로컬) 데이터를 primary source로 사용한다"
+  - "TodayTimelineScreen은 Room(로컬) 데이터를 primary source로 사용한다"
   - "Supabase REST에 직접 쿼리하지 않는다 — 모든 서버 조회는 Railway API를 통한다"
   - "SourceStatusStrip 칩은 탭 인터랙션이 없다 — 읽기 전용 진단 표시"
-  - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 DashboardScreen"
+  - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 TodayTimelineScreen"
+  - "TodayTimelineScreen에는 사이드 드로어(HamburgerMenu)가 없다 — 설정 접근은 우상단 아이콘 탭"

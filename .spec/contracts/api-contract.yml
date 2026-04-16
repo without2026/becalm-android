@@ -52,6 +52,11 @@ endpoints:
           source_type: string         # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
           source_ref?: string
           person_ref?: string         # Canonicalized counterparty; null if unidentifiable
+          event_title?: string        # voice: MediaStore title / email: subject / calendar: title
+          event_snippet?: string      # email/voice: first ~200 chars of body/transcript
+          duration_seconds?: int      # voice only
+          location?: string           # calendar only
+          commitments_extracted_count?: int  # default 0; updated after LLM extraction
           timestamp: datetime
     response:
       200: { acknowledged: int, failed: "FailedEvent[]" }
@@ -70,10 +75,18 @@ endpoints:
       since?: string          # ISO datetime — commitments updated after this time
       person_ref?: string     # Filter by person
       direction?: string      # give | take
+      action_state?: string   # pending | reminded | followed_up | completed
     response:
-      200: { data: "Commitment[]", cursor: string, has_more: boolean }
+      200:
+        data: "Commitment[]"
+        # Commitment type includes: id, user_id, direction, counterparty_raw, person_ref,
+        # title, description, quote, source_event_title, source_event_occurred_at,
+        # due_date, action_state, source_type, source_ref, confidence,
+        # sync_status, created_at, updated_at
+        cursor: string
+        has_more: boolean
       401: { error: string, message: string }
-    spec_refs: [DASH-004]
+    spec_refs: [TDY-004, CMT-010]
 
   - method: GET
     path: /v1/commitments/{id}
@@ -82,7 +95,19 @@ endpoints:
       200: { data: Commitment }
       401: { error: string, message: string }
       404: { error: string, message: string }
-    spec_refs: [DASH-004]
+    spec_refs: [CMT-003]
+
+  - method: PATCH
+    path: /v1/commitments/{id}
+    auth: required
+    body:
+      action_state: string    # pending | reminded | followed_up | completed
+    response:
+      200: { data: Commitment }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+      422: { error: string, message: string }  # Invalid action_state value
+    spec_refs: [CMT-005, CMT-006, CMT-007]
 
   # ========== RAILWAY — CALENDAR EVENTS ==========
 
@@ -96,7 +121,7 @@ endpoints:
     response:
       200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
       401: { error: string, message: string }
-    spec_refs: [DASH-005]
+    spec_refs: [TDY-005]
 
   - method: POST
     path: /v1/calendar_events:sync
@@ -105,7 +130,7 @@ endpoints:
       200: { synced: int }
       401: { error: string, message: string }
       429: { error: string, message: string }
-    spec_refs: [DASH-005]
+    spec_refs: [TDY-005]
 
   # ========== RAILWAY — PERSONS (virtual grouping — no persons table in MVP) ==========
 

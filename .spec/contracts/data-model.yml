@@ -4,6 +4,7 @@ version: 1
 # Persistence: Room (local primary) + Supabase Postgres (mirror via Railway FastAPI).
 # Railway is the ONLY writer to Supabase — Android does NOT call Supabase REST directly for data R/W.
 # Transcript and EmailBody live in Room only — never uploaded to Railway or Supabase.
+# persons_enrichment lives in Room only — never uploaded to Railway or Supabase (PIPA).
 
 tables:
   # ---- Supabase tables (written by Railway; mirrored from Room via Railway batch API) ----
@@ -36,6 +37,27 @@ tables:
         nullable: true
         # Canonicalized counterparty identifier. Precedence: phone (E.164) > email (lowercase) > display_name (normalized).
         # NULL for events with no identifiable counterparty (e.g., self-dictated note). Groups under "Unassigned" in UI.
+      - name: event_title
+        type: text
+        nullable: true
+        # voice: MediaStore TITLE / email: subject / calendar: event title. Populated at ingestion time.
+      - name: event_snippet
+        type: text
+        nullable: true
+        # voice: first ~200 chars of transcript (populated after STT) / email: first 200 chars of body / calendar: null
+      - name: duration_seconds
+        type: int
+        nullable: true
+        # voice only: MediaStore DURATION / 1000. null for non-voice sources.
+      - name: location
+        type: text
+        nullable: true
+        # calendar only: event location. null for non-calendar sources.
+      - name: commitments_extracted_count
+        type: int
+        nullable: false
+        default: "0"
+        # Number of commitments extracted from this event by the LLM pipeline. Updated after extraction.
       - name: timestamp
         type: timestamptz
         nullable: false
@@ -91,14 +113,28 @@ tables:
       - name: description
         type: text
         nullable: true
+      - name: quote
+        type: text
+        nullable: false
+        # Verbatim text fragment from source event from which this commitment was extracted.
+        # Legally sensitive — treat as evidentiary record. Never summarized or modified by app.
+      - name: source_event_title
+        type: text
+        nullable: true
+        # Denormalized event_title of the source raw_ingestion_event. For display in CommitmentCard.
+      - name: source_event_occurred_at
+        type: timestamptz
+        nullable: false
+        # Timestamp of the source event (not extraction time). Required for attribution display.
       - name: due_date
         type: date
         nullable: true
-      - name: status
+      - name: action_state
         type: text
         nullable: false
         default: "'pending'"
-        # enum: pending | done | overdue (MVP: pending only)
+        # enum: pending | reminded | followed_up | completed
+        # Replaces status column. Tracks user's follow-through action, not system-derived state.
       - name: source_type
         type: text
         nullable: false
@@ -122,8 +158,9 @@ tables:
         nullable: false
         default: now()
     indexes:
-      - columns: [user_id, due_date, status]
+      - columns: [user_id, action_state, due_date]
         type: btree
+        # idx_commitments_user_action_due — supports CommitmentManagementScreen queries
       - columns: [user_id, sync_status]
         type: btree
       - columns: [user_id, person_ref, due_date]
@@ -171,6 +208,45 @@ tables:
         type: btree
     rls: true
 
+  # ---- Room-only table (never uploaded to Railway or Supabase) ----
+
+  - name: persons_enrichment
+    room_only: true
+    # PIPA invariant: 연락처 데이터는 온디바이스 전용. Railway/Supabase로 전송 절대 금지.
+    columns:
+      - name: person_ref
+        type: text
+        primary: true
+        nullable: false
+        # Matches person_ref in raw_ingestion_events / commitments. JOIN key is purely local.
+      - name: display_name
+        type: text
+        nullable: true
+        # ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME
+      - name: nickname
+        type: text
+        nullable: true
+        # ContactsContract.CommonDataKinds.Nickname.NAME
+      - name: company
+        type: text
+        nullable: true
+        # ContactsContract.CommonDataKinds.Organization.COMPANY
+      - name: title
+        type: text
+        nullable: true
+        # ContactsContract.CommonDataKinds.Organization.TITLE
+      - name: source_contact_id
+        type: text
+        nullable: true
+        # ContactsContract raw contact ID used for change detection in EnrichmentWorker
+      - name: last_synced_at
+        type: timestamptz
+        nullable: false
+        # Updated on every EnrichmentWorker run
+    indexes:
+      - columns: [person_ref]
+        type: btree
+
 relationships:
   - from: "raw_ingestion_events.user_id"
     to: "auth.users.id"
@@ -189,12 +265,17 @@ relationships:
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
-  - "Room 전용 엔티티 (Supabase 없음): Transcript, EmailBody — 개인정보(원본 텍스트) 보호 목적으로 로컬 only"
+  - "Room 전용 엔티티 (Supabase 없음): Transcript, EmailBody, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only"
   - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 mirror. sync_status·retry_count·last_attempt_at는 Room-side tracking 컬럼으로 Supabase에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
   - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
   - "person_ref 컬럼: MVP는 별도 persons 테이블 없이 raw_ingestion_events·commitments의 person_ref TEXT로 가상 그룹핑. 정규화 우선순위: 전화번호(E.164) > 이메일(소문자) > 표시이름(정규화). 동일 연락처가 채널별 다른 식별자를 가질 경우 중복 그룹핑 위험 있음 — post-MVP에서 persons 테이블 + 수동 병합 UI로 해결"
+  - "commitments.status 컬럼 → action_state 컬럼으로 대체: enum이 pending|done|overdue에서 pending|reminded|followed_up|completed로 변경. Room 마이그레이션: ALTER TABLE commitments RENAME COLUMN status TO action_state; UPDATE commitments SET action_state='pending' WHERE action_state='done' OR action_state='overdue'"
+  - "commitments.quote 컬럼: LLM이 추출한 원문 발화/텍스트 단편. 법적 증거 기록 성격 — 앱이 절대 요약·편집하지 않음. Railway로 업로드되므로 Supabase RLS 적용 필수"
+  - "commitments.source_event_occurred_at: 추출 시각이 아닌 원본 이벤트 발생 시각. Railway payload에 포함됨"
+  - "persons_enrichment: CONTACTS 권한 부여 시 EnrichmentWorker가 ContactsContract.Data에서 읽어 채움. person_ref PRIMARY KEY — 동일 person_ref의 최신 연락처 정보로 UPSERT. 로그아웃 시 전체 삭제"
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
   - "리텐션 정책: Room 데이터 보관 기간 미정 (spec 단계 이월 항목)"
   - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
   - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. MS Graph deltaToken은 staleness 후 HTTP 410 반환. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 최근 30일 범위로 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."
+  - "RISK — CONTACTS 권한 부여 범위: EnrichmentWorker는 ContactsContract.CommonDataKinds.StructuredName·Nickname·Organization만 읽음. SMS·통화기록·사진 등 접근 없음. 앱 스토어 심사 시 READ_CONTACTS 사용 목적 명시 필요 (개인화된 표시명 — 서버 전송 없음)"

@@ -17,7 +17,7 @@ behaviors:
     description: "ContentObserver가 Samsung Voice Recorder 신규 녹음 파일 저장을 감지하면 Room raw_ingestion_events에 pending 레코드를 INSERT한다. ContentObserver는 앱 프로세스가 살아있는 동안만 작동한다 — 프로세스 종료 중 발생한 이벤트는 ING-011 foreground catch-up이 MediaStore timestamp cursor로 보완한다"
     trigger: "Samsung Voice Recorder가 새 .m4a 파일을 SAF-granted URI에 저장, 앱 프로세스가 FOREGROUND 또는 BACKGROUND에서 살아있음"
     precondition: "앱 프로세스가 FOREGROUND 또는 BACKGROUND 상태, SAF 권한 보유, Room DB 초기화 완료, ContentObserver 등록됨"
-    expected: "Room raw_ingestion_events에 {source_type:'voice', sync_status:'pending', retry_count:0, person_ref:null} 레코드 1건 INSERT됨"
+    expected: "Room raw_ingestion_events에 {source_type:'voice', sync_status:'pending', retry_count:0, person_ref:null, event_title: MediaStore TITLE, duration_seconds: MediaStore DURATION/1000, commitments_extracted_count:0} 레코드 1건 INSERT됨. event_snippet은 STT 파이프라인 완료 후 갱신됨"
     source: phase2-acceptance
     tests: []
 
@@ -62,7 +62,7 @@ behaviors:
     description: "[주기적 보조 경로] Gmail OAuth WorkManager periodic sync가 신규 이메일을 로컬 파싱하여 Room EmailBody + RawIngestionEvent로 저장한다. Gmail 자격증명은 Android Keystore에 보관되며 Railway로 전송되지 않는다"
     trigger: "WorkManager GmailSyncWorker 실행 (15분 주기)"
     precondition: "Gmail OAuth 토큰 유효(Keystore 저장), Room DB 초기화, 마지막 sync 이후 신규 메시지 1건 존재"
-    expected: "Room raw_ingestion_events 1건(source_type='gmail', person_ref=발신자이메일) + EmailBody 1건 INSERT됨"
+    expected: "Room raw_ingestion_events 1건(source_type='gmail', person_ref=발신자이메일, event_title=이메일제목, event_snippet=본문앞200자) + EmailBody 1건 INSERT됨"
     source: phase2-acceptance
     tests: []
 
@@ -71,7 +71,7 @@ behaviors:
     description: "[주기적 보조 경로] Outlook Mail Microsoft Graph WorkManager periodic sync가 신규 이메일을 로컬 파싱하여 Room에 저장한다. Outlook OAuth 토큰은 Keystore에 보관되며 Railway로 전송되지 않는다"
     trigger: "WorkManager OutlookSyncWorker 실행 (15분 주기)"
     precondition: "Microsoft Graph OAuth 토큰 유효(Keystore 저장), 신규 메시지 1건 존재"
-    expected: "Room raw_ingestion_events 1건(source_type='outlook_mail', person_ref=발신자이메일) + EmailBody 1건 INSERT됨"
+    expected: "Room raw_ingestion_events 1건(source_type='outlook_mail', person_ref=발신자이메일, event_title=이메일제목, event_snippet=본문앞200자) + EmailBody 1건 INSERT됨"
     source: phase2-acceptance
     tests: []
 
@@ -80,7 +80,7 @@ behaviors:
     description: "[주기적 보조 경로] 네이버 IMAP sync가 신규 이메일을 로컬 파싱하여 Room에 저장한다. IMAP 앱 비밀번호는 Android Keystore에 보관되며 Railway로 전송되지 않는다"
     trigger: "WorkManager NaverImapSyncWorker 실행"
     precondition: "Keystore에 네이버 IMAP credential 저장됨, IMAP 연결 성공, 신규 메시지 1건"
-    expected: "Room raw_ingestion_events 1건(source_type='naver_imap', person_ref=발신자이메일) + EmailBody 1건 INSERT됨"
+    expected: "Room raw_ingestion_events 1건(source_type='naver_imap', person_ref=발신자이메일, event_title=이메일제목, event_snippet=본문앞200자) + EmailBody 1건 INSERT됨"
     source: phase2-acceptance
     tests: []
 
@@ -89,7 +89,7 @@ behaviors:
     description: "[주기적 보조 경로] Google Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다"
     trigger: "WorkManager CalendarSyncWorker 실행 (1시간 주기)"
     precondition: "Google Calendar OAuth 토큰 유효(Keystore 저장), 오늘 캘린더 이벤트 1건 존재"
-    expected: "Room calendar_events 1건(source_type='google_calendar') INSERT 또는 UPSERT됨"
+    expected: "Room calendar_events 1건(source_type='google_calendar') INSERT 또는 UPSERT됨. 해당 raw_ingestion_events에 event_title=캘린더 제목, location=장소(있을 경우) 저장됨"
     source: phase2-acceptance
     tests: []
 
@@ -98,7 +98,7 @@ behaviors:
     description: "[주기적 보조 경로] Outlook Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다"
     trigger: "WorkManager OutlookCalendarSyncWorker 실행"
     precondition: "Microsoft Graph Calendar 토큰 유효(Keystore 저장), 오늘 이벤트 1건 존재"
-    expected: "Room calendar_events 1건(source_type='outlook_calendar') INSERT 또는 UPSERT됨"
+    expected: "Room calendar_events 1건(source_type='outlook_calendar') INSERT 또는 UPSERT됨. 해당 raw_ingestion_events에 event_title=캘린더 제목, location=장소(있을 경우) 저장됨"
     source: phase2-acceptance
     tests: []
 
