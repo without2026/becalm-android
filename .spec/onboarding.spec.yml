@@ -1,3 +1,4 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 module: onboarding
 platform: android
 version: 1
@@ -44,11 +45,11 @@ behaviors:
 
   - id: ONB-005
     type: ui_interaction
-    description: "배터리 최적화 예외 요청 화면에서 거부 시 경고 메시지를 표시하고 다음 단계로 진행한다"
+    description: "배터리 최적화 예외 요청은 2단계 시퀀스다. 1단계: 표준 Android REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 시스템 다이얼로그. 2단계(삼성 기기 전용, Build.MANUFACTURER=='samsung'): '삼성 기기에서 백그라운드 동기화를 안정적으로 사용하려면 설정 → 배터리 → 백그라운드 사용 제한 → 잠자는 앱에서 BeCalm을 제거해주세요' 가이드 화면 + [설정 열기] 버튼(Settings.ACTION_APPLICATION_DETAILS_SETTINGS 실행) + [건너뛰기] 버튼. 거부/건너뛰기 시: '백그라운드 수집이 불안정할 수 있습니다' 경고 Snackbar 표시 후 다음 단계 진행"
     screen: "BatteryOptimizationScreen"
-    interaction: "[나중에] 또는 시스템 다이얼로그 거부"
-    precondition: "온보딩 9단계 (BatteryOptimizationScreen)"
-    expected: "'백그라운드 수집이 불안정할 수 있습니다' 경고 Snackbar 표시됨. DashboardScreen으로 이동됨"
+    interaction: "1단계 시스템 다이얼로그 완료 후 자동 진행"
+    precondition: "온보딩 9단계(BatteryOptimizationScreen). Build.MANUFACTURER == 'samsung'"
+    expected: "1단계: 시스템 다이얼로그 표시됨. 1단계 완료(승인/거부) → 2단계 삼성 가이드 화면 표시됨([설정 열기] + [건너뛰기]). [건너뛰기] 탭 시 경고 Snackbar + 다음 단계 진행. 비삼성 기기: 1단계만 실행 후 다음 단계 진행"
     source: phase2-acceptance
     tests: []
 
@@ -71,6 +72,16 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: ONB-008
+    type: lifecycle
+    description: "온보딩 완료가 DASH-010 cold sync 흐름과 연동된다. DataStore onboarding_completed=true는 cold sync 완료 또는 사용자 [나중에 하기] 후에 기록된다. cold sync 진행 중 앱 재시작 시 ColdSyncScreen이 다시 표시된다"
+    trigger: "온보딩 마지막 단계(BatteryOptimizationScreen) 완료 → ColdSyncScreen 표시됨"
+    precondition: "DataStore onboarding_completed=false, Room 전체 0건"
+    expected: "ColdSyncScreen으로 이동됨. cold sync 완료 또는 [나중에 하기] 탭 시에만 DataStore onboarding_completed=true 저장됨. cold sync 중 앱 강제 종료 후 재실행 시 onboarding_completed=false이므로 ColdSyncScreen 재표시됨"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "이용약관 미동의 시 절대 앱 기능에 접근할 수 없다"
   - "온보딩은 순차 진행이며 건너뛴 OAuth 소스는 설정 화면에서 재연결 가능하다"
+  - "DataStore onboarding_completed=true는 ColdSyncScreen 완료 또는 [나중에 하기] 후에 기록된다 — 온보딩 step 완료 시점이 아님"

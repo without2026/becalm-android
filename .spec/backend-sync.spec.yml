@@ -50,7 +50,17 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: SYNC-006
+    type: lifecycle
+    description: "앱 foreground 진입(ING-011 완료 직후) 시 UploadWorker를 enqueueUniqueWork('sync-all-upload', REPLACE, OneTimeWorkRequest)로 즉시 트리거한다. 다음 주기적 WorkManager 인터벌을 기다리지 않는다"
+    trigger: "ING-011 병렬 어댑터 실행 완료 후 (ON_START 또는 pull-to-refresh 경로)"
+    precondition: "Room에 sync_status='pending' 레코드 존재(raw_ingestion_events, commitments 포함), Supabase JWT 유효, 네트워크 연결됨"
+    expected: "enqueueUniqueWork('sync-all-upload', REPLACE) 호출됨. 이전에 동일 태그로 대기 중인 워커가 있으면 교체됨. 모든 pending 레코드 즉시 Railway batch 업로드 시작됨"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "raw_ingestion_events 도달률 100% — Railway ack(sync_status='synced') 확인 전까지 Room 레코드 유지"
   - "Railway 업로드 대상: raw_ingestion_events batch, commitments. transcripts·email_bodies는 절대 업로드 안 됨"
   - "모든 Railway 호출 실패는 Room sync_status·retry_count·last_attempt_at에 기록된다 — 무음 실패 금지"
+  - "foreground 진입 시 즉시 업로드(SYNC-006)는 주기적 WorkManager를 대체하지 않는다 — 양쪽 모두 작동한다"

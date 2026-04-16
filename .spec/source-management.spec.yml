@@ -1,0 +1,63 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+# Source management = per-source administration and error recovery path.
+# The PRIMARY sync trigger is ING-011 (foreground catch-up) and DASH-009 (pull-to-refresh).
+# Per-source manual trigger (SMG-005) is intentionally only accessible inside source detail — not on dashboard.
+module: source-management
+platform: android
+version: 1
+
+behaviors:
+  - id: SMG-001
+    type: ui_interaction
+    description: "Settings → Sources 목록 화면에서 6개 소스의 현재 상태(connected / disconnected / error + 이유)를 표시한다"
+    screen: "SourcesListScreen"
+    interaction: "화면 진입"
+    precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, imap disconnected, google_calendar connected, outlook_calendar disconnected"
+    expected: "6개 소스 목록 표시됨. Gmail: '연결됨'. Outlook: '오류 — 토큰이 만료되었습니다'. voice: '연결됨'. imap: '미연결'. google_calendar: '연결됨'. outlook_calendar: '미연결'"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SMG-002
+    type: ui_interaction
+    description: "연결된 소스 탭 시 소스 상세 화면 표시 — last_sync_at, events_synced_count, last_error(있는 경우), [연결 해제] 버튼"
+    screen: "SourceDetailScreen"
+    interaction: "connected 소스 카드 탭"
+    precondition: "SourcesListScreen에서 Gmail(connected) 카드 탭"
+    expected: "SourceDetailScreen 표시됨. last_sync_at: 'HH:mm' 형식. events_synced_count: N건. last_error: 없음(오류 없을 시 미표시). [연결 해제] 버튼 표시됨. [지금 동기화] 버튼 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SMG-003
+    type: ui_interaction
+    description: "미연결 또는 오류 상태 소스 탭 시 해당 소스의 재연결 플로우로 이동한다 — OAuth 소스는 OAuth 재인증, IMAP 소스는 앱 비밀번호 재입력, voice는 SAF 폴더 재선택"
+    screen: "SourceDetailScreen"
+    interaction: "disconnected 또는 error 소스 카드 탭"
+    precondition: "SourcesListScreen에서 Outlook Mail(error) 카드 탭"
+    expected: "SourceDetailScreen 표시됨. [다시 연결] 버튼 표시됨. [다시 연결] 탭 시 Microsoft OAuth 재인증 플로우 실행됨. 재인증 성공 시 DataStore Outlook 토큰 업데이트됨. SourceDetailScreen 상태가 connected로 갱신됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SMG-004
+    type: ui_interaction
+    description: "소스 연결 해제 시 해당 소스의 DataStore cursor 초기화, Keystore credentials 삭제, 기존 Room 데이터는 유지, 칩 상태가 idle로 변경된다"
+    screen: "SourceDetailScreen"
+    interaction: "[연결 해제] 버튼 탭"
+    precondition: "SourceDetailScreen에서 Gmail connected 상태, [연결 해제] 탭 + 확인 다이얼로그 [확인] 탭"
+    expected: "DataStore gmail last_cursor 초기화됨(null). Keystore Gmail OAuth 토큰 삭제됨. Room의 기존 gmail raw_ingestion_events + EmailBody 유지됨(삭제 없음). SourceStatusStrip Gmail 칩이 idle(회색)으로 변경됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SMG-005
+    type: ui_interaction
+    description: "소스 상세 화면의 [지금 동기화] 버튼이 해당 소스 어댑터만 선택적으로 실행한다 — WorkManager enqueueUniqueWork('sync-<source>', REPLACE). 이것이 앱에서 유일한 소스별 수동 트리거다"
+    screen: "SourceDetailScreen"
+    interaction: "[지금 동기화] 버튼 탭"
+    precondition: "SourceDetailScreen에서 Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
+    expected: "WorkManager enqueueUniqueWork('sync-gmail', REPLACE) 호출됨. Gmail 어댑터만 실행됨(다른 소스 영향 없음). SourceDetailScreen의 last_sync_at 갱신됨. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, Transcript)는 삭제하지 않는다"
+  - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"
+  - "[지금 동기화]는 소스 상세 화면에서만 접근 가능하다 — 대시보드에서 소스별 개별 동기화 불가"

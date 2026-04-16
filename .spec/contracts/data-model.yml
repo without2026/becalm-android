@@ -196,3 +196,5 @@ migration_notes:
   - "person_ref 컬럼: MVP는 별도 persons 테이블 없이 raw_ingestion_events·commitments의 person_ref TEXT로 가상 그룹핑. 정규화 우선순위: 전화번호(E.164) > 이메일(소문자) > 표시이름(정규화). 동일 연락처가 채널별 다른 식별자를 가질 경우 중복 그룹핑 위험 있음 — post-MVP에서 persons 테이블 + 수동 병합 UI로 해결"
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
   - "리텐션 정책: Room 데이터 보관 기간 미정 (spec 단계 이월 항목)"
+  - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
+  - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. MS Graph deltaToken은 staleness 후 HTTP 410 반환. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 최근 30일 범위로 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."
