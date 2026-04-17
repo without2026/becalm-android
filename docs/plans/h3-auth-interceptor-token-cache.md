@@ -334,20 +334,15 @@ the old token into `refresh(previousAccessToken)`.
 
 ---
 
-## 7. Open questions for CTO
+## 7. CTO decisions (2026-04-17)
 
-1. **Rollout gate.** This change affects 100% of authenticated traffic. Recommendation by
-   user-base size:
-   - < 1,000 MAU: Play Store staged rollout (5% → 20% → 100% over 3 days). No runtime gate.
-   - 1,000 – 10,000 MAU: Firebase Remote Config `auth_token_cache_enabled` flag, default
-     `false`, flip ON gradually. Requires Remote Config SDK — **is it already wired in this
-     project?** Need to confirm.
-   - \> 10,000 MAU: Remote Config mandatory.
-2. **Metrics.** Emit `auth.token.cache_hit` / `cache_miss` / `refresh_coalesced` counters
-   via whatever telemetry pipeline exists (Firebase Analytics / custom Railway endpoint)?
-   Retain for 2 weeks post-merge to validate cache hit-rate assumptions.
-3. **`refresh()` signature change.** Adding `previousAccessToken` parameter — OK, or prefer
-   alternative §3.5(i) timestamp approach?
+1. **`refresh()` signature change** — **APPROVED.**
+   `AuthTokenProvider.refresh()` → `AuthTokenProvider.refresh(previousAccessToken: String): String?`.
+   `AuthInterceptor.kt:79` passes the token it attached at L59.
+2. **Rollout gate** — **DEFERRED.** Revisit at merge time. Default if not revisited:
+   direct merge to `feat/becalm-mvp`, no runtime gate.
+3. **Cache hit/miss telemetry** — **DEFERRED.** Not blocking implementation. Add post-merge
+   only if diagnostic data is needed.
 
 ---
 
