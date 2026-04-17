@@ -1,5 +1,6 @@
 package com.becalm.android.core.di
 
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.remote.supabase.AuthResult
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
@@ -121,7 +122,7 @@ class DefaultAuthTokenProviderTest {
     fun `refresh returns null when Supabase refresh fails, cache preserved`() = runTest {
         coEvery { sessionStore.load() } returns session("at_v1", refreshToken = "rt_v1")
         coEvery { authClient.refresh("rt_v1") } returns BecalmResult.Failure(
-            com.becalm.android.core.result.BecalmError.Network(code = -1, message = "bad net"),
+            BecalmError.Network(code = -1, message = "bad net"),
         )
 
         val provider = DefaultAuthTokenProvider(authClient, sessionStore)
