@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App name -->
+    <string name="app_name">BeCalm</string>
+
+    <!-- Common -->
+    <string name="action_skip">Skip</string>
+    <string name="action_back">Back</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_next">Next</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_grant">Grant Permission</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_sign_out">Sign Out</string>
+    <string name="action_wipe_data">Wipe Local Data</string>
+    <string name="action_save">Save</string>
+    <string name="action_reconnect">Reconnect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_sync_now">Sync Now</string>
+    <string name="action_mark_done">Mark done</string>
+    <string name="action_reopen">Reopen</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="label_settings">Settings</string>
+    <string name="label_loading">Loading…</string>
+
+    <!-- Error / empty states -->
+    <string name="error_generic_title">Something went wrong</string>
+    <string name="error_generic_message">An unexpected error occurred. Please try again.</string>
+    <string name="empty_list_title">Nothing here yet</string>
+
+    <!-- Splash -->
+    <string name="splash_title">BeCalm</string>
+    <string name="splash_tagline">Your commitment companion</string>
+
+    <!-- Terms -->
+    <string name="terms_title">Terms &amp; Privacy</string>
+    <string name="terms_subtitle">Please read and accept before continuing.</string>
+    <string name="terms_pipa_notice">BeCalm collects and processes personal information (contacts, calendar events, emails) on-device under your consent as required by the Personal Information Protection Act (PIPA). Your data is stored locally first and only shared with our servers with your explicit consent.</string>
+    <string name="terms_accept">I agree to the Terms and Privacy Policy</string>
+    <string name="terms_accept_checkbox">I have read and agree to the Terms</string>
+    <string name="terms_cta">Continue</string>
+    <string name="terms_decline_cta">Decline &amp; exit</string>
+
+    <!-- Login -->
+    <string name="login_title">Sign In</string>
+    <string name="login_email_label">Email</string>
+    <string name="login_email_placeholder">name@example.com</string>
+    <string name="login_password_label">Password</string>
+    <string name="login_password_placeholder">Your password</string>
+    <string name="login_cta">Sign In</string>
+    <string name="login_google_cta">Continue with Google</string>
+    <string name="login_error_empty_fields">Please enter your email and password.</string>
+
+    <!-- Onboarding: recording folder -->
+    <string name="onb_recording_folder_title">Recording Folder</string>
+    <string name="onb_recording_folder_headline">Allow access to recordings</string>
+    <string name="onb_recording_folder_body">BeCalm reads your voice recording files to extract commitments. Files are processed locally; only extracted commitment text is ever sent to our servers.</string>
+
+    <!-- Onboarding: contacts -->
+    <string name="onb_contacts_title">Contacts Access</string>
+    <string name="onb_contacts_headline">Connect your contacts</string>
+    <string name="onb_contacts_body">BeCalm reads your contact names to display people you interact with. Contact data never leaves your device. This permission can be revoked at any time.</string>
+    <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
+
+    <!-- Onboarding: Gmail OAuth -->
+    <string name="onb_gmail_title">Gmail</string>
+    <string name="onb_gmail_headline">Connect Gmail</string>
+    <string name="onb_gmail_body">BeCalm accesses your Gmail to detect commitments in email threads. We request read-only access. Only commitment-relevant metadata is synced — full email bodies are never uploaded.</string>
+
+    <!-- Onboarding: Outlook Mail OAuth -->
+    <string name="onb_outlook_mail_title">Outlook Mail</string>
+    <string name="onb_outlook_mail_headline">Connect Outlook Mail</string>
+    <string name="onb_outlook_mail_body">BeCalm accesses your Outlook inbox to detect commitments in email threads. We request read-only access. Full email bodies are never uploaded.</string>
+
+    <!-- Onboarding: IMAP -->
+    <string name="onb_imap_title">IMAP / App Password</string>
+    <string name="onb_imap_headline">Connect via IMAP</string>
+    <string name="onb_imap_body">Enter your IMAP server details to sync email commitments. Use an app-specific password, not your main account password. Your credentials will be stored encrypted on your device only (coming soon).</string>
+    <string name="onb_imap_host_label">IMAP Server</string>
+    <string name="onb_imap_host_placeholder">imap.example.com</string>
+    <string name="onb_imap_email_label">Email address</string>
+    <string name="onb_imap_email_placeholder">name@example.com</string>
+    <string name="onb_imap_password_label">App password</string>
+    <string name="onb_imap_password_placeholder">App-specific password</string>
+    <string name="onb_imap_cta">Save</string>
+
+    <!-- Onboarding: Google Calendar -->
+    <string name="onb_gcal_title">Google Calendar</string>
+    <string name="onb_gcal_headline">Connect Google Calendar</string>
+    <string name="onb_gcal_body">BeCalm reads your Google Calendar to surface upcoming meetings and related commitments. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
+
+    <!-- Onboarding: Outlook Calendar -->
+    <string name="onb_outlook_cal_title">Outlook Calendar</string>
+    <string name="onb_outlook_cal_headline">Connect Outlook Calendar</string>
+    <string name="onb_outlook_cal_body">BeCalm reads your Outlook Calendar to surface upcoming meetings. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
+
+    <!-- Onboarding: Battery optimization -->
+    <string name="onb_battery_title">Background Activity</string>
+    <string name="onb_battery_headline">Keep BeCalm active</string>
+    <string name="onb_battery_body">To capture commitments reliably, BeCalm needs to run in the background. Please disable battery optimization for BeCalm. On Samsung devices, also remove it from the Sleeping Apps list.</string>
+    <string name="onb_battery_cta">Disable Battery Optimization</string>
+    <string name="onb_battery_samsung_guide">Samsung: Settings → Device Care → Battery → Background usage limits → Sleeping apps → remove BeCalm</string>
+
+    <!-- Onboarding: Cold sync -->
+    <string name="onb_cold_sync_title">Initial Sync</string>
+    <string name="onb_cold_sync_headline">Syncing your data…</string>
+    <string name="onb_cold_sync_body">BeCalm is importing your existing data for the first time. This may take a few minutes.</string>
+    <string name="onb_cold_sync_done">All done! Tap to continue.</string>
+    <string name="onb_cold_sync_cta">Go to Today</string>
+
+    <!-- Today Timeline -->
+    <string name="today_title">Today</string>
+    <string name="today_empty_title">Clear day ahead</string>
+    <string name="today_empty_message">No commitments or meetings scheduled for today.</string>
+    <string name="today_error_not_authenticated">Not signed in. Please sign in to view your timeline.</string>
+    <string name="today_section_commitments">Commitments</string>
+    <string name="today_section_meetings">Meetings</string>
+    <string name="today_section_events">Events</string>
+    <string name="today_syncing">Syncing…</string>
+
+    <!-- Persons -->
+    <string name="persons_title">People</string>
+    <string name="persons_search_placeholder">Search people…</string>
+    <string name="persons_empty_title">No people yet</string>
+    <string name="persons_empty_message">People will appear here once BeCalm detects interactions.</string>
+    <string name="persons_unidentified">Unidentified contact</string>
+    <string name="persons_unassigned_title">Unassigned Events</string>
+    <string name="persons_unassigned_empty_title">No unassigned events</string>
+    <string name="persons_unassigned_empty_message">All events have been matched to a person.</string>
+    <string name="persons_last_interaction">Last interaction</string>
+    <string name="persons_interactions_count">%d interactions</string>
+
+    <!-- Person detail -->
+    <string name="person_detail_title">Person</string>
+    <string name="person_detail_commitments_section">Commitments</string>
+    <string name="person_detail_history_section">Interaction History</string>
+    <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
+    <string name="person_detail_source_label">Source: %s</string>
+
+    <!-- Raw event detail -->
+    <string name="raw_event_detail_title">Event Detail</string>
+    <string name="raw_event_detail_source">Source</string>
+    <string name="raw_event_detail_timestamp">Recorded</string>
+    <string name="raw_event_detail_not_found">Event not found.</string>
+
+    <!-- Commitments -->
+    <string name="commitments_title">Commitments</string>
+    <string name="commitments_filter_all">All</string>
+    <string name="commitments_filter_give">I give</string>
+    <string name="commitments_filter_take">I take</string>
+    <string name="commitments_filter_due_today">Due today</string>
+    <string name="commitments_filter_overdue">Overdue</string>
+    <string name="commitments_filter_done">Done</string>
+    <string name="commitments_empty_title">No commitments</string>
+    <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
+    <string name="commitments_direction_give">Give</string>
+    <string name="commitments_direction_take">Take</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_account_section">Account</string>
+    <string name="settings_preferences_section">Preferences</string>
+    <string name="settings_data_section">Data</string>
+    <string name="settings_language_label">Language</string>
+    <string name="settings_notifications_label">Notifications</string>
+    <string name="settings_sources_label">Data Sources</string>
+    <string name="settings_storage_label">Local storage</string>
+    <string name="settings_storage_unknown">Unknown</string>
+    <string name="settings_sign_out_confirm_title">Sign out?</string>
+    <string name="settings_sign_out_confirm_message">You will be signed out of BeCalm. Local data remains until you wipe it.</string>
+    <string name="settings_wipe_confirm_title">Wipe all data?</string>
+    <string name="settings_wipe_confirm_message">This will permanently delete all locally stored personal data and sign you out. This action cannot be undone.</string>
+    <string name="settings_lang_korean">Korean (한국어)</string>
+    <string name="settings_lang_english">English</string>
+    <string name="settings_lang_system">Follow device language</string>
+
+    <!-- Sources list -->
+    <string name="sources_title">Data Sources</string>
+    <string name="sources_empty_title">No sources connected</string>
+    <string name="sources_empty_message">Connect a data source to start capturing commitments.</string>
+    <string name="sources_status_ok">Synced</string>
+    <string name="sources_status_stale">Stale</string>
+    <string name="sources_status_error">Error</string>
+    <string name="sources_status_unknown">Not connected</string>
+    <string name="sources_last_sync_label">Last sync</string>
+    <string name="sources_never_synced">Never synced</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_today">Today</string>
+    <string name="nav_persons">People</string>
+    <string name="nav_commitments">Commitments</string>
+
+    <!-- Onboarding: PIPA 제3자 제공 + 국외 이전 동의 (ONB-PIPA) -->
+    <string name="onb_pipa_title">개인정보 제3자 제공 동의</string>
+    <string name="onb_pipa_headline">음성 자동 처리를 위한 정보 제공 동의</string>
+    <string name="onb_pipa_body">BeCalm은 음성 녹음 파일을 자동으로 분석하여 약속과 할 일을 추출합니다. 이를 위해 아래 내용에 따라 귀하의 녹음 파일을 Google LLC에 제공합니다. 동의를 거부하셔도 이메일·캘린더·수동 입력 기능은 정상 사용하실 수 있습니다.</string>
+    <!-- Bullet 1: 제공받는 자 -->
+    <string name="onb_pipa_bullet_1_label">제공받는 자</string>
+    <string name="onb_pipa_bullet_1_value">Google LLC</string>
+    <!-- Bullet 2: 제공 항목 -->
+    <string name="onb_pipa_bullet_2_label">제공 항목</string>
+    <string name="onb_pipa_bullet_2_value">녹음 파일 전체 오디오 바이트</string>
+    <!-- Bullet 3: 제공 목적 -->
+    <string name="onb_pipa_bullet_3_label">제공 목적</string>
+    <string name="onb_pipa_bullet_3_value">약속/할 일 자동 추출 (Gemini 2.5 Flash audio multimodal)</string>
+    <!-- Bullet 4: 데이터 처리 리전 -->
+    <string name="onb_pipa_bullet_4_label">데이터 처리 리전</string>
+    <string name="onb_pipa_bullet_4_value">asia-northeast3 (서울)</string>
+    <!-- Bullet 5: 보유 및 이용 기간 -->
+    <string name="onb_pipa_bullet_5_label">보유 및 이용 기간</string>
+    <string name="onb_pipa_bullet_5_value">요청 처리 후 즉시 삭제 (ZDR — Zero Data Retention)</string>
+    <!-- Bullet 6: 거부 권리 및 불이익 -->
+    <string name="onb_pipa_bullet_6_label">거부 권리 및 불이익</string>
+    <string name="onb_pipa_bullet_6_value">동의 거부 시 음성 자동 처리 기능만 비활성화되며, 나머지 앱 기능(이메일·캘린더 연동, 수동 입력)은 정상 사용 가능합니다. 설정에서 언제든지 변경하실 수 있습니다.</string>
+    <!-- Buttons -->
+    <string name="onb_pipa_button_agree">동의</string>
+    <string name="onb_pipa_button_decline">동의 안 함</string>
+
+    <!-- Settings: PIPA 제3자 제공 동의 toggle -->
+    <string name="settings_pipa_toggle_label">음성 자동 업로드 (PIPA 제3자 제공 동의)</string>
+    <string name="settings_pipa_enable_dialog_title">개인정보 제3자 제공 동의</string>
+    <string name="settings_pipa_disable_dialog_warning">향후 녹음 파일은 자동 업로드되지 않습니다. 이미 업로드된 데이터는 영향받지 않습니다.</string>
+
+    <!-- Source detail -->
+    <string name="source_detail_title">Source Detail</string>
+    <string name="source_detail_status_section">Status</string>
+    <string name="source_detail_recent_events_section">Recent Events</string>
+    <string name="source_detail_empty_events">No events recorded from this source yet.</string>
+    <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
+</resources>

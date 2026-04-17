@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    PIPA local-only invariant: all app data is excluded from cloud backup and
+    device-to-device transfer. Users own their data on-device.
+    targetSdk 31+ requires this file referenced from android:dataExtractionRules.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ── Permissions ──────────────────────────────────────────────────────── -->
+
+    <!-- Network (Supabase + Railway API) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        RECORD_AUDIO intentionally removed (R10-01).
+        On-device STT has been dropped from the voice pipeline; capture now relies on
+        Samsung Voice Recorder via SAF (user-picked file) and server-side transcription.
+        See .spec/voice-pipeline.spec.yml. If on-device recording is ever reintroduced,
+        restore this permission together with runtime request + PIPA notice.
+    -->
+
+    <!-- Contacts enrichment: PIPA notice shown on ENR-001 onboarding screen; graceful skip -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- Recording folder access (API 33+) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Recording folder access (API ≤ 32 legacy fallback) -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- WorkManager long-running data-sync (upload + ingestion workers) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Battery optimization exemption (ONB-005) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Alarm reminders (SP-37) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!--
+        API 33+ (TIRAMISU): POST_NOTIFICATIONS is a runtime permission.
+        The only runtime touch-point today lives in ReminderBroadcastReceiver, which
+        performs a checkSelfPermission guard and silently skips posting when denied
+        (see receiver/ReminderBroadcastReceiver.kt:37-48).
+        TODO(R10-02): there is currently NO UI site that actually *requests* this
+        permission (ActivityResultContracts.RequestPermission). Add a request during
+        onboarding or first reminder scheduling so users on API 33+ can opt in;
+        without it reminders will never surface on fresh installs.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".BecalmApplication"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Becalm"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true">
+
+        <!-- ── Main entry point ───────────────────────────────────────────── -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Becalm.Splash"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ── Receivers ──────────────────────────────────────────────────── -->
+
+        <!--
+            SP-37 reminder receiver.
+            exported=false: alarms are only fired by the system via PendingIntent; no
+            external app should be able to trigger this receiver directly.
+        -->
+        <receiver
+            android:name="com.becalm.android.receiver.ReminderBroadcastReceiver"
+            android:exported="false" />
+
+        <!-- ── WorkManager: disable auto-init; BecalmApplication provides HiltWorkerFactory ── -->
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+    </application>
+
+</manifest>

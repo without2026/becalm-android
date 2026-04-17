@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App name -->
+    <string name="app_name">비캄</string>
+
+    <!-- Common -->
+    <string name="action_skip">건너뛰기</string>
+    <string name="action_back">뒤로</string>
+    <string name="action_retry">다시 시도</string>
+    <string name="action_next">다음</string>
+    <string name="action_connect">연결</string>
+    <string name="action_grant">권한 허용</string>
+    <string name="action_continue">계속</string>
+    <string name="action_confirm">확인</string>
+    <string name="action_cancel">취소</string>
+    <string name="action_sign_out">로그아웃</string>
+    <string name="action_wipe_data">데이터 삭제</string>
+    <string name="action_save">저장</string>
+    <string name="action_reconnect">다시 연결</string>
+    <string name="action_disconnect">연결 해제</string>
+    <string name="action_sync_now">지금 동기화</string>
+    <string name="action_mark_done">완료 처리</string>
+    <string name="action_reopen">다시 열기</string>
+    <string name="action_dismiss">닫기</string>
+    <string name="label_settings">설정</string>
+    <string name="label_loading">불러오는 중…</string>
+
+    <!-- Error / empty states -->
+    <string name="error_generic_title">오류가 발생했습니다</string>
+    <string name="error_generic_message">예기치 않은 오류가 발생했습니다. 다시 시도해 주세요.</string>
+    <string name="empty_list_title">아직 항목이 없습니다</string>
+
+    <!-- Splash -->
+    <string name="splash_title">비캄</string>
+    <string name="splash_tagline">약속을 관리하는 AI 비서</string>
+
+    <!-- Terms -->
+    <string name="terms_title">이용약관 및 개인정보처리방침</string>
+    <string name="terms_subtitle">계속하기 전에 아래 내용을 읽고 동의해 주세요.</string>
+    <string name="terms_pipa_notice">비캄은 개인정보 보호법(PIPA)에 따라 귀하의 동의 하에 연락처, 캘린더 일정, 이메일 등 개인정보를 기기 내에서 수집·처리합니다. 귀하의 데이터는 우선 기기에 로컬 저장되며, 귀하의 명시적 동의 항목만 서버로 전송됩니다.</string>
+    <string name="terms_accept">이용약관 및 개인정보처리방침에 동의합니다</string>
+    <string name="terms_accept_checkbox">약관을 읽고 동의합니다</string>
+    <string name="terms_cta">계속</string>
+    <string name="terms_decline_cta">동의 안 함 · 앱 종료</string>
+
+    <!-- Login -->
+    <string name="login_title">로그인</string>
+    <string name="login_email_label">이메일</string>
+    <string name="login_email_placeholder">name@example.com</string>
+    <string name="login_password_label">비밀번호</string>
+    <string name="login_password_placeholder">비밀번호를 입력하세요</string>
+    <string name="login_cta">로그인</string>
+    <string name="login_google_cta">Google로 계속하기</string>
+    <string name="login_error_empty_fields">이메일과 비밀번호를 입력해 주세요.</string>
+
+    <!-- Onboarding: recording folder -->
+    <string name="onb_recording_folder_title">녹음 폴더</string>
+    <string name="onb_recording_folder_headline">녹음 파일 접근 허용</string>
+    <string name="onb_recording_folder_body">비캄은 약속 추출을 위해 음성 녹음 파일을 읽습니다. 파일은 기기에서만 처리되며, 추출된 약속 텍스트만 서버로 전송됩니다.</string>
+
+    <!-- Onboarding: contacts -->
+    <string name="onb_contacts_title">연락처 접근</string>
+    <string name="onb_contacts_headline">연락처 연결</string>
+    <string name="onb_contacts_body">비캄은 상호작용 상대방의 이름 표시를 위해 연락처를 읽습니다. 연락처 데이터는 기기 밖으로 전송되지 않습니다. 언제든지 권한을 취소할 수 있습니다.</string>
+    <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
+
+    <!-- Onboarding: Gmail OAuth -->
+    <string name="onb_gmail_title">Gmail</string>
+    <string name="onb_gmail_headline">Gmail 연결</string>
+    <string name="onb_gmail_body">비캄은 이메일 스레드에서 약속을 감지하기 위해 Gmail에 접근합니다. 읽기 전용 권한을 요청합니다. 약속 관련 메타데이터만 동기화되며 이메일 본문은 업로드되지 않습니다.</string>
+
+    <!-- Onboarding: Outlook Mail OAuth -->
+    <string name="onb_outlook_mail_title">Outlook 메일</string>
+    <string name="onb_outlook_mail_headline">Outlook 메일 연결</string>
+    <string name="onb_outlook_mail_body">비캄은 이메일 스레드에서 약속을 감지하기 위해 Outlook 받은편지함에 접근합니다. 읽기 전용 권한을 요청합니다. 이메일 본문은 업로드되지 않습니다.</string>
+
+    <!-- Onboarding: IMAP -->
+    <string name="onb_imap_title">IMAP / 앱 비밀번호</string>
+    <string name="onb_imap_headline">IMAP으로 연결</string>
+    <string name="onb_imap_body">IMAP 서버 정보를 입력해 이메일 약속을 동기화하세요. 주 계정 비밀번호가 아닌 앱 전용 비밀번호를 사용하세요. 자격 증명은 기기에만 암호화 저장될 예정입니다 (출시 예정).</string>
+    <string name="onb_imap_host_label">IMAP 서버</string>
+    <string name="onb_imap_host_placeholder">imap.example.com</string>
+    <string name="onb_imap_email_label">이메일 주소</string>
+    <string name="onb_imap_email_placeholder">name@example.com</string>
+    <string name="onb_imap_password_label">앱 비밀번호</string>
+    <string name="onb_imap_password_placeholder">앱 전용 비밀번호</string>
+    <string name="onb_imap_cta">저장</string>
+
+    <!-- Onboarding: Google Calendar -->
+    <string name="onb_gcal_title">Google 캘린더</string>
+    <string name="onb_gcal_headline">Google 캘린더 연결</string>
+    <string name="onb_gcal_body">비캄은 예정 회의 및 관련 약속을 표시하기 위해 Google 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
+
+    <!-- Onboarding: Outlook Calendar -->
+    <string name="onb_outlook_cal_title">Outlook 캘린더</string>
+    <string name="onb_outlook_cal_headline">Outlook 캘린더 연결</string>
+    <string name="onb_outlook_cal_body">비캄은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
+
+    <!-- Onboarding: Battery optimization -->
+    <string name="onb_battery_title">백그라운드 실행</string>
+    <string name="onb_battery_headline">비캄 백그라운드 유지</string>
+    <string name="onb_battery_body">약속을 안정적으로 캡처하려면 비캄이 백그라운드에서 실행되어야 합니다. 비캄의 배터리 최적화를 비활성화해 주세요. 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
+    <string name="onb_battery_cta">배터리 최적화 비활성화</string>
+    <string name="onb_battery_samsung_guide">삼성: 설정 → 디바이스 케어 → 배터리 → 백그라운드 사용 제한 → 절전 앱 → 비캄 제거</string>
+
+    <!-- Onboarding: Cold sync -->
+    <string name="onb_cold_sync_title">초기 동기화</string>
+    <string name="onb_cold_sync_headline">데이터 동기화 중…</string>
+    <string name="onb_cold_sync_body">비캄이 기존 데이터를 처음으로 가져오고 있습니다. 몇 분 정도 걸릴 수 있습니다.</string>
+    <string name="onb_cold_sync_done">완료! 탭하여 계속하세요.</string>
+    <string name="onb_cold_sync_cta">오늘로 이동</string>
+
+    <!-- Today Timeline -->
+    <string name="today_title">오늘</string>
+    <string name="today_empty_title">오늘 일정 없음</string>
+    <string name="today_empty_message">오늘 예정된 약속이나 회의가 없습니다.</string>
+    <string name="today_error_not_authenticated">로그인이 필요합니다.</string>
+    <string name="today_section_commitments">약속</string>
+    <string name="today_section_meetings">회의</string>
+    <string name="today_section_events">이벤트</string>
+    <string name="today_syncing">동기화 중…</string>
+
+    <!-- Persons -->
+    <string name="persons_title">사람</string>
+    <string name="persons_search_placeholder">사람 검색…</string>
+    <string name="persons_empty_title">아직 사람이 없습니다</string>
+    <string name="persons_empty_message">상호작용이 감지되면 여기에 사람이 표시됩니다.</string>
+    <string name="persons_unidentified">미식별 연락처</string>
+    <string name="persons_unassigned_title">미할당 이벤트</string>
+    <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
+    <string name="persons_unassigned_empty_message">모든 이벤트가 특정 사람과 연결되었습니다.</string>
+    <string name="persons_last_interaction">마지막 상호작용</string>
+    <string name="persons_interactions_count">%d회 상호작용</string>
+
+    <!-- Person detail -->
+    <string name="person_detail_title">사람 상세</string>
+    <string name="person_detail_commitments_section">약속</string>
+    <string name="person_detail_history_section">상호작용 기록</string>
+    <string name="person_detail_empty_interactions">아직 기록된 상호작용이 없습니다.</string>
+    <string name="person_detail_source_label">출처: %s</string>
+
+    <!-- Raw event detail -->
+    <string name="raw_event_detail_title">이벤트 상세</string>
+    <string name="raw_event_detail_source">출처</string>
+    <string name="raw_event_detail_timestamp">기록 시각</string>
+    <string name="raw_event_detail_not_found">이벤트를 찾을 수 없습니다.</string>
+
+    <!-- Commitments -->
+    <string name="commitments_title">약속 관리</string>
+    <string name="commitments_filter_all">전체</string>
+    <string name="commitments_filter_give">내가 한</string>
+    <string name="commitments_filter_take">상대가 한</string>
+    <string name="commitments_filter_due_today">오늘 마감</string>
+    <string name="commitments_filter_overdue">기한 초과</string>
+    <string name="commitments_filter_done">완료</string>
+    <string name="commitments_empty_title">약속 없음</string>
+    <string name="commitments_empty_message">회의와 이메일에서 추출된 약속이 여기에 표시됩니다.</string>
+    <string name="commitments_direction_give">줄 것</string>
+    <string name="commitments_direction_take">받을 것</string>
+
+    <!-- Settings -->
+    <string name="settings_title">설정</string>
+    <string name="settings_account_section">계정</string>
+    <string name="settings_preferences_section">환경설정</string>
+    <string name="settings_data_section">데이터</string>
+    <string name="settings_language_label">언어</string>
+    <string name="settings_notifications_label">알림</string>
+    <string name="settings_sources_label">데이터 소스</string>
+    <string name="settings_storage_label">로컬 저장소</string>
+    <string name="settings_storage_unknown">알 수 없음</string>
+    <string name="settings_sign_out_confirm_title">로그아웃하시겠습니까?</string>
+    <string name="settings_sign_out_confirm_message">비캄에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
+    <string name="settings_wipe_confirm_title">모든 데이터를 삭제하시겠습니까?</string>
+    <string name="settings_wipe_confirm_message">로컬에 저장된 모든 개인정보가 영구적으로 삭제되고 로그아웃됩니다. 이 작업은 취소할 수 없습니다.</string>
+    <string name="settings_lang_korean">한국어</string>
+    <string name="settings_lang_english">English (영어)</string>
+    <string name="settings_lang_system">시스템 언어 따름</string>
+
+    <!-- Sources list -->
+    <string name="sources_title">데이터 소스</string>
+    <string name="sources_empty_title">연결된 소스 없음</string>
+    <string name="sources_empty_message">데이터 소스를 연결하면 약속 캡처가 시작됩니다.</string>
+    <string name="sources_status_ok">동기화됨</string>
+    <string name="sources_status_stale">오래됨</string>
+    <string name="sources_status_error">오류</string>
+    <string name="sources_status_unknown">연결 안 됨</string>
+    <string name="sources_last_sync_label">마지막 동기화</string>
+    <string name="sources_never_synced">동기화 없음</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_today">오늘</string>
+    <string name="nav_persons">사람</string>
+    <string name="nav_commitments">약속</string>
+
+    <!-- Source detail -->
+    <string name="source_detail_title">소스 상세</string>
+    <string name="source_detail_status_section">상태</string>
+    <string name="source_detail_recent_events_section">최근 이벤트</string>
+    <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
+    <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+</resources>

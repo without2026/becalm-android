@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    TODO(BECALM-ASSET-001): replace with final brand launcher icon (designer deliverable)
+    Placeholder: monochrome white circle centred in the safe-zone inset (72dp of 108dp canvas).
+    No text, no branding — neutral placeholder to keep the build green.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#EAEAEA"
+        android:pathData="M54,36 a18,18 0 1,0 0.001,0 Z" />
+</vector>

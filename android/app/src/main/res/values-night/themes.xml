@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Night alias — the app controls dark/light mode via BecalmTheme composable,
+        not via system DayNight switching. Both day and night use the same transparent
+        chrome; no override needed. This file exists to satisfy resource validation.
+    -->
+    <style name="Theme.Becalm" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <style name="Theme.Becalm.Splash" parent="Theme.Becalm">
+        <item name="android:windowBackground">#111111</item>
+        <item name="android:windowSplashScreenBackground">#111111</item>
+    </style>
+</resources>

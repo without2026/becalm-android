@@ -1,0 +1,110 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+module: onboarding
+platform: android
+version: 1
+
+behaviors:
+  - id: ONB-001
+    type: ui_interaction
+    description: "첫 실행 시 TermsScreen이 가장 먼저 표시되고 [동의] 탭 시 LoginScreen으로 이동한다"
+    screen: "TermsScreen"
+    interaction: "[동의] 버튼 탭"
+    precondition: "앱 신규 설치 후 첫 실행, DataStore onboarding_completed=false"
+    expected: "LoginScreen으로 네비게이션됨. DataStore terms_accepted=true 저장됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-PIPA
+    type: consent
+    description: "PIPA 제3자 제공 + 국외 이전 동의 화면 — 음성 파이프라인이 Google LLC Vertex AI(미국 법인, 데이터 처리 리전 asia-northeast3 서울)에 오디오를 전송한다는 사실을 명시 고지하고 [동의] / [동의 안 함] 두 버튼을 제공한다. 온보딩 12단계 중 3번째 단계 (로그인 직후, 녹음 폴더 설정 직전)"
+    screen: "PipaThirdPartyConsentScreen"
+    interaction: "[동의] 또는 [동의 안 함] 버튼 탭"
+    precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore pipa_third_party_consent 미설정"
+    expected: "화면에 다음 고지문이 표시됨 — (1) 제공받는 자: Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, (3) 제공 목적: 약속/할 일 자동 추출(Gemini 2.5 Flash audio multimodal), (4) 데이터 처리 리전: asia-northeast3(서울), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능(이메일/캘린더 연동, 수동 입력)은 정상 사용 가능. [동의] 탭 시 DataStore pipa_third_party_consent=true, pipa_consent_timestamp=now() 저장 후 RecordingFolderScreen으로 이동. [동의 안 함] 탭 시 DataStore pipa_third_party_consent=false 저장 후 RecordingFolderScreen은 스킵하고 ContactsPermissionScreen으로 이동 — 이 경우 이후 voice raw event는 sync_status='awaiting_consent'로 적재되며 Settings에서 추후 동의 가능(VOI-004)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-002
+    type: ui_interaction
+    description: "PIPA 동의 완료 후 녹음 폴더 자동 감지 화면으로 이동하며 Samsung Voice Recorder 기본 경로를 자동 탐색한다. 동의 거부 시 이 화면은 스킵됨"
+    screen: "RecordingFolderScreen"
+    interaction: "화면 진입 (자동)"
+    precondition: "ONB-PIPA 완료(pipa_third_party_consent=true), READ_MEDIA_AUDIO 권한 미부여"
+    expected: "RecordingFolderScreen 표시됨. 자동 탐색 후 기본 경로('/storage/emulated/0/VoiceRecorder') 발견 시 경로 텍스트 표시됨. pipa_third_party_consent=false인 경우 이 화면 전체 스킵 — ContactsPermissionScreen으로 직진"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-003
+    type: permission
+    description: "녹음 폴더 권한 요청 시 READ_MEDIA_AUDIO + SAF URI 권한을 요청한다"
+    os_permission: "READ_MEDIA_AUDIO"
+    precondition: "RecordingFolderScreen 표시됨, READ_MEDIA_AUDIO 미부여"
+    expected: "시스템 READ_MEDIA_AUDIO 권한 다이얼로그 표시됨. 승인 시 SAF folder picker 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-CONTACTS
+    type: permission
+    description: "연락처 권한 요청 화면 — PIPA 사유 고지 후 [허용] / [나중에] 선택. 온보딩 11단계 중 4번째 단계"
+    screen: "ContactsPermissionScreen"
+    interaction: "[허용] 또는 [나중에] 버튼 탭"
+    precondition: "ONB-003 완료 후, READ_CONTACTS 미부여"
+    expected: "ContactsPermissionScreen 표시됨. 고지문: '연락처 접근은 약속 상대방의 이름·회사·직함을 앱 안에서만 표시하는 데 사용되며 서버로 전송되지 않습니다'. [허용] 탭 시 시스템 READ_CONTACTS 권한 다이얼로그 표시됨. 승인 또는 거부 후 다음 단계(ONB-004) 진행됨. [나중에] 탭 시 다음 단계 즉시 진행됨. DataStore contacts_permission_asked=true 저장됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-004
+    type: ui_interaction
+    description: "Gmail OAuth 연결 화면에서 [스킵] 탭 시 다음 온보딩 단계로 이동한다"
+    screen: "GmailOAuthScreen"
+    interaction: "[스킵] 버튼 탭"
+    precondition: "온보딩 5단계 (GmailOAuthScreen), Gmail 미연결"
+    expected: "OutlookMailOAuthScreen으로 이동됨. DataStore gmail_connected=false 유지"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-005
+    type: ui_interaction
+    description: "배터리 최적화 예외 요청은 2단계 시퀀스다. 1단계: 표준 Android REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 시스템 다이얼로그. 2단계(삼성 기기 전용, Build.MANUFACTURER=='samsung'): '삼성 기기에서 백그라운드 동기화를 안정적으로 사용하려면 설정 → 배터리 → 백그라운드 사용 제한 → 잠자는 앱에서 BeCalm을 제거해주세요' 가이드 화면 + [설정 열기] 버튼(Settings.ACTION_APPLICATION_DETAILS_SETTINGS 실행) + [건너뛰기] 버튼. 거부/건너뛰기 시: '백그라운드 수집이 불안정할 수 있습니다' 경고 Snackbar 표시 후 다음 단계 진행"
+    screen: "BatteryOptimizationScreen"
+    interaction: "1단계 시스템 다이얼로그 완료 후 자동 진행"
+    precondition: "온보딩 10단계(BatteryOptimizationScreen). Build.MANUFACTURER == 'samsung'"
+    expected: "1단계: 시스템 다이얼로그 표시됨. 1단계 완료(승인/거부) → 2단계 삼성 가이드 화면 표시됨([설정 열기] + [건너뛰기]). [건너뛰기] 탭 시 경고 Snackbar + 다음 단계 진행. 비삼성 기기: 1단계만 실행 후 다음 단계 진행"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-006
+    type: ui_interaction
+    description: "온보딩 완료 후 재실행 시 TermsScreen을 건너뛰고 TodayTimelineScreen으로 바로 이동한다"
+    screen: "SplashScreen"
+    interaction: "앱 재실행"
+    precondition: "DataStore onboarding_completed=true, terms_accepted=true, Supabase Auth 세션 유효"
+    expected: "TodayTimelineScreen으로 바로 이동됨 (TermsScreen, LoginScreen 건너뜀)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-007
+    type: lifecycle
+    description: "온보딩 실패 이벤트가 Sentry에 전송된다"
+    trigger: "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생"
+    precondition: "Sentry DSN 설정됨, 온보딩 진행 중"
+    expected: "Sentry에 onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ONB-008
+    type: lifecycle
+    description: "온보딩 완료가 TDY-010 cold sync 흐름과 연동된다. DataStore onboarding_completed=true는 cold sync 완료 또는 사용자 [나중에 하기] 후에 기록된다. cold sync 진행 중 앱 재시작 시 ColdSyncScreen이 다시 표시된다"
+    trigger: "온보딩 마지막 단계(BatteryOptimizationScreen) 완료 → ColdSyncScreen 표시됨"
+    precondition: "DataStore onboarding_completed=false, Room 전체 0건"
+    expected: "ColdSyncScreen으로 이동됨. cold sync 완료 또는 [나중에 하기] 탭 시에만 DataStore onboarding_completed=true 저장됨. cold sync 중 앱 강제 종료 후 재실행 시 onboarding_completed=false이므로 ColdSyncScreen 재표시됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "이용약관 미동의 시 절대 앱 기능에 접근할 수 없다"
+  - "온보딩은 순차 진행이며 건너뛴 OAuth 소스는 설정 화면에서 재연결 가능하다"
+  - "DataStore onboarding_completed=true는 ColdSyncScreen 완료 또는 [나중에 하기] 후에 기록된다 — 온보딩 step 완료 시점이 아님"
+  - "CONTACTS 권한 거부는 온보딩을 중단시키지 않는다 — graceful skip"
+  - "PIPA 제3자 제공 + 국외 이전 동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화되고 Settings에서 추후 변경 가능"
+  - "총 12단계: 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"

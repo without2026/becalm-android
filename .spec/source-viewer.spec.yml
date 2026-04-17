@@ -1,0 +1,90 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+module: source-viewer
+platform: android
+version: 1
+
+behaviors:
+  - id: SRC-001
+    type: ui_interaction
+    description: "PersonsScreen 진입 시 인터랙션이 있는 인물 목록이 most_recent_event_time 내림차순으로 표시된다. 각 카드에 persons_enrichment 기반 표시명(display_name 또는 nickname, 없으면 person_ref 원본값) + company/title(있을 경우) + 채널 아이콘 클러스터 + 미이행 약속 건수 DNBadge + 최근 이벤트 미리보기 + 타임스탬프 표시됨"
+    screen: "PersonsScreen"
+    interaction: "화면 진입"
+    precondition: "인증 완료, Room에 person_ref='+821012345678' raw_ingestion_events 2건(voice 1, gmail 1) + persons_enrichment {display_name='김철수', company='ABC Corp', title='팀장'} + 미이행 Commitment 2건 존재"
+    expected: "인물 카드 표시됨. 표시명: '김철수 · ABC Corp · 팀장'. 채널 아이콘: 음성+이메일. DNBadge: '미이행 2'. 더 최근 이벤트를 가진 인물이 상단. 커서 기반 페이지네이션(limit=20)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-002
+    type: ui_interaction
+    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 헤더에 enriched 정보(full_name, nickname, company, title, 이벤트 수, 미이행 약속 수)가 표시되고, 본문에 3개 섹션(미이행 약속 / 이행 완료 / 상호작용 히스토리)이 표시된다"
+    screen: "PersonDetailScreen"
+    interaction: "인물 카드 탭"
+    precondition: "PersonsScreen에 person_ref='+821012345678' 카드 표시됨. persons_enrichment {display_name='김철수', nickname='철수', company='ABC Corp', title='팀장'}. Room에 voice 1건 + gmail 1건 + give Commitment 1건(pending) + take Commitment 1건(completed)"
+    expected: "PersonDetailScreen 표시됨. 헤더: '김철수(철수) · ABC Corp · 팀장 · 이벤트 2건 · 미이행 약속 1건'. 섹션 1 '미이행 약속': pending Commitment 1건. 섹션 2 '이행 완료': completed Commitment 1건. 섹션 3 '상호작용 히스토리': voice + gmail 이벤트 event_time 내림차순"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-003
+    type: ui_interaction
+    description: "인물 검색 — 이름·이메일·전화번호 substring으로 필터링됨 (서버측 GET /v1/persons?q= 또는 Room 캐시 클라이언트 필터)"
+    screen: "PersonsScreen"
+    interaction: "검색창에 'lee' 입력"
+    precondition: "Room에 person_ref='lee@corp.com' 1건 + person_ref='+821012345678'(display_name='김철수') 1건 존재"
+    expected: "'lee@corp.com' 카드만 표시됨. 김철수 카드 숨겨짐. 검색어 지우면 전체 목록 복원됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-004
+    type: ui_interaction
+    description: "이벤트 항목 탭 시 원시 이벤트 상세 시트가 표시된다 — 소스 타입별 상세: voice(event_title, duration_seconds, transcript, commitments_extracted_count), email(subject=event_title, event_snippet, EmailBody 전문), calendar(title=event_title, location, attendees_raw), 수집 타임스탬프"
+    screen: "RawEventDetailSheet"
+    interaction: "PersonDetailScreen 상호작용 히스토리의 이벤트 항목 탭"
+    precondition: "PersonDetailScreen에 source_type='voice' 이벤트 1건 표시됨(event_title='팀 회의', duration_seconds=1800, commitments_extracted_count=2)"
+    expected: "바텀 시트 열림. '팀 회의' 제목, '30분', transcript.text 전문, '약속 추출 2건' 표시됨. ingestion timestamp 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-005
+    type: ui_interaction
+    description: "Unassigned 버킷 — person_ref IS NULL인 이벤트를 별도 섹션으로 표시한다"
+    screen: "PersonsScreen"
+    interaction: "화면 진입"
+    precondition: "Room에 person_ref=NULL raw_ingestion_events 2건 존재"
+    expected: "'미분류' 섹션 표시됨. 2건의 이벤트 목록 표시됨. person_ref가 있는 인물 카드와 분리됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-006
+    type: gesture
+    description: "pull-to-refresh 시 Railway GET /v1/persons를 재요청하고 Room 캐시를 갱신한다"
+    gesture: "pull-to-refresh"
+    screen: "PersonsScreen"
+    precondition: "PersonsScreen 표시됨, 네트워크 연결됨"
+    expected: "GET /v1/persons 호출됨. Room 데이터 갱신됨. 인물 목록 업데이트됨"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-007
+    type: lifecycle
+    description: "오프라인 모드 — 네트워크 없을 때 Room 캐시로 렌더링하고 헤더에 '오프라인 — 마지막 동기화 <ts>' 배지를 표시한다"
+    trigger: "PersonsScreen 진입 또는 refresh 시도 (네트워크 없음)"
+    precondition: "네트워크 연결 없음, Room에 캐시된 person 데이터 존재"
+    expected: "인물 목록 Room 캐시로 표시됨. 상단에 '오프라인 — 마지막 동기화 HH:mm' 배지 표시됨. 크래시 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: SRC-008
+    type: ui_interaction
+    description: "PersonDetailScreen 본문 3-섹션 구조 — 섹션 1: 미이행 약속(action_state != 'completed'), 섹션 2: 이행 완료(action_state='completed', 접힌 상태 기본), 섹션 3: 상호작용 히스토리(raw_ingestion_events, event_time 내림차순). commitments_extracted_count >= 1인 히스토리 항목에 배지 표시됨"
+    screen: "PersonDetailScreen"
+    interaction: "화면 진입"
+    precondition: "person_ref='+821012345678' 선택됨. Room에 voice 이벤트 1건(commitments_extracted_count=2) + give Commitment 2건(1건 pending, 1건 completed)"
+    expected: "섹션 1 '미이행 약속 (1)': pending commitment 1건. 섹션 2 '이행 완료 (1)': 접힌 상태. 탭 시 completed commitment 1건 펼쳐짐. 섹션 3 '상호작용 히스토리': voice 이벤트 1건 + '약속 추출 2건' 배지 표시됨"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "원문보기(PersonDetailScreen) 데이터는 Room에서 primary 조회한다. Railway GET /v1/persons는 새로고침 시에만 호출됨"
+  - "person_ref 그룹핑은 Room 쿼리 레벨에서 수행됨 — 별도 persons 테이블 없음 (MVP)"
+  - "persons_enrichment 조인은 순수 온디바이스 Room LEFT JOIN — Railway/Supabase로 연락처 정보 전송 없음"
+  - "enrichment 없는 person_ref는 원본값(전화번호/이메일/표시이름)으로 fallback 표시됨 — 크래시 없음"

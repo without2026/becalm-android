@@ -1,0 +1,247 @@
+version: 1
+# BeCalm Android MVP — UI Map Contract
+# Navigation: Jetpack Compose Navigation (NavHost)
+# Language: Korean only
+# Bottom navigation: 3-tab BottomNavigationBar (오늘의 타임라인 / 인물 / 약속관리)
+# Total routes: 22
+
+routes:
+  # -------- AUTH / ONBOARDING (public + first-run) --------
+
+  - path: /splash
+    screen: SplashScreen
+    data: []
+    components: [SplashLogo]
+    auth: public
+    # Decides: onboarding vs /today based on DataStore state
+
+  - path: /terms
+    screen: TermsScreen
+    data: []
+    components: [TermsBody, AgreeButton, DisagreeButton]
+    auth: public
+
+  - path: /login
+    screen: LoginScreen
+    data: ["POST https://<supabase-project>.supabase.co/auth/v1/token"]
+    components: [EmailField, PasswordField, LoginButton, GoogleSignInButton, SignUpLink]
+    auth: public
+
+  - path: /onboarding/recording-folder
+    screen: RecordingFolderScreen
+    data: []
+    components: [FolderPathText, GrantPermissionButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/contacts
+    screen: ContactsPermissionScreen
+    data: []
+    components: [PIPANoticeText, AllowButton, LaterButton]
+    auth: required
+    # ENR-001: PIPA 사유 고지 후 READ_CONTACTS 요청. 온보딩 4번째 단계.
+    # 거부/[나중에] 시 graceful skip — 앱 기능 영향 없음.
+
+  - path: /onboarding/gmail
+    screen: GmailOAuthScreen
+    data: []
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/outlook-mail
+    screen: OutlookMailOAuthScreen
+    data: []
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/imap
+    screen: ImapSetupScreen
+    data: []
+    components: [ImapProviderSelector, UsernameField, AppPasswordField, ConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/google-calendar
+    screen: GoogleCalendarOAuthScreen
+    data: []
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/outlook-calendar
+    screen: OutlookCalendarOAuthScreen
+    data: []
+    components: [OAuthConnectButton, SkipButton]
+    auth: required
+
+  - path: /onboarding/battery
+    screen: BatteryOptimizationScreen
+    data: []
+    components: [BatteryExemptButton, SamsungSleepingAppsGuide, SkipButton, WarningSnackbar]
+    auth: required
+    # ONB-005: 2-step: (1) standard REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog,
+    # (2) Samsung-only guidance screen (Build.MANUFACTURER=='samsung').
+
+  - path: /onboarding/cold-sync
+    screen: ColdSyncScreen
+    data: []
+    components: [ColdSyncProgressList, DismissButton]
+    auth: required
+    # TDY-010 / ONB-008: First-run only. Shown when Room is entirely empty after onboarding.
+    # DataStore onboarding_completed=true written only after this screen is dismissed or sync completes.
+
+  # -------- MAIN APP (3-tab bottom nav) --------
+
+  - path: /today
+    screen: TodayTimelineScreen
+    data: ["GET /v1/commitments", "GET /v1/calendar_events"]
+    components: [OverallSyncIndicator, SourceStatusStrip, TodayTimeline, CommitmentItem, CalendarEventItem, BottomNavigationBar]
+    auth: required
+    # Tab 1: 오늘의 타임라인. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
+
+  - path: /persons
+    screen: PersonsScreen
+    data: ["GET /v1/persons"]
+    components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
+    auth: required
+    # Tab 2: 인물. PersonCard에 enriched 표시명 + DNBadge(미이행 약속 수) 표시.
+
+  - path: /persons/{person_id}
+    screen: PersonDetailScreen
+    data: ["GET /v1/persons/{person_id}/events", "GET /v1/persons/{person_id}/commitments"]
+    components: [PersonHeader, CommitmentCard, InteractionHistoryRow, RawEventRow]
+    auth: required
+    # 3-section body: 미이행 약속 / 이행 완료 / 상호작용 히스토리 (SRC-002, SRC-008)
+
+  - path: /persons/{person_id}/events/{event_id}
+    screen: RawEventDetailSheet
+    data: []
+    components: [EventSourceBadge, EventTitleText, EventSnippetText, DurationText, LocationText, CommitmentsExtractedBadge, IngestionTimestamp, BackButton]
+    auth: required
+    # Bottom sheet — raw event drill-down with extended fields. Data loaded from Room directly.
+
+  - path: /persons/unassigned
+    screen: UnassignedEventsScreen
+    data: []
+    components: [UnifiedTimeline, RawEventRow, OfflineBadge]
+    auth: required
+    # Events where person_ref IS NULL.
+
+  - path: /commitments
+    screen: CommitmentManagementScreen
+    data: ["GET /v1/commitments", "PATCH /v1/commitments/{id}"]
+    components: [CommitmentFilterTabs, CommitmentCard, DNBadge, BottomNavigationBar]
+    auth: required
+    # Tab 3: 약속관리. Filter tabs: 전체 / 내가 한 / 상대가 한. Expandable completed section.
+
+  # -------- SETTINGS --------
+
+  - path: /settings
+    screen: SettingsScreen
+    data: ["POST https://<supabase-project>.supabase.co/auth/v1/logout"]
+    components: [SourcesEntryRow, AccountSection, LogoutButton]
+    auth: required
+    # Accessed via top-right settings icon on TodayTimelineScreen (not hamburger menu).
+
+  - path: /settings/sources
+    screen: SourcesListScreen
+    data: []
+    components: [SourceStatusRow]
+    auth: required
+    # SMG-001: 6-source list + '연락처' pseudo-source row (ENR-008).
+
+  - path: /settings/sources/{source_id}
+    screen: SourceDetailScreen
+    data: []
+    components: [SourceStatusDetail, LastSyncInfo, ReconnectButton, DisconnectButton, ManualSyncButton]
+    auth: required
+    # SMG-002..005: source detail, reconnect flow, disconnect, manual per-source sync.
+
+shared_components:
+  - name: BottomNavigationBar
+    props:
+      selectedTab: "BottomTab"  # TODAY | PERSONS | COMMITMENTS
+      onTabSelected: "(tab: BottomTab) -> Unit"
+    description: "3탭 하단 네비게이션. 탭: '오늘의 타임라인'(/today) / '인물'(/persons) / '약속관리'(/commitments)"
+
+  - name: OverallSyncIndicator
+    props:
+      state: "OverallSyncState"
+      syncingCount: int
+      lastSyncAt: "datetime?"
+    description: "6개 어댑터 상태 집계. 4가지 상태: idle / 'syncing N/6' / 'synced HH:mm' / '일부 소스 실패 — 설정에서 확인'(경고색). 탭 인터랙션 없음"
+
+  - name: SourceStatusStrip
+    props:
+      sources: "SourceStatus[]"
+    description: "6개 소스(Gmail, Outlook Mail, 네이버, 다음, Google Calendar, Outlook Calendar) 칩 배열. 각 칩: idle(회색) / syncing(스피너) / error(빨간 점) / synced(초록 체크+HH:mm). 읽기 전용 — 탭 인터랙션 없음"
+
+  - name: TodayTimeline
+    props:
+      items: "TodayItem[]"
+      onRefresh: "() -> Unit"
+    description: "오늘 캘린더 이벤트 + due=오늘 commitment 통합 시간순 목록. pull-to-refresh 지원"
+
+  - name: CommitmentItem
+    props:
+      commitment: "Commitment"
+    description: "direction 배지(give=파랑/take=주황) + title + person_ref 기반 표시명 + due_date 표시. TodayTimelineScreen 전용 compact 카드"
+
+  - name: CommitmentCard
+    props:
+      commitment: "Commitment"
+      onTap: "(id: string) -> Unit"
+    description: "CommitmentManagementScreen + PersonDetailScreen 전용 풀 카드. direction 배지 + title + quote(truncated) + source_event_title + person_ref 표시명 + DNBadge + action_state 상태 표시"
+
+  - name: CommitmentFilterTabs
+    props:
+      selectedFilter: "CommitmentFilter"  # ALL | GIVE | TAKE
+      onFilterSelected: "(filter: CommitmentFilter) -> Unit"
+    description: "CommitmentManagementScreen 상단 필터 탭. '전체' / '내가 한(give)' / '상대가 한(take)'"
+
+  - name: DNBadge
+    props:
+      dueDate: "date?"
+      pendingCount: "int?"
+    description: "두 가지 사용: (1) CommitmentCard — D-N/D+N due_date 배지. D+N은 빨간색. (2) PersonCard — '미이행 N건' 약속 수 배지"
+
+  - name: InteractionHistoryRow
+    props:
+      event: "RawIngestionEvent"
+      onTap: "(eventId: string) -> Unit"
+    description: "PersonDetailScreen 섹션 3 항목. 소스 아이콘 + event_title + event_snippet(truncated) + timestamp. commitments_extracted_count >= 1 시 '약속 추출 N건' 배지 표시"
+
+  - name: CalendarEventItem
+    props:
+      event: "CalendarEvent"
+    description: "캘린더 아이콘 + title + start_at~end_at 표시"
+
+  - name: PersonCard
+    props:
+      person: "Person"
+      enrichment: "PersonEnrichment?"
+      pendingCommitmentsCount: int
+      onTap: "(personId: string) -> Unit"
+    description: "인물 카드. 표시명: enrichment.display_name (없으면 person_ref 원본). company·title(있을 경우) + 채널 아이콘 클러스터 + DNBadge(미이행 약속 수) + 최근 이벤트 미리보기 + 타임스탬프"
+
+  - name: UnifiedTimeline
+    props:
+      items: "RawIngestionEvent[]"
+      onEventTap: "(eventId: string) -> Unit"
+      isLoading: boolean
+    description: "소스 무관 통합 타임라인. 각 항목: 소스 아이콘 + event_title + event_snippet(truncated) + 타임스탬프. 커서 페이지네이션 지원"
+
+  - name: SearchBar
+    props:
+      query: string
+      onQueryChange: "(q: string) -> Unit"
+    description: "이름/이메일/전화번호 substring 검색 입력창"
+
+  - name: OfflineBadge
+    props:
+      lastSyncAt: datetime
+    description: "오프라인 상태 표시 배지. '오프라인 — 마지막 동기화 HH:mm' 형식"
+
+  - name: ColdSyncProgressList
+    props:
+      sources: "ColdSyncSourceProgress[]"
+      completedCount: int
+      totalCount: int
+    description: "초기 동기화 전용. '초기 데이터를 가져오는 중 (N/6 완료)' 헤더 + 소스별 진행 항목(완료 체크/진행 스피너). [나중에 하기] 버튼 포함"

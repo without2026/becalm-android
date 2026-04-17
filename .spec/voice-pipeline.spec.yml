@@ -1,0 +1,85 @@
+module: voice-pipeline
+platform: android
+version: 2
+
+# Architecture lock (2026-04-16):
+#   Android → Railway FastAPI `POST /v1/voice/transcribe_extract` → Vertex AI Gemini 2.5 Flash (audio multimodal, asia-northeast3) → Supabase Postgres (commitments).
+#   다른 API와 동일한 패턴: Android는 Supabase JWT만 Bearer로 보내고, Railway가 service_role 키로 Supabase에 write. Supabase REST / Edge Function 직접 호출 없음.
+#   Legacy on-device STT + Gemini Nano stubs (AndroidSpeechRecognizerBackend, WhisperJni, GeminiNanoExtractor, SttBackendSelector, VoiceChunker) are removed.
+#   Audio bytes leave device ONLY when PIPA 제3자 제공 + 국외 이전 동의(ONB-PIPA)가 True. Transcript 중간 산출물은 어디에도 영속되지 않는다 — Railway 요청 lifetime 내 ephemeral.
+#   청크 분할하지 않음 — 전체 맥락 보존을 위해 오디오 전체를 단일 Gemini 호출로 처리 (최대 120분). 단일 호출 한도 초과 시 HTTP 422 quarantine, post-MVP에 overlap chunk + dedup 방안 재설계.
+
+behaviors:
+  - id: VOI-001
+    type: lifecycle
+    description: "VoiceUploadWorker가 source_type='voice', sync_status='pending'인 raw_ingestion_event에 대해 Railway `POST /v1/voice/transcribe_extract`로 오디오 파일을 multipart 업로드하고 추출된 commitments를 Room commitments에 INSERT한다"
+    trigger: "Room raw_ingestion_events에 source_type='voice', sync_status='pending' 레코드 삽입됨"
+    precondition: "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent=true), Supabase JWT 유효, READ_MEDIA_AUDIO 권한 부여, 오디오 파일 URI 접근 가능, Wi-Fi 또는 unmetered 네트워크 연결"
+    expected: "Railway endpoint가 HTTP 200 + commitments[] 반환. raw_ingestion_events.commitments_extracted_count 업데이트됨. Room commitments에 direction in ('give','take'), confidence > 0.0 레코드 N건 INSERT됨 (N >= 0). raw_ingestion_events.sync_status='pending' 유지 — 별도 UploadWorker가 /v1/raw_ingestion_events:batch로 mirror. Vertex AI 응답 JSON은 Railway 요청 lifetime 외부로 전파되지 않음(DB·로그 저장 금지)."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-002
+    type: lifecycle
+    description: "Railway `/v1/voice/transcribe_extract`는 오디오 파일 전체를 분할 없이 단일 Gemini 2.5 Flash 호출로 처리한다 — cross-boundary commitment 손실과 화자/맥락 단절을 방지하기 위함"
+    trigger: "Railway가 유효한 오디오 업로드 수신 (duration_seconds ≤ 7200)"
+    precondition: "duration_seconds in [1, 7200], audio codec=.m4a AAC, Gemini 2.5 Flash audio multimodal 엔드포인트 가용"
+    expected: "Vertex AI 호출 1회 (전체 오디오 + responseSchema = CommitmentDraft[]). HTTP 200 + { raw_event_id, commitments: [...], model: 'gemini-2.5-flash', region: 'asia-northeast3' } 반환. Gemini 응답에 finish_reason='MAX_TOKENS'가 포함되거나 JSON이 잘린 경우(스키마 검증 실패) HTTP 502 + { error: 'output_truncated' } 반환 — 해당 raw_event는 quarantine되며 post-MVP overlap-chunk 경로로 재처리 예정. duration_seconds > 7200인 요청은 업스트림(api-contract 422)에서 차단되어 본 behavior에 도달하지 않음."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-003
+    type: lifecycle
+    description: "Gemini 2.5 Flash는 structured output(responseSchema = CommitmentDraft[])로 give/take commitment를 추출한다. 스키마 위반 응답은 즉시 실패 처리되며 Supabase/Room에 partial commit이 저장되지 않는다"
+    trigger: "Railway endpoint가 청크 처리 중"
+    precondition: "Vertex AI endpoint = asia-northeast3, 모델 = gemini-2.5-flash, responseMimeType = application/json, responseSchema 지정됨"
+    expected: "각 CommitmentDraft는 { direction: 'give'|'take', text: string, person_ref?: string, due_at?: datetime-ISO8601, quote: string, confidence: float(0..1) } 스키마 준수. 스키마 위반(필수 필드 누락, enum 불일치, JSON parse 실패) 시 Railway가 HTTP 502 + { error: 'schema_violation' } 반환. Supabase 트랜잭션 롤백, raw_ingestion_events.sync_status='pending' 유지."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-004
+    type: consent
+    description: "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent) 미수락 상태에서는 VoiceUploadWorker가 Railway 호출을 수행하지 않고 raw_ingestion_event를 sync_status='awaiting_consent'로 대기시킨다"
+    trigger: "source_type='voice' raw event 생성 시점에 pipa_third_party_consent=false"
+    precondition: "DataStore pipa_third_party_consent=false, source_type='voice' raw event 삽입됨"
+    expected: "Railway 호출 발생하지 않음. raw_ingestion_events.sync_status='awaiting_consent'로 전이. 이후 ONB-PIPA 또는 Settings에서 동의 토글 ON 시 자동으로 sync_status='pending'으로 복귀되어 VoiceUploadWorker가 재진입. 동의 토글 OFF로 전환 시 새 raw event만 awaiting_consent로 들어가며 이미 업로드 완료된 commitments는 영향받지 않는다(소급 삭제 없음 — 사용자가 개별 삭제 필요)."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-005
+    type: permission
+    description: "READ_MEDIA_AUDIO 권한 미부여 시 ContentObserver가 등록되지 않고 VoiceUploadWorker도 enqueue되지 않는다"
+    os_permission: "READ_MEDIA_AUDIO"
+    precondition: "앱 설치 직후, READ_MEDIA_AUDIO 권한 미부여"
+    expected: "ContentObserver 등록 안 됨. raw_ingestion_events에 source_type='voice' 신규 행 없음. Sentry에 onboarding_permission_denied(source='voice') 이벤트 전송됨. VoiceUploadWorker는 unique work 이름으로 enqueue되지 않음."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-006
+    type: resilience
+    description: "VoiceUploadWorker는 네트워크/서버 오류 시 지수 백오프로 최대 3회 재시도한 후 quarantine으로 전이한다"
+    trigger: "Railway `/v1/voice/transcribe_extract` 호출이 HTTP 500/502/503 또는 IOException으로 실패"
+    precondition: "VoiceUploadWorker 실행 중, max_attempts=3, initial_backoff=30s, multiplier=2"
+    expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed', Sentry에 voice_upload_quarantined 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 즉시 failed(retry_count=0 유지). HTTP 413/422는 retryable=false로 즉시 quarantine."
+    source: phase2-acceptance
+    tests: []
+
+  - id: VOI-007
+    type: privacy
+    description: "VoiceUploadWorker는 Samsung Voice Recorder 원본 오디오 파일을 복사·이동·삭제하지 않는다. 오디오 바이트는 multipart 요청 스트림으로만 Railway에 전달되며 앱 private storage에 잔존하지 않는다"
+    trigger: "VoiceUploadWorker 실행 시점부터 완료까지"
+    precondition: "원본 파일 경로 = Samsung Voice Recorder 폴더 (사용자 자산), SAF URI 권한 = read-only"
+    expected: "파일 URI → ContentResolver.openInputStream → OkHttp RequestBody 직접 스트리밍. 앱 context.filesDir / cacheDir 에 복사본 없음. 업로드 성공/실패와 무관하게 원본 파일은 삭제되지 않음(사용자 소유). 메모리 버퍼는 청크 단위(64KB)로 스트리밍."
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "오디오 바이트는 pipa_third_party_consent=true일 때만 device 외부로 전송된다"
+  - "Transcript(STT 중간 산출물)는 Android·Railway·Supabase Postgres 어디에도 영속되지 않는다 — Railway 요청 lifetime 내 ephemeral"
+  - "원본 오디오 파일은 사용자 자산이므로 앱이 삭제·복사·이동하지 않는다"
+  - "Vertex AI 호출은 asia-northeast3(서울 리전) endpoint 고정 — 국외 이전 시에도 data-at-rest residency는 한국"
+  - "Vertex AI ZDR(Zero Data Retention) 플래그 필수 — Google이 프롬프트/응답을 로깅/학습에 사용하지 못하도록 차단"
+  - "Railway는 받은 오디오 바이트를 Supabase Storage·Postgres·파일시스템·로그에 저장하지 않는다 — 요청 핸들러 스코프 내 메모리 처리만"
+  - "Railway 호출 실패 시에도 raw_ingestion_event는 보존되어 `/v1/raw_ingestion_events:batch` mirror 파이프라인을 타야 한다 — commitments_extracted_count=0으로"
+  - "VoiceUploadWorker는 Wi-Fi/unmetered 네트워크 제약을 설정한다 — 모바일 데이터 자동 업로드 금지"
+  - "Railway는 Android가 보내는 Supabase JWT를 검증한 뒤 service_role 키로 Supabase에 write — 다른 API 경로(/v1/raw_ingestion_events:batch, /v1/commitments 등)와 동일 패턴"

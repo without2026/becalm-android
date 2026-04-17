@@ -1,0 +1,243 @@
+version: 1
+# BeCalm Android MVP — API Contract (client_primary profile)
+#
+# TWO API surfaces:
+#   1. Supabase Auth  — base: https://<supabase-project>.supabase.co  (client calls directly for Auth only)
+#   2. Railway API    — base: ${BECALM_API_BASE_URL} (BuildConfig; all data R/W goes through here)
+#
+# Android does NOT call Supabase REST (rest/v1/*) directly for data.
+# All commitments, raw events, and calendar data flow through Railway.
+# Railway holds the Supabase service_role key; Android sends only its Supabase JWT as Bearer.
+#
+# Error envelope for all Railway endpoints:
+#   4xx/5xx: { error: string, message: string, request_id?: string }
+# Rate limiting: HTTP 429 with Retry-After header (seconds).
+
+base_path: ${BECALM_API_BASE_URL}
+auth: bearer_jwt
+
+# Shared types
+types:
+  FailedEvent:
+    client_event_id: uuid       # 실패한 이벤트의 멱등 키
+    reason: string              # "schema_invalid" | "source_type_unknown" | "timestamp_parse_error" | "internal_error"
+    message: string             # 사람이 읽을 수 있는 상세
+    retryable: boolean          # true면 client가 재시도, false면 quarantine
+
+  CommitmentDraft:
+    direction: string           # "give" | "take"
+    text: string                # 요약 문구 (1~2 문장)
+    quote: string               # 오디오에서 추출한 원문 발화 단편 — 법적 증거 기록, 앱이 요약·편집 금지
+    person_ref?: string         # 정규화된 상대방 식별자 (정규화 우선순위: phone E.164 > email lowercase > display_name normalized). 식별 불가 시 null
+    due_at?: datetime           # ISO8601. 발화에 시점 언급이 없으면 null
+    confidence: float           # 0.0 ~ 1.0
+
+endpoints:
+  # ========== SUPABASE AUTH (client calls directly) ==========
+
+  - method: POST
+    path: https://<supabase-project>.supabase.co/auth/v1/token
+    auth: none
+    body:
+      grant_type: string      # "password" | "refresh_token" | "id_token"
+      email?: string
+      password?: string
+      refresh_token?: string
+      id_token?: string       # Google OAuth
+    response:
+      200: { access_token: string, refresh_token: string, user: { id: uuid, email: string } }
+      400: { error: string, error_description: string }
+    spec_refs: [AUTH-001, AUTH-002, AUTH-003, AUTH-004, AUTH-007]
+
+  - method: POST
+    path: https://<supabase-project>.supabase.co/auth/v1/logout
+    auth: required
+    response:
+      204: {}
+      401: { error: string, message: string }
+    spec_refs: [AUTH-005]
+
+  # ========== RAILWAY — RAW INGESTION EVENTS ==========
+
+  - method: POST
+    path: /v1/raw_ingestion_events:batch
+    auth: required
+    idempotency: client_event_id   # 서버는 (user_id, client_event_id) UNIQUE로 dedupe. 중복 전송은 200 ack로 처리 (새 INSERT 없음).
+    body:
+      events:
+        - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
+          source_type: string         # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+          source_ref?: string
+          person_ref?: string         # Canonicalized counterparty; null if unidentifiable
+          event_title?: string        # voice: MediaStore title / email: subject / calendar: title
+          event_snippet?: string      # email/voice: first ~200 chars of body/transcript
+          duration_seconds?: int      # voice only
+          location?: string           # calendar only
+          commitments_extracted_count?: int  # default 0; updated after LLM extraction
+          timestamp: datetime
+    constraints:
+      max_batch_size: 100              # events[] 길이. 초과 시 413.
+      max_body_bytes: 1048576          # 1 MiB. 초과 시 413.
+    response:
+      200: { acknowledged: int, failed: "FailedEvent[]" }   # 부분 성공 — failed[]는 재전송 대상(retryable:true)과 quarantine 대상(retryable:false)을 구분
+      400: { error: string, message: string }               # 잘못된 JSON / 필수 필드 누락 / body events=[]
+      401: { error: string, message: string }               # 토큰 없음/만료 — AUTH-007 refresh 트리거
+      413: { error: string, message: string }               # max_batch_size 또는 max_body_bytes 초과 — client chunk 후 재전송
+      422: { error: string, message: string }               # 전체 스키마 검증 실패(개별 이벤트가 아닌 batch 수준)
+      429: { error: string, message: string }               # Retry-After 헤더 존중
+      500: { error: string, message: string }               # 서버 내부 오류 — retryable
+      503: { error: string, message: string }               # 일시적 downstream 장애 — retryable
+    spec_refs: [ING-003, ING-004, ING-005, ING-011, ING-012, ING-013, SYNC-001, SYNC-002, SYNC-003, SYNC-005, SYNC-006]
+
+  # ========== RAILWAY — VOICE (audio → commitments) ==========
+
+  - method: POST
+    path: /v1/voice/transcribe_extract
+    auth: required
+    content_type: multipart/form-data
+    idempotency: client_event_id   # 서버는 (user_id, client_event_id)로 기존 raw event를 upsert. 중복 업로드는 commitments 재추출 없이 기존 결과 반환.
+    body:
+      audio: binary                # .m4a AAC. 메모리 스트리밍으로 수신 — 서버는 파일시스템/Supabase Storage에 저장하지 않음
+      client_event_id: uuid        # raw_ingestion_events의 멱등 키와 동일
+      raw_event_id: uuid           # 연결될 raw_ingestion_events.id (Android가 미리 INSERT한 행의 서버 id; /batch 성공 후 받은 값)
+      duration_seconds: int
+      timestamp: datetime
+      person_ref?: string
+      event_title?: string         # MediaStore TITLE
+    constraints:
+      max_body_bytes: 62914560     # 60 MiB. 60분 AAC 128kbps 상한. 초과 시 413
+      max_duration_seconds: 7200   # 120분. 초과 시 422 — client가 파일 분할 후 재업로드
+    response:
+      200:
+        raw_event_id: uuid
+        commitments: "CommitmentDraft[]"
+        model: string                        # "gemini-2.5-flash"
+        region: string                       # "asia-northeast3"
+      202:
+        job_id: uuid                         # 긴 오디오 async 처리로 전환된 경우. MVP에서는 발행하지 않음 — post-MVP 예약.
+        status: string                       # "queued"
+      400: { error: string, message: string }    # 멀티파트 파싱 실패, 필수 필드 누락
+      401: { error: string, message: string }    # JWT 만료 — AUTH-007 refresh 트리거
+      403: { error: string, message: string }    # pipa_third_party_consent 서버측 감사 실패 (클라이언트 guard와 defense-in-depth)
+      413: { error: string, message: string }    # max_body_bytes 초과 — client는 즉시 quarantine
+      422: { error: string, message: string }    # max_duration_seconds 초과 또는 오디오 디코딩 실패 — retryable:false
+      429: { error: string, message: string }    # Vertex AI quota 한도 도달 — Retry-After 존중
+      500: { error: string, message: string }    # Railway 내부 오류 — retryable
+      502:
+        error: string              # "output_truncated" | "schema_violation" | "vertex_upstream_error"
+        message: string
+        # output_truncated: Gemini finish_reason=MAX_TOKENS 또는 JSON 파싱 실패 — 단일 호출로 처리 불가. raw_event는 quarantine되며 post-MVP overlap-chunk 경로 예약.
+        # schema_violation: responseSchema 미준수(enum/필수필드 위반)
+      503: { error: string, message: string }    # Vertex AI 일시 downstream 장애 — retryable
+    notes:
+      - "서버는 Vertex AI 호출을 asia-northeast3 엔드포인트로 고정하고 ZDR(Zero Data Retention) 플래그를 설정한다"
+      - "오디오 바이트·transcript·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
+      - "추출된 commitments는 Supabase commitments 테이블에 INSERT되고 raw_ingestion_events.commitments_extracted_count가 갱신된다"
+      - "오디오 처리 전략: 청크 분할 없이 전체 파일을 단일 Gemini 호출로 전달 — cross-boundary commitment와 화자 맥락 손실 방지. max_duration_seconds=7200(120분) 상한은 단일 호출 안전 범위(입력 1M 토큰 / 출력 8192 토큰 여유)를 기준으로 설정. 상한 초과는 클라이언트에서 quarantine."
+    spec_refs: [VOI-001, VOI-002, VOI-003, VOI-006, VOI-007]
+
+  # ========== RAILWAY — COMMITMENTS ==========
+
+  - method: GET
+    path: /v1/commitments
+    auth: required
+    query:
+      cursor?: string         # Opaque cursor for pagination
+      limit?: int             # Default 20
+      since?: string          # ISO datetime — commitments updated after this time
+      person_ref?: string     # Filter by person
+      direction?: string      # give | take
+      action_state?: string   # pending | reminded | followed_up | completed
+    response:
+      200:
+        data: "Commitment[]"
+        # Commitment type includes: id, user_id, direction, counterparty_raw, person_ref,
+        # title, description, quote, source_event_title, source_event_occurred_at,
+        # due_date, action_state, source_type, source_ref, confidence,
+        # sync_status, created_at, updated_at
+        cursor: string
+        has_more: boolean
+      401: { error: string, message: string }
+    spec_refs: [TDY-004, CMT-010]
+
+  - method: GET
+    path: /v1/commitments/{id}
+    auth: required
+    response:
+      200: { data: Commitment }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [CMT-003]
+
+  - method: PATCH
+    path: /v1/commitments/{id}
+    auth: required
+    body:
+      action_state: string    # pending | reminded | followed_up | completed
+    response:
+      200: { data: Commitment }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+      422: { error: string, message: string }  # Invalid action_state value
+    spec_refs: [CMT-005, CMT-006, CMT-007]
+
+  # ========== RAILWAY — CALENDAR EVENTS ==========
+
+  - method: GET
+    path: /v1/calendar_events
+    auth: required
+    query:
+      cursor?: string
+      since?: string          # ISO datetime
+      limit?: int
+    response:
+      200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+    spec_refs: [TDY-005]
+
+  - method: POST
+    path: /v1/calendar_events:sync
+    auth: required
+    response:
+      200: { synced: int }
+      401: { error: string, message: string }
+      429: { error: string, message: string }
+    spec_refs: [TDY-005]
+
+  # ========== RAILWAY — PERSONS (virtual grouping — no persons table in MVP) ==========
+
+  - method: GET
+    path: /v1/persons
+    auth: required
+    query:
+      cursor?: string
+      limit?: int             # Default 20
+      q?: string              # Substring search on display_name, email, phone
+    response:
+      200: { data: "Person[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+    spec_refs: [SRC-001, SRC-003, SRC-006]
+
+  - method: GET
+    path: /v1/persons/{person_id}/events
+    auth: required
+    query:
+      cursor?: string
+      limit?: int
+    response:
+      200: { data: "RawIngestionEvent[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [SRC-002]
+
+  - method: GET
+    path: /v1/persons/{person_id}/commitments
+    auth: required
+    query:
+      cursor?: string
+      limit?: int
+    response:
+      200: { data: "Commitment[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    spec_refs: [SRC-002]
