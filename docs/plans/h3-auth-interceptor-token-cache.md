@@ -96,56 +96,154 @@ override fun currentAccessToken(): String? {
 - `compareAndSet(null, loaded)` avoids clobbering a token that a concurrent `refresh()` may
   have just published.
 
-### 3.3 Write points (three, exhaustive)
+### 3.3 Write points — Observer pattern (decided)
 
-1. **`refresh()`** — on success, `cachedAccessToken.set(result.session.accessToken)` **after**
-   `sessionStore.save(...)` completes. On `null` return (refresh failed), cache is **not**
-   invalidated; the stale token stays until explicit logout, matching current semantics.
-2. **`SupabaseSessionStore.save(...)`** — called from login and from `refresh()`. We'll
-   extend the provider (not the store) so the store contract is untouched.
-3. **`SupabaseSessionStore.clear()`** — called from logout. Provider must observe and call
-   `cachedAccessToken.set(null)`.
+**Current write sites** (verified via grep 2026-04-17):
 
-Options for (2)+(3):
+- `sessionStore.save` — 4 call sites
+  - `SupabaseAuthClient.kt:159` / `:171` / `:195`
+  - `NetworkModule.kt:261` (DefaultAuthTokenProvider.refresh)
+- `sessionStore.clear` — 2 call sites
+  - `AuthRepository.kt:209` / `:260` (signOut wipe)
 
-- **(a) Observe `SupabaseSessionStore`'s `Flow<SupabaseSession?>`** — if the store already
-  exposes one. Subscribe in `DefaultAuthTokenProvider`'s init block with a `SupervisorJob`
-  scope. Self-healing if any code path writes to the store without going through the provider.
-- **(b) Make `DefaultAuthTokenProvider` the write funnel** — every writer (AuthRepository,
-  refresh) calls into the provider, which forwards to the store and updates the cache. Simpler
-  concurrency model but requires auditing all `sessionStore.save/clear` call sites.
+**Decision: Observer (Flow subscription).** Funnel pattern was considered and rejected
+because (1) it introduces a Hilt circular dependency (`SupabaseAuthClient` injects
+`SupabaseSessionStore`; funneling would require `SupabaseAuthClient` to inject
+`AuthTokenProvider` while `DefaultAuthTokenProvider` already injects `SupabaseAuthClient`);
+(2) it cannot compile-enforce "no direct writes" since `SupabaseSessionStore.save/clear` stay
+public; (3) it bleeds Network-layer dependency upward into Storage callers, violating the
+current one-way `Network → Storage` directionality.
 
-**Recommendation:** (a) if the store already exposes a `Flow`. Decide after reading
-`SupabaseSessionStore.kt`.
+**Contract extension on `SupabaseSessionStore`:**
+
+```kotlin
+public interface SupabaseSessionStore {
+    public suspend fun save(session: SupabaseSession)
+    public suspend fun load(): SupabaseSession?
+    public suspend fun clear()
+    public fun observe(): Flow<SupabaseSession?>   // NEW
+}
+```
+
+**Implementation (`EncryptedTokenStore`):** back the store with a `MutableStateFlow<SupabaseSession?>`
+seeded by the first `load()` (lazy initial read on `observe()` subscription). `save()` and
+`clear()` both `emit` after the encrypted write completes so subscribers never see a value
+that isn't persisted.
+
+**Provider wiring:**
+
+```kotlin
+@Singleton
+public class DefaultAuthTokenProvider @Inject constructor(
+    private val authClient: SupabaseAuthClient,
+    private val sessionStore: SupabaseSessionStore,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+) : AuthTokenProvider {
+
+    private val cachedAccessToken = AtomicReference<String?>(null)
+    private val observerScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+
+    init {
+        observerScope.launch {
+            sessionStore.observe()
+                .catch { e -> Log.e(TAG, "session observer died — cache will stale", e) }
+                .collect { session -> cachedAccessToken.set(session?.accessToken) }
+        }
+    }
+    // ...
+}
+```
+
+Key invariants:
+- `.catch { }` MUST be present. A dead collector silently stales the cache; the log line is
+  the only detection surface (no thrown exception reaches callers).
+- `observerScope` uses `SupervisorJob` so one child failure doesn't tear down the scope.
+- Dispatcher is injected (not `Dispatchers.IO` hard-coded) for test substitution.
 
 ### 3.4 Refresh-and-retry on 401 (AUTH-007) stays byte-identical
 
 `refresh()` is still the only path that mutates the token during a request cycle. The
 interceptor's sequence is unchanged: receive 401 → buffer body → call `refresh()` →
-retry with new token. The cache update happens **inside** `refresh()` before it returns, so
-the retry request gets the fresh token via the same mechanism as today.
+retry with new token. The cache update happens via the Observer (§3.3) after
+`sessionStore.save(result.session)` completes.
+
+### 3.5 Refresh coalescing via Mutex (in-scope)
+
+**Problem.** Supabase rotates refresh tokens — each RT is single-use. If N workers see 401
+simultaneously and call `refresh()` in parallel with the same RT_v1, only the first wins;
+the rest get `null` back and propagate the 401 to callers, even though a valid new session
+was persisted.
+
+**Solution.** Guard `refresh()` with a `kotlinx.coroutines.sync.Mutex` using the
+double-checked pattern:
+
+```kotlin
+private val refreshMutex = Mutex()
+
+override suspend fun refresh(): String? = refreshMutex.withLock {
+    val current = sessionStore.load() ?: return@withLock null
+
+    // Double-check: did another coroutine refresh while I was waiting for the lock?
+    val cached = cachedAccessToken.get()
+    if (cached != null && cached != tokenThatCausedMy401(current)) {
+        return@withLock cached
+    }
+
+    val result = authClient.refresh(current.refreshToken).getOrNull() ?: return@withLock null
+    sessionStore.save(result.session)   // observer updates cache
+    result.session.accessToken
+}
+```
+
+Note on `tokenThatCausedMy401`: we can't easily pass the old token through the interceptor's
+`runBlocking { refresh() }` call without changing `AuthTokenProvider.refresh()`'s signature.
+Two options:
+
+- **(i) Compare against a captured "last refresh completed at" timestamp.** If another
+  refresh finished after this caller observed their 401 (i.e., after `chain.proceed` returned),
+  return the cached token. Requires passing a timestamp through the interceptor call —
+  signature change.
+- **(ii) Compare against the RT in `current`.** If the RT in `sessionStore.load()` is
+  different from what we expected, someone refreshed. But interceptor doesn't know the
+  "expected" RT either.
+- **(iii) Keep it simple: if `cachedAccessToken` != the access token on the retry request,
+  skip the Supabase call and return the cache.** The interceptor passes the old token to
+  `refresh()` as a parameter.
+
+**Recommended:** (iii). Minimal signature change (`refresh(previousAccessToken: String)`),
+and the check is precise: "is the cache strictly newer than what caused the 401?"
+
+**Mutex trade-off note.** Since `runBlocking { refresh() }` runs on the OkHttp dispatcher
+thread, the mutex `suspend` does park the coroutine but `runBlocking` keeps the OS thread
+blocked. During a refresh burst this means OkHttp's thread pool may grow to absorb pending
+work. Acceptable — refresh is rare (cache hit covers steady state).
+
+### 3.6 Cold-start read path
+
+The init-block observer subscribes asynchronously. The very first `currentAccessToken()` call
+after process start may fire **before** the observer has emitted its first value. The hot-path
+`cachedAccessToken.get()` returns null → falls through to the cold-path `runBlocking { sessionStore.load() }`
+→ `compareAndSet(null, loaded)` seeds the cache. Once the observer catches up, its emission
+is identical to what was seeded, so the `set()` is a no-op race.
 
 ---
 
 ## 4. Concurrency scenarios
 
-### S1. Two workers fire parallel 401s
+### S1. Two workers fire parallel 401s (with mutex §3.5)
 
-- Worker A and Worker B both see 401.
-- Both call `runBlocking { refresh() }`.
-- `refresh()` is **not** currently guarded by a mutex — both calls will hit
-  `authClient.refresh(...)` in parallel with the same refresh token.
-- Supabase typically rejects the second refresh (refresh tokens rotate) → B's refresh fails →
-  B returns `bufferedResponse` (401) to the caller. A's retry succeeds.
-- **With cache**: same outcome. B's failed refresh does **not** invalidate A's cache update,
-  because we only `set` on success.
-- **Open question:** should we serialize `refresh()` with a `Mutex`? Out of scope for H3
-  (existing behaviour) but worth flagging.
+- Worker A and Worker B both see 401 simultaneously, both call `runBlocking { refresh(oldToken) }`.
+- A acquires `refreshMutex`, B suspends waiting.
+- A loads current session, calls `authClient.refresh(RT_v1)` → Supabase issues AT_v2 / RT_v2,
+  `sessionStore.save()` triggers observer → cache = AT_v2. A releases mutex, returns AT_v2.
+- B acquires mutex. Double-check: `cachedAccessToken.get() = AT_v2`, which differs from
+  `oldToken` (AT_v1 that caused B's 401) → return AT_v2 without a Supabase call.
+- Both workers retry with AT_v2 and succeed. **Supabase refresh calls: 1 (was N).**
 
 ### S2. Logout during in-flight request
 
 - User taps Logout → `AuthRepository.signOut()` → `sessionStore.clear()`.
-- Cache observer (option 3.3a) sets `cachedAccessToken` to null.
+- Cache observer (via `.observe()` Flow) emits `null` → `cachedAccessToken.set(null)`.
 - An in-flight request that already attached the pre-logout Bearer completes. Server returns
   200 (token still valid server-side for its TTL) or 401 (revoked). Either way behaviour is
   identical to current: we don't retry with the (now-null) refreshed token because `refresh()`
@@ -165,6 +263,16 @@ the retry request gets the fresh token via the same mechanism as today.
   401. If 401, Thread A's own refresh-and-retry path fires; `refresh()` sees the freshly saved
   v2 session and immediately returns the v2 token. No user-visible regression.
 
+### S5. Observer collector dies
+
+- `sessionStore.observe()` emits an exception (e.g., `IllegalStateException` from DataStore
+  corruption).
+- `.catch { Log.e(TAG, "session observer died — cache will stale", e) }` fires.
+- Cache freezes at its last value. Subsequent logins/logouts silently fail to update cache.
+- Detection: Logcat warning. No thrown exception surfaces to UI.
+- Mitigation (future, out of scope): restart the collector via retry operator, or surface a
+  metric to Firebase Crashlytics. For now we rely on the log.
+
 ---
 
 ## 5. AUTH-007 impact checklist
@@ -172,12 +280,16 @@ the retry request gets the fresh token via the same mechanism as today.
 - [ ] Host guard (L54): unchanged.
 - [ ] `currentAccessToken()` contract: still synchronous, still returns `String?`. Caller code
       is byte-identical.
-- [ ] `refresh()` contract: still `suspend`, still returns `String?` on success, `null` on
-      failure. Caller code is byte-identical.
+- [ ] `refresh()` signature: extended to `refresh(previousAccessToken: String): String?`
+      (§3.5 (iii)). Interceptor L79 call site updated; no other callers.
+- [ ] `refresh()` return contract: still `String?` on success, `null` on failure. Caller
+      branching byte-identical.
 - [ ] 401 buffer-and-rebuild (R1-01): unchanged.
 - [ ] `runBlocking` on 401 path (L79): unchanged.
 - [ ] Single-retry guarantee: unchanged.
 - [ ] IOException propagation: unchanged.
+- [ ] `SupabaseSessionStore` interface: extended with `observe(): Flow<SupabaseSession?>`.
+      Existing `save`/`load`/`clear` contracts byte-identical.
 
 ---
 
@@ -186,49 +298,82 @@ the retry request gets the fresh token via the same mechanism as today.
 **New unit tests** (`DefaultAuthTokenProviderTest`):
 
 - `currentAccessToken returns null when no session and cache empty`
-- `currentAccessToken loads from store on cold path`
+- `currentAccessToken seeds cache via cold-path load`
 - `currentAccessToken returns cached value on hot path without touching store`
-- `refresh success updates cache`
+- `observer updates cache when store emits new session`
+- `observer clears cache when store emits null`
+- `observer death is caught and logged, cache freezes` (verify no uncaught exception)
+- `refresh success persists new session and observer propagates to cache`
 - `refresh failure preserves prior cache value`
-- `logout/clear resets cache to null`
-- `concurrent currentAccessToken calls from cold state all return same token` (2 threads)
+- `concurrent currentAccessToken calls from cold state all return same token` (2 threads,
+  verify `compareAndSet` race is benign)
+
+**Refresh coalescing tests** (new suite `RefreshCoalescingTest`):
+
+- `N parallel refresh calls result in exactly 1 SupabaseAuthClient.refresh invocation`
+- `second caller receives the freshly cached token without a network call`
+- `all parallel callers see success when first refresh succeeds`
+- `second caller retries its own refresh when first refresh fails`
+
+**`SupabaseSessionStore` contract tests:**
+
+- `observe emits null on first subscription when no session persisted`
+- `observe emits saved session after save(...)`
+- `observe emits null after clear(...)`
+- `observe is a hot flow — late subscribers see the latest value`
 
 **Instrumentation smoke** (unchanged flow, verifies no regression):
 
-- Login → fire 10 parallel commitment reads → assert only 1 DataStore read via spy.
-- Force 401 (mock server) → assert single refresh call and retry with new token.
+- Login → fire 10 parallel commitment reads → assert only 1 DataStore read via spy on
+  `sessionStore.load`.
+- Force 401 burst (mock server, 5 concurrent requests) → assert exactly 1 Supabase refresh
+  call, all 5 requests succeed on retry.
 
-No new tests for AuthInterceptor itself — the interceptor is unchanged.
+No new tests for AuthInterceptor itself — the interceptor is unchanged apart from passing
+the old token into `refresh(previousAccessToken)`.
 
 ---
 
 ## 7. Open questions for CTO
 
-1. **Should `refresh()` be mutex-guarded?** Current code allows parallel refreshes. H3 does
-   not change this. Flag as M-tier tech debt?
-2. **Observer vs funnel (3.3a vs 3.3b)?** Depends on whether `SupabaseSessionStore` already
-   exposes a Flow. Pending a file read.
-3. **Rollout gate.** This change affects 100% of authenticated traffic. Merge behind the
-   existing `feat/becalm-mvp` staging deploy? Or behind a Firebase Remote Config kill-switch?
-4. **Metrics.** Do we want to emit a `auth.token.cache_hit` / `miss` counter for the first
-   week post-merge?
+1. **Rollout gate.** This change affects 100% of authenticated traffic. Recommendation by
+   user-base size:
+   - < 1,000 MAU: Play Store staged rollout (5% → 20% → 100% over 3 days). No runtime gate.
+   - 1,000 – 10,000 MAU: Firebase Remote Config `auth_token_cache_enabled` flag, default
+     `false`, flip ON gradually. Requires Remote Config SDK — **is it already wired in this
+     project?** Need to confirm.
+   - \> 10,000 MAU: Remote Config mandatory.
+2. **Metrics.** Emit `auth.token.cache_hit` / `cache_miss` / `refresh_coalesced` counters
+   via whatever telemetry pipeline exists (Firebase Analytics / custom Railway endpoint)?
+   Retain for 2 weeks post-merge to validate cache hit-rate assumptions.
+3. **`refresh()` signature change.** Adding `previousAccessToken` parameter — OK, or prefer
+   alternative §3.5(i) timestamp approach?
 
 ---
 
 ## 8. Out of scope
 
-- Mutex-guarded refresh (tracked separately if CTO agrees in Q7.1).
-- `SupabaseSessionStore` Flow API (if it doesn't already exist).
+- Deduplicating the dual `sessionStore.save` between `SupabaseAuthClient.kt:195` and
+  `NetworkModule.kt:261`. Pre-existing tech debt. Observer pattern tolerates both call sites.
 - Replacing `runBlocking` on the cold path (requires re-architecting the
   `AuthTokenProvider` interface to be suspendable; large blast radius).
+- Auto-recovering from observer death (§S5). Relies on Logcat warning + Crashlytics for now.
 
 ---
 
 ## 9. Implementation sequence (post-approval)
 
-1. Read `SupabaseSessionStore.kt` end-to-end; decide 3.3a vs 3.3b.
-2. Add `cachedAccessToken: AtomicReference<String?>` to `DefaultAuthTokenProvider`.
-3. Wire writes (observer or funnel).
-4. Add unit tests listed in §6.
-5. Run `./gradlew :app:testDebugUnitTest` (CTO on Windows — Claude cannot run gradle in WSL2).
-6. Open PR against `feat/becalm-mvp`. Reference this plan doc.
+1. Extend `SupabaseSessionStore` interface with `observe(): Flow<SupabaseSession?>`.
+2. Implement `observe()` in `EncryptedTokenStore` via `MutableStateFlow` seeded lazily on
+   first subscription.
+3. Add `cachedAccessToken: AtomicReference<String?>` + `refreshMutex: Mutex` +
+   `observerScope: CoroutineScope(SupervisorJob())` to `DefaultAuthTokenProvider`.
+4. Wire init-block observer with `.catch { Log.e(...) }`.
+5. Rewrite `currentAccessToken()` with hot-path + cold-path fallback.
+6. Change `AuthTokenProvider.refresh()` signature to `refresh(previousAccessToken: String): String?`.
+   Implement double-checked mutex pattern in `DefaultAuthTokenProvider.refresh()`.
+7. Update `AuthInterceptor.kt:79` to pass `token` (the value attached at L59) into `refresh(...)`.
+8. Add unit tests listed in §6.
+9. Run `./gradlew :app:testDebugUnitTest` + `:app:lintDebug` (CTO on Windows — Claude cannot
+   run gradle in WSL2).
+10. Open PR against `feat/becalm-mvp`. Reference this plan doc.
