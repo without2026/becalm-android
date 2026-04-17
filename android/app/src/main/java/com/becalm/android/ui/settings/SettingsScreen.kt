@@ -58,36 +58,22 @@ import kotlinx.coroutines.launch
 
 @Composable
 private fun PipaDisclosureList() {
+    val bullets = listOf(
+        R.string.onb_pipa_bullet_1_label to R.string.onb_pipa_bullet_1_value,
+        R.string.onb_pipa_bullet_2_label to R.string.onb_pipa_bullet_2_value,
+        R.string.onb_pipa_bullet_3_label to R.string.onb_pipa_bullet_3_value,
+        R.string.onb_pipa_bullet_4_label to R.string.onb_pipa_bullet_4_value,
+        R.string.onb_pipa_bullet_5_label to R.string.onb_pipa_bullet_5_value,
+        R.string.onb_pipa_bullet_6_label to R.string.onb_pipa_bullet_6_value,
+    )
     Column {
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_1_label),
-            value = stringResource(R.string.onb_pipa_bullet_1_value),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_2_label),
-            value = stringResource(R.string.onb_pipa_bullet_2_value),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_3_label),
-            value = stringResource(R.string.onb_pipa_bullet_3_value),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_4_label),
-            value = stringResource(R.string.onb_pipa_bullet_4_value),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_5_label),
-            value = stringResource(R.string.onb_pipa_bullet_5_value),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        SettingsPipaDisclosureBullet(
-            label = stringResource(R.string.onb_pipa_bullet_6_label),
-            value = stringResource(R.string.onb_pipa_bullet_6_value),
-        )
+        bullets.forEachIndexed { index, (labelRes, valueRes) ->
+            if (index > 0) Spacer(modifier = Modifier.height(8.dp))
+            SettingsPipaDisclosureBullet(
+                label = stringResource(labelRes),
+                value = stringResource(valueRes),
+            )
+        }
     }
 }
 
@@ -155,109 +141,68 @@ public fun SettingsScreen(
     var showPipaDisableDialog by remember { mutableStateOf(false) }
 
     if (showSignOutDialog) {
-        AlertDialog(
-            onDismissRequest = { showSignOutDialog = false },
-            title = { Text(stringResource(R.string.settings_sign_out_confirm_title)) },
-            text = { Text(stringResource(R.string.settings_sign_out_confirm_message)) },
-            confirmButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_sign_out),
-                    onClick = {
-                        showSignOutDialog = false
-                        viewModel.onSignOut()
-                    },
-                    variant = BecalmButtonVariant.Text,
-                )
+        ConfirmDialog(
+            title = stringResource(R.string.settings_sign_out_confirm_title),
+            confirmText = stringResource(R.string.action_sign_out),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showSignOutDialog = false
+                viewModel.onSignOut()
             },
-            dismissButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_cancel),
-                    onClick = { showSignOutDialog = false },
-                    variant = BecalmButtonVariant.Text,
-                )
-            },
-        )
+            onDismiss = { showSignOutDialog = false },
+        ) {
+            Text(stringResource(R.string.settings_sign_out_confirm_message))
+        }
     }
 
     if (showWipeDialog) {
-        AlertDialog(
-            onDismissRequest = { showWipeDialog = false },
-            title = { Text(stringResource(R.string.settings_wipe_confirm_title)) },
-            text = { Text(stringResource(R.string.settings_wipe_confirm_message)) },
-            confirmButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_wipe_data),
-                    onClick = {
-                        showWipeDialog = false
-                        viewModel.onWipeLocalData()
-                    },
-                    variant = BecalmButtonVariant.Text,
-                )
+        ConfirmDialog(
+            title = stringResource(R.string.settings_wipe_confirm_title),
+            confirmText = stringResource(R.string.action_wipe_data),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showWipeDialog = false
+                viewModel.onWipeLocalData()
             },
-            dismissButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_cancel),
-                    onClick = { showWipeDialog = false },
-                    variant = BecalmButtonVariant.Text,
-                )
-            },
-        )
+            onDismiss = { showWipeDialog = false },
+        ) {
+            Text(stringResource(R.string.settings_wipe_confirm_message))
+        }
     }
 
     // PIPA 동의 ON — re-show all 6 disclosure bullets; user must confirm before consent is written.
     if (showPipaEnableDialog) {
-        AlertDialog(
-            onDismissRequest = { showPipaEnableDialog = false },
-            title = { Text(stringResource(R.string.settings_pipa_enable_dialog_title)) },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    PipaDisclosureList()
-                }
+        ConfirmDialog(
+            title = stringResource(R.string.settings_pipa_enable_dialog_title),
+            confirmText = stringResource(R.string.onb_pipa_button_agree),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showPipaEnableDialog = false
+                viewModel.onTogglePipaConsent(true)
             },
-            confirmButton = {
-                BecalmButton(
-                    text = stringResource(R.string.onb_pipa_button_agree),
-                    onClick = {
-                        showPipaEnableDialog = false
-                        viewModel.onTogglePipaConsent(true)
-                    },
-                    variant = BecalmButtonVariant.Primary,
-                )
-            },
-            dismissButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_cancel),
-                    onClick = { showPipaEnableDialog = false },
-                    variant = BecalmButtonVariant.Text,
-                )
-            },
-        )
+            onDismiss = { showPipaEnableDialog = false },
+            primaryConfirm = true,
+        ) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                PipaDisclosureList()
+            }
+        }
     }
 
     // PIPA 동의 OFF — warn that future recordings will not be auto-uploaded.
     if (showPipaDisableDialog) {
-        AlertDialog(
-            onDismissRequest = { showPipaDisableDialog = false },
-            title = { Text(stringResource(R.string.settings_pipa_toggle_label)) },
-            text = { Text(stringResource(R.string.settings_pipa_disable_dialog_warning)) },
-            confirmButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_confirm),
-                    onClick = {
-                        showPipaDisableDialog = false
-                        viewModel.onTogglePipaConsent(false)
-                    },
-                    variant = BecalmButtonVariant.Text,
-                )
+        ConfirmDialog(
+            title = stringResource(R.string.settings_pipa_toggle_label),
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showPipaDisableDialog = false
+                viewModel.onTogglePipaConsent(false)
             },
-            dismissButton = {
-                BecalmButton(
-                    text = stringResource(R.string.action_cancel),
-                    onClick = { showPipaDisableDialog = false },
-                    variant = BecalmButtonVariant.Text,
-                )
-            },
-        )
+            onDismiss = { showPipaDisableDialog = false },
+        ) {
+            Text(stringResource(R.string.settings_pipa_disable_dialog_warning))
+        }
     }
 
     BecalmScaffold(
@@ -470,22 +415,44 @@ private fun PreviewSettingsScreen() {
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Spacer(modifier = Modifier.height(24.dp))
-                SettingsSectionLabel("Preferences")
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .glassPanel(MaterialTheme.shapes.medium)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                ) {
-                    SettingsToggleRow(
-                        label = "Notifications",
-                        checked = true,
-                        onCheckedChange = {},
-                    )
-                }
             }
         }
     }
+}
+
+/**
+ * 네 개의 거의 동일한 AlertDialog(sign-out / wipe / PIPA on·off)를 하나로 묶기 위해 추출.
+ * 호출자는 본문 slot에 단일 Text 또는 스크롤 Column을 직접 전달해야 하며,
+ * confirm/dismiss 버튼 텍스트와 콜백은 원본과 동일한 순서로 전달해야 한다.
+ * primaryConfirm=true일 때만 confirm 버튼이 Primary variant로 표시되며, 그 외 동작은 원본과 완전히 동일하다.
+ */
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    confirmText: String,
+    dismissText: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    primaryConfirm: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { content() },
+        confirmButton = {
+            BecalmButton(
+                text = confirmText,
+                onClick = onConfirm,
+                variant = if (primaryConfirm) BecalmButtonVariant.Primary else BecalmButtonVariant.Text,
+            )
+        },
+        dismissButton = {
+            BecalmButton(
+                text = dismissText,
+                onClick = onDismiss,
+                variant = BecalmButtonVariant.Text,
+            )
+        },
+    )
 }

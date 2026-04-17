@@ -2,6 +2,8 @@ package com.becalm.android.worker.ingestion
 
 import android.content.ContentUris
 import android.content.Context
+import android.database.Cursor
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.Telephony
@@ -10,12 +12,15 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
+import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CancellationException
@@ -88,15 +93,9 @@ public class MediaStoreWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
-        val smsMissing = ContextCompat.checkSelfPermission(
-            appContext,
-            android.Manifest.permission.READ_SMS,
-        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        val smsMissing = isMissing(android.Manifest.permission.READ_SMS)
 
         // VOI-005: READ_MEDIA_AUDIO on API 33+; READ_EXTERNAL_STORAGE on API 28-32.
         val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -104,10 +103,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         } else {
             android.Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        val audioMissing = ContextCompat.checkSelfPermission(
-            appContext,
-            audioPermission,
-        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        val audioMissing = isMissing(audioPermission)
 
         if (smsMissing && audioMissing) {
             logger.w(TAG, "both permissions missing — retrying")
@@ -149,35 +145,31 @@ public class MediaStoreWorker @AssistedInject constructor(
         var count = 0
         var maxDateMs = lastSeenMs
 
-        try {
-            appContext.contentResolver.query(
-                Telephony.Sms.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                sortOrder,
-            )?.use { cursor ->
-                val idxDate = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
-                val idxAddress = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
+        val scanned = queryMediaStore(
+            uri = Telephony.Sms.CONTENT_URI,
+            projection = projection,
+            selection = selection,
+            selectionArgs = selectionArgs,
+            sortOrder = sortOrder,
+            onError = { e ->
+                logger.e(TAG, "SMS query failed", e)
+                sourceStatusRepository.recordSyncError(SOURCE_SMS_MMS, e.message ?: "query failed", now)
+            },
+        ) { cursor ->
+            val idxDate = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
+            val idxAddress = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
 
-                while (cursor.moveToNext()) {
-                    val dateMs = cursor.getLong(idxDate)
-                    val rawAddress = cursor.getString(idxAddress) ?: ""
-                    // PII guard: log only the hashed address, never the raw value
-                    logger.d(TAG, "sms row hash=${redact(rawAddress)} dateMs=$dateMs")
+            while (cursor.moveToNext()) {
+                val dateMs = cursor.getLong(idxDate)
+                val rawAddress = cursor.getString(idxAddress) ?: ""
+                // PII guard: log only the hashed address, never the raw value
+                logger.d(TAG, "sms row hash=${redact(rawAddress)} dateMs=$dateMs")
 
-                    count++
-                    if (dateMs > maxDateMs) maxDateMs = dateMs
-                }
+                count++
+                if (dateMs > maxDateMs) maxDateMs = dateMs
             }
-        } catch (e: Exception) {
-            // Rethrow CancellationException so WorkManager can properly cancel the worker;
-            // swallowing it would cause the coroutine to continue after cancellation.
-            if (e is CancellationException) throw e
-            logger.e(TAG, "SMS query failed", e)
-            sourceStatusRepository.recordSyncError(SOURCE_SMS_MMS, e.message ?: "query failed", now)
-            return 0
         }
+        if (!scanned) return 0
 
         if (count > 0) {
             syncCursorStore.setMediaStoreLastSeen(KIND_SMS, maxDateMs)
@@ -273,108 +265,105 @@ public class MediaStoreWorker @AssistedInject constructor(
         // Track the highest DATE_ADDED (in ms) across successfully processed rows only
         var maxDateAddedMs = lastSeenMs
 
-        try {
-            appContext.contentResolver.query(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                sortOrder,
-            )?.use { cursor ->
-                val idxId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-                val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+        val scanned = queryMediaStore(
+            uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection = projection,
+            selection = selection,
+            selectionArgs = selectionArgs,
+            sortOrder = sortOrder,
+            onError = { e ->
+                logger.e(TAG, "voice MediaStore query failed", e)
+                sourceStatusRepository.recordSyncError(SourceType.VOICE, e.message ?: "query failed", now)
+            },
+        ) { cursor ->
+            val idxId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
 
-                while (cursor.moveToNext()) {
-                    val mediaId = cursor.getLong(idxId)
-                    val dateAddedSec = cursor.getLong(idxDateAdded)
-                    // MediaStore DURATION is in milliseconds; store as integer seconds
-                    val durationMs = cursor.getLong(idxDuration)
-                    val durationSec = (durationMs / 1_000L).toInt()
-                    val displayName = cursor.getString(idxDisplayName) ?: ""
+            while (cursor.moveToNext()) {
+                val mediaId = cursor.getLong(idxId)
+                val dateAddedSec = cursor.getLong(idxDateAdded)
+                // MediaStore DURATION is in milliseconds; store as integer seconds
+                val durationMs = cursor.getLong(idxDuration)
+                val durationSec = (durationMs / 1_000L).toInt()
+                val displayName = cursor.getString(idxDisplayName) ?: ""
 
-                    // PII guard: log only a hash of the file name, never the raw path
-                    logger.d(
-                        TAG,
-                        "voice row nameHash=${redact(displayName)} durationSec=$durationSec dateAddedSec=$dateAddedSec",
-                    )
+                // PII guard: log only a hash of the file name, never the raw path
+                logger.d(
+                    TAG,
+                    "voice row nameHash=${redact(displayName)} durationSec=$durationSec dateAddedSec=$dateAddedSec",
+                )
 
-                    // Build the audio content URI — openInputStream on this returns real audio bytes
-                    val audioUri = ContentUris.withAppendedId(
-                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                        mediaId,
-                    ).toString()
+                // Build the audio content URI — openInputStream on this returns real audio bytes
+                val audioUri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    mediaId,
+                ).toString()
 
-                    // Deterministic idempotency key: same mediaId always yields same clientEventId
-                    val clientEventId = "mediastore:voice:$mediaId"
+                // Deterministic idempotency key: same mediaId always yields same clientEventId
+                val clientEventId = "mediastore:voice:$mediaId"
 
-                    val entity = RawIngestionEventEntity(
-                        id = UUID.randomUUID().toString(),
-                        userId = userId,
-                        clientEventId = clientEventId,
-                        sourceType = SOURCE_VOICE,
-                        sourceRef = audioUri,
-                        durationSeconds = durationSec,
-                        timestamp = Instant.fromEpochSeconds(dateAddedSec),
-                        syncStatus = "pending",
-                    )
+                val entity = RawIngestionEventEntity(
+                    id = UUID.randomUUID().toString(),
+                    userId = userId,
+                    clientEventId = clientEventId,
+                    sourceType = SourceType.VOICE,
+                    sourceRef = audioUri,
+                    durationSeconds = durationSec,
+                    timestamp = Instant.fromEpochSeconds(dateAddedSec),
+                    syncStatus = "pending",
+                )
 
-                    val rowId = try {
-                        rawIngestionEventDao.insert(entity)
-                    } catch (e: Exception) {
-                        // Rethrow CancellationException so WorkManager can properly cancel.
-                        if (e is CancellationException) throw e
-                        // Per-row failure: log and continue so one bad row doesn't abort the batch.
-                        // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
-                        // next run. The >= predicate combined with clientEventId dedup ensures it is
-                        // re-discovered without double-inserting already-processed siblings.
-                        logger.e(TAG, "DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}", e)
-                        hasInsertFailure = true
+                val rowId = try {
+                    rawIngestionEventDao.insert(entity)
+                } catch (e: Exception) {
+                    // Rethrow CancellationException so WorkManager can properly cancel.
+                    if (e is CancellationException) throw e
+                    // Per-row failure: log and continue so one bad row doesn't abort the batch.
+                    // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
+                    // next run. The >= predicate combined with clientEventId dedup ensures it is
+                    // re-discovered without double-inserting already-processed siblings.
+                    logger.e(TAG, "DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}", e)
+                    hasInsertFailure = true
+                    continue
+                }
+
+                val rowMs = dateAddedSec * 1_000L
+                if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+
+                // Resolve the actual row ID for enqueue. On fresh insert, use entity.id.
+                // On dedup hit (rowId == -1L), the generated UUID was NOT persisted —
+                // look up the existing row to get its real ID.
+                val enqueueId = if (rowId != -1L) {
+                    insertedCount++
+                    entity.id
+                } else {
+                    val existing = rawIngestionEventDao.findByClientEventId(userId, clientEventId)
+                    if (existing == null ||
+                        existing.syncStatus != "pending" ||
+                        existing.commitmentsExtractedCount > 0
+                    ) {
+                        // Row not found, already extracted, or not in pending state — skip
                         continue
                     }
+                    existing.id
+                }
 
-                    val rowMs = dateAddedSec * 1_000L
-                    if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
-
-                    // Resolve the actual row ID for enqueue. On fresh insert, use entity.id.
-                    // On dedup hit (rowId == -1L), the generated UUID was NOT persisted —
-                    // look up the existing row to get its real ID.
-                    val enqueueId = if (rowId != -1L) {
-                        insertedCount++
-                        entity.id
-                    } else {
-                        val existing = rawIngestionEventDao.findByClientEventId(userId, clientEventId)
-                        if (existing == null ||
-                            existing.syncStatus != "pending" ||
-                            existing.commitmentsExtractedCount > 0
-                        ) {
-                            // Row not found, already extracted, or not in pending state — skip
-                            continue
-                        }
-                        existing.id
-                    }
-
-                    // Enqueue (or re-enqueue on dedup recovery). The dedup path above
-                    // already guards against re-uploading extracted/non-pending rows.
-                    try {
-                        workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
-                        logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=${rowId != -1L}")
-                    } catch (e: Exception) {
-                        // Rethrow CancellationException so WorkManager can properly cancel.
-                        if (e is CancellationException) throw e
-                        logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
-                        hasInsertFailure = true
-                    }
+                // Enqueue (or re-enqueue on dedup recovery). The dedup path above
+                // already guards against re-uploading extracted/non-pending rows.
+                try {
+                    workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
+                    logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=${rowId != -1L}")
+                } catch (e: Exception) {
+                    // Rethrow CancellationException so WorkManager can properly cancel.
+                    if (e is CancellationException) throw e
+                    logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
+                    hasInsertFailure = true
                 }
             }
-        } catch (e: Exception) {
-            // Rethrow CancellationException so WorkManager can properly cancel the worker.
-            if (e is CancellationException) throw e
-            logger.e(TAG, "voice MediaStore query failed", e)
-            sourceStatusRepository.recordSyncError(SOURCE_VOICE, e.message ?: "query failed", now)
-            return 0
         }
+        if (!scanned) return 0
 
         // Only advance cursor when every row succeeded. If any insert failed, freeze the
         // cursor so the failed row is re-discovered on the next run (>= predicate + dedup).
@@ -386,7 +375,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             )
         }
 
-        sourceStatusRepository.recordSyncSuccess(SOURCE_VOICE, now)
+        sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
         logger.d(TAG, "ING-003 voice recordings inserted=$insertedCount")
         return insertedCount
     }
@@ -394,11 +383,42 @@ public class MediaStoreWorker @AssistedInject constructor(
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
-     * Returns an 8-char hex surrogate for [value].
-     * Mirrors the pattern used in PersonEnrichmentRepository to prevent PII from
-     * appearing in logcat.
+     * MediaStore cursor 스캔 스캐폴드를 한 군데로 모은 헬퍼.
+     * `CancellationException`은 그대로 rethrow하여 WorkManager 취소 경로를 보존한다.
+     * `.use { }` 자원 해제 동작과 null-cursor 시 no-op 처리 또한 원본과 동일하다.
+     * 예외 발생 시 [onError]를 호출하고 `false`를 반환해 호출부가 early-return 하도록 한다.
      */
-    private fun redact(value: String): String = "%08x".format(value.hashCode())
+    private inline fun queryMediaStore(
+        uri: Uri,
+        projection: Array<String>,
+        selection: String?,
+        selectionArgs: Array<String>?,
+        sortOrder: String?,
+        onError: (Exception) -> Unit,
+        onCursor: (Cursor) -> Unit,
+    ): Boolean {
+        try {
+            appContext.contentResolver.query(
+                uri,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder,
+            )?.use { cursor -> onCursor(cursor) }
+        } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel the worker;
+            // swallowing it would cause the coroutine to continue after cancellation.
+            if (e is CancellationException) throw e
+            onError(e)
+            return false
+        }
+        return true
+    }
+
+    /** 지정 권한이 현재 미허용 상태면 true를 반환한다. */
+    private fun isMissing(perm: String): Boolean =
+        ContextCompat.checkSelfPermission(appContext, perm) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
 
     public companion object {
         private const val TAG = "MediaStoreWorker"
@@ -417,13 +437,6 @@ public class MediaStoreWorker @AssistedInject constructor(
          * Not a [com.becalm.android.data.remote.dto.SourceType] wire value.
          */
         public const val SOURCE_SMS_MMS: String = "sms_mms"
-
-        /**
-         * Source identifier used with [SourceStatusRepository] for voice recordings.
-         * Matches [com.becalm.android.data.remote.dto.SourceType.VOICE].
-         * Also written as [RawIngestionEventEntity.sourceType] for every inserted row.
-         */
-        public const val SOURCE_VOICE: String = "voice"
 
         /**
          * Samsung Voice Recorder default relative folder name (ONB-002 spec reference).

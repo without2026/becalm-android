@@ -20,6 +20,7 @@ import com.becalm.android.data.remote.imap.ImapClient
 import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -76,10 +77,7 @@ public class ImapNaverWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return Result.failure()
-        }
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
         val credentials = imapCredentialStore.getCredentials()

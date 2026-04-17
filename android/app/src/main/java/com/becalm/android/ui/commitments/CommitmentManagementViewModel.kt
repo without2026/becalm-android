@@ -216,10 +216,14 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-006
     public fun onSchedule(id: String, at: Instant) {
-        launchActionWithEffect("onSchedule", id, {
+        launchAction(
+            name = "onSchedule",
+            id = id,
+            effect = {
+                reminderScheduler.schedule(id, JavaInstant.ofEpochMilli(at.toEpochMilliseconds()))
+            },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))
-        }) {
-            reminderScheduler.schedule(id, JavaInstant.ofEpochMilli(at.toEpochMilliseconds()))
         }
     }
 
@@ -230,10 +234,12 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-007
     public fun onMarkDone(id: String) {
-        launchActionWithEffect("onMarkDone", id, {
+        launchAction(
+            name = "onMarkDone",
+            id = id,
+            effect = { reminderScheduler.cancel(id) },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)
-        }) {
-            reminderScheduler.cancel(id)
         }
     }
 
@@ -245,59 +251,40 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-008
     public fun onDismiss(id: String) {
-        launchActionWithEffect("onDismiss", id, {
+        launchAction(
+            name = "onDismiss",
+            id = id,
+            effect = { reminderScheduler.cancel(id) },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)
-        }) {
-            reminderScheduler.cancel(id)
         }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    /** id 해시를 로그용 8자리 hex 문자열로 변환한다. */
+    private fun hashId(id: String): String = "%08x".format(id.hashCode())
+
     /**
-     * Launches a simple action that returns [BecalmResult] and surfaces failure to
-     * [CommitmentUiState.error]. Used for actions that do not require post-success
-     * side effects beyond clearing the error flag.
+     * 원래 launchAction / launchActionWithEffect 두 버전을 하나로 병합한 헬퍼.
+     * effect는 block이 Success일 때만, 상태 머신 업데이트(_uiState) 이후에 실행되며,
+     * null이면 실행을 건너뛴다. CMT-005/6/7 FSM 전이 순서는 block 내부 책임이다.
      */
     private fun launchAction(
         name: String,
         id: String,
+        effect: (suspend () -> Unit)? = null,
         block: suspend () -> BecalmResult<*>,
     ) {
         viewModelScope.launch {
             when (val result = block()) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "$name succeeded id=%08x".format(id.hashCode()))
+                    logger.d(TAG, "$name succeeded id=${hashId(id)}")
                     _uiState.update { it.copy(error = null) }
+                    effect?.invoke()
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "$name failed id=%08x: ${result.error}".format(id.hashCode()))
-                    _uiState.update { it.copy(error = result.error.toString()) }
-                }
-            }
-        }
-    }
-
-    /**
-     * Like [launchAction], but on success runs an additional side-effect [effect] (e.g.
-     * schedule/cancel an alarm). The effect runs after the state transition succeeds and
-     * is not wrapped in a try-catch — if the effect throws, the transition is still committed.
-     */
-    private fun launchActionWithEffect(
-        name: String,
-        id: String,
-        block: suspend () -> BecalmResult<*>,
-        effect: suspend () -> Unit,
-    ) {
-        viewModelScope.launch {
-            when (val result = block()) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "$name succeeded id=%08x".format(id.hashCode()))
-                    _uiState.update { it.copy(error = null) }
-                    effect()
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "$name failed id=%08x: ${result.error}".format(id.hashCode()))
+                    logger.w(TAG, "$name failed id=${hashId(id)}: ${result.error}")
                     _uiState.update { it.copy(error = result.error.toString()) }
                 }
             }

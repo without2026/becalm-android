@@ -15,6 +15,7 @@ import com.becalm.android.data.remote.msgraph.MsGraphClient
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -71,10 +72,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         val now = Clock.System.now()
         logger.d(TAG, "doWork started runAttemptCount=$runAttemptCount")

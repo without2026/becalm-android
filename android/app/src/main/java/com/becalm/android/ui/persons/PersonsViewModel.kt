@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -201,6 +202,4 @@ public class PersonsViewModel @Inject constructor(
         interactionCount = 0,
         starred = false,
     )
-
-    private fun redact(personRef: String): String = "%08x".format(personRef.hashCode())
 }

@@ -8,16 +8,16 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
-import com.becalm.android.data.remote.dto.CommitmentDraftDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
@@ -27,17 +27,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.io.IOException
-import java.util.UUID
+
+// sync_status 리터럴. STATUS_PENDING 은 [VoiceUploadMappers] 와 공유하기 위해 그쪽에 internal 로 두고
+// STATUS_AWAITING_CONSENT 는 이 파일에서만 쓰이므로 file-private 으로 유지한다.
+private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 
 /**
  * [CoroutineWorker] that uploads a voice recording to Railway's
@@ -128,12 +126,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
             return@withContext Result.failure()
         }
 
-        // VOI-004: PIPA consent gate
-        val hasConsent = userPrefsStore.observeThirdPartyProvisionConsent().first()
-        if (!hasConsent) {
-            logger.w(TAG, "PIPA consent not granted — parking id=${redact(rawEventId)} as awaiting_consent")
-            val parked = entity.copy(syncStatus = "awaiting_consent")
-            rawIngestionEventDao.update(parked)
+        // VOI-004: PIPA consent gate (first check — pre-upload).
+        if (parkIfConsentWithdrawn(entity, rawEventId, stage = "PIPA consent not granted")) {
             return@withContext Result.success()
         }
 
@@ -159,30 +153,21 @@ public class VoiceUploadWorker @AssistedInject constructor(
         // VOI-004: second PIPA gate — consent may have been withdrawn while this job was queued
         // or while buildAudioPart was running. Check immediately before the network call so no
         // audio bytes are transmitted after consent is revoked (finding #1 in-flight race fix).
-        val hasConsentPreCall = userPrefsStore.observeThirdPartyProvisionConsent().first()
-        if (!hasConsentPreCall) {
-            logger.w(TAG, "PIPA consent withdrawn before network call — parking id=${redact(rawEventId)} as awaiting_consent")
-            val parked = entity.copy(syncStatus = "awaiting_consent")
-            rawIngestionEventDao.update(parked)
+        if (parkIfConsentWithdrawn(entity, rawEventId, stage = "PIPA consent withdrawn before network call")) {
             return@withContext Result.success()
         }
 
-        val clientEventIdBody = entity.clientEventId.toPlainRequestBody()
-        val rawEventIdBody = rawEventId.toPlainRequestBody()
-        val durationBody = (entity.durationSeconds ?: 0).toString().toPlainRequestBody()
-        val timestampBody = entity.timestamp.toString().toPlainRequestBody()
-        val personRefBody = entity.personRef?.toPlainRequestBody()
-        val eventTitleBody = entity.eventTitle?.toPlainRequestBody()
+        val parts = entity.toRequestParts(rawEventId)
 
         val response = try {
             voiceApi.transcribeExtract(
                 audio = audioPart,
-                clientEventId = clientEventIdBody,
-                rawEventId = rawEventIdBody,
-                durationSeconds = durationBody,
-                timestamp = timestampBody,
-                personRef = personRefBody,
-                eventTitle = eventTitleBody,
+                clientEventId = parts.clientEventId,
+                rawEventId = parts.rawEventId,
+                durationSeconds = parts.durationSeconds,
+                timestamp = parts.timestamp,
+                personRef = parts.personRef,
+                eventTitle = parts.eventTitle,
             )
         } catch (e: IOException) {
             logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -224,11 +209,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 val updated = entity.copy(
                     commitmentsExtractedCount = body.commitments.size,
                     eventSnippet = snippet,
-                    syncStatus = "pending",
+                    syncStatus = STATUS_PENDING,
                 )
                 rawIngestionEventDao.update(updated)
 
-                sourceStatusRepository.recordSyncSuccess(SOURCE_VOICE, now)
+                sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
                 logger.d(TAG, "upload success id=${redact(rawEventId)} commitments=${body.commitments.size}")
                 Result.success()
             }
@@ -270,6 +255,45 @@ public class VoiceUploadWorker @AssistedInject constructor(
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
+     * VOI-004 PIPA consent gate 구현 — pre-upload, post-upload 두 번 호출된다.
+     * 반환값이 true 이면 caller 는 즉시 중단해야 한다.
+     * 동의가 철회된 경우 entity 를 `awaiting_consent` 상태로 파킹하고,
+     * 업로드는 절대 수행하지 않는다 (오디오 바이트가 서버로 나가지 않음).
+     * [stage] 는 로그에 기록되어 어느 gate 에서 차단됐는지 구분한다.
+     */
+    private suspend fun parkIfConsentWithdrawn(
+        entity: RawIngestionEventEntity,
+        rawEventId: String,
+        stage: String,
+    ): Boolean {
+        val hasConsent = userPrefsStore.observeThirdPartyProvisionConsent().first()
+        if (hasConsent) return false
+        logger.w(TAG, "$stage — parking id=${redact(rawEventId)} as awaiting_consent")
+        val parked = entity.copy(syncStatus = STATUS_AWAITING_CONSENT)
+        rawIngestionEventDao.update(parked)
+        return true
+    }
+
+    /**
+     * 반복되는 try/catch 블록을 통합한다.
+     * CancellationException 은 반드시 rethrow 하여 WorkManager 의 cancel 신호를 보존한다.
+     * 실패 시 `"$op: ${e.message}"` 형태로 warn 로그를 남기고 [onFailure] 결과를 반환한다.
+     */
+    private inline fun <T> runCatchingNonCancel(
+        op: String,
+        block: () -> T,
+        onFailure: (Exception) -> T,
+    ): T {
+        return try {
+            block()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            logger.w(TAG, "$op: ${e.message}")
+            onFailure(e)
+        }
+    }
+
+    /**
      * Handles an HTTP 502 response by parsing the error envelope from [errorBodyString].
      *
      * Per api-contract.yml, three error codes are possible in the 502 envelope:
@@ -292,16 +316,15 @@ public class VoiceUploadWorker @AssistedInject constructor(
         entity: RawIngestionEventEntity,
         rawEventId: String,
     ): Result {
-        val envelope = try {
-            errorBodyString?.let {
-                moshi.adapter(VoiceErrorEnvelope::class.java).fromJson(it)
-            }
-        } catch (e: Exception) {
-            // Rethrow CancellationException so WorkManager can properly cancel the worker.
-            if (e is CancellationException) throw e
-            logger.w(TAG, "HTTP 502 — failed to parse error envelope id=${redact(rawEventId)}: ${e.message}")
-            null
-        }
+        val envelope = runCatchingNonCancel(
+            op = "HTTP 502 — failed to parse error envelope id=${redact(rawEventId)}",
+            block = {
+                errorBodyString?.let {
+                    moshi.adapter(VoiceErrorEnvelope::class.java).fromJson(it)
+                }
+            },
+            onFailure = { null },
+        )
 
         val errorCode = envelope?.error
         logger.w(TAG, "HTTP 502 id=${redact(rawEventId)} error=$errorCode attempt=$runAttemptCount")
@@ -327,14 +350,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * Returns null when [ContentResolver.openInputStream] fails (e.g. URI revoked).
      */
     private fun buildAudioPart(uri: Uri): MultipartBody.Part? {
-        val inputStream = try {
-            appContext.contentResolver.openInputStream(uri) ?: return null
-        } catch (e: Exception) {
-            // Rethrow CancellationException so WorkManager can properly cancel the worker.
-            if (e is CancellationException) throw e
-            logger.w(TAG, "openInputStream failed uri=${redact(uri.toString())}: ${e.message}")
-            return null
-        }
+        val inputStream = runCatchingNonCancel(
+            op = "openInputStream failed uri=${redact(uri.toString())}",
+            block = { appContext.contentResolver.openInputStream(uri) ?: return null },
+            onFailure = { return null },
+        )
 
         val streamingBody = object : RequestBody() {
             override fun contentType() = "audio/m4a".toMediaTypeOrNull()
@@ -393,7 +413,6 @@ public class VoiceUploadWorker @AssistedInject constructor(
         private const val TAG = "VoiceUploadWorker"
         private const val SNIPPET_MAX_CHARS = 200
         private const val MAX_ATTEMPTS = 3
-        private const val SOURCE_VOICE = "voice"
 
         /** Streaming buffer size — 64 KiB chunks per VOI-007. */
         private const val STREAM_BUFFER_BYTES = 65536
@@ -403,73 +422,5 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
         /** WorkManager input [androidx.work.Data] key: content URI string of the audio file. */
         public const val KEY_AUDIO_URI: String = "audio_uri"
-
-        /**
-         * Returns an 8-char hex surrogate for [s] to prevent PII (event IDs, audio URIs)
-         * from appearing in logcat. Mirrors the pattern used in other workers.
-         */
-        private fun redact(s: String): String = "%08x".format(s.hashCode())
     }
 }
-
-// ── Mapper extension ──────────────────────────────────────────────────────────
-
-/**
- * Maps a [CommitmentDraftDto] received from Railway to a [CommitmentEntity] ready for
- * Room insertion.
- *
- * The [CommitmentEntity.id] is a deterministic UUID v3 (name-based, MD5) keyed on
- * `"commitment:<rawEventId>:<index>"`. This ensures that re-processing the same audio
- * (e.g., a replayed 200 response) produces an upsert on the same primary key rather than
- * inserting a duplicate row — CommitmentDao uses [OnConflictStrategy.REPLACE], so duplicate
- * inserts become idempotent (finding #2 fix).
- *
- * @param rawEventId UUID of the originating [RawIngestionEventEntity] (used for deterministic ID).
- * @param index 0-based position of this commitment in the response list (used for deterministic ID).
- * @param userId Supabase auth.users UUID of the owning user.
- * @param sourceRef Source reference from the originating [RawIngestionEventEntity].
- * @param sourceEventTitle Event title from the originating [RawIngestionEventEntity].
- * @param sourceEventOccurredAt Timestamp of the source event (not extraction time).
- * @param now Wall-clock instant used for [CommitmentEntity.createdAt] and [CommitmentEntity.updatedAt].
- */
-private fun CommitmentDraftDto.toCommitmentEntity(
-    rawEventId: String,
-    index: Int,
-    userId: String,
-    sourceRef: String?,
-    sourceEventTitle: String?,
-    sourceEventOccurredAt: Instant,
-    now: Instant,
-): CommitmentEntity = CommitmentEntity(
-    // Deterministic UUID v3 (nameUUIDFromBytes uses MD5) keyed on rawEventId+index.
-    // Re-processing the same response yields the same ID → upsert, not duplicate.
-    id = UUID.nameUUIDFromBytes(
-        "commitment:$rawEventId:$index".toByteArray(Charsets.UTF_8),
-    ).toString(),
-    userId = userId,
-    direction = direction.lowercase(),
-    counterpartyRaw = null,
-    personRef = personRef,
-    title = text.take(500), // reasonable title truncation
-    description = null,
-    quote = quote,
-    sourceEventTitle = sourceEventTitle,
-    sourceEventOccurredAt = sourceEventOccurredAt,
-    dueDate = dueAt?.toLocalDate(),
-    actionState = "pending",
-    sourceType = "voice",
-    sourceRef = sourceRef,
-    confidence = confidence.toDouble(),
-    commitmentState = CommitmentState.DRAFT,
-    syncStatus = "pending",
-    createdAt = now,
-    updatedAt = now,
-)
-
-/** Converts an [Instant] to a [LocalDate] in the device's system time zone. */
-private fun Instant.toLocalDate(): LocalDate =
-    toLocalDateTime(TimeZone.currentSystemDefault()).date
-
-/** Convenience: creates a plain-text [RequestBody] from this String. */
-private fun String.toPlainRequestBody(): RequestBody =
-    toRequestBody("text/plain".toMediaTypeOrNull())

@@ -3,6 +3,7 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import java.io.IOException
@@ -193,15 +194,6 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
                     BecalmResult.Failure(e.toBecalmError("enrichment wipe failed"))
                 },
             )
-
-    /**
-     * Replaces a raw personRef (email, E.164 phone, or normalized display name) with a
-     * non-reversible 8-char hex surrogate. personRef is PII under PIPA; logcat is
-     * readable by any app with READ_LOGS on pre-JellyBean devices and by ADB attackers
-     * with physical access, so the raw value must never land there.
-     */
-    private fun redact(personRef: String): String =
-        "%08x".format(personRef.hashCode())
 
     private companion object {
         private const val TAG = "PersonEnrichmentRepo"

@@ -193,87 +193,78 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // spec: ONB-PIPA
+    // spec: ONB-PIPA / ONB-PIPA invariant: "동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화"
     /**
-     * Called when the user taps [동의] on [com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen].
+     * Shared implementation for [onPipaConsentGranted] / [onPipaConsentDeclined].
      *
-     * Writes pipa_third_party_consent=true (+ timestamp) to DataStore, marks
-     * [OnboardingStep.PIPA_CONSENT] as [StepStatus.GRANTED], and advances to
-     * [OnboardingStep.RECORDING_FOLDER].
+     * Writes pipa_third_party_consent=[granted] to DataStore. On success:
+     *  - granted=true  → mark PIPA_CONSENT=GRANTED, advance to RECORDING_FOLDER
+     *  - granted=false → mark PIPA_CONSENT=DENIED + RECORDING_FOLDER=SKIPPED, advance to CONTACTS_PERM
+     *    (voice events stored with sync_status='awaiting_consent'; VOI-004)
      *
-     * The navigation itself is performed by the composable callback chain; this method
-     * only owns the DataStore write and step-state update.
+     * Emits [PipaConsentEvent] so [PipaThirdPartyConsentScreen] navigates only after the write.
      */
-    public fun onPipaConsentGranted() {
+    private fun setPipa(granted: Boolean) {
+        // 로그 태그는 분리돼 있던 onPipaConsentGranted / onPipaConsentDeclined 시절과 동일하게 유지한다.
+        // (로그 파이프라인/필터가 함수명 prefix에 의존할 수 있으므로 drift 방지)
+        val caller = if (granted) "onPipaConsentGranted" else "onPipaConsentDeclined"
         viewModelScope.launch {
             try {
-                userPrefsStore.setThirdPartyProvisionConsent(true)
-                logger.i(TAG, "PIPA third-party provision consent GRANTED")
-                // Update step state only after the write succeeds, then signal the screen to navigate.
+                userPrefsStore.setThirdPartyProvisionConsent(granted)
+                if (granted) {
+                    logger.i(TAG, "PIPA third-party provision consent GRANTED")
+                } else {
+                    logger.i(TAG, "PIPA third-party provision consent DECLINED — voice auto-upload disabled")
+                }
                 _uiState.update { state ->
                     val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
-                    val recordingFolderIndex = steps.indexOf(OnboardingStep.RECORDING_FOLDER)
-                    logger.d(TAG, "onPipaConsentGranted: advancing to RECORDING_FOLDER (index=$recordingFolderIndex)")
-                    state.copy(
-                        currentStepIndex = recordingFolderIndex.coerceAtLeast(pipaIndex + 1),
-                        stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED),
-                        error = null,
-                    )
+                    if (granted) {
+                        val recordingFolderIndex = steps.indexOf(OnboardingStep.RECORDING_FOLDER)
+                        logger.d(TAG, "$caller: advancing to RECORDING_FOLDER (index=$recordingFolderIndex)")
+                        state.copy(
+                            currentStepIndex = recordingFolderIndex.coerceAtLeast(pipaIndex + 1),
+                            stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED),
+                            error = null,
+                        )
+                    } else {
+                        // Skip RECORDING_FOLDER — go straight to CONTACTS_PERM. Mark RECORDING_FOLDER
+                        // as SKIPPED so the onCompleteOnboarding() terminal-status gate doesn't lock
+                        // the user out (PIPA compliance fix).
+                        val contactsIndex = steps.indexOf(OnboardingStep.CONTACTS_PERM)
+                        val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
+                        logger.d(TAG, "$caller: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
+                        state.copy(
+                            currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
+                            stepStates = state.stepStates +
+                                (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
+                                (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
+                            error = null,
+                        )
+                    }
                 }
-                _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = true))
+                _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = granted))
             } catch (e: Exception) {
-                logger.e(TAG, "onPipaConsentGranted: DataStore write failed", e)
+                logger.e(TAG, "$caller: DataStore write failed", e)
                 _uiState.update { it.copy(error = e.message ?: "consent write failed") }
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaveFailed(e.message ?: "consent write failed"))
             }
         }
     }
 
-    // spec: ONB-PIPA invariant: "동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화"
+    /**
+     * Called when the user taps [동의] on [com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen].
+     * See [setPipa] for behavior.
+     */
+    public fun onPipaConsentGranted() {
+        setPipa(granted = true)
+    }
+
     /**
      * Called when the user taps [동의 안 함] on [com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen].
-     *
-     * Writes pipa_third_party_consent=false to DataStore, marks
-     * [OnboardingStep.PIPA_CONSENT] as [StepStatus.DENIED], and skips
-     * [OnboardingStep.RECORDING_FOLDER] — advancing directly to [OnboardingStep.CONTACTS_PERM].
-     *
-     * Voice events recorded after this point will be stored with sync_status='awaiting_consent'
-     * (enforced by VoiceUploadWorker VOI-004). The user can grant consent later via Settings.
-     *
-     * The navigation itself is performed by the composable callback chain; this method
-     * only owns the DataStore write and step-state update.
+     * See [setPipa] for behavior.
      */
     public fun onPipaConsentDeclined() {
-        viewModelScope.launch {
-            try {
-                userPrefsStore.setThirdPartyProvisionConsent(false)
-                logger.i(TAG, "PIPA third-party provision consent DECLINED — voice auto-upload disabled")
-                // Update step state only after the write succeeds, then signal the screen to navigate.
-                _uiState.update { state ->
-                    // Skip RECORDING_FOLDER — go straight to CONTACTS_PERM
-                    val contactsIndex = steps.indexOf(OnboardingStep.CONTACTS_PERM)
-                    val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
-                    val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
-                    logger.d(TAG, "onPipaConsentDeclined: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
-                    // Mark PIPA_CONSENT as DENIED and RECORDING_FOLDER as SKIPPED so the
-                    // onCompleteOnboarding() terminal-status gate does not block the user
-                    // from finishing — leaving RECORDING_FOLDER as NOT_STARTED caused a
-                    // lockout (PIPA compliance fix).
-                    state.copy(
-                        currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
-                        stepStates = state.stepStates +
-                            (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
-                            (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
-                        error = null,
-                    )
-                }
-                _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = false))
-            } catch (e: Exception) {
-                logger.e(TAG, "onPipaConsentDeclined: DataStore write failed", e)
-                _uiState.update { it.copy(error = e.message ?: "consent write failed") }
-                _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaveFailed(e.message ?: "consent write failed"))
-            }
-        }
+        setPipa(granted = false)
     }
 
     // spec: ONB-001 — persist terms acceptance so restarting the app doesn't re-show terms.

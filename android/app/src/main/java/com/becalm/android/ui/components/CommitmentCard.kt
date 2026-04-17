@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmStateColors
 import com.becalm.android.ui.theme.BecalmTheme
@@ -110,12 +111,14 @@ public fun CommitmentCard(
     }
 
     // Status → alpha; chip visibility
-    val isDismissed = derivedStatus.uppercase() == "DISMISSED"
-    val isDone = derivedStatus.uppercase() == "DONE"
+    val normalized = derivedStatus.uppercase()
+    val isDismissed = normalized == "DISMISSED"
+    val isDone = normalized == "DONE"
     val cardAlpha = if (isDismissed || isDone) 0.55f else 1.0f
     val showChip = !isDismissed
 
-    // D-N badge — single date computation, memoised on dueDate
+    // D-N badge — single date computation, memoised on dueDate. Label + colors
+    // derived together; null = no badge shown.
     val daysUntil: Int? = remember(dueDate) {
         dueDate?.let {
             val today = JLocalDate.now(ZoneOffset.UTC)
@@ -123,16 +126,15 @@ public fun CommitmentCard(
             ChronoUnit.DAYS.between(today, jDate).toInt()
         }
     }
-    val badgeColors: BecalmStateColors? = daysUntil?.let {
-        when {
-            it == 0 -> colors.dayBadgeToday
-            it in 1..3 -> colors.dayBadgeSoon
-            it >= 4 -> colors.dayBadgeUpcoming
+    val badge: Pair<String, BecalmStateColors>? = daysUntil?.let { days ->
+        val stateColors = when {
+            days == 0 -> colors.dayBadgeToday
+            days in 1..3 -> colors.dayBadgeSoon
+            days >= 4 -> colors.dayBadgeUpcoming
             else -> colors.dayBadgeOverdue // negative = past due
         }
-    }
-    val badgeLabel: String? = daysUntil?.let {
-        if (it >= 0) "D-$it" else "D+${-it}"
+        val label = if (days >= 0) "D-$days" else "D+${-days}"
+        label to stateColors
     }
 
     val semanticsDesc = "$direction $title"
@@ -183,9 +185,15 @@ public fun CommitmentCard(
                         modifier = Modifier.weight(1f),
                     )
                     // D-N badge
-                    if (badgeColors != null && badgeLabel != null) {
+                    if (badge != null) {
+                        val (badgeLabel, badgeColors) = badge
                         Spacer(modifier = Modifier.width(8.dp))
-                        DayBadge(label = badgeLabel, stateColors = badgeColors)
+                        PillBadge(
+                            label = badgeLabel,
+                            stateColors = badgeColors,
+                            horizontalPadding = 6.dp,
+                            verticalPadding = 2.dp,
+                        )
                     }
                     // Mark-done button — showMarkDone guarantees onMarkDone != null
                     if (showMarkDone && onMarkDone != null) {
@@ -215,7 +223,7 @@ public fun CommitmentCard(
 
                 // Status chip — stateColors computed only when chip is drawn
                 if (showChip) {
-                    val stateColors: BecalmStateColors = when (derivedStatus.uppercase()) {
+                    val stateColors: BecalmStateColors = when (normalized) {
                         "DRAFT", "CONFIRMED" -> colors.actionStatePending
                         "SCHEDULED" -> colors.actionStateReminded
                         "DONE" -> colors.actionStateCompleted
@@ -227,7 +235,12 @@ public fun CommitmentCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Spacer(modifier = Modifier.weight(1f))
-                        StatusChip(stateColors = stateColors, label = derivedStatus)
+                        PillBadge(
+                            label = derivedStatus,
+                            stateColors = stateColors,
+                            horizontalPadding = 8.dp,
+                            verticalPadding = 3.dp,
+                        )
                     }
                 }
             }
@@ -237,10 +250,17 @@ public fun CommitmentCard(
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
+/**
+ * D-N 배지와 상태 칩이 padding만 달랐던 중복을 제거하기 위해 추출한 공용 pill.
+ * 보존 포인트: fill/border 색, extraSmall corner, labelSmall typography, text color
+ * 는 기존 DayBadge/StatusChip과 완전히 동일해야 한다 (spec §5 state color 계약).
+ */
 @Composable
-private fun DayBadge(
+private fun PillBadge(
     label: String,
     stateColors: BecalmStateColors,
+    horizontalPadding: Dp,
+    verticalPadding: Dp,
 ) {
     Box(
         modifier = Modifier
@@ -253,33 +273,7 @@ private fun DayBadge(
                 color = stateColors.border,
                 shape = MaterialTheme.shapes.extraSmall,
             )
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = stateColors.text,
-        )
-    }
-}
-
-@Composable
-private fun StatusChip(
-    stateColors: BecalmStateColors,
-    label: String,
-) {
-    Box(
-        modifier = Modifier
-            .background(
-                color = stateColors.fill,
-                shape = MaterialTheme.shapes.extraSmall,
-            )
-            .border(
-                width = 1.dp,
-                color = stateColors.border,
-                shape = MaterialTheme.shapes.extraSmall,
-            )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
     ) {
         Text(
             text = label,
@@ -291,69 +285,75 @@ private fun StatusChip(
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
 
+/**
+ * 네 개의 @Preview에서 반복되던 BecalmTheme + Box(padding=16.dp) 래퍼를 추출.
+ * 보존 포인트: padding 16.dp와 BecalmTheme 감싸기는 각 Preview의 렌더링 결과와
+ * 동일해야 한다 (Android Studio Preview 비교 기준).
+ */
+@Composable
+private fun PreviewScaffold(content: @Composable () -> Unit) {
+    BecalmTheme {
+        Box(modifier = Modifier.padding(16.dp)) {
+            content()
+        }
+    }
+}
+
 @Preview
 @Composable
 private fun PreviewCommitmentCardGivePendingD2() {
-    BecalmTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CommitmentCard(
-                title = "Send contract draft",
-                direction = "give",
-                derivedStatus = "CONFIRMED",
-                dueDate = LocalDate(2026, 4, 18),
-                counterpartyDisplayName = "Alice Kim",
-                onClick = {},
-                onMarkDone = {},
-            )
-        }
+    PreviewScaffold {
+        CommitmentCard(
+            title = "Send contract draft",
+            direction = "give",
+            derivedStatus = "CONFIRMED",
+            dueDate = LocalDate(2026, 4, 18),
+            counterpartyDisplayName = "Alice Kim",
+            onClick = {},
+            onMarkDone = {},
+        )
     }
 }
 
 @Preview
 @Composable
 private fun PreviewCommitmentCardTakeCompleted() {
-    BecalmTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CommitmentCard(
-                title = "Review budget proposal",
-                direction = "take",
-                derivedStatus = "DONE",
-                dueDate = null,
-                counterpartyDisplayName = "Bob Lee",
-            )
-        }
+    PreviewScaffold {
+        CommitmentCard(
+            title = "Review budget proposal",
+            direction = "take",
+            derivedStatus = "DONE",
+            dueDate = null,
+            counterpartyDisplayName = "Bob Lee",
+        )
     }
 }
 
 @Preview
 @Composable
 private fun PreviewCommitmentCardOverdueReminded() {
-    BecalmTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CommitmentCard(
-                title = "Submit expense report",
-                direction = "give",
-                derivedStatus = "SCHEDULED",
-                dueDate = LocalDate(2026, 4, 10),
-                counterpartyDisplayName = null,
-                onClick = {},
-            )
-        }
+    PreviewScaffold {
+        CommitmentCard(
+            title = "Submit expense report",
+            direction = "give",
+            derivedStatus = "SCHEDULED",
+            dueDate = LocalDate(2026, 4, 10),
+            counterpartyDisplayName = null,
+            onClick = {},
+        )
     }
 }
 
 @Preview
 @Composable
 private fun PreviewCommitmentCardNoDueDate() {
-    BecalmTheme {
-        Box(modifier = Modifier.padding(16.dp)) {
-            CommitmentCard(
-                title = "Follow up on proposal",
-                direction = "take",
-                derivedStatus = "DRAFT",
-                dueDate = null,
-                counterpartyDisplayName = "Carol Park",
-            )
-        }
+    PreviewScaffold {
+        CommitmentCard(
+            title = "Follow up on proposal",
+            direction = "take",
+            derivedStatus = "DRAFT",
+            dueDate = null,
+            counterpartyDisplayName = "Carol Park",
+        )
     }
 }

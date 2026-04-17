@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -92,64 +93,57 @@ public class GmailWorker @AssistedInject constructor(
         }
 
         return@withContext when (syncResult) {
-            is SyncOutcome.Success -> {
-                sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
-                logger.d(TAG, "doWork complete fetched=${syncResult.fetchedCount}")
-                Result.success()
-            }
             is SyncOutcome.HistoryExpired -> {
                 // historyId expired (404/410) — clear cursor then full-sync
                 logger.d(TAG, "doWork historyId expired, falling back to full-sync")
                 cursorStore.setGmailHistoryId(null)
                 val fallbackOutcome = runFullSync(userId)
                 when (fallbackOutcome) {
-                    is SyncOutcome.Success -> {
-                        sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
-                        logger.d(TAG, "doWork fallback-full-sync complete fetched=${fallbackOutcome.fetchedCount}")
-                        Result.success()
-                    }
-                    is SyncOutcome.Unauthorized -> {
-                        sourceStatusRepository.recordSyncError(
-                            SourceType.GMAIL,
-                            "unauthorized",
-                            Clock.System.now(),
-                        )
-                        logger.e(TAG, "doWork fallback-full-sync unauthorized — user must re-auth")
-                        Result.failure()
-                    }
-                    is SyncOutcome.Retryable -> {
-                        sourceStatusRepository.recordSyncError(
-                            SourceType.GMAIL,
-                            fallbackOutcome.reason,
-                            Clock.System.now(),
-                        )
-                        logger.w(TAG, "doWork fallback-full-sync retryable reason=${fallbackOutcome.reason}")
-                        Result.retry()
-                    }
                     is SyncOutcome.HistoryExpired -> {
                         // Cannot happen during a full-sync; guard against it anyway.
                         Result.retry()
                     }
+                    else -> fallbackOutcome.toWorkerResult(" fallback-full-sync")
                 }
             }
-            is SyncOutcome.Unauthorized -> {
-                sourceStatusRepository.recordSyncError(
-                    SourceType.GMAIL,
-                    "unauthorized",
-                    Clock.System.now(),
-                )
-                logger.e(TAG, "doWork unauthorized — user must re-auth")
-                Result.failure()
-            }
-            is SyncOutcome.Retryable -> {
-                sourceStatusRepository.recordSyncError(
-                    SourceType.GMAIL,
-                    syncResult.reason,
-                    Clock.System.now(),
-                )
-                logger.w(TAG, "doWork retryable reason=${syncResult.reason}")
-                Result.retry()
-            }
+            else -> syncResult.toWorkerResult("")
+        }
+    }
+
+    /**
+     * 외부 `doWork`의 `when(syncResult)`와 HistoryExpired 내부의 `when(fallbackOutcome)`가
+     * Success/Unauthorized/Retryable 세 분기에서 동일한 Result 매핑을 중복하던 것을
+     * 한 함수로 통합해 두 호출 사이트에서 바이트 단위로 동일한 결과를 보장한다.
+     * HistoryExpired는 의도적으로 제외되며, fallback 분기 자체의 시맨틱(커서 클리어 →
+     * 전체 동기화)은 변경하지 않는다. [phase]는 로그 메시지에 삽입되는 접두 문자열이다.
+     */
+    private suspend fun SyncOutcome.toWorkerResult(phase: String): Result = when (this) {
+        is SyncOutcome.Success -> {
+            sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
+            logger.d(TAG, "doWork$phase complete fetched=$fetchedCount")
+            Result.success()
+        }
+        is SyncOutcome.Unauthorized -> {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                "unauthorized",
+                Clock.System.now(),
+            )
+            logger.e(TAG, "doWork$phase unauthorized — user must re-auth")
+            Result.failure()
+        }
+        is SyncOutcome.Retryable -> {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                reason,
+                Clock.System.now(),
+            )
+            logger.w(TAG, "doWork$phase retryable reason=$reason")
+            Result.retry()
+        }
+        is SyncOutcome.HistoryExpired -> {
+            // Handled at each call site (outer: fallback branch; inner: guarded retry).
+            Result.retry()
         }
     }
 
@@ -329,12 +323,6 @@ public class GmailWorker @AssistedInject constructor(
         }
         return raw.lowercase().ifBlank { null }
     }
-
-    /**
-     * Returns an 8-char hex surrogate for [value] to prevent PII from appearing in logcat.
-     * Mirrors the pattern used in [MediaStoreWorker].
-     */
-    private fun redact(value: String): String = "%08x".format(value.hashCode())
 
     public companion object {
         private const val TAG = "GmailWorker"

@@ -8,6 +8,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -60,7 +61,7 @@ import kotlin.time.Duration.Companion.days
  * - Otherwise (display-name surrogate) → [ContactsContract.Contacts.CONTENT_URI]
  *
  * PII guard: personRef values are NEVER passed to [Logger]. A non-reversible 8-char
- * hex surrogate is logged instead (see [redactPersonRef]).
+ * hex surrogate is logged instead (see [com.becalm.android.core.util.redact]).
  */
 @HiltWorker
 public class EnrichmentWorker @AssistedInject constructor(
@@ -74,10 +75,7 @@ public class EnrichmentWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         // ENR-003: resolve userId; null session → terminal failure
         val userId = authRepository.currentSession()?.userId
@@ -120,7 +118,7 @@ public class EnrichmentWorker @AssistedInject constructor(
             // ENR-006: freshness gate — skip if row is <7 days old
             val existing = personEnrichmentRepository.findByPersonRef(ref)
             if (existing != null && isWithinTtl(existing.lastSyncedAt, now)) {
-                logger.d(TAG, "skip fresh ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "skip fresh ref=${redact(ref)}")
                 continue
             }
 
@@ -135,7 +133,7 @@ public class EnrichmentWorker @AssistedInject constructor(
                         lastSyncedAt = now,
                     ),
                 )
-                logger.d(TAG, "enriched ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "enriched ref=${redact(ref)}")
                 enrichedCount++
             } else {
                 // No matching ContactsContract row — upsert a minimal row so that
@@ -146,7 +144,7 @@ public class EnrichmentWorker @AssistedInject constructor(
                         lastSyncedAt = now,
                     ),
                 )
-                logger.d(TAG, "no contact found ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "no contact found ref=${redact(ref)}")
             }
         }
 
@@ -305,11 +303,3 @@ private fun classifyRef(ref: String): RefKind = when {
     else -> RefKind.NAME
 }
 
-/**
- * Returns a non-reversible 8-char hex surrogate for [personRef].
- *
- * personRef is PII under PIPA; raw values must never appear in logcat.
- * Mirrors the pattern used in [com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl].
- */
-private fun redactPersonRef(personRef: String): String =
-    "%08x".format(personRef.hashCode())

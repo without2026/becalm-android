@@ -141,16 +141,13 @@ public class SettingsViewModel @Inject constructor(
      * @param lang Locale tag string, or "" to follow the system locale.
      */
     public fun onChangeLanguage(lang: String) {
-        viewModelScope.launch {
-            try {
-                userPrefsStore.setLocaleTag(lang.ifEmpty { null })
-                _uiState.update { it.copy(language = lang, error = null) }
-                logger.d(TAG, "language changed to '${lang.ifEmpty { "system" }}'")
-            } catch (e: Exception) {
-                logger.e(TAG, "onChangeLanguage failed", e)
-                _uiState.update { it.copy(error = e.message ?: "language change failed") }
-            }
-        }
+        persistPref(
+            opTag = "onChangeLanguage",
+            successLog = "language changed to '${lang.ifEmpty { "system" }}'",
+            failureMessage = "language change failed",
+            write = { userPrefsStore.setLocaleTag(lang.ifEmpty { null }) },
+            onSuccess = { state -> state.copy(language = lang, error = null) },
+        )
     }
 
     /**
@@ -159,14 +156,36 @@ public class SettingsViewModel @Inject constructor(
      * @param enabled True to enable, false to disable notifications.
      */
     public fun onToggleNotifications(enabled: Boolean) {
+        persistPref(
+            opTag = "onToggleNotifications",
+            successLog = "notifications toggled to $enabled",
+            failureMessage = "notifications toggle failed",
+            write = { userPrefsStore.setNotificationsEnabled(enabled) },
+            onSuccess = { state -> state.copy(notificationsEnabled = enabled, error = null) },
+        )
+    }
+
+    /**
+     * [onChangeLanguage] / [onToggleNotifications]의 공통 try/catch·log·state 업데이트
+     * 패턴을 통합한다. WorkScheduler 등 외부 부수효과가 없는 "순수 DataStore 쓰기"만
+     * 대상이며, 성공 시 logger.d([opTag] 아닌 [successLog] 그대로) + onSuccess 적용,
+     * 실패 시 logger.e("[opTag] failed", e) + error 문자열 surface — 원본 메시지와 동일.
+     */
+    private fun persistPref(
+        opTag: String,
+        successLog: String,
+        failureMessage: String,
+        write: suspend () -> Unit,
+        onSuccess: (SettingsUiState) -> SettingsUiState,
+    ) {
         viewModelScope.launch {
             try {
-                userPrefsStore.setNotificationsEnabled(enabled)
-                _uiState.update { it.copy(notificationsEnabled = enabled, error = null) }
-                logger.d(TAG, "notifications toggled to $enabled")
+                write()
+                _uiState.update(onSuccess)
+                logger.d(TAG, successLog)
             } catch (e: Exception) {
-                logger.e(TAG, "onToggleNotifications failed", e)
-                _uiState.update { it.copy(error = e.message ?: "notifications toggle failed") }
+                logger.e(TAG, "$opTag failed", e)
+                _uiState.update { it.copy(error = e.message ?: failureMessage) }
             }
         }
     }
@@ -217,15 +236,10 @@ public class SettingsViewModel @Inject constructor(
                     // Using the IDs-returning variant ensures we enqueue exactly the released
                     // rows — no chance of missing new rows or re-enqueueing existing pending ones
                     // (finding #2 fix).
-                    val releaseResult = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId)
-                    val releasedIds = when (releaseResult) {
-                        is BecalmResult.Success -> releaseResult.value
-                        is BecalmResult.Failure -> {
-                            logger.e(TAG, "releaseAwaitingConsentVoiceAndReturnIds failed: ${releaseResult.error}")
-                            _uiState.update { it.copy(error = releaseResult.error.toString()) }
-                            emptyList()
-                        }
-                    }
+                    val releasedIds = unwrapIdsOrShowError(
+                        result = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId),
+                        failureLogPrefix = "releaseAwaitingConsentVoiceAndReturnIds failed",
+                    )
 
                     var enqueuedCount = 0
                     for (id in releasedIds) {
@@ -246,15 +260,10 @@ public class SettingsViewModel @Inject constructor(
                 } else {
                     // Consent withdrawn: park pending/queued voice rows and cancel their WorkManager
                     // jobs to prevent already-enqueued uploads from proceeding (finding #1 fix).
-                    val parkResult = rawIngestionRepository.parkAndCancelPendingVoice(userId)
-                    val parkedIds = when (parkResult) {
-                        is BecalmResult.Success -> parkResult.value
-                        is BecalmResult.Failure -> {
-                            logger.e(TAG, "parkAndCancelPendingVoice failed: ${parkResult.error}")
-                            _uiState.update { it.copy(error = parkResult.error.toString()) }
-                            emptyList()
-                        }
-                    }
+                    val parkedIds = unwrapIdsOrShowError(
+                        result = rawIngestionRepository.parkAndCancelPendingVoice(userId),
+                        failureLogPrefix = "parkAndCancelPendingVoice failed",
+                    )
                     for (id in parkedIds) {
                         workScheduler.cancelVoiceUpload(rawEventId = id)
                     }
@@ -281,19 +290,14 @@ public class SettingsViewModel @Inject constructor(
      * On failure, surfaces the error string via [SettingsUiState.error].
      */
     public fun onSignOut() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
-            when (val result = authRepository.invalidateSession()) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
-                    _uiState.update { it.copy(loading = false, signedOut = true) }
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "sign-out failed: ${result.error}")
-                    _uiState.update { it.copy(loading = false, error = result.error.toString()) }
-                }
-            }
-        }
+        runAuthOp(
+            failureLogPrefix = "sign-out failed",
+            op = { authRepository.invalidateSession() },
+            onSuccess = {
+                logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
+                _uiState.update { it.copy(loading = false, signedOut = true) }
+            },
+        )
     }
 
     /**
@@ -309,18 +313,54 @@ public class SettingsViewModel @Inject constructor(
      * On failure, surfaces the error via [SettingsUiState.error].
      */
     public fun onWipeLocalData() {
+        runAuthOp(
+            failureLogPrefix = "PIPA wipe failed",
+            op = { authRepository.signOut() },
+            onSuccess = {
+                logger.d(TAG, "PIPA wipe and sign-out completed")
+                _uiState.update { it.copy(loading = false, error = null) }
+            },
+        )
+    }
+
+    /**
+     * [onSignOut] / [onWipeLocalData]의 공통 loading=true → AuthRepository 호출 →
+     * Failure 시 logger.w("[failureLogPrefix]: ...") + loading=false + error surface 패턴을
+     * 통합한다. Success 분기는 호출부마다 로그 문구·state 필드(signedOut vs error=null)가
+     * 달라 [onSuccess] 콜백에 위임 — 원본 순서·메시지를 그대로 보존한다.
+     */
+    private fun runAuthOp(
+        failureLogPrefix: String,
+        op: suspend () -> BecalmResult<Unit>,
+        onSuccess: () -> Unit,
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            when (val result = authRepository.signOut()) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "PIPA wipe and sign-out completed")
-                    _uiState.update { it.copy(loading = false, error = null) }
-                }
+            when (val result = op()) {
+                is BecalmResult.Success -> onSuccess()
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "PIPA wipe failed: ${result.error}")
+                    logger.w(TAG, "$failureLogPrefix: ${result.error}")
                     _uiState.update { it.copy(loading = false, error = result.error.toString()) }
                 }
             }
+        }
+    }
+
+    /**
+     * PIPA 토글의 두 분기(release / park)에서 공통인 `when(result) { Success → ids;
+     * Failure → logger.e + error surface + emptyList() }` 패턴을 통합한다. 실패 시
+     * 로그 메시지와 UI error 문자열(`result.error.toString()`)은 원본과 동일하게 유지되고,
+     * loading 플래그는 양쪽 다 건드리지 않던 동작을 그대로 보존한다.
+     */
+    private fun unwrapIdsOrShowError(
+        result: BecalmResult<List<String>>,
+        failureLogPrefix: String,
+    ): List<String> = when (result) {
+        is BecalmResult.Success -> result.value
+        is BecalmResult.Failure -> {
+            logger.e(TAG, "$failureLogPrefix: ${result.error}")
+            _uiState.update { it.copy(error = result.error.toString()) }
+            emptyList()
         }
     }
 }

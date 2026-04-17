@@ -59,10 +59,7 @@ public class UploadWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return Result.failure()
-        }
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
 
         val attempt = workerParams.inputData.getInt(INPUT_KEY_ATTEMPT, 0)
 
@@ -264,9 +261,7 @@ public class UploadWorker @AssistedInject constructor(
             is BecalmError.RateLimited -> {
                 if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
                     logger.w(TAG, "$domain rateLimit maxAttempts=$attempt — permanent failure")
-                    return FlushOutcome.PermanentFailure(
-                        Result.failure(retryOutput("rate_limited_max_attempts", attempt).build()),
-                    )
+                    return retryableOutcome(attempt, "rate_limited", "rate_limited_max_attempts")
                 }
                 val delaySec = UploadBackoff.nextDelaySeconds(attempt + 1, error.retryAfterSeconds)
                 logger.w(
@@ -292,27 +287,19 @@ public class UploadWorker @AssistedInject constructor(
             is BecalmError.Network -> {
                 if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
                     logger.e(TAG, "$domain network error maxAttempts=$attempt — permanent failure code=${error.code}")
-                    return FlushOutcome.PermanentFailure(
-                        Result.failure(retryOutput("network_max_attempts", attempt).build()),
-                    )
+                } else {
+                    logger.w(TAG, "$domain network error code=${error.code} attempt=$attempt — retry")
                 }
-                logger.w(TAG, "$domain network error code=${error.code} attempt=$attempt — retry")
-                FlushOutcome.RetryNeeded(
-                    Result.retry(retryOutput("network_error", attempt).build()),
-                )
+                retryableOutcome(attempt, "network_error", "network_max_attempts")
             }
 
             is BecalmError.ServerError -> {
                 if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
                     logger.e(TAG, "$domain server error maxAttempts=$attempt — permanent failure code=${error.code}")
-                    return FlushOutcome.PermanentFailure(
-                        Result.failure(retryOutput("server_error_max_attempts", attempt).build()),
-                    )
+                } else {
+                    logger.w(TAG, "$domain server error code=${error.code} attempt=$attempt — retry")
                 }
-                logger.w(TAG, "$domain server error code=${error.code} attempt=$attempt — retry")
-                FlushOutcome.RetryNeeded(
-                    Result.retry(retryOutput("server_error", attempt).build()),
-                )
+                retryableOutcome(attempt, "server_error", "server_error_max_attempts")
             }
 
             else -> {
@@ -322,6 +309,22 @@ public class UploadWorker @AssistedInject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * 세 분기(rate_limited / network / server)에서 반복되던 `attempt >= UploadBackoff.MAX_ATTEMPTS`
+     * 가드를 한 군데로 통합한다. ING-003 분류(Retry vs PermanentFailure)와 출력 키(reason/attempt)는
+     * 기존과 동일하게 유지한다.
+     */
+    private fun retryableOutcome(
+        attempt: Int,
+        retryReason: String,
+        permanentReason: String,
+    ): FlushOutcome {
+        if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
+            return FlushOutcome.PermanentFailure(Result.failure(retryOutput(permanentReason, attempt).build()))
+        }
+        return FlushOutcome.RetryNeeded(Result.retry(retryOutput(retryReason, attempt).build()))
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -344,7 +347,13 @@ public class UploadWorker @AssistedInject constructor(
     public companion object {
         private const val TAG = "UploadWorker"
 
-        /** Maximum WorkManager runAttemptCount before permanent failure. */
+        /**
+         * Maximum WorkManager runAttemptCount before permanent failure.
+         *
+         * NOTE: `UploadBackoff.MAX_ATTEMPTS`와는 별개 카운터다 —
+         * `MAX_RETRIES`는 WorkManager 런타임의 `runAttemptCount`(프로세스 재시작/시스템 재스케줄 포함) 상한이고,
+         * `UploadBackoff.MAX_ATTEMPTS`는 SP-32가 input data로 주입하는 논리적 `attempt` 카운터 상한이다.
+         */
         public const val MAX_RETRIES: Int = 5
 
         /** Railway per-batch item cap (SYNC-004). */
