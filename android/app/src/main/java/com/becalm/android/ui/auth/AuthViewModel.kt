@@ -25,8 +25,13 @@ public sealed class AuthUiState {
     /** An async operation is in flight. */
     public data object Loading : AuthUiState()
 
-    /** No session is present; sign-in UI should be shown. */
-    public data object SignedOut : AuthUiState()
+    /**
+     * No session is present; sign-in UI should be shown.
+     *
+     * @param termsAccepted Whether the user has already accepted terms on a prior launch.
+     *   When `true`, [SplashScreen] can skip directly to [BecalmRoute.Login].
+     */
+    public data class SignedOut(val termsAccepted: Boolean = false) : AuthUiState()
 
     /**
      * A valid session is present.
@@ -169,7 +174,9 @@ public class AuthViewModel @Inject constructor(
                             userId = authState.session.userId,
                             onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
                         )
-                        is AuthState.Unauthenticated -> AuthUiState.SignedOut
+                        is AuthState.Unauthenticated -> AuthUiState.SignedOut(
+                            termsAccepted = userPrefsStore.observeTermsAccepted().first(),
+                        )
                     }
                 }
         }
@@ -180,6 +187,6 @@ public class AuthViewModel @Inject constructor(
      * and return to the sign-in screen.
      */
     public fun onErrorDismissed() {
-        _uiState.value = AuthUiState.SignedOut
+        _uiState.value = AuthUiState.SignedOut()
     }
 }

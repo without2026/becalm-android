@@ -65,9 +65,18 @@ public fun SplashScreen(
                     popUpTo(BecalmRoute.Splash.path) { inclusive = true }
                 }
             }
-            is AuthUiState.SignedOut,
-            is AuthUiState.Error,
-            -> {
+            is AuthUiState.SignedOut -> {
+                navigated = true
+                val destination = if ((state as AuthUiState.SignedOut).termsAccepted) {
+                    BecalmRoute.Login.path
+                } else {
+                    BecalmRoute.Terms.path
+                }
+                navController.navigate(destination) {
+                    popUpTo(BecalmRoute.Splash.path) { inclusive = true }
+                }
+            }
+            is AuthUiState.Error -> {
                 navigated = true
                 navController.navigate(BecalmRoute.Terms.path) {
                     popUpTo(BecalmRoute.Splash.path) { inclusive = true }

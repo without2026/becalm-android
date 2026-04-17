@@ -169,6 +169,13 @@ public interface UserPrefsStore {
     public suspend fun setTermsAccepted(accepted: Boolean)
 
     /**
+     * Emits the set of source-type strings the user has enabled for ingestion.
+     *
+     * Stub (SP-14.1): always emits an empty set until the full source-enable UI is built.
+     */
+    public fun observeEnabledSources(): Flow<Set<String>>
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
@@ -276,6 +283,10 @@ public class UserPrefsStoreImpl @Inject constructor(
     override suspend fun setTermsAccepted(accepted: Boolean) {
         dataStore.edit { prefs -> prefs[termsAcceptedKey] = accepted }
     }
+
+    // Stub (SP-14.1): always emits empty set until the source-enable UI lands.
+    override fun observeEnabledSources(): Flow<Set<String>> =
+        kotlinx.coroutines.flow.flowOf(emptySet())
 
     override suspend fun clearAll() {
         dataStore.edit { it.clear() }

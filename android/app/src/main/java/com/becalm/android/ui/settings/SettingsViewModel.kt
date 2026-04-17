@@ -46,6 +46,7 @@ public data class SettingsUiState(
     val storageMb: Long? = null,
     val loading: Boolean = true,
     val error: String? = null,
+    val signedOut: Boolean = false,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -285,7 +286,7 @@ public class SettingsViewModel @Inject constructor(
             when (val result = authRepository.invalidateSession()) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
-                    _uiState.update { it.copy(loading = false) }
+                    _uiState.update { it.copy(loading = false, signedOut = true) }
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "sign-out failed: ${result.error}")

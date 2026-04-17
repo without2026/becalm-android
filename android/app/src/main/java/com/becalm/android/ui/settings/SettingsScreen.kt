@@ -130,6 +130,15 @@ public fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Navigate to auth graph after successful sign-out so the user isn't left on a dead session.
+    LaunchedEffect(state.signedOut) {
+        if (state.signedOut) {
+            navController.navigate(BecalmRoute.Splash.path) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     LaunchedEffect(state.error) {
         state.error?.let { err ->
             scope.launch {
