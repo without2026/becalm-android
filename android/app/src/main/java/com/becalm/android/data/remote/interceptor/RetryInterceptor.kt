@@ -94,7 +94,7 @@ public class RetryInterceptor : Interceptor {
      */
     private fun backoffDelayMs(attempt: Int): Long = when (attempt) {
         0 -> 0L
-        1 -> 500L
+        1 -> FIRST_RETRY_DELAY_MS
         else -> MAX_BACKOFF_MS
     }
 
@@ -107,9 +107,9 @@ public class RetryInterceptor : Interceptor {
      * client for minutes. For all other retryable statuses the standard backoff wins.
      */
     private fun retryAfterOverrideMs(response: Response): Long? {
-        if (response.code != 429) return null
-        val retryAfterSeconds = response.header("Retry-After")?.toLongOrNull() ?: return null
-        return minOf(retryAfterSeconds * 1_000L, MAX_RETRY_AFTER_MS)
+        if (response.code != HTTP_TOO_MANY_REQUESTS) return null
+        val retryAfterSeconds = response.header(HEADER_RETRY_AFTER)?.toLongOrNull() ?: return null
+        return minOf(retryAfterSeconds * MILLIS_PER_SECOND, MAX_RETRY_AFTER_MS)
     }
 
     /**
@@ -119,15 +119,21 @@ public class RetryInterceptor : Interceptor {
      * Non-retryable: all other 4xx, 501, 2xx/3xx.
      */
     private fun isRetryableStatus(statusCode: Int): Boolean = when (statusCode) {
-        501 -> false
-        408, 429 -> true
+        HTTP_NOT_IMPLEMENTED -> false
+        HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS -> true
         in 500..599 -> true
         else -> false
     }
 
     private companion object {
         private const val MAX_ATTEMPTS = 3
+        private const val FIRST_RETRY_DELAY_MS = 500L
         private const val MAX_BACKOFF_MS = 2_000L
         private const val MAX_RETRY_AFTER_MS = 10_000L
+        private const val MILLIS_PER_SECOND = 1_000L
+        private const val HEADER_RETRY_AFTER = "Retry-After"
+        private const val HTTP_REQUEST_TIMEOUT = 408
+        private const val HTTP_NOT_IMPLEMENTED = 501
+        private const val HTTP_TOO_MANY_REQUESTS = 429
     }
 }

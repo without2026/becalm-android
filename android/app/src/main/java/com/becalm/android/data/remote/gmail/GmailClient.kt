@@ -215,6 +215,7 @@ public interface GmailClient {
 // ─── Implementation ───────────────────────────────────────────────────────────
 
 private const val GMAIL_BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
+private const val GMAIL_HISTORY_NOT_FOUND_KEY = "gmail_history"
 
 /**
  * Production [GmailClient] backed by raw [OkHttpClient] + Moshi.
@@ -352,7 +353,7 @@ public class GmailClientImpl(
             parseBody(bodyString)
         }
         401 -> BecalmResult.Failure(BecalmError.Unauthorized)
-        404, 410 -> BecalmResult.Failure(BecalmError.NotFound("gmail_history"))
+        404, 410 -> BecalmResult.Failure(BecalmError.NotFound(GMAIL_HISTORY_NOT_FOUND_KEY))
         429 -> {
             val retryAfter = response.header("Retry-After")?.toLongOrNull()
             BecalmResult.Failure(BecalmError.RateLimited(retryAfter))

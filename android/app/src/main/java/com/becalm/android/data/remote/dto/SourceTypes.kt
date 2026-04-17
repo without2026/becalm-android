@@ -8,8 +8,8 @@ package com.becalm.android.data.remote.dto
  * - [RawIngestionEventDto.sourceType]
  * - [CommitmentDto.sourceType]
  * - [CalendarEventDto.sourceType]
- * - [SourceStatusDto.sourceType]
- * - [AckCursorRequest.sourceType]
+ * - SourceStatusDto.sourceType (removed — speculative, CONTRACT GAP, zero callers)
+ * - AckCursorRequest.sourceType (removed — speculative, CONTRACT GAP, zero callers)
  *
  * SP-09 (Room entities) imports from this object — do not rename constants.
  */

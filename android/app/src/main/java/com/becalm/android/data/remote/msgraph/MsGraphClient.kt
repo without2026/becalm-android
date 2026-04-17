@@ -270,11 +270,8 @@ public class MsGraphClientImpl(
     private val tokenProvider: MsGraphTokenProvider,
 ) : MsGraphClient {
 
-    private val messageListAdapter by lazy {
-        moshi.adapter(GraphListDto::class.java)
-    }
-
-    private val eventListAdapter by lazy {
+    // Single adapter instance — both message and event endpoints share the same envelope shape.
+    private val deltaListAdapter by lazy {
         moshi.adapter(GraphListDto::class.java)
     }
 
@@ -283,22 +280,14 @@ public class MsGraphClientImpl(
     ): BecalmResult<GraphDeltaResponse<GraphMessage>> {
         val url = deltaOrNextLink ?: INITIAL_MESSAGES_URL
         val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
-
-        return try {
-            @Suppress("UNCHECKED_CAST")
-            val dto = messageListAdapter.fromJson(rawJson) as? GraphListDto<Map<String, Any?>>
-                ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null DTO for messages delta")))
-
-            val messages = dto.value.map { parseMessageMap(it) }
+        return parseDeltaDto(rawJson, "messages delta") { dto ->
             BecalmResult.Success(
                 GraphDeltaResponse(
-                    value = messages,
+                    value = dto.value.map { parseMessageMap(it) },
                     nextLink = dto.nextLink,
                     deltaLink = dto.deltaLink,
                 ),
             )
-        } catch (e: Exception) {
-            BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }
 
@@ -307,22 +296,14 @@ public class MsGraphClientImpl(
     ): BecalmResult<GraphDeltaResponse<GraphCalendarEvent>> {
         val url = deltaOrNextLink ?: INITIAL_EVENTS_URL
         val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
-
-        return try {
-            @Suppress("UNCHECKED_CAST")
-            val dto = eventListAdapter.fromJson(rawJson) as? GraphListDto<Map<String, Any?>>
-                ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null DTO for events delta")))
-
-            val events = dto.value.map { parseEventMap(it) }
+        return parseDeltaDto(rawJson, "events delta") { dto ->
             BecalmResult.Success(
                 GraphDeltaResponse(
-                    value = events,
+                    value = dto.value.map { parseEventMap(it) },
                     nextLink = dto.nextLink,
                     deltaLink = dto.deltaLink,
                 ),
             )
-        } catch (e: Exception) {
-            BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }
 
@@ -337,23 +318,35 @@ public class MsGraphClientImpl(
             "$INITIAL_CALENDAR_VIEW_DELTA_URL&startDateTime=$start&endDateTime=$end"
         }
         val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
-
-        return try {
-            @Suppress("UNCHECKED_CAST")
-            val dto = eventListAdapter.fromJson(rawJson) as? GraphListDto<Map<String, Any?>>
-                ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null DTO for calendarView delta")))
-
-            val events = dto.value.map { parseEventMap(it) }
+        return parseDeltaDto(rawJson, "calendarView delta") { dto ->
             BecalmResult.Success(
                 CalendarViewDeltaPage(
-                    value = events,
+                    value = dto.value.map { parseEventMap(it) },
                     nextLink = dto.nextLink,
                     deltaLink = dto.deltaLink,
                 ),
             )
-        } catch (e: Exception) {
-            BecalmResult.Failure(BecalmError.Unknown(e))
         }
+    }
+
+    /**
+     * Deserialises [rawJson] into [GraphListDto] and delegates to [block] for domain mapping.
+     * Centralises the null-DTO guard and catch-all exception wrapping shared by all three
+     * public delta methods.
+     *
+     * @param context Human-readable label included in the error message when the DTO is null.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> parseDeltaDto(
+        rawJson: String,
+        context: String,
+        block: (GraphListDto<Map<String, Any?>>) -> BecalmResult<T>,
+    ): BecalmResult<T> = try {
+        val dto = deltaListAdapter.fromJson(rawJson) as? GraphListDto<Map<String, Any?>>
+            ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null DTO for $context")))
+        block(dto)
+    } catch (e: Exception) {
+        BecalmResult.Failure(BecalmError.Unknown(e))
     }
 
     // ─── HTTP fetch ───────────────────────────────────────────────────────────

@@ -2,8 +2,6 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,10 +62,13 @@ public class ImapCredentialStore @Inject constructor(
         const val KEY_APP_PASSWORD = "imap_app_password"
         const val KEY_HOST = "imap_host"
         const val KEY_PORT = "imap_port"
+
+        const val DEFAULT_HOST = "imap.naver.com"
+        const val DEFAULT_PORT = 993
     }
 
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        createPrefs()
+        buildStorePrefs(context, FILE_NAME, MASTER_KEY_ALIAS, "ImapCredentialStore")
     }
 
     /**
@@ -76,11 +77,10 @@ public class ImapCredentialStore @Inject constructor(
      * Disk access is performed on [Dispatchers.IO].
      */
     public suspend fun getCredentials(): ImapCredentials? = withContext(Dispatchers.IO) {
-        val p = prefs
-        val username = p.getString(KEY_USERNAME, null) ?: return@withContext null
-        val appPassword = p.getString(KEY_APP_PASSWORD, null) ?: return@withContext null
-        val host = p.getString(KEY_HOST, "imap.naver.com") ?: "imap.naver.com"
-        val port = p.getInt(KEY_PORT, 993)
+        val username = prefs.getString(KEY_USERNAME, null) ?: return@withContext null
+        val appPassword = prefs.getString(KEY_APP_PASSWORD, null) ?: return@withContext null
+        val host = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
+        val port = prefs.getInt(KEY_PORT, DEFAULT_PORT)
         ImapCredentials(username = username, appPassword = appPassword, host = host, port = port)
     }
 
@@ -108,26 +108,5 @@ public class ImapCredentialStore @Inject constructor(
     public suspend fun clear(): Unit = withContext(Dispatchers.IO) {
         prefs.edit().clear().apply()
         Timber.d("ImapCredentialStore: credentials cleared")
-    }
-
-    private fun createPrefs(): SharedPreferences = try {
-        buildEncryptedPrefs()
-    } catch (t: Throwable) {
-        Timber.w(t, "ImapCredentialStore: master key or prefs unavailable; wiping and rebuilding")
-        context.deleteSharedPreferences(FILE_NAME)
-        buildEncryptedPrefs()
-    }
-
-    private fun buildEncryptedPrefs(): SharedPreferences {
-        val masterKey = MasterKey.Builder(context, MASTER_KEY_ALIAS)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            FILE_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
     }
 }

@@ -36,7 +36,7 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
 
         // Finding 4 (security-auditor): POST_NOTIFICATIONS is a runtime permission on API 33+.
         // Skip notification silently rather than crash; log WARN with redacted ID for diagnostics.
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     context,
                     android.Manifest.permission.POST_NOTIFICATIONS,

@@ -95,7 +95,7 @@ public fun BecalmButton(
                     disabledContainerColor = MaterialTheme.colorScheme.primary,
                     disabledContentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = ButtonHorizontalPaddingPrimary, vertical = 0.dp),
             ) {
                 ButtonContent(text = text, leadingIcon = leadingIcon, loading = loading)
             }
@@ -112,7 +112,7 @@ public fun BecalmButton(
                     disabledContainerColor = Color.Transparent,
                     disabledContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = ButtonHorizontalPaddingPrimary, vertical = 0.dp),
             ) {
                 ButtonContent(text = text, leadingIcon = leadingIcon, loading = loading)
             }
@@ -127,13 +127,21 @@ public fun BecalmButton(
                     contentColor = MaterialTheme.colorScheme.primary,
                     disabledContentColor = MaterialTheme.colorScheme.primary,
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = ButtonHorizontalPaddingText, vertical = 0.dp),
             ) {
                 ButtonContent(text = text, leadingIcon = leadingIcon, loading = loading)
             }
         }
     }
 }
+
+// ─── Private constants ────────────────────────────────────────────────────────
+
+private val ButtonHorizontalPaddingPrimary = 24.dp
+private val ButtonHorizontalPaddingText = 12.dp
+private val ButtonLoadingIndicatorSize = 16.dp
+private val ButtonLeadingIconSize = 18.dp
+private val ButtonLeadingIconSpacing = 8.dp
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 

@@ -31,12 +31,6 @@ import javax.inject.Singleton
 /** [WorkScheduler.enqueueUpload] input data key carrying the 0-based attempt index. */
 public const val KEY_UPLOAD_ATTEMPT: String = "attempt"
 
-/** [WorkScheduler.enqueueVoice] input data key carrying the raw event ID. */
-public const val KEY_VOICE_RAW_EVENT_ID: String = "raw_event_id"
-
-/** [WorkScheduler.enqueueVoice] input data key carrying the audio content URI. */
-public const val KEY_VOICE_AUDIO_URI: String = "audio_uri"
-
 // ── WorkScheduler interface ──────────────────────────────────────────────────
 
 /**
@@ -94,13 +88,37 @@ public interface WorkScheduler {
     public fun enqueueEnrichment()
 
     /**
-     * Enqueues a one-shot [VoiceTranscriptionWorker] to transcribe an audio recording.
+     * Enqueues a one-shot [VoiceUploadWorker] to upload a voice recording to Railway and
+     * extract commitments via Vertex AI Gemini 2.5 Flash.
      *
-     * @param rawEventId Stable ID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity]
-     *   row to be updated with the transcription result.
-     * @param audioUri   Content URI of the audio file to transcribe.
+     * Requires Wi-Fi / unmetered network (SYNC-005 + spec invariant: mobile data
+     * auto-upload prohibited for audio files).
+     *
+     * The unique work name is [UniqueWorkKeys.voiceUpload](rawEventId) — per-event stability
+     * ensures re-enqueue for the same recording atomically replaces any in-flight request.
+     *
+     * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity]
+     *   to process.
+     * @param audioUri   Content URI of the audio file (read-only SAF access; VOI-007).
+     *
+     * Spec refs: VOI-001, VOI-005, VOI-007.
      */
-    public fun enqueueVoice(rawEventId: String, audioUri: String)
+    public fun enqueueVoiceUpload(rawEventId: String, audioUri: String)
+
+    /**
+     * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued
+     * or running.
+     *
+     * Called when PIPA consent is withdrawn to prevent an already-enqueued job from
+     * transmitting audio after consent is revoked (finding #1 fix — closes the in-queue
+     * race window).
+     *
+     * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity]
+     *   whose upload should be cancelled.
+     *
+     * Spec refs: VOI-004.
+     */
+    public fun cancelVoiceUpload(rawEventId: String)
 
     /**
      * Cancels all uniquely-named work managed by this scheduler.
@@ -187,26 +205,39 @@ public class WorkSchedulerImpl @Inject constructor(
         Log.d(TAG, "enqueueEnrichment key=${UniqueWorkKeys.ENRICHMENT}")
     }
 
-    override fun enqueueVoice(rawEventId: String, audioUri: String) {
-        val request = OneTimeWorkRequest.Builder(VoiceTranscriptionWorker::class.java)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+    override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) {
+        val voiceConstraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED)
+            .build()
+        val request = OneTimeWorkRequest.Builder(VoiceUploadWorker::class.java)
+            .setConstraints(voiceConstraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
             .setInputData(
                 workDataOf(
-                    KEY_VOICE_RAW_EVENT_ID to rawEventId,
-                    KEY_VOICE_AUDIO_URI to audioUri,
+                    VoiceUploadWorker.KEY_RAW_EVENT_ID to rawEventId,
+                    VoiceUploadWorker.KEY_AUDIO_URI to audioUri,
                 ),
             )
+            .addTag(TAG_VOICE_UPLOAD)
             .build()
-        workManager.enqueueUniqueWork(UniqueWorkKeys.VOICE, ExistingWorkPolicy.REPLACE, request)
-        Log.d(TAG, "enqueueVoice rawEventId_hash=${redact(rawEventId)} key=${UniqueWorkKeys.VOICE}")
+        val workKey = UniqueWorkKeys.voiceUpload(rawEventId)
+        workManager.enqueueUniqueWork(workKey, ExistingWorkPolicy.REPLACE, request)
+        Log.d(TAG, "enqueueVoiceUpload rawEventId_hash=${redact(rawEventId)} key=$workKey")
+    }
+
+    override fun cancelVoiceUpload(rawEventId: String) {
+        val workKey = UniqueWorkKeys.voiceUpload(rawEventId)
+        workManager.cancelUniqueWork(workKey)
+        Log.d(TAG, "cancelVoiceUpload rawEventId_hash=${redact(rawEventId)} key=$workKey")
     }
 
     override fun cancelAll() {
         for (key in ALL_KEYS) {
             workManager.cancelUniqueWork(key)
         }
-        Log.d(TAG, "cancelAll — cancelled ${ALL_KEYS.size} unique work chains")
+        // Per-event voice uploads use dynamic keys not in ALL_KEYS; cancel by tag.
+        workManager.cancelAllWorkByTag(TAG_VOICE_UPLOAD)
+        Log.d(TAG, "cancelAll — cancelled ${ALL_KEYS.size} unique chains + voice uploads by tag")
     }
 
     // ── ForegroundWorkScheduler ──────────────────────────────────────────────
@@ -311,6 +342,9 @@ public class WorkSchedulerImpl @Inject constructor(
         /** Base backoff delay in seconds for EXPONENTIAL policy (30s → 60s → 120s …). */
         private const val BACKOFF_DELAY_SECONDS: Long = 30L
 
+        /** Tag applied to all per-event voice upload requests for bulk cancellation on sign-out. */
+        private const val TAG_VOICE_UPLOAD: String = "voice_upload"
+
         // Source key string constants matching SourceType wire values.
         private const val SOURCE_SMS_CALL: String = "sms_call"
         private const val SOURCE_GMAIL: String = "gmail"
@@ -319,7 +353,11 @@ public class WorkSchedulerImpl @Inject constructor(
         private const val SOURCE_GOOGLE_CALENDAR: String = "google_calendar"
         private const val SOURCE_OUTLOOK_CALENDAR: String = "outlook_calendar"
 
-        /** All managed work names — used by [cancelAll] to sweep the WorkManager queue. */
+        /**
+         * Static work names — used by [cancelAll] to sweep the WorkManager queue.
+         * Per-event voice upload keys are dynamic and covered by [TAG_VOICE_UPLOAD]
+         * tag-based cancellation in [cancelAll].
+         */
         private val ALL_KEYS: List<String> = listOf(
             UniqueWorkKeys.SMS_CALL,
             UniqueWorkKeys.GMAIL,
@@ -329,7 +367,6 @@ public class WorkSchedulerImpl @Inject constructor(
             UniqueWorkKeys.OUTLOOK_CAL,
             UniqueWorkKeys.UPLOAD,
             UniqueWorkKeys.ENRICHMENT,
-            UniqueWorkKeys.VOICE,
         )
     }
 }

@@ -37,6 +37,14 @@ public sealed class BecalmRoute(public val path: String) {
 
     // ── Onboarding (auth required) ─────────────────────────────────────────────
 
+    /**
+     * Onboarding step 3 of 12: PIPA 제3자 제공 + 국외 이전 동의 (ONB-PIPA).
+     *
+     * Shown immediately after login, before RecordingFolderScreen.
+     * [동의] navigates to [OnboardingRecordingFolder]; [동의 안 함] skips to [OnboardingContacts].
+     */
+    public data object OnboardingPipaConsent : BecalmRoute("onboarding/pipa-consent")
+
     /** Onboarding step: recording folder permission grant. */
     public data object OnboardingRecordingFolder : BecalmRoute("onboarding/recording-folder")
 

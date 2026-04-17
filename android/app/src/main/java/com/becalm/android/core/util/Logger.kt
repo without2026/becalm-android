@@ -9,20 +9,10 @@ import timber.log.Timber
  * supply a no-op or recording implementation without touching global [Timber] state.
  */
 public interface Logger {
-
-    /** Log at VERBOSE level. */
     public fun v(tag: String, message: String, throwable: Throwable? = null)
-
-    /** Log at DEBUG level. */
     public fun d(tag: String, message: String, throwable: Throwable? = null)
-
-    /** Log at INFO level. */
     public fun i(tag: String, message: String, throwable: Throwable? = null)
-
-    /** Log at WARN level. */
     public fun w(tag: String, message: String, throwable: Throwable? = null)
-
-    /** Log at ERROR level. */
     public fun e(tag: String, message: String, throwable: Throwable? = null)
 }
 
@@ -33,24 +23,9 @@ public interface Logger {
  * is responsible for planting the appropriate tree before any logging occurs.
  */
 public object TimberLogger : Logger {
-
-    override fun v(tag: String, message: String, throwable: Throwable?) {
-        Timber.tag(tag).v(throwable, message)
-    }
-
-    override fun d(tag: String, message: String, throwable: Throwable?) {
-        Timber.tag(tag).d(throwable, message)
-    }
-
-    override fun i(tag: String, message: String, throwable: Throwable?) {
-        Timber.tag(tag).i(throwable, message)
-    }
-
-    override fun w(tag: String, message: String, throwable: Throwable?) {
-        Timber.tag(tag).w(throwable, message)
-    }
-
-    override fun e(tag: String, message: String, throwable: Throwable?) {
-        Timber.tag(tag).e(throwable, message)
-    }
+    override fun v(tag: String, message: String, throwable: Throwable?) = Timber.tag(tag).v(throwable, message)
+    override fun d(tag: String, message: String, throwable: Throwable?) = Timber.tag(tag).d(throwable, message)
+    override fun i(tag: String, message: String, throwable: Throwable?) = Timber.tag(tag).i(throwable, message)
+    override fun w(tag: String, message: String, throwable: Throwable?) = Timber.tag(tag).w(throwable, message)
+    override fun e(tag: String, message: String, throwable: Throwable?) = Timber.tag(tag).e(throwable, message)
 }

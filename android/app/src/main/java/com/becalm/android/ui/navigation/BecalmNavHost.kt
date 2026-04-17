@@ -7,6 +7,7 @@ package com.becalm.android.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,6 +20,7 @@ import com.becalm.android.ui.commitments.CommitmentManagementScreen
 import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
 import com.becalm.android.ui.onboarding.ColdSyncScreen
 import com.becalm.android.ui.onboarding.ContactsPermissionScreen
+import com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen
 import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
@@ -33,6 +35,14 @@ import com.becalm.android.ui.settings.SettingsScreen
 import com.becalm.android.ui.sources.SourceDetailScreen
 import com.becalm.android.ui.sources.SourcesListScreen
 import com.becalm.android.ui.today.TodayTimelineScreen
+
+/**
+ * Returns the named string argument from this back-stack entry, or `null` if absent.
+ *
+ * Used internally to reduce boilerplate in parameterised [composable] blocks.
+ */
+private fun NavBackStackEntry.stringArg(key: String): String? =
+    arguments?.getString(key)
 
 /**
  * Root navigation host for the BeCalm Android app.
@@ -82,6 +92,20 @@ public fun BecalmNavHost(
         }
 
         // ── Onboarding ─────────────────────────────────────────────────────────
+
+        // ONB-PIPA: step 3 of 12 — shown after login, before recording-folder.
+        // [동의] → recording-folder; [동의 안 함] → contacts (recording-folder skipped).
+        composable(route = BecalmRoute.OnboardingPipaConsent.path) {
+            PipaThirdPartyConsentScreen(
+                onConsented = {
+                    navController.navigate(BecalmRoute.OnboardingRecordingFolder.path)
+                },
+                onDeclined = {
+                    // TODO(ONB-CONTACTS): ContactsPermissionScreen exists; navigate directly.
+                    navController.navigate(BecalmRoute.OnboardingContacts.path)
+                },
+            )
+        }
 
         composable(route = BecalmRoute.OnboardingRecordingFolder.path) {
             RecordingFolderScreen(navController = navController)
@@ -142,8 +166,7 @@ public fun BecalmNavHost(
                 navArgument(BecalmNavArgs.PERSON_ID) { type = NavType.StringType },
             ),
         ) { backStackEntry ->
-            val personId = backStackEntry.arguments
-                ?.getString(BecalmNavArgs.PERSON_ID)
+            val personId = backStackEntry.stringArg(BecalmNavArgs.PERSON_ID)
                 ?: return@composable
             PersonDetailScreen(navController = navController, personId = personId)
         }
@@ -155,11 +178,9 @@ public fun BecalmNavHost(
                 navArgument(BecalmNavArgs.EVENT_ID) { type = NavType.StringType },
             ),
         ) { backStackEntry ->
-            val personId = backStackEntry.arguments
-                ?.getString(BecalmNavArgs.PERSON_ID)
+            val personId = backStackEntry.stringArg(BecalmNavArgs.PERSON_ID)
                 ?: return@composable
-            val eventId = backStackEntry.arguments
-                ?.getString(BecalmNavArgs.EVENT_ID)
+            val eventId = backStackEntry.stringArg(BecalmNavArgs.EVENT_ID)
                 ?: return@composable
             RawEventDetailSheet(navController = navController, personId = personId, eventId = eventId)
         }

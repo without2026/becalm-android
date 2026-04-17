@@ -15,6 +15,17 @@ import kotlinx.datetime.toLocalDateTime
  * performed so these formatters are safe to use outside an Android [Context].
  */
 
+private fun Int.pad2(): String = toString().padStart(2, '0')
+private fun Int.pad4(): String = toString().padStart(4, '0')
+private fun Int.pad3(): String = toString().padStart(3, '0')
+
+/** Formats the hour/minute portion of a LocalDateTime as `"오전 2:30"` or `"오후 2:30"`. */
+private fun formatKoreanTime(hour: Int, minute: Int): String {
+    val amPm = if (hour < 12) "오전" else "오후"
+    val h = hour % 12
+    return "$amPm ${if (h == 0) 12 else h}:${minute.pad2()}"
+}
+
 /**
  * Formats [instant] as `"2026-04-16 오후 2:30"` suitable for timeline section headers.
  *
@@ -25,11 +36,8 @@ public fun formatKoreanDateTime(
     tz: TimeZone = TimeZone.currentSystemDefault(),
 ): String {
     val ldt = instant.toLocalDateTime(tz)
-    val amPm = if (ldt.hour < 12) "오전" else "오후"
-    val displayHour = (ldt.hour % 12).let { if (it == 0) 12 else it }
-    val minute = ldt.minute.toString().padStart(2, '0')
-    val date = "${ldt.year}-${ldt.monthNumber.toString().padStart(2, '0')}-${ldt.dayOfMonth.toString().padStart(2, '0')}"
-    return "$date $amPm $displayHour:$minute"
+    val date = "${ldt.year}-${ldt.monthNumber.pad2()}-${ldt.dayOfMonth.pad2()}"
+    return "$date ${formatKoreanTime(ldt.hour, ldt.minute)}"
 }
 
 /**
@@ -46,23 +54,13 @@ public fun formatRelativeKorean(
     tz: TimeZone = TimeZone.currentSystemDefault(),
 ): String {
     val ldt = instant.toLocalDateTime(tz)
-    val nowDate = now.toLocalDateTime(tz).date
-    val thenDate = ldt.date
-
-    val amPm = if (ldt.hour < 12) "오전" else "오후"
-    val displayHour = (ldt.hour % 12).let { if (it == 0) 12 else it }
-    val minute = ldt.minute.toString().padStart(2, '0')
-    val timeStr = "$amPm $displayHour:$minute"
-
-    val dayDiff = nowDate.minus(thenDate, DateTimeUnit.DAY)
-
-    val prefix = when {
-        dayDiff == 0 -> "오늘"
-        dayDiff == 1 -> "어제"
+    val dayDiff = now.toLocalDateTime(tz).date.minus(ldt.date, DateTimeUnit.DAY)
+    val prefix = when (dayDiff) {
+        0 -> "오늘"
+        1 -> "어제"
         else -> "${dayDiff}일 전"
     }
-
-    return "$prefix · $timeStr"
+    return "$prefix · ${formatKoreanTime(ldt.hour, ldt.minute)}"
 }
 
 /**
@@ -92,13 +90,7 @@ public fun formatIsoDate(date: LocalDate): String = date.toString()
  */
 public fun formatRfc3339(instant: Instant): String {
     val ldt = instant.toLocalDateTime(TimeZone.UTC)
-    val year = ldt.year.toString().padStart(4, '0')
-    val month = ldt.monthNumber.toString().padStart(2, '0')
-    val day = ldt.dayOfMonth.toString().padStart(2, '0')
-    val hour = ldt.hour.toString().padStart(2, '0')
-    val minute = ldt.minute.toString().padStart(2, '0')
-    val second = ldt.second.toString().padStart(2, '0')
-    val rawMillis = instant.toEpochMilliseconds() % 1_000L
-    val millisStr = (if (rawMillis < 0) rawMillis + 1_000L else rawMillis).toString().padStart(3, '0')
-    return "$year-$month-${day}T$hour:$minute:$second.${millisStr}Z"
+    val millis = Math.floorMod(instant.toEpochMilliseconds(), 1_000L).toInt()
+    return "${ldt.year.pad4()}-${ldt.monthNumber.pad2()}-${ldt.dayOfMonth.pad2()}" +
+        "T${ldt.hour.pad2()}:${ldt.minute.pad2()}:${ldt.second.pad2()}.${millis.pad3()}Z"
 }

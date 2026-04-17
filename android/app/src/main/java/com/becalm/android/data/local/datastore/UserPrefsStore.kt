@@ -130,6 +130,32 @@ public interface UserPrefsStore {
     public suspend fun setNotificationsEnabled(enabled: Boolean)
 
     /**
+     * Emits `true` when the user has granted PIPA 제3자 제공 + 국외 이전 동의
+     * (third-party provision and international transfer consent) required for the voice
+     * pipeline to upload audio to Railway / Vertex AI.
+     *
+     * Defaults to `false` on first install. Audio bytes MUST NOT leave the device until
+     * this returns `true` (VOI-004, ONB-PIPA invariant).
+     *
+     * Persisted under key `pipa_third_party_consent`.
+     */
+    public fun observeThirdPartyProvisionConsent(): Flow<Boolean>
+
+    /**
+     * Persists the PIPA third-party provision + international transfer consent [granted] flag.
+     *
+     * Setting to `true` releases all `sync_status='awaiting_consent'` voice events for upload.
+     * Also writes the current wall-clock time to `pipa_consent_timestamp_millis` (ONB-PIPA).
+     *
+     * Setting to `false` does NOT retroactively delete already-uploaded commitments
+     * (소급 삭제 없음 — per VOI-004). The `pipa_consent_timestamp_millis` key is cleared so
+     * that downstream readers cannot misinterpret a stale timestamp as active consent.
+     *
+     * @param granted `true` when the user grants consent; `false` when consent is withdrawn.
+     */
+    public suspend fun setThirdPartyProvisionConsent(granted: Boolean)
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
@@ -155,6 +181,8 @@ public interface UserPrefsStore {
  * | Locale tag                       | String   | `locale_tag`                     | null       |
  * | Doze prompt dismissed at         | Long     | `doze_whitelist_prompt_dismissed`| null       |
  * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
+ * | PIPA third-party consent         | Boolean  | `pipa_third_party_consent`       | false      |
+ * | PIPA consent timestamp millis    | Long     | `pipa_consent_timestamp_millis`  | null (absent when consent not currently granted) |
  */
 public class UserPrefsStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
@@ -166,16 +194,20 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val localeTagKey = stringPreferencesKey("locale_tag")
     private val dozePromptDismissedAtKey = longPreferencesKey("doze_whitelist_prompt_dismissed")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
+    private val pipaThirdPartyConsentKey = booleanPreferencesKey("pipa_third_party_consent")
+    private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
+
+    private suspend fun <T> editNullable(key: Preferences.Key<T>, value: T?) {
+        dataStore.edit { prefs ->
+            if (value != null) prefs[key] = value else prefs.remove(key)
+        }
+    }
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
 
-    override suspend fun setCurrentUserId(userId: String?) {
-        dataStore.edit { prefs ->
-            if (userId != null) prefs[currentUserIdKey] = userId
-            else prefs.remove(currentUserIdKey)
-        }
-    }
+    override suspend fun setCurrentUserId(userId: String?) =
+        editNullable(currentUserIdKey, userId)
 
     override fun observeOnboardingCompleted(): Flow<Boolean> =
         dataStore.data.map { it[onboardingCompletedKey] ?: false }
@@ -194,27 +226,34 @@ public class UserPrefsStoreImpl @Inject constructor(
     override fun observeLocaleTag(): Flow<String?> =
         dataStore.data.map { it[localeTagKey] }
 
-    override suspend fun setLocaleTag(tag: String?) {
-        dataStore.edit { prefs ->
-            if (tag != null) prefs[localeTagKey] = tag else prefs.remove(localeTagKey)
-        }
-    }
+    override suspend fun setLocaleTag(tag: String?) =
+        editNullable(localeTagKey, tag)
 
     override fun observeDozePromptDismissedAt(): Flow<Long?> =
         dataStore.data.map { it[dozePromptDismissedAtKey] }
 
-    override suspend fun setDozePromptDismissedAt(epochMs: Long?) {
-        dataStore.edit { prefs ->
-            if (epochMs != null) prefs[dozePromptDismissedAtKey] = epochMs
-            else prefs.remove(dozePromptDismissedAtKey)
-        }
-    }
+    override suspend fun setDozePromptDismissedAt(epochMs: Long?) =
+        editNullable(dozePromptDismissedAtKey, epochMs)
 
     override fun observeNotificationsEnabled(): Flow<Boolean> =
         dataStore.data.map { it[notificationsEnabledKey] ?: true }
 
     override suspend fun setNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[notificationsEnabledKey] = enabled }
+    }
+
+    override fun observeThirdPartyProvisionConsent(): Flow<Boolean> =
+        dataStore.data.map { it[pipaThirdPartyConsentKey] ?: false }
+
+    override suspend fun setThirdPartyProvisionConsent(granted: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[pipaThirdPartyConsentKey] = granted
+            if (granted) {
+                prefs[pipaConsentTimestampKey] = System.currentTimeMillis()
+            } else {
+                prefs.remove(pipaConsentTimestampKey)
+            }
+        }
     }
 
     override suspend fun clearAll() {

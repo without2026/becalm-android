@@ -201,18 +201,10 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-006
     public fun onSchedule(id: String, at: Instant) {
-        viewModelScope.launch {
-            when (val result = commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "onSchedule succeeded id=%08x".format(id.hashCode()))
-                    reminderScheduler.schedule(id, JavaInstant.ofEpochMilli(at.toEpochMilliseconds()))
-                    _uiState.update { it.copy(error = null) }
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "onSchedule failed id=%08x: ${result.error}".format(id.hashCode()))
-                    _uiState.update { it.copy(error = result.error.toString()) }
-                }
-            }
+        launchActionWithEffect("onSchedule", id, {
+            commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))
+        }) {
+            reminderScheduler.schedule(id, JavaInstant.ofEpochMilli(at.toEpochMilliseconds()))
         }
     }
 
@@ -223,18 +215,10 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-007
     public fun onMarkDone(id: String) {
-        viewModelScope.launch {
-            when (val result = commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "onMarkDone succeeded id=%08x".format(id.hashCode()))
-                    reminderScheduler.cancel(id)
-                    _uiState.update { it.copy(error = null) }
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "onMarkDone failed id=%08x: ${result.error}".format(id.hashCode()))
-                    _uiState.update { it.copy(error = result.error.toString()) }
-                }
-            }
+        launchActionWithEffect("onMarkDone", id, {
+            commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)
+        }) {
+            reminderScheduler.cancel(id)
         }
     }
 
@@ -246,18 +230,10 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-008
     public fun onDismiss(id: String) {
-        viewModelScope.launch {
-            when (val result = commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "onDismiss succeeded id=%08x".format(id.hashCode()))
-                    reminderScheduler.cancel(id)
-                    _uiState.update { it.copy(error = null) }
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "onDismiss failed id=%08x: ${result.error}".format(id.hashCode()))
-                    _uiState.update { it.copy(error = result.error.toString()) }
-                }
-            }
+        launchActionWithEffect("onDismiss", id, {
+            commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)
+        }) {
+            reminderScheduler.cancel(id)
         }
     }
 

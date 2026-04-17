@@ -184,21 +184,28 @@ public class SyncCursorStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
 ) : SyncCursorStore {
 
+    // ─── Private helpers ─────────────────────────────────────────────────────
+
+    private suspend fun <T> editNullable(key: Preferences.Key<T>, value: T?) {
+        dataStore.edit { prefs ->
+            if (value != null) prefs[key] = value else prefs.remove(key)
+        }
+    }
+
+    private fun imapValidityKey(mailbox: String) = longPreferencesKey("imap_${mailbox}_uidvalidity")
+    private fun imapUidKey(mailbox: String) = longPreferencesKey("imap_${mailbox}_uid")
+    private fun mediaStoreKey(kind: String) = longPreferencesKey("mediastore_${kind}_last_seen")
+
     // ─── Generic ─────────────────────────────────────────────────────────────
 
     override fun observeCursor(source: String): Flow<String?> =
         dataStore.data.map { it[stringPreferencesKey("cursor_$source")] }
 
-    override suspend fun setCursor(source: String, cursor: String?) {
-        dataStore.edit { prefs ->
-            val key = stringPreferencesKey("cursor_$source")
-            if (cursor != null) prefs[key] = cursor else prefs.remove(key)
-        }
-    }
+    override suspend fun setCursor(source: String, cursor: String?) =
+        editNullable(stringPreferencesKey("cursor_$source"), cursor)
 
-    override suspend fun clearCursor(source: String) {
-        dataStore.edit { prefs -> prefs.remove(stringPreferencesKey("cursor_$source")) }
-    }
+    override suspend fun clearCursor(source: String) =
+        editNullable(stringPreferencesKey("cursor_$source"), null)
 
     override suspend fun clearAll() {
         dataStore.edit { it.clear() }
@@ -211,32 +218,26 @@ public class SyncCursorStoreImpl @Inject constructor(
     override fun observeGmailHistoryId(): Flow<Long?> =
         dataStore.data.map { it[gmailHistoryIdKey] }
 
-    override suspend fun setGmailHistoryId(historyId: Long?) {
-        dataStore.edit { prefs ->
-            if (historyId != null) prefs[gmailHistoryIdKey] = historyId
-            else prefs.remove(gmailHistoryIdKey)
-        }
-    }
+    override suspend fun setGmailHistoryId(historyId: Long?) =
+        editNullable(gmailHistoryIdKey, historyId)
 
     // ─── IMAP ────────────────────────────────────────────────────────────────
 
     override fun observeImapState(mailbox: String): Flow<ImapCursorState?> =
         dataStore.data.map { prefs ->
-            val validity = prefs[longPreferencesKey("imap_${mailbox}_uidvalidity")]
-            val uid = prefs[longPreferencesKey("imap_${mailbox}_uid")]
+            val validity = prefs[imapValidityKey(mailbox)]
+            val uid = prefs[imapUidKey(mailbox)]
             if (validity != null && uid != null) ImapCursorState(validity, uid) else null
         }
 
     override suspend fun setImapState(mailbox: String, state: ImapCursorState?) {
-        val validityKey = longPreferencesKey("imap_${mailbox}_uidvalidity")
-        val uidKey = longPreferencesKey("imap_${mailbox}_uid")
         dataStore.edit { prefs ->
             if (state != null) {
-                prefs[validityKey] = state.uidValidity
-                prefs[uidKey] = state.lastSeenUid
+                prefs[imapValidityKey(mailbox)] = state.uidValidity
+                prefs[imapUidKey(mailbox)] = state.lastSeenUid
             } else {
-                prefs.remove(validityKey)
-                prefs.remove(uidKey)
+                prefs.remove(imapValidityKey(mailbox))
+                prefs.remove(imapUidKey(mailbox))
             }
         }
     }
@@ -244,12 +245,8 @@ public class SyncCursorStoreImpl @Inject constructor(
     // ─── MediaStore ──────────────────────────────────────────────────────────
 
     override fun observeMediaStoreLastSeen(kind: String): Flow<Long?> =
-        dataStore.data.map { it[longPreferencesKey("mediastore_${kind}_last_seen")] }
+        dataStore.data.map { it[mediaStoreKey(kind)] }
 
-    override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) {
-        val key = longPreferencesKey("mediastore_${kind}_last_seen")
-        dataStore.edit { prefs ->
-            if (epochMs != null) prefs[key] = epochMs else prefs.remove(key)
-        }
-    }
+    override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) =
+        editNullable(mediaStoreKey(kind), epochMs)
 }

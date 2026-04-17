@@ -1,16 +1,21 @@
 package com.becalm.android.worker.ingestion
 
+import android.content.ContentUris
 import android.content.Context
-import android.provider.CallLog
+import android.os.Build
+import android.provider.MediaStore
 import android.provider.Telephony
 import androidx.core.content.ContextCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.WorkScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -18,32 +23,52 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import java.util.UUID
 
 /**
- * Periodic CoroutineWorker that enumerates new SMS messages and call log entries since
+ * Periodic CoroutineWorker that enumerates new SMS messages and voice recordings since
  * the last successful run, advancing per-source watermark cursors in [SyncCursorStore].
  *
  * ## ING-002 — SMS capture
  * Reads `Telephony.Sms.CONTENT_URI` (inbox + sent boxes). SMS is NOT a valid
- * [com.becalm.android.data.remote.dto.SourceType], so no [com.becalm.android.data.local.db.entity.RawIngestionEventEntity]
+ * [com.becalm.android.data.remote.dto.SourceType], so no [RawIngestionEventEntity]
  * rows are inserted. Instead the worker records a count observation and advances
  * the "sms" watermark via [SyncCursorStore.setMediaStoreLastSeen].
  * Source status is updated through [SourceStatusRepository.recordSyncSuccess].
  *
- * ## ING-003 — Call log capture
- * Reads `CallLog.Calls.CONTENT_URI`. For each entry the MediaStore URI is forwarded to
- * SP-31 (VoiceTranscriptionWorker) via [Data] output so that SP-31 can insert the
- * [com.becalm.android.data.local.db.entity.RawIngestionEventEntity] after transcription.
- * No raw event rows are inserted here.
+ * ## ING-003 — Voice recording capture (VOI-001, VOI-005, VOI-007)
+ * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since the
+ * last watermark. For each newly-discovered recording:
+ * 1. A [RawIngestionEventEntity] row (source_type="voice", sync_status="pending") is
+ *    inserted via [RawIngestionEventDao.insert] with [OnConflictStrategy.IGNORE].
+ *    The `clientEventId` is deterministic (`"mediastore:voice:<mediaId>"`) so re-running
+ *    the worker against the same file is idempotent — the DB unique index on
+ *    (user_id, client_event_id) silently drops duplicates.
+ * 2. If the row was freshly inserted (not a duplicate), [WorkScheduler.enqueueVoiceUpload]
+ *    is called with the row's UUID and the content URI so that [VoiceUploadWorker] can
+ *    stream audio bytes upstream.
+ *
+ * The audio content URI is built via
+ * `ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, _ID)`.
+ * That URI is the value stored in `sourceRef` and passed to [VoiceUploadWorker].
+ * `ContentResolver.openInputStream` on that URI returns real audio bytes (VOI-007).
+ *
+ * ## Cursor unit convention
+ * The voice watermark is stored in **epoch milliseconds** (matching the SMS cursor and
+ * [SyncCursorStore] contract). `MediaStore.Audio.Media.DATE_ADDED` is epoch **seconds**,
+ * so the stored cursor is divided by 1 000 before use in the `DATE_ADDED >= ?` predicate,
+ * and the per-row `DATE_ADDED` value is multiplied by 1 000 before being compared/stored.
  *
  * ## Permissions
- * Requires `READ_SMS` and `READ_CALL_LOG`. Missing permissions cause [Result.retry] so
- * WorkManager will re-attempt once the onboarding flow (SP-53) has granted them.
+ * - SMS path: `READ_SMS`
+ * - Voice path: `READ_MEDIA_AUDIO` on API 33+ (TIRAMISU), `READ_EXTERNAL_STORAGE` on
+ *   API 28–32. Missing permission causes [Result.retry] so WorkManager re-attempts once
+ *   the onboarding flow (ONB-003) has granted it.
  *
  * ## PII
  * Raw phone numbers, addresses, and SMS body text are never logged.
- * Counts and 8-char hex hashes of phone numbers are the only identifiers written
- * to logcat (pattern from [com.becalm.android.data.repository.PersonEnrichmentRepository.redact]).
+ * Audio file display names are logged only as their `hashCode()` in 8-char hex.
+ * Counts and hashes are the only identifiers written to logcat.
  *
  * ## Scheduled by
  * SP-32 WorkScheduler registers this class as a periodic job and as an expedited
@@ -55,6 +80,9 @@ public class MediaStoreWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val syncCursorStore: SyncCursorStore,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val rawIngestionEventDao: RawIngestionEventDao,
+    private val workScheduler: WorkScheduler,
+    private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
@@ -64,32 +92,31 @@ public class MediaStoreWorker @AssistedInject constructor(
             android.Manifest.permission.READ_SMS,
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        val callLogMissing = ContextCompat.checkSelfPermission(
+        // VOI-005: READ_MEDIA_AUDIO on API 33+; READ_EXTERNAL_STORAGE on API 28-32.
+        val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val audioMissing = ContextCompat.checkSelfPermission(
             appContext,
-            android.Manifest.permission.READ_CALL_LOG,
+            audioPermission,
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        if (smsMissing || callLogMissing) {
-            logger.w(
-                TAG,
-                "permissions missing sms=$smsMissing callLog=$callLogMissing — retrying",
-            )
+        if (smsMissing && audioMissing) {
+            logger.w(TAG, "both permissions missing — retrying")
             return@withContext Result.retry()
         }
 
         val now = Clock.System.now()
-        val smsResult = ingestSms(now)
-        val callLogUris = ingestCallLog(now)
-
-        val outputData = Data.Builder()
-            .putStringArray(OUTPUT_KEY_CALL_LOG_URIS, callLogUris.toTypedArray())
-            .build()
+        val smsResult = if (!smsMissing) ingestSms(now) else 0
+        val voiceResult = if (!audioMissing) ingestVoiceRecordings(now) else 0
 
         logger.d(
             TAG,
-            "doWork complete smsCount=${smsResult} callLogEntries=${callLogUris.size}",
+            "doWork complete smsCount=$smsResult voiceInserted=${voiceResult}",
         )
-        Result.success(outputData)
+        Result.success()
     }
 
     // ── SMS ───────────────────────────────────────────────────────────────────
@@ -153,79 +180,200 @@ public class MediaStoreWorker @AssistedInject constructor(
         return count
     }
 
-    // ── Call log ──────────────────────────────────────────────────────────────
+    // ── Voice recordings ──────────────────────────────────────────────────────
 
     /**
-     * Queries the call log for entries newer than the stored watermark.
-     * Returns the list of MediaStore content URIs for SP-31 to consume.
-     * No [com.becalm.android.data.local.db.entity.RawIngestionEventEntity] rows are inserted here.
+     * Queries `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since
+     * the stored watermark. For each discovered file:
+     * - Inserts a [RawIngestionEventEntity] (source_type="voice", sync_status="pending").
+     *   `clientEventId = "mediastore:voice:<mediaId>"` is deterministic, so re-running on
+     *   the same file is idempotent (the DB UNIQUE index on (user_id, client_event_id)
+     *   drops duplicates via [OnConflictStrategy.IGNORE]).
+     * - Enqueues [WorkScheduler.enqueueVoiceUpload] only when the row was freshly inserted
+     *   (insert return value != -1L), preventing double-enqueue on retry runs.
      *
-     * @return Ordered list of call-log content URI strings (one per entry).
+     * ## Recorder-folder filter (privacy boundary)
+     * Only files whose path begins with a known recorder folder are ingested. On API 29+
+     * this is enforced via `RELATIVE_PATH LIKE ?` matching "VoiceRecorder%" (Samsung Voice
+     * Recorder default, ONB-002) or "Recordings%" (stock Android recorder). On API 28
+     * the deprecated `DATA` column is used with equivalent `%/VoiceRecorder/%` and
+     * `%/Recordings/%` patterns. This prevents music, podcast, and messenger audio files
+     * from being captured as voice events.
+     *
+     * ## Cursor semantics
+     * The watermark is stored in **epoch milliseconds**; DATE_ADDED is epoch seconds, so
+     * `lastSeenMs / 1_000` is used in the query predicate and `dateAddedSec * 1_000` in
+     * the max-cursor tracking. The predicate uses `>=` (not `>`) to avoid permanently
+     * skipping siblings that share the same DATE_ADDED second when a mid-batch failure
+     * occurs. Duplicate rows are handled by the deterministic clientEventId dedup via
+     * [OnConflictStrategy.IGNORE], so the one-second overlap costs only one extra query
+     * overlap per run.
+     *
+     * The cursor is advanced to `maxDateAddedMs` only after the full loop completes and only
+     * for successfully processed rows — failed rows are never counted, ensuring they are
+     * retried on the next run.
+     *
+     * If no signed-in userId is available, voice ingestion is skipped for this cycle and
+     * the cursor is NOT advanced (recordings will be retried on the next run).
+     *
+     * @return Count of [RawIngestionEventEntity] rows freshly inserted this run.
      */
-    private suspend fun ingestCallLog(now: Instant): List<String> {
+    private suspend fun ingestVoiceRecordings(now: Instant): Int {
+        // userId is required: skip rather than insert orphan rows
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId == null) {
+            logger.w(TAG, "userId null — skipping voice ingestion this cycle")
+            return 0
+        }
+
+        // Cursor stored in ms; DATE_ADDED is in seconds
         val lastSeenMs = syncCursorStore.observeMediaStoreLastSeen(KIND_VOICE).first() ?: 0L
+        val lastSeenSec = lastSeenMs / 1_000L
 
+        // Build folder-filter predicate and projection.
+        // API 29+ has RELATIVE_PATH; API 28 uses the deprecated DATA column instead.
+        val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.RELATIVE_PATH
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Audio.Media.DATA
+        }
         val projection = arrayOf(
-            CallLog.Calls._ID,
-            CallLog.Calls.DATE,
-            CallLog.Calls.DURATION,
-            CallLog.Calls.NUMBER,
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            folderColumn,
         )
-        val selection = "${CallLog.Calls.DATE} > ?"
-        val selectionArgs = arrayOf(lastSeenMs.toString())
-        val sortOrder = "${CallLog.Calls.DATE} ASC"
+        // Use >= so siblings sharing the same DATE_ADDED second are not permanently skipped
+        // on a mid-batch failure. clientEventId dedup absorbs the one-second overlap.
+        val (folderArg1, folderArg2) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // RELATIVE_PATH ends with "/" (e.g. "VoiceRecorder/"); trailing slash prevents matching siblings
+            Pair("${RECORDER_FOLDER_SAMSUNG}/%", "${RECORDER_FOLDER_STOCK}/%")
+        } else {
+            // DATA is the full absolute path; match either known recorder directory
+            Pair("%/${RECORDER_FOLDER_SAMSUNG}/%", "%/${RECORDER_FOLDER_STOCK}/%")
+        }
+        val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND " +
+            "($folderColumn LIKE ? OR $folderColumn LIKE ?)"
+        val selectionArgs = arrayOf(lastSeenSec.toString(), folderArg1, folderArg2)
+        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} ASC"
 
-        val uris = mutableListOf<String>()
-        var maxDateMs = lastSeenMs
+        var insertedCount = 0
+        var hasInsertFailure = false
+        // Track the highest DATE_ADDED (in ms) across successfully processed rows only
+        var maxDateAddedMs = lastSeenMs
 
         try {
             appContext.contentResolver.query(
-                CallLog.Calls.CONTENT_URI,
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 selection,
                 selectionArgs,
                 sortOrder,
             )?.use { cursor ->
-                val idxId = cursor.getColumnIndexOrThrow(CallLog.Calls._ID)
-                val idxDate = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)
-                val idxDuration = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)
-                val idxNumber = cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
+                val idxId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
 
                 while (cursor.moveToNext()) {
-                    val rowId = cursor.getLong(idxId)
-                    val dateMs = cursor.getLong(idxDate)
-                    val duration = cursor.getLong(idxDuration)
-                    val rawNumber = cursor.getString(idxNumber) ?: ""
+                    val mediaId = cursor.getLong(idxId)
+                    val dateAddedSec = cursor.getLong(idxDateAdded)
+                    // MediaStore DURATION is in milliseconds; store as integer seconds
+                    val durationMs = cursor.getLong(idxDuration)
+                    val durationSec = (durationMs / 1_000L).toInt()
+                    val displayName = cursor.getString(idxDisplayName) ?: ""
 
-                    // PII guard: log only hashed number and duration
+                    // PII guard: log only a hash of the file name, never the raw path
                     logger.d(
                         TAG,
-                        "call row hash=${redact(rawNumber)} durationSec=$duration dateMs=$dateMs",
+                        "voice row nameHash=${redact(displayName)} durationSec=$durationSec dateAddedSec=$dateAddedSec",
                     )
 
-                    val entryUri = "${CallLog.Calls.CONTENT_URI}/$rowId"
-                    uris.add(entryUri)
+                    // Build the audio content URI — openInputStream on this returns real audio bytes
+                    val audioUri = ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        mediaId,
+                    ).toString()
 
-                    if (dateMs > maxDateMs) maxDateMs = dateMs
+                    // Deterministic idempotency key: same mediaId always yields same clientEventId
+                    val clientEventId = "mediastore:voice:$mediaId"
+
+                    val entity = RawIngestionEventEntity(
+                        id = UUID.randomUUID().toString(),
+                        userId = userId,
+                        clientEventId = clientEventId,
+                        sourceType = SOURCE_VOICE,
+                        sourceRef = audioUri,
+                        durationSeconds = durationSec,
+                        timestamp = Instant.fromEpochSeconds(dateAddedSec),
+                        syncStatus = "pending",
+                    )
+
+                    val rowId = try {
+                        rawIngestionEventDao.insert(entity)
+                    } catch (e: Exception) {
+                        // Per-row failure: log and continue so one bad row doesn't abort the batch.
+                        // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
+                        // next run. The >= predicate combined with clientEventId dedup ensures it is
+                        // re-discovered without double-inserting already-processed siblings.
+                        logger.e(TAG, "DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}", e)
+                        hasInsertFailure = true
+                        continue
+                    }
+
+                    val rowMs = dateAddedSec * 1_000L
+                    if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+
+                    // Resolve the actual row ID for enqueue. On fresh insert, use entity.id.
+                    // On dedup hit (rowId == -1L), the generated UUID was NOT persisted —
+                    // look up the existing row to get its real ID.
+                    val enqueueId = if (rowId != -1L) {
+                        insertedCount++
+                        entity.id
+                    } else {
+                        val existing = rawIngestionEventDao.findByClientEventId(userId, clientEventId)
+                        if (existing == null ||
+                            existing.syncStatus != "pending" ||
+                            existing.commitmentsExtractedCount > 0
+                        ) {
+                            // Row not found, already extracted, or not in pending state — skip
+                            continue
+                        }
+                        existing.id
+                    }
+
+                    // Enqueue (or re-enqueue on dedup recovery). The dedup path above
+                    // already guards against re-uploading extracted/non-pending rows.
+                    try {
+                        workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
+                        logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=${rowId != -1L}")
+                    } catch (e: Exception) {
+                        logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
+                        hasInsertFailure = true
+                    }
                 }
             }
         } catch (e: Exception) {
-            logger.e(TAG, "call log query failed", e)
+            logger.e(TAG, "voice MediaStore query failed", e)
             sourceStatusRepository.recordSyncError(SOURCE_VOICE, e.message ?: "query failed", now)
-            return emptyList()
+            return 0
         }
 
-        if (uris.isNotEmpty()) {
-            syncCursorStore.setMediaStoreLastSeen(KIND_VOICE, maxDateMs)
+        // Only advance cursor when every row succeeded. If any insert failed, freeze the
+        // cursor so the failed row is re-discovered on the next run (>= predicate + dedup).
+        if (!hasInsertFailure && maxDateAddedMs > lastSeenMs) {
+            syncCursorStore.setMediaStoreLastSeen(KIND_VOICE, maxDateAddedMs)
             logger.d(
                 TAG,
-                "call cursor advanced from=$lastSeenMs to=$maxDateMs count=${uris.size}",
+                "voice cursor advanced from=${lastSeenMs}ms to=${maxDateAddedMs}ms inserted=$insertedCount",
             )
         }
 
         sourceStatusRepository.recordSyncSuccess(SOURCE_VOICE, now)
-        logger.d(TAG, "ING-003 call log entries=${uris.size}")
-        return uris
+        logger.d(TAG, "ING-003 voice recordings inserted=$insertedCount")
+        return insertedCount
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -243,7 +391,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         /** [SyncCursorStore] MediaStore kind key for SMS. */
         public const val KIND_SMS: String = "sms"
 
-        /** [SyncCursorStore] MediaStore kind key for voice/call. */
+        /** [SyncCursorStore] MediaStore kind key for voice recordings. */
         public const val KIND_VOICE: String = "voice"
 
         /**
@@ -253,15 +401,24 @@ public class MediaStoreWorker @AssistedInject constructor(
         public const val SOURCE_SMS_MMS: String = "sms_mms"
 
         /**
-         * Source identifier used with [SourceStatusRepository] for call log / voice.
+         * Source identifier used with [SourceStatusRepository] for voice recordings.
          * Matches [com.becalm.android.data.remote.dto.SourceType.VOICE].
+         * Also written as [RawIngestionEventEntity.sourceType] for every inserted row.
          */
         public const val SOURCE_VOICE: String = "voice"
 
         /**
-         * Output [Data] key carrying the array of call-log content URI strings forwarded to
-         * SP-31 (VoiceTranscriptionWorker) via chained WorkManager tasks.
+         * Samsung Voice Recorder default relative folder name (ONB-002 spec reference).
+         * Used as a LIKE pattern prefix on API 29+ (`RELATIVE_PATH LIKE 'VoiceRecorder%'`)
+         * or as a path segment on API 28 (`DATA LIKE '%/VoiceRecorder/%'`).
          */
-        public const val OUTPUT_KEY_CALL_LOG_URIS: String = "call_log_uris"
+        public const val RECORDER_FOLDER_SAMSUNG: String = "VoiceRecorder"
+
+        /**
+         * Stock Android voice recorder default relative folder name (AOSP / Pixel Recorder).
+         * Used alongside [RECORDER_FOLDER_SAMSUNG] in the OR clause of the MediaStore query
+         * to cover devices that do not use Samsung's default path.
+         */
+        public const val RECORDER_FOLDER_STOCK: String = "Recordings"
     }
 }

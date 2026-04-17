@@ -14,13 +14,23 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: ONB-PIPA
+    type: consent
+    description: "PIPA 제3자 제공 + 국외 이전 동의 화면 — 음성 파이프라인이 Google LLC Vertex AI(미국 법인, 데이터 처리 리전 asia-northeast3 서울)에 오디오를 전송한다는 사실을 명시 고지하고 [동의] / [동의 안 함] 두 버튼을 제공한다. 온보딩 12단계 중 3번째 단계 (로그인 직후, 녹음 폴더 설정 직전)"
+    screen: "PipaThirdPartyConsentScreen"
+    interaction: "[동의] 또는 [동의 안 함] 버튼 탭"
+    precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore pipa_third_party_consent 미설정"
+    expected: "화면에 다음 고지문이 표시됨 — (1) 제공받는 자: Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, (3) 제공 목적: 약속/할 일 자동 추출(Gemini 2.5 Flash audio multimodal), (4) 데이터 처리 리전: asia-northeast3(서울), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능(이메일/캘린더 연동, 수동 입력)은 정상 사용 가능. [동의] 탭 시 DataStore pipa_third_party_consent=true, pipa_consent_timestamp=now() 저장 후 RecordingFolderScreen으로 이동. [동의 안 함] 탭 시 DataStore pipa_third_party_consent=false 저장 후 RecordingFolderScreen은 스킵하고 ContactsPermissionScreen으로 이동 — 이 경우 이후 voice raw event는 sync_status='awaiting_consent'로 적재되며 Settings에서 추후 동의 가능(VOI-004)"
+    source: phase2-acceptance
+    tests: []
+
   - id: ONB-002
     type: ui_interaction
-    description: "로그인/가입 완료 후 녹음 폴더 자동 감지 화면으로 이동하며 Samsung Voice Recorder 기본 경로를 자동 탐색한다"
+    description: "PIPA 동의 완료 후 녹음 폴더 자동 감지 화면으로 이동하며 Samsung Voice Recorder 기본 경로를 자동 탐색한다. 동의 거부 시 이 화면은 스킵됨"
     screen: "RecordingFolderScreen"
     interaction: "화면 진입 (자동)"
-    precondition: "Supabase Auth 로그인 완료, READ_MEDIA_AUDIO 권한 미부여"
-    expected: "RecordingFolderScreen 표시됨. 자동 탐색 후 기본 경로('/storage/emulated/0/VoiceRecorder') 발견 시 경로 텍스트 표시됨"
+    precondition: "ONB-PIPA 완료(pipa_third_party_consent=true), READ_MEDIA_AUDIO 권한 미부여"
+    expected: "RecordingFolderScreen 표시됨. 자동 탐색 후 기본 경로('/storage/emulated/0/VoiceRecorder') 발견 시 경로 텍스트 표시됨. pipa_third_party_consent=false인 경우 이 화면 전체 스킵 — ContactsPermissionScreen으로 직진"
     source: phase2-acceptance
     tests: []
 
@@ -96,4 +106,5 @@ invariants:
   - "온보딩은 순차 진행이며 건너뛴 OAuth 소스는 설정 화면에서 재연결 가능하다"
   - "DataStore onboarding_completed=true는 ColdSyncScreen 완료 또는 [나중에 하기] 후에 기록된다 — 온보딩 step 완료 시점이 아님"
   - "CONTACTS 권한 거부는 온보딩을 중단시키지 않는다 — graceful skip"
-  - "총 11단계: 약관 → 로그인 → 녹음폴더 → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"
+  - "PIPA 제3자 제공 + 국외 이전 동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화되고 Settings에서 추후 변경 가능"
+  - "총 12단계: 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"

@@ -5,7 +5,9 @@ import com.becalm.android.BuildConfig
 import com.becalm.android.core.result.getOrNull
 import com.becalm.android.data.local.secure.EncryptedTokenStore // SP-15 — unresolved at R1 ship time; lands in Round 2
 import com.becalm.android.data.remote.api.ApiFactory
+import com.becalm.android.data.remote.api.HttpTimeouts
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.DefaultIdempotencyKeyProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
@@ -190,6 +192,38 @@ public abstract class NetworkModule {
         public fun provideAndroidNetworkMonitor(
             @ApplicationContext context: Context,
         ): AndroidNetworkMonitor = AndroidNetworkMonitor(context)
+
+        /**
+         * Creates the [VoiceApi] Retrofit service interface.
+         *
+         * Uses a dedicated [OkHttpClient] configured with [HttpTimeouts.Voice]
+         * (connect=30s, read=180s, write=180s) to handle audio uploads up to 60 MiB
+         * and server-side Vertex AI inference latency (VOI-006, api-contract.yml).
+         *
+         * The same base URL and authentication interceptor chain as [RailwayApi] are used.
+         */
+        @Provides
+        @Singleton
+        public fun provideVoiceApi(
+            authProvider: AuthTokenProvider,
+            idempotencyProvider: IdempotencyKeyProvider,
+            moshi: Moshi,
+            config: BecalmApiConfig,
+        ): VoiceApi {
+            val voiceOkHttp = ApiFactory.createOkHttpClient(
+                authProvider = authProvider,
+                idempotencyProvider = idempotencyProvider,
+                railwayHost = config.baseUrl.toHttpUrlOrNull()?.host.orEmpty(),
+                isDebug = BuildConfig.DEBUG,
+                timeouts = HttpTimeouts.Voice,
+            )
+            val voiceRetrofit = ApiFactory.createRetrofit(
+                baseUrl = config.baseUrl,
+                okHttp = voiceOkHttp,
+                moshi = moshi,
+            )
+            return ApiFactory.createVoiceApi(voiceRetrofit)
+        }
     }
 }
 

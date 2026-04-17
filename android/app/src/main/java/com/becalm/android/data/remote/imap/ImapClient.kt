@@ -304,28 +304,29 @@ public class ImapClientImpl @Inject constructor() : ImapClient {
         }
     }.getOrNull()
 
+    /**
+     * Single-pass extraction: prefers the first `text/plain` part; if none exists, falls back
+     * to the first `text/*` part (e.g. `text/html`). Avoids iterating the parts array twice.
+     */
     private fun extractFromMultipart(multipart: jakarta.mail.Multipart): String? {
+        var textFallback: String? = null
         for (i in 0 until multipart.count) {
             val bodyPart = runCatching { multipart.getBodyPart(i) }.getOrNull() ?: continue
             val contentType = bodyPart.contentType?.lowercase() ?: continue
-            if ("text/plain" in contentType) {
-                val text = runCatching { bodyPart.content as? String }.getOrNull() ?: continue
+            val text = runCatching { bodyPart.content as? String }.getOrNull() ?: continue
+            if (CONTENT_TYPE_PLAIN in contentType) {
                 return text.take(BODY_PREVIEW_LENGTH).takeIf { it.isNotBlank() }
             }
-        }
-        // Fall back to first text/* part (e.g. text/html) if no text/plain found.
-        for (i in 0 until multipart.count) {
-            val bodyPart = runCatching { multipart.getBodyPart(i) }.getOrNull() ?: continue
-            val contentType = bodyPart.contentType?.lowercase() ?: continue
-            if (contentType.startsWith("text/")) {
-                val text = runCatching { bodyPart.content as? String }.getOrNull() ?: continue
-                return text.take(BODY_PREVIEW_LENGTH).takeIf { it.isNotBlank() }
+            if (textFallback == null && contentType.startsWith(CONTENT_TYPE_TEXT_PREFIX)) {
+                textFallback = text.take(BODY_PREVIEW_LENGTH).takeIf { it.isNotBlank() }
             }
         }
-        return null
+        return textFallback
     }
 
     private companion object {
         private const val BODY_PREVIEW_LENGTH = 200
+        private const val CONTENT_TYPE_PLAIN = "text/plain"
+        private const val CONTENT_TYPE_TEXT_PREFIX = "text/"
     }
 }

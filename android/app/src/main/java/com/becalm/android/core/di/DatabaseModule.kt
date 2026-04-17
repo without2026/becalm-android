@@ -66,42 +66,22 @@ public object DatabaseModule {
         @ApplicationContext context: Context,
     ): BeCalmDatabase = BeCalmDatabase.build(context)
 
-    /**
-     * Provides the [RawIngestionEventDao] backed by the singleton [BeCalmDatabase].
-     *
-     * @param db The singleton [BeCalmDatabase] provided by [provideBeCalmDatabase].
-     * @return A [RawIngestionEventDao] instance for the `raw_ingestion_events` table.
-     */
+    /** Provides [RawIngestionEventDao] from the singleton [BeCalmDatabase]. */
     @Provides
     public fun provideRawIngestionEventDao(db: BeCalmDatabase): RawIngestionEventDao =
         db.rawIngestionEventDao()
 
-    /**
-     * Provides the [CommitmentDao] backed by the singleton [BeCalmDatabase].
-     *
-     * @param db The singleton [BeCalmDatabase] provided by [provideBeCalmDatabase].
-     * @return A [CommitmentDao] instance for the `commitments` table.
-     */
+    /** Provides [CommitmentDao] from the singleton [BeCalmDatabase]. */
     @Provides
     public fun provideCommitmentDao(db: BeCalmDatabase): CommitmentDao =
         db.commitmentDao()
 
-    /**
-     * Provides the [CalendarEventDao] backed by the singleton [BeCalmDatabase].
-     *
-     * @param db The singleton [BeCalmDatabase] provided by [provideBeCalmDatabase].
-     * @return A [CalendarEventDao] instance for the `calendar_events` table.
-     */
+    /** Provides [CalendarEventDao] from the singleton [BeCalmDatabase]. */
     @Provides
     public fun provideCalendarEventDao(db: BeCalmDatabase): CalendarEventDao =
         db.calendarEventDao()
 
-    /**
-     * Provides the [PersonEnrichmentDao] backed by the singleton [BeCalmDatabase].
-     *
-     * @param db The singleton [BeCalmDatabase] provided by [provideBeCalmDatabase].
-     * @return A [PersonEnrichmentDao] instance for the `persons_enrichment` table.
-     */
+    /** Provides [PersonEnrichmentDao] from the singleton [BeCalmDatabase]. */
     @Provides
     public fun providePersonEnrichmentDao(db: BeCalmDatabase): PersonEnrichmentDao =
         db.personEnrichmentDao()

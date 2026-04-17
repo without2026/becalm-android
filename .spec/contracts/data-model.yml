@@ -3,7 +3,8 @@ version: 1
 # BeCalm Android MVP — Data Model Contract
 # Persistence: Room (local primary) + Supabase Postgres (mirror via Railway FastAPI).
 # Railway is the ONLY writer to Supabase — Android does NOT call Supabase REST directly for data R/W.
-# Transcript and EmailBody live in Room only — never uploaded to Railway or Supabase.
+# EmailBody lives in Room only — never uploaded to Railway or Supabase.
+# Transcript (STT 중간 산출물): 어디에도 영속되지 않음. 음성 파이프라인(voice-pipeline.spec.yml v2)은 Vertex AI Gemini 2.5 Flash의 audio multimodal 처리로 오디오 → commitments를 한 번에 추출하며, 중간 transcript는 Railway 요청 lifetime 내 ephemeral로만 존재.
 # persons_enrichment lives in Room only — never uploaded to Railway or Supabase (PIPA).
 
 tables:
@@ -44,7 +45,7 @@ tables:
       - name: event_snippet
         type: text
         nullable: true
-        # voice: first ~200 chars of transcript (populated after STT) / email: first 200 chars of body / calendar: null
+        # voice: 추출된 첫 번째 commitment의 quote 첫 ~200자 (POST /v1/voice/transcribe_extract 응답 후 Railway가 set) — transcript 자체는 영속되지 않으므로 quote가 유일한 텍스트 소스. commitments가 0건이면 null. / email: first 200 chars of body / calendar: null
       - name: duration_seconds
         type: int
         nullable: true
@@ -65,7 +66,8 @@ tables:
         type: text
         nullable: false
         default: "'pending'"
-        # enum: pending | synced | failed — Room-side tracking column, not uploaded to Supabase
+        # enum: pending | synced | failed | awaiting_consent — Room-side tracking column, not uploaded to Supabase
+        # awaiting_consent: voice source만 사용. pipa_third_party_consent=false인 동안 VoiceUploadWorker가 업로드를 보류. 동의 ON 시 자동으로 pending으로 전이 (VOI-004).
       - name: retry_count
         type: int
         nullable: false
@@ -265,7 +267,7 @@ relationships:
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
-  - "Room 전용 엔티티 (Supabase 없음): Transcript, EmailBody, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only"
+  - "Room 전용 엔티티 (Supabase 없음): EmailBody, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. (Transcript는 voice-pipeline v2에서 제거됨 — 오디오 → commitments 직접 추출 구조, 중간 transcript는 어디에도 저장되지 않음)"
   - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 mirror. sync_status·retry_count·last_attempt_at는 Room-side tracking 컬럼으로 Supabase에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
   - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
@@ -275,6 +277,8 @@ migration_notes:
   - "commitments.source_event_occurred_at: 추출 시각이 아닌 원본 이벤트 발생 시각. Railway payload에 포함됨"
   - "persons_enrichment: CONTACTS 권한 부여 시 EnrichmentWorker가 ContactsContract.Data에서 읽어 채움. person_ref PRIMARY KEY — 동일 person_ref의 최신 연락처 정보로 UPSERT. 로그아웃 시 전체 삭제"
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
+  - "Vertex AI 리전: asia-northeast3 (서울). ZDR(Zero Data Retention) 플래그 필수. voice-pipeline v2는 Railway `POST /v1/voice/transcribe_extract`에서 Vertex AI Gemini 2.5 Flash를 호출하며 오디오 바이트·transcript·Gemini 응답은 요청 lifetime 내 ephemeral. commitments만 Supabase에 INSERT됨"
+  - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice source에 대한 Railway 업로드가 차단됨 (VOI-004, ONB-PIPA)"
   - "리텐션 정책: Room 데이터 보관 기간 미정 (spec 단계 이월 항목)"
   - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
   - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. MS Graph deltaToken은 staleness 후 HTTP 410 반환. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 최근 30일 범위로 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."

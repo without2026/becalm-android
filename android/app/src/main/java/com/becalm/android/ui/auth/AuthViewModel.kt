@@ -53,6 +53,13 @@ public sealed class AuthUiState {
 
 private const val TAG = "AuthViewModel"
 
+/** Maps a [BecalmError] from a sign-in failure to a human-readable message. */
+private fun signInErrorMessage(error: BecalmError): String = when (error) {
+    is BecalmError.Unauthorized -> "Invalid email or password"
+    is BecalmError.Network -> "Network error. Please try again."
+    else -> "Sign-in failed. Please try again."
+}
+
 /**
  * ViewModel for the authentication flow.
  *
@@ -98,12 +105,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-in failed")
-                    val userMessage = when (result.error) {
-                        is BecalmError.Unauthorized -> "Invalid email or password"
-                        is BecalmError.Network -> "Network error. Please try again."
-                        else -> "Sign-in failed. Please try again."
-                    }
-                    _uiState.value = AuthUiState.Error(userMessage)
+                    _uiState.value = AuthUiState.Error(signInErrorMessage(result.error))
                 }
             }
         }
@@ -124,12 +126,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "google sign-in failed")
-                    val userMessage = when (result.error) {
-                        is BecalmError.Unauthorized -> "Invalid email or password"
-                        is BecalmError.Network -> "Network error. Please try again."
-                        else -> "Sign-in failed. Please try again."
-                    }
-                    _uiState.value = AuthUiState.Error(userMessage)
+                    _uiState.value = AuthUiState.Error(signInErrorMessage(result.error))
                 }
             }
         }

@@ -2,8 +2,6 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -47,7 +45,7 @@ import javax.inject.Singleton
  * construction of [EncryptedSharedPreferences] throws. This store detects that scenario, wipes
  * the preference file, and attempts one rebuild. If the second attempt also fails the exception
  * propagates to crash reporting — the device is genuinely broken and the user must re-authenticate
- * after reinstalling the app. See [createPrefs] for the implementation.
+ * after reinstalling the app. See [buildStorePrefs] for the implementation.
  *
  * ## Thread safety
  * [EncryptedSharedPreferences] guarantees in-memory read visibility immediately after
@@ -86,38 +84,7 @@ public class EncryptedTokenStore @Inject constructor(
     // The lazy block runs inside withContext(Dispatchers.IO), so the initializer itself runs on IO.
     // Double-checked locking is handled by Kotlin's lazy(LazyThreadSafetyMode.SYNCHRONIZED).
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        createPrefs()
-    }
-
-    /**
-     * Constructs the [EncryptedSharedPreferences] instance.
-     *
-     * On first call: creates the AES-256-GCM master key in the Android Keystore and initialises
-     * the encrypted preference file.
-     *
-     * On failure: wipes the existing preference file (which is unreadable anyway) and retries
-     * once. A second consecutive failure is re-thrown — the Keystore is genuinely unavailable.
-     */
-    private fun createPrefs(): SharedPreferences = try {
-        buildEncryptedPrefs()
-    } catch (t: Throwable) {
-        Timber.w(t, "EncryptedTokenStore: master key or prefs unavailable; wiping and rebuilding")
-        context.deleteSharedPreferences(FILE_NAME)
-        // Second failure propagates — device Keystore is broken beyond recovery.
-        buildEncryptedPrefs()
-    }
-
-    private fun buildEncryptedPrefs(): SharedPreferences {
-        val masterKey = MasterKey.Builder(context, MASTER_KEY_ALIAS)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            FILE_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        buildStorePrefs(context, FILE_NAME, MASTER_KEY_ALIAS, "EncryptedTokenStore")
     }
 
     /**
@@ -127,16 +94,12 @@ public class EncryptedTokenStore @Inject constructor(
      * Disk access is performed on [Dispatchers.IO].
      */
     override suspend fun load(): SupabaseSession? = withContext(Dispatchers.IO) {
-        val p = prefs
-        val accessToken = p.getString(KEY_ACCESS_TOKEN, null) ?: return@withContext null
-        val refreshToken = p.getString(KEY_REFRESH_TOKEN, null) ?: return@withContext null
-        val userId = p.getString(KEY_USER_ID, null) ?: return@withContext null
-        val email = p.getString(KEY_EMAIL, null) ?: return@withContext null
-        val expiresAtMillis = if (p.contains(KEY_EXPIRES_AT_EPOCH_MILLIS)) {
-            p.getLong(KEY_EXPIRES_AT_EPOCH_MILLIS, 0L)
-        } else {
-            return@withContext null
-        }
+        val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null) ?: return@withContext null
+        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null) ?: return@withContext null
+        val userId = prefs.getString(KEY_USER_ID, null) ?: return@withContext null
+        val email = prefs.getString(KEY_EMAIL, null) ?: return@withContext null
+        if (!prefs.contains(KEY_EXPIRES_AT_EPOCH_MILLIS)) return@withContext null
+        val expiresAtMillis = prefs.getLong(KEY_EXPIRES_AT_EPOCH_MILLIS, 0L)
 
         Timber.d("EncryptedTokenStore: session loaded, expires=%d", expiresAtMillis)
 

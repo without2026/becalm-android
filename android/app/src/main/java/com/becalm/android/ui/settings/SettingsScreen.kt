@@ -51,6 +51,62 @@ import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 
+// ── PIPA disclosure bullets (reused in Settings consent dialog) ───────────────
+// Pulled into a private helper to avoid duplicating the glass-panel layout
+// between PipaThirdPartyConsentScreen and this confirm dialog.
+// The six string resource keys match the ONB-PIPA spec disclosure items exactly.
+
+@Composable
+private fun PipaDisclosureList() {
+    Column {
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_1_label),
+            value = stringResource(R.string.onb_pipa_bullet_1_value),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_2_label),
+            value = stringResource(R.string.onb_pipa_bullet_2_value),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_3_label),
+            value = stringResource(R.string.onb_pipa_bullet_3_value),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_4_label),
+            value = stringResource(R.string.onb_pipa_bullet_4_value),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_5_label),
+            value = stringResource(R.string.onb_pipa_bullet_5_value),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsPipaDisclosureBullet(
+            label = stringResource(R.string.onb_pipa_bullet_6_label),
+            value = stringResource(R.string.onb_pipa_bullet_6_value),
+        )
+    }
+}
+
+@Composable
+private fun SettingsPipaDisclosureBullet(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
 /**
  * Settings root screen.
  *
@@ -85,6 +141,9 @@ public fun SettingsScreen(
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showWipeDialog by remember { mutableStateOf(false) }
+    // PIPA 제3자 제공 동의 toggle dialogs (ONB-PIPA / VOI-004)
+    var showPipaEnableDialog by remember { mutableStateOf(false) }
+    var showPipaDisableDialog by remember { mutableStateOf(false) }
 
     if (showSignOutDialog) {
         AlertDialog(
@@ -130,6 +189,62 @@ public fun SettingsScreen(
                 BecalmButton(
                     text = stringResource(R.string.action_cancel),
                     onClick = { showWipeDialog = false },
+                    variant = BecalmButtonVariant.Text,
+                )
+            },
+        )
+    }
+
+    // PIPA 동의 ON — re-show all 6 disclosure bullets; user must confirm before consent is written.
+    if (showPipaEnableDialog) {
+        AlertDialog(
+            onDismissRequest = { showPipaEnableDialog = false },
+            title = { Text(stringResource(R.string.settings_pipa_enable_dialog_title)) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    PipaDisclosureList()
+                }
+            },
+            confirmButton = {
+                BecalmButton(
+                    text = stringResource(R.string.onb_pipa_button_agree),
+                    onClick = {
+                        showPipaEnableDialog = false
+                        viewModel.onTogglePipaConsent(true)
+                    },
+                    variant = BecalmButtonVariant.Primary,
+                )
+            },
+            dismissButton = {
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { showPipaEnableDialog = false },
+                    variant = BecalmButtonVariant.Text,
+                )
+            },
+        )
+    }
+
+    // PIPA 동의 OFF — warn that future recordings will not be auto-uploaded.
+    if (showPipaDisableDialog) {
+        AlertDialog(
+            onDismissRequest = { showPipaDisableDialog = false },
+            title = { Text(stringResource(R.string.settings_pipa_toggle_label)) },
+            text = { Text(stringResource(R.string.settings_pipa_disable_dialog_warning)) },
+            confirmButton = {
+                BecalmButton(
+                    text = stringResource(R.string.action_confirm),
+                    onClick = {
+                        showPipaDisableDialog = false
+                        viewModel.onTogglePipaConsent(false)
+                    },
+                    variant = BecalmButtonVariant.Text,
+                )
+            },
+            dismissButton = {
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { showPipaDisableDialog = false },
                     variant = BecalmButtonVariant.Text,
                 )
             },
@@ -205,6 +320,14 @@ public fun SettingsScreen(
                         label = stringResource(R.string.settings_notifications_label),
                         checked = state.notificationsEnabled,
                         onCheckedChange = viewModel::onToggleNotifications,
+                    )
+                    SettingsToggleRow(
+                        label = stringResource(R.string.settings_pipa_toggle_label),
+                        checked = state.pipaConsentEnabled,
+                        onCheckedChange = { wantsEnabled ->
+                            if (wantsEnabled) showPipaEnableDialog = true
+                            else showPipaDisableDialog = true
+                        },
                     )
                 }
 

@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
  *
  * Primary VM: [AuthViewModel]
  * Navigation entry: [BecalmRoute.Login]
- * Navigation exit: [BecalmRoute.OnboardingRecordingFolder] (new user) | [BecalmRoute.Today] (existing session via VM)
+ * Navigation exit: [BecalmRoute.OnboardingPipaConsent] (new user) | [BecalmRoute.Today] (existing session via VM)
  */
 @Composable
 public fun LoginScreen(
@@ -82,7 +82,10 @@ public fun LoginScreen(
             val destination = if (state.onboardingCompleted) {
                 BecalmRoute.Today.path
             } else {
-                BecalmRoute.OnboardingRecordingFolder.path
+                // ONB-PIPA: first post-login screen must be the PIPA 제3자 제공 consent screen
+                // (finding #3 fix). RecordingFolder is reached only after the user acts on
+                // the PIPA disclosure — the OnboardingPipaConsent composable handles that hop.
+                BecalmRoute.OnboardingPipaConsent.path
             }
             navController.navigate(destination) {
                 popUpTo(BecalmRoute.Login.path) { inclusive = true }

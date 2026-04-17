@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import kotlinx.coroutines.flow.Flow
@@ -229,10 +230,6 @@ public interface RawIngestionEventDao {
     /**
      * Looks up a single event by its primary key [id].
      *
-     * Added in SP-31 (VoiceTranscriptionWorker) to resolve a [RawIngestionEventEntity]
-     * from the row UUID received as WorkManager input data, independent of user_id or
-     * sync_status.
-     *
      * Uses index: primary key lookup on `id` — O(1).
      *
      * @param id The [RawIngestionEventEntity.id] UUID to look up.
@@ -246,4 +243,202 @@ public interface RawIngestionEventDao {
         """,
     )
     public suspend fun findById(id: String): RawIngestionEventEntity?
+
+    /**
+     * Returns all voice events for [userId] that are blocked waiting for PIPA consent
+     * ([RawIngestionEventEntity.syncStatus] = "awaiting_consent").
+     *
+     * Called when Stream 2 wires the consent toggle to determine how many events are queued.
+     * Uses index: `idx_raw_events_user_sync` (user_id, sync_status).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @return List of entities awaiting consent grant. May be empty.
+     *
+     * Spec refs: VOI-004.
+     */
+    @Query(
+        "SELECT * FROM raw_ingestion_events " +
+            "WHERE user_id = :userId " +
+            "AND source_type = 'voice' " +
+            "AND sync_status = 'awaiting_consent'",
+    )
+    public suspend fun findVoiceAwaitingConsent(userId: String): List<RawIngestionEventEntity>
+
+    /**
+     * Transitions all voice events for [userId] from "awaiting_consent" back to "pending"
+     * so that [com.becalm.android.worker.VoiceUploadWorker] will pick them up on the next
+     * enqueue triggered by the consent toggle going ON.
+     *
+     * Called by Stream 2 when PIPA third-party provision consent is granted.
+     * Uses index: `idx_raw_events_user_sync` (user_id, sync_status).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @return The number of rows updated (0 if no rows were waiting, ≥1 otherwise).
+     *
+     * Spec refs: VOI-004.
+     */
+    @Query(
+        "UPDATE raw_ingestion_events " +
+            "SET sync_status = 'pending' " +
+            "WHERE user_id = :userId " +
+            "AND source_type = 'voice' " +
+            "AND sync_status = 'awaiting_consent'",
+    )
+    public suspend fun releaseAwaitingConsentVoice(userId: String): Int
+
+    /**
+     * Returns only the IDs (not full entities) of all voice events for [userId] that are
+     * currently awaiting consent, keeping the payload small for the SELECT + UPDATE transaction.
+     *
+     * Uses index: `idx_raw_events_user_sync` (user_id, sync_status).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @return List of [RawIngestionEventEntity.id] values for awaiting_consent voice rows.
+     *
+     * Spec refs: VOI-004.
+     */
+    @Query(
+        "SELECT id FROM raw_ingestion_events " +
+            "WHERE user_id = :userId " +
+            "AND source_type = 'voice' " +
+            "AND sync_status = 'awaiting_consent'",
+    )
+    public suspend fun findAwaitingConsentVoiceIds(userId: String): List<String>
+
+    /**
+     * Atomically transitions all voice events for [userId] from "awaiting_consent" to
+     * "pending" and returns the IDs of the affected rows so the caller can re-enqueue
+     * exactly those [com.becalm.android.worker.VoiceUploadWorker] jobs.
+     *
+     * The two-step SELECT + UPDATE runs inside a single [Transaction] so no concurrent
+     * writer can insert a new awaiting_consent row that slips through without being
+     * included in the returned ID list.
+     *
+     * Replaces the count-only [releaseAwaitingConsentVoice] for the consent-grant flow
+     * in [com.becalm.android.ui.settings.SettingsViewModel] (finding #2 fix).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @return The IDs that were released (empty when none were waiting).
+     *
+     * Spec refs: VOI-004.
+     */
+    @Transaction
+    public suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): List<String> {
+        val ids = findAwaitingConsentVoiceIds(userId)
+        if (ids.isNotEmpty()) {
+            releaseAwaitingConsentVoice(userId)
+        }
+        return ids
+    }
+
+    /**
+     * Returns the IDs of all voice events for [userId] that are in a genuinely in-flight
+     * state when consent is withdrawn — i.e. "pending", "queued", or "failed_retryable".
+     *
+     * "awaiting_consent" rows are intentionally excluded: they are already parked and have
+     * no active WorkManager job to cancel. Including them caused spurious cancel calls and
+     * re-parked the same rows unnecessarily (finding #1 re-review fix).
+     *
+     * Uses index: `idx_raw_events_user_sync` (user_id, sync_status).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @return List of IDs for voice rows whose uploads should be cancelled and parked.
+     *
+     * Spec refs: VOI-004.
+     */
+    @Query(
+        "SELECT id FROM raw_ingestion_events " +
+            "WHERE user_id = :userId " +
+            "AND source_type = 'voice' " +
+            "AND sync_status IN ('pending', 'queued', 'failed_retryable')",
+    )
+    public suspend fun findCancellableVoiceIds(userId: String): List<String>
+
+    /**
+     * Parks voice events for [userId] that are in a genuinely in-flight state to
+     * "awaiting_consent". Used when the user withdraws PIPA consent to freeze any
+     * active voice uploads so they do not proceed after consent is revoked.
+     *
+     * Only transitions rows in "pending", "queued", or "failed_retryable" — already-parked
+     * "awaiting_consent" rows and irreversible end states ("synced", "failed") are not touched.
+     *
+     * Uses index: `idx_raw_events_user_sync` (user_id, sync_status).
+     *
+     * @param userId The Supabase auth.users UUID.
+     *
+     * Spec refs: VOI-004.
+     */
+    @Query(
+        "UPDATE raw_ingestion_events " +
+            "SET sync_status = 'awaiting_consent' " +
+            "WHERE user_id = :userId " +
+            "AND source_type = 'voice' " +
+            "AND sync_status IN ('pending', 'queued', 'failed_retryable')",
+    )
+    public suspend fun parkPendingVoiceToAwaitingConsent(userId: String)
+
+    /**
+     * Atomically selects the IDs of all voice events for [userId] in an in-flight state
+     * ("pending", "queued", "failed_retryable"), then parks exactly those rows to "awaiting_consent".
+     *
+     * Running SELECT then UPDATE inside a single [Transaction] prevents a new "pending" row
+     * inserted between the two statements from being parked without its ID being returned —
+     * the exact race the two-call pattern in the repository had (finding #1 fix).
+     *
+     * @param userId The Supabase auth.users UUID.
+     * @param now    Wall-clock epoch-millis stamped as `last_attempt_at` on parked rows.
+     * @return The IDs that were parked (may be empty).
+     *
+     * Spec refs: VOI-004.
+     */
+    @Transaction
+    public suspend fun parkCancellablePendingVoiceAndReturnIds(userId: String, now: Long): List<String> {
+        val ids = findCancellableVoiceIds(userId)
+        if (ids.isNotEmpty()) {
+            parkVoiceByIds(ids, now)
+        }
+        return ids
+    }
+
+    /**
+     * Parks the voice rows whose primary keys are in [ids] to "awaiting_consent".
+     *
+     * Only called from [parkCancellablePendingVoiceAndReturnIds]; private to that transaction.
+     *
+     * @param ids List of [RawIngestionEventEntity.id] values to park.
+     * @param now Wall-clock epoch-millis to stamp as `last_attempt_at`.
+     */
+    @Query(
+        "UPDATE raw_ingestion_events " +
+            "SET sync_status = 'awaiting_consent', last_attempt_at = :now " +
+            "WHERE id IN (:ids)",
+    )
+    public suspend fun parkVoiceByIds(ids: List<String>, now: Long)
+
+    /**
+     * Records a transient upload failure for a single voice event without changing
+     * [RawIngestionEventEntity.syncStatus]. Increments [RawIngestionEventEntity.retryCount]
+     * by 1 and records [now] as [RawIngestionEventEntity.lastAttemptAt].
+     *
+     * Called by [com.becalm.android.worker.VoiceUploadWorker.handleFailure] before
+     * returning [androidx.work.ListenableWorker.Result.retry] so that retry metadata is
+     * accumulated correctly across WorkManager attempts (VOI-006 finding #6 fix).
+     *
+     * Does **not** set sync_status to "failed" — the row stays "pending" so WorkManager
+     * can retry it. Use [markFailed] with retryIncrement=0 for the final quarantine step.
+     *
+     * Uses index: primary key lookup on `id` — O(1).
+     *
+     * @param id The [RawIngestionEventEntity.id] UUID of the failing event.
+     * @param now The wall-clock instant of the attempt, injected for testability.
+     *
+     * Spec refs: VOI-006.
+     */
+    @Query(
+        """UPDATE raw_ingestion_events
+           SET retry_count = retry_count + 1,
+               last_attempt_at = :now
+           WHERE id = :id""",
+    )
+    public suspend fun markTransientFailure(id: String, now: Instant)
 }

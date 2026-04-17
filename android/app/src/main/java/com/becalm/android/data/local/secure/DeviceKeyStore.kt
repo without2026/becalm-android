@@ -2,8 +2,6 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,7 +62,7 @@ public class DeviceKeyStore @Inject constructor(
     }
 
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        createPrefs()
+        buildStorePrefs(context, FILE_NAME, MASTER_KEY_ALIAS, "DeviceKeyStore")
     }
 
     /**
@@ -102,32 +100,5 @@ public class DeviceKeyStore @Inject constructor(
         // WebAuthn handles) is added, there is no "remember to mirror into clear()" footgun.
         prefs.edit().clear().apply()
         Timber.d("DeviceKeyStore: device key material cleared")
-    }
-
-    /**
-     * Constructs the [EncryptedSharedPreferences] instance.
-     *
-     * Wipes and rebuilds once on Keystore or file corruption. Rethrows on a second consecutive
-     * failure — the device Keystore is broken beyond in-process recovery.
-     */
-    private fun createPrefs(): SharedPreferences = try {
-        buildEncryptedPrefs()
-    } catch (t: Throwable) {
-        Timber.w(t, "DeviceKeyStore: master key or prefs unavailable; wiping and rebuilding")
-        context.deleteSharedPreferences(FILE_NAME)
-        buildEncryptedPrefs()
-    }
-
-    private fun buildEncryptedPrefs(): SharedPreferences {
-        val masterKey = MasterKey.Builder(context, MASTER_KEY_ALIAS)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            FILE_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
     }
 }

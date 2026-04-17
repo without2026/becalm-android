@@ -54,11 +54,7 @@ public object ApiFactory {
         timeouts: HttpTimeouts = HttpTimeouts.Default,
     ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = if (isDebug) {
-                HttpLoggingInterceptor.Level.BASIC
-            } else {
-                HttpLoggingInterceptor.Level.NONE
-            }
+            level = if (isDebug) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
         }
 
         return OkHttpClient.Builder()
@@ -99,4 +95,16 @@ public object ApiFactory {
      */
     public fun createRailwayApi(retrofit: Retrofit): RailwayApi =
         retrofit.create(RailwayApi::class.java)
+
+    /**
+     * Creates the [VoiceApi] Retrofit service proxy from a pre-built [Retrofit] instance.
+     *
+     * The [Retrofit] instance must be built with an [OkHttpClient] that uses
+     * [HttpTimeouts.Voice] (connect=30s, read=180s, write=180s) to accommodate
+     * audio file uploads up to 60 MiB and Vertex AI inference latency (VOI-006).
+     *
+     * @param retrofit [Retrofit] instance from [createRetrofit], configured with voice timeouts.
+     */
+    public fun createVoiceApi(retrofit: Retrofit): VoiceApi =
+        retrofit.create(VoiceApi::class.java)
 }

@@ -1,6 +1,7 @@
 package com.becalm.android.domain.commitment
 
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 
 /**
  * Pure, stateless state machine for commitment lifecycle transitions.
@@ -45,7 +46,7 @@ public object CommitmentStateMachine {
 
         CommitmentState.CONFIRMED -> when (event) {
             is CommitmentEvent.Schedule -> {
-                if (event.at <= Clock.System.now()) {
+                if (isPastOrPresent(event.at)) {
                     TransitionResult.Err(TransitionError.MissingSchedule)
                 } else {
                     TransitionResult.Ok(CommitmentState.SCHEDULED)
@@ -70,6 +71,10 @@ public object CommitmentStateMachine {
         CommitmentState.DISMISSED ->
             TransitionResult.Err(TransitionError.IllegalTransition(current, event))
     }
+
+    /** Returns true when [instant] is not strictly in the future relative to the system clock. */
+    private fun isPastOrPresent(instant: Instant): Boolean =
+        instant <= Clock.System.now()
 }
 
 /**

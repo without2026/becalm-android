@@ -121,6 +121,49 @@ public interface RawIngestionRepository {
      */
     public suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse>
 
+    // ── PIPA consent release / park ───────────────────────────────────────────
+
+    /**
+     * Transitions all voice events for [userId] from "awaiting_consent" to "pending"
+     * so that [com.becalm.android.worker.VoiceUploadWorker] will pick them up.
+     *
+     * Called by [com.becalm.android.ui.settings.SettingsViewModel] when the user grants
+     * PIPA third-party provision consent via the Settings toggle.
+     *
+     * @return [BecalmResult.Success] with the count of rows updated (0 if none were waiting).
+     *
+     * Spec refs: VOI-004, ONB-PIPA invariant.
+     */
+    public suspend fun releaseAwaitingConsentVoice(userId: String): BecalmResult<Int>
+
+    /**
+     * Atomically transitions all voice events for [userId] from "awaiting_consent" to
+     * "pending" and returns the exact list of released IDs.
+     *
+     * Supersedes [releaseAwaitingConsentVoice] for the consent-grant flow because the
+     * caller needs to enqueue [com.becalm.android.worker.VoiceUploadWorker] for precisely
+     * the released rows — no more, no less (finding #2 fix).
+     *
+     * @return [BecalmResult.Success] with the released IDs (empty list if none were waiting).
+     *
+     * Spec refs: VOI-004.
+     */
+    public suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): BecalmResult<List<String>>
+
+    /**
+     * Returns the IDs of all voice events for [userId] that are in a cancellable state
+     * ("pending" or "awaiting_consent"), then parks them all as "awaiting_consent".
+     *
+     * Called when the user withdraws PIPA consent so that the caller can cancel the
+     * corresponding WorkManager unique-work entries by ID before any queued job proceeds
+     * past the consent check (finding #1 fix).
+     *
+     * @return [BecalmResult.Success] with the IDs that were parked (empty when none).
+     *
+     * Spec refs: VOI-004.
+     */
+    public suspend fun parkAndCancelPendingVoice(userId: String): BecalmResult<List<String>>
+
     // ── Clear ─────────────────────────────────────────────────────────────────
 
     /**
@@ -159,27 +202,21 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             logger.d(TAG, "insertLocal dedup hit for id=${existing.id}")
             return BecalmResult.Success(existing.id)
         }
-        return try {
+        return daoOp(TAG, "insert failed") {
             dao.insert(resolved)
             logger.d(TAG, "insertLocal ok id=${resolved.id}")
-            BecalmResult.Success(resolved.id)
-        } catch (e: Exception) {
-            logger.e(TAG, "insertLocal failed id=${resolved.id}", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "insert failed"))
+            resolved.id
         }
     }
 
     override suspend fun insertLocalBatch(events: List<RawIngestionEventEntity>): BecalmResult<List<String>> {
         if (events.isEmpty()) return BecalmResult.Success(emptyList())
         val resolved = events.map { it.ensureClientEventId() }
-        return try {
-            // Room @Insert(onConflict = IGNORE) on insertAll handles duplicates at the schema layer.
+        // Room @Insert(onConflict = IGNORE) on insertAll handles duplicates at the schema layer.
+        return daoOp(TAG, "batch insert failed") {
             dao.insertAll(resolved)
             logger.d(TAG, "insertLocalBatch ok count=${resolved.size}")
-            BecalmResult.Success(resolved.map { it.id })
-        } catch (e: Exception) {
-            logger.e(TAG, "insertLocalBatch failed count=${resolved.size}", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "batch insert failed"))
+            resolved.map { it.id }
         }
     }
 
@@ -230,24 +267,16 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     override suspend fun markSynced(ids: List<String>): BecalmResult<Unit> {
         if (ids.isEmpty()) return BecalmResult.Success(Unit)
-        return try {
+        return daoOp(TAG, "markSynced failed") {
             dao.markSynced(ids)
             logger.d(TAG, "markSynced count=${ids.size}")
-            BecalmResult.Success(Unit)
-        } catch (e: Exception) {
-            logger.e(TAG, "markSynced failed count=${ids.size}", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "markSynced failed"))
         }
     }
 
     override suspend fun markFailed(id: String, lastAttemptAt: Instant): BecalmResult<Unit> =
-        try {
+        daoOp(TAG, "markFailed failed") {
             dao.markFailed(id = id, retryIncrement = 1, now = lastAttemptAt)
             logger.d(TAG, "markFailed id=$id")
-            BecalmResult.Success(Unit)
-        } catch (e: Exception) {
-            logger.e(TAG, "markFailed error id=$id", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "markFailed failed"))
         }
 
     // ── Upload ────────────────────────────────────────────────────────────────
@@ -267,6 +296,44 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }
+
+    // ── PIPA consent release / park ───────────────────────────────────────────
+
+    override suspend fun releaseAwaitingConsentVoice(userId: String): BecalmResult<Int> =
+        try {
+            val count = dao.releaseAwaitingConsentVoice(userId)
+            logger.d(TAG, "releaseAwaitingConsentVoice userId_hash=${userId.hashCode()} count=$count")
+            BecalmResult.Success(count)
+        } catch (e: Exception) {
+            logger.e(TAG, "releaseAwaitingConsentVoice failed", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "release failed"))
+        }
+
+    override suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): BecalmResult<List<String>> =
+        try {
+            val ids = dao.releaseAwaitingConsentVoiceAndReturnIds(userId)
+            logger.d(TAG, "releaseAwaitingConsentVoiceAndReturnIds userId_hash=${userId.hashCode()} count=${ids.size}")
+            BecalmResult.Success(ids)
+        } catch (e: Exception) {
+            logger.e(TAG, "releaseAwaitingConsentVoiceAndReturnIds failed", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "release failed"))
+        }
+
+    override suspend fun parkAndCancelPendingVoice(userId: String): BecalmResult<List<String>> =
+        try {
+            // Atomic: SELECT ids + UPDATE WHERE id IN (:ids) run inside a single @Transaction.
+            // Eliminates the race where a new 'pending' row inserted between the old two-call
+            // SELECT/UPDATE would be parked but its ID never returned (finding #1 fix).
+            val ids = dao.parkCancellablePendingVoiceAndReturnIds(
+                userId = userId,
+                now = System.currentTimeMillis(),
+            )
+            logger.d(TAG, "parkAndCancelPendingVoice userId_hash=${userId.hashCode()} count=${ids.size}")
+            BecalmResult.Success(ids)
+        } catch (e: Exception) {
+            logger.e(TAG, "parkAndCancelPendingVoice failed", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "park failed"))
+        }
 
     // ── Clear ─────────────────────────────────────────────────────────────────
 

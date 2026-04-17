@@ -36,6 +36,24 @@ public object UniqueWorkKeys {
     /** Contact enrichment via [com.becalm.android.worker.EnrichmentWorker]. */
     public const val ENRICHMENT: String = "enrichment"
 
-    /** Voice transcription via [com.becalm.android.worker.VoiceTranscriptionWorker]. */
-    public const val VOICE: String = "voice.transcribe"
+    /**
+     * Voice upload via [com.becalm.android.worker.VoiceUploadWorker].
+     *
+     * Each enqueue uses a per-event suffix to allow concurrent uploads for different
+     * recordings. Use [voiceUpload] to generate the full work name.
+     *
+     * Spec refs: VOI-001.
+     */
+    public const val VOICE_UPLOAD_PREFIX: String = "voice.upload"
+
+    /**
+     * Returns the unique work name for a [com.becalm.android.worker.VoiceUploadWorker]
+     * processing the raw event identified by [rawEventId].
+     *
+     * Stable per event — re-enqueueing for the same [rawEventId] replaces any in-flight
+     * work (SYNC-005 compliance).
+     *
+     * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
+     */
+    public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
 }

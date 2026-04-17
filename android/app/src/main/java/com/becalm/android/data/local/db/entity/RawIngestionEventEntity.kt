@@ -103,7 +103,10 @@ public data class RawIngestionEventEntity(
     val eventTitle: String? = null,
 
     /**
-     * Voice: first ~200 chars of transcript (populated after STT completes).
+     * Voice: first ~200 chars of the first extracted commitment's [quote] field, populated after
+     * [com.becalm.android.worker.VoiceUploadWorker] receives a successful Railway response.
+     * Transcript itself is never persisted (voice-pipeline.spec.yml v2 invariant) — the quote
+     * is the only persisted text for voice events. Null when no commitments were extracted.
      * Email: first 200 chars of body.
      * Null for calendar events.
      */
@@ -140,9 +143,13 @@ public data class RawIngestionEventEntity(
 
     /**
      * Room-only sync state machine column. Never uploaded to Railway or Supabase.
-     * Valid values: "pending" | "synced" | "failed".
-     * New rows start as "pending"; the sync worker transitions to "synced" on
-     * success or "failed" after exhausting retries.
+     * Valid values:
+     * - "pending"           — ready for Railway upload.
+     * - "synced"            — successfully uploaded to Railway/Supabase.
+     * - "failed"            — upload exhausted max retries; event quarantined.
+     * - "awaiting_consent"  — voice source only. pipa_third_party_consent=false at worker
+     *                         run time; upload blocked until consent is granted (VOI-004).
+     *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoice] is called.
      */
     @ColumnInfo(name = "sync_status")
     val syncStatus: String = "pending",

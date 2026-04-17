@@ -118,6 +118,8 @@ public interface SupabaseAuthClient {
 
 // ─── Implementation ──────────────────────────────────────────────────────────
 
+private const val TAG = "SupabaseAuthClient"
+
 /**
  * Production implementation of [SupabaseAuthClient] backed by the Supabase Kotlin SDK 2.6.0.
  *
@@ -199,16 +201,16 @@ public class SupabaseAuthClientImpl @Inject constructor(
         // orchestrated by AuthRepository (SP-16).
         return try {
             client.auth.signOut(scope = SignOutScope.LOCAL)
-            logger.d("SupabaseAuthClient: server sign-out succeeded")
+            logger.d(TAG, "server sign-out succeeded")
             BecalmResult.Success(Unit)
         } catch (e: RestException) {
-            logger.w("SupabaseAuthClient: server sign-out failed (${e.statusCode}) — continuing local wipe")
+            logger.w(TAG, "server sign-out failed (${e.statusCode}) — continuing local wipe")
             BecalmResult.Success(Unit)
         } catch (e: IOException) {
-            logger.w("SupabaseAuthClient: sign-out network error — continuing local wipe: ${e.message}")
+            logger.w(TAG, "sign-out network error — continuing local wipe: ${e.message}")
             BecalmResult.Success(Unit)
         } catch (e: Exception) {
-            logger.w("SupabaseAuthClient: sign-out unexpected error — continuing local wipe: ${e.message}")
+            logger.w(TAG, "sign-out unexpected error — continuing local wipe: ${e.message}")
             BecalmResult.Success(Unit)
         }
     }
@@ -241,13 +243,13 @@ public class SupabaseAuthClientImpl @Inject constructor(
         BecalmResult.Success(block())
     } catch (e: RestException) {
         val error = mapRestException(e)
-        logger.e("SupabaseAuthClient[$tag] RestException ${e.statusCode}: ${e.message}")
+        logger.e(TAG, "[$tag] RestException ${e.statusCode}: ${e.message}")
         BecalmResult.Failure(error)
     } catch (e: IOException) {
-        logger.e("SupabaseAuthClient[$tag] IOException: ${e.message}")
+        logger.e(TAG, "[$tag] IOException: ${e.message}")
         BecalmResult.Failure(BecalmError.Network(code = -1, message = e.message ?: "Network error"))
     } catch (e: Exception) {
-        logger.e("SupabaseAuthClient[$tag] Unexpected: ${e.message}")
+        logger.e(TAG, "[$tag] Unexpected: ${e.message}")
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
 

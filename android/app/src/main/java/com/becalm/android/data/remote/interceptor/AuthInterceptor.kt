@@ -19,13 +19,15 @@ import okhttp3.Response
  *    the header is always present; the server returns 401 which triggers step 3.
  *
  * 3. **401 refresh-and-retry** — on receiving an HTTP 401 response:
- *    a. The response body is closed immediately to free the connection.
- *    b. [AuthTokenProvider.refresh] is invoked via [runBlocking] on the current OkHttp
+ *    a. [AuthTokenProvider.refresh] is invoked via [runBlocking] on the current OkHttp
  *       dispatcher thread (refresh performs network I/O to Supabase Auth).
- *    c. If [refresh] returns `null` (refresh failed or no session), the original 401
- *       response is returned unchanged to the caller. No retry is attempted.
- *    d. If [refresh] returns a non-null token, the original request is rebuilt with the
- *       new `Authorization: Bearer <newToken>` header and executed exactly **once**.
+ *    b. If [refresh] returns `null` (refresh failed or no session), the original 401
+ *       response is returned **intact** to the caller (body is NOT closed). No retry is
+ *       attempted. The caller receives a fully-readable 401 response so that Retrofit can
+ *       surface it to higher-layer error handlers (R1-01 fix).
+ *    c. If [refresh] returns a non-null token, the original 401 response is closed to
+ *       free the connection, the original request is rebuilt with the new
+ *       `Authorization: Bearer <newToken>` header, and executed exactly **once**.
  *       The second response is returned unchanged — no further 401 retry occurs.
  *
  * 4. **IOException propagation** — IOExceptions from the network are never swallowed;
@@ -63,13 +65,17 @@ public class AuthInterceptor(
             return response
         }
 
-        // Close the 401 body to release the connection before making the refresh call
-        response.close()
-
+        // Attempt token refresh. Do NOT close the response before the refresh call —
+        // if refresh fails (returns null) we must return the original 401 intact so the
+        // caller can read its body (R1-01 fix: avoids returning a closed Response).
         val newToken = runBlocking { authTokenProvider.refresh() }
-            ?: return response // refresh failed — return original 401 unchanged
+        if (newToken == null) {
+            // Refresh failed — return the original 401 response with body still open.
+            return response
+        }
 
-        // Retry exactly once with the refreshed token
+        // Refresh succeeded: close the 401 response to release the connection, then retry once.
+        response.close()
         val retryRequest = originalRequest.newBuilder()
             .header("Authorization", "Bearer $newToken")
             .build()
