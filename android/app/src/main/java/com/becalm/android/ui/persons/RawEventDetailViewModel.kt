@@ -41,7 +41,7 @@ public data class RawEventDetailUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "RawEventDetailViewModel"
-internal const val ARG_EVENT_ID = "eventId"
+internal const val ARG_EVENT_ID = "event_id"
 
 /**
  * ViewModel for RawEventDetailScreen (SRC-008).

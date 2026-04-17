@@ -279,6 +279,32 @@ public class CommitmentManagementViewModel @Inject constructor(
     }
 
     /**
+     * Like [launchAction], but on success runs an additional side-effect [effect] (e.g.
+     * schedule/cancel an alarm). The effect runs after the state transition succeeds and
+     * is not wrapped in a try-catch — if the effect throws, the transition is still committed.
+     */
+    private fun launchActionWithEffect(
+        name: String,
+        id: String,
+        block: suspend () -> BecalmResult<*>,
+        effect: suspend () -> Unit,
+    ) {
+        viewModelScope.launch {
+            when (val result = block()) {
+                is BecalmResult.Success -> {
+                    logger.d(TAG, "$name succeeded id=%08x".format(id.hashCode()))
+                    _uiState.update { it.copy(error = null) }
+                    effect()
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "$name failed id=%08x: ${result.error}".format(id.hashCode()))
+                    _uiState.update { it.copy(error = result.error.toString()) }
+                }
+            }
+        }
+    }
+
+    /**
      * Derives a [CommitmentRow] list by applying [filter] to [entities] in-memory.
      *
      * Today is determined by the JVM default clock at the moment of each filter evaluation.

@@ -21,7 +21,7 @@ import javax.inject.Inject
 // ─── Navigation argument key ──────────────────────────────────────────────────
 
 /** Nav-graph argument key used to pass the source type string to this screen. */
-public const val ARG_SOURCE_TYPE: String = "sourceType"
+public const val ARG_SOURCE_TYPE: String = "source_id"
 
 // ─── UI types ─────────────────────────────────────────────────────────────────
 
