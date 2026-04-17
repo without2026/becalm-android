@@ -1,5 +1,6 @@
 package com.becalm.android.data.remote.msgraph
 
+import android.util.Log
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.squareup.moshi.Json
@@ -79,6 +80,8 @@ private data class GraphLocationDto(
 )
 
 // ─── Endpoint URLs ────────────────────────────────────────────────────────────
+
+private const val TAG = "MsGraphClient"
 
 private const val INITIAL_MESSAGES_URL =
     "https://graph.microsoft.com/v1.0/me/messages/delta" +
@@ -222,9 +225,10 @@ public class MsGraphClientImpl(
 
         return withContext(Dispatchers.IO) {
             try {
-                val response = okHttpClient.newCall(request).execute()
-                val body = response.body?.string() ?: ""
-                mapHttpStatus(response, body)
+                okHttpClient.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    mapHttpStatus(response, body)
+                }
             } catch (e: IOException) {
                 BecalmResult.Failure(BecalmError.Network(-1, e.message ?: "network I/O failure"))
             } catch (e: Exception) {
@@ -325,7 +329,8 @@ public class MsGraphClientImpl(
             // Append 'Z' if absent so kotlinx.datetime can parse it.
             val normalized = if (raw.endsWith("Z")) raw else "${raw}Z"
             Instant.parse(normalized)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "parseGraphDateTime failed raw=${raw.take(40)}", e)
             Instant.DISTANT_PAST
         }
     }

@@ -93,13 +93,6 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  * Runs on the application-scoped [CoroutineScope] provided by AppModule
  * (`@ApplicationScope`). Exceptions in a single enqueue do not cancel the scope.
  *
- * ## TODO(SP-14.1)
- * [UserPrefsStore.observeEnabledSources] is declared here but must be implemented by
- * SP-14. Until SP-14 merges, the call will fail at compile time. SP-14 should add:
- *   `fun observeEnabledSources(): Flow<Set<String>>`
- * to the [UserPrefsStore] interface returning the set of [SourceType] strings the user
- * has connected.
- *
  * @param scope Application-scoped coroutine scope. Provided by AppModule with
  *   `@ApplicationScope` qualifier. If the qualifier binding is absent, leave a
  *   TODO and inject a plain `CoroutineScope` until AppModule is updated.
@@ -146,8 +139,6 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     override fun onStart(owner: LifecycleOwner) {
         scope.launch {
             try {
-                // TODO(SP-14.1): UserPrefsStore.observeEnabledSources() must be added by SP-14.
-                // The call below will fail at compile time until that interface method exists.
                 val enabledSources: Set<String> = userPrefsStore.observeEnabledSources().first()
 
                 if (enabledSources.isEmpty()) {
@@ -158,6 +149,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
                 logger.d(TAG, "onStart: enqueueing catch-up for sources=$enabledSources")
                 enqueueForSources(enabledSources)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.e(TAG, "onStart: failed to enqueue catch-up work", e)
             }
         }

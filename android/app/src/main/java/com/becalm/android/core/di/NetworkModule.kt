@@ -3,7 +3,7 @@ package com.becalm.android.core.di
 import android.content.Context
 import com.becalm.android.BuildConfig
 import com.becalm.android.core.result.getOrNull
-import com.becalm.android.data.local.secure.EncryptedTokenStore // SP-15 — unresolved at R1 ship time; lands in Round 2
+import com.becalm.android.data.local.secure.EncryptedTokenStore
 import com.becalm.android.data.remote.api.ApiFactory
 import com.becalm.android.data.remote.api.HttpTimeouts
 import com.becalm.android.data.remote.api.RailwayApi
@@ -49,16 +49,6 @@ import javax.inject.Singleton
  * [SupabaseAuthClient] (token refresh) into the single [AuthTokenProvider] interface that
  * the OkHttp [com.becalm.android.data.remote.interceptor.AuthInterceptor] (SP-05) depends on.
  * This keeps the interceptor layer free of Supabase SDK knowledge.
- *
- * ## Unresolved imports at R1 ship time
- * [com.becalm.android.data.local.secure.EncryptedTokenStore] is owned by SP-15 and lands in
- * Round 2. The binding `bindSupabaseSessionStore` will not compile until that class exists.
- * All other imports resolve within R1. This is intentional — the full Hilt graph compiles for
- * the first time in Round 10.
- *
- * Similarly, [SupabaseAuthClient], [SupabaseAuthClientImpl], [ApiFactory], [RailwayApi],
- * [AndroidNetworkMonitor], and [NetworkMonitor] are owned by SP-04/SP-05 and land in R1 in
- * parallel. Cross-SP symbols are expected to be absent until each SP ships.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -69,11 +59,7 @@ public abstract class NetworkModule {
     @Singleton
     public abstract fun bindSupabaseAuthClient(impl: SupabaseAuthClientImpl): SupabaseAuthClient
 
-    /**
-     * Binds [EncryptedTokenStore] (SP-15) as the singleton [SupabaseSessionStore].
-     *
-     * UNRESOLVED at R1 ship time — [EncryptedTokenStore] lands in Round 2 (SP-15).
-     */
+    /** Binds [EncryptedTokenStore] (SP-15) as the singleton [SupabaseSessionStore]. */
     @Binds
     @Singleton
     public abstract fun bindSupabaseSessionStore(impl: EncryptedTokenStore): SupabaseSessionStore

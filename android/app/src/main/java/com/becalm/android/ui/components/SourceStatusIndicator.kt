@@ -45,6 +45,23 @@ public enum class SourceSyncStatus {
     Unknown,
 }
 
+// ─── Status-string mapping ────────────────────────────────────────────────────
+
+/**
+ * Maps a raw ViewModel status string (e.g. `"CONNECTED"`, `"SYNCING"`, `"ERROR"`,
+ * `"NEVER_CONNECTED"`) to the corresponding [SourceSyncStatus] for the indicator.
+ *
+ * Deduplicated from the per-screen private copies in [SourcesListScreen] and
+ * [SourceDetailScreen]; behavior is byte-identical to those prior implementations.
+ */
+internal fun statusStringToSyncStatus(raw: String): SourceSyncStatus = when (raw.uppercase()) {
+    "CONNECTED" -> SourceSyncStatus.Ok
+    "SYNCING" -> SourceSyncStatus.Ok
+    "ERROR" -> SourceSyncStatus.Error
+    "NEVER_CONNECTED" -> SourceSyncStatus.Unknown
+    else -> SourceSyncStatus.Stale
+}
+
 // ─── SourceStatusIndicator ────────────────────────────────────────────────────
 
 private val PillShape = RoundedCornerShape(100.dp)

@@ -3,6 +3,7 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.map
+import com.becalm.android.core.result.onSuccess
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -145,21 +146,17 @@ public class AuthRepositoryImpl @Inject constructor(
     ): BecalmResult<SupabaseSession> =
         authClient.signInWithEmail(email, password)
             .map { it.session }
-            .also { result ->
-                if (result is BecalmResult.Success) {
-                    userPrefsStore.setCurrentUserId(result.value.userId)
-                    sessionFlow.value = result.value
-                }
+            .onSuccess { value ->
+                userPrefsStore.setCurrentUserId(value.userId)
+                sessionFlow.value = value
             }
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
         authClient.signInWithGoogleIdToken(idToken)
             .map { it.session }
-            .also { result ->
-                if (result is BecalmResult.Success) {
-                    userPrefsStore.setCurrentUserId(result.value.userId)
-                    sessionFlow.value = result.value
-                }
+            .onSuccess { value ->
+                userPrefsStore.setCurrentUserId(value.userId)
+                sessionFlow.value = value
             }
 
     override suspend fun signOut(): BecalmResult<Unit> {

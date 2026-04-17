@@ -11,6 +11,7 @@ import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
@@ -189,7 +190,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             logger.d(
                 TAG,
                 "inserted count=${entities.size} " +
-                    "uidHashes=${entities.map { hashUid(it.clientEventId) }}",
+                    "uidHashes=${entities.map { redact(it.clientEventId) }}",
             )
         }
 
@@ -244,12 +245,6 @@ public class ImapNaverWorker @AssistedInject constructor(
             eventSnippet = bodyPreview,
             timestamp = sentAt,
         )
-
-    /**
-     * Returns an 8-char hex surrogate for [value] to avoid writing PII to logcat.
-     * Mirrors the pattern used in [MediaStoreWorker].
-     */
-    private fun hashUid(value: String): String = "%08x".format(value.hashCode())
 
     // ─── Constants ────────────────────────────────────────────────────────────
 

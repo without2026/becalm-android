@@ -1,10 +1,5 @@
 package com.becalm.android.ui.navigation
 
-// R8 IMPLEMENTATION — All screen composable calls wired.
-// Previously every composable block contained a "// R7:" TODO placeholder.
-// This file replaces every placeholder with the real screen composable call.
-// Argument-extraction logic from R1 is preserved unchanged.
-
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
@@ -47,10 +42,8 @@ private fun NavBackStackEntry.stringArg(key: String): String? =
 /**
  * Root navigation host for the BeCalm Android app.
  *
- * ## R8 implementation state
  * Every route declared in `.spec/contracts/ui-map.yml` (version 1, 21 routes) is
- * registered and wired to its real screen composable. Argument-extraction logic
- * introduced in R1 is preserved; screen composable calls replace the R7 placeholders.
+ * registered and wired to its screen composable.
  *
  * ## Usage
  * ```kotlin
