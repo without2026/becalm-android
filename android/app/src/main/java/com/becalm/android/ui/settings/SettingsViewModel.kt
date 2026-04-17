@@ -228,7 +228,7 @@ public class SettingsViewModel @Inject constructor(
 
                     var enqueuedCount = 0
                     for (id in releasedIds) {
-                        val entity = rawIngestionRepository.findById(id)
+                        val entity = rawIngestionRepository.findById(id = id, userId = userId)
                         if (entity == null) {
                             logger.w(TAG, "released voice row id=$id not found for re-enqueue — skipping")
                             continue
@@ -271,24 +271,20 @@ public class SettingsViewModel @Inject constructor(
     /**
      * Signs out the current user.
      *
-     * Per spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", sign-out should only
-     * invalidate the current session (clear tokens) and preserve Room data so the user can
-     * resume locally cached content after signing back in. This differs from [onWipeLocalData],
-     * which is the deliberate full PIPA wipe.
-     *
-     * TODO(AUTH-005): authRepository.signOut() currently performs a full PIPA wipe including
-     * Room data. Per spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", sign-out
-     * should preserve Room data. Requires splitting authRepository.signOut() into
-     * invalidateSession() + fullWipe() — tracked for next sprint.
+     * Per spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", sign-out only invalidates
+     * the current session (tokens, session store, current-user mirror, workers, content
+     * observers) via [AuthRepository.invalidateSession] and preserves Room-persisted user data
+     * so the user can resume locally cached content after signing back in. For the deliberate
+     * full PIPA wipe use [onWipeLocalData] instead.
      *
      * On failure, surfaces the error string via [SettingsUiState.error].
      */
     public fun onSignOut() {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
-            when (val result = authRepository.signOut()) {
+            when (val result = authRepository.invalidateSession()) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "sign-out completed")
+                    logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
                     _uiState.update { it.copy(loading = false) }
                 }
                 is BecalmResult.Failure -> {

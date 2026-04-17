@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,7 @@ public fun TermsScreen(
     navController: NavHostController,
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
 
     BecalmScaffold(title = stringResource(R.string.terms_title)) { padding ->
         Column(
@@ -100,6 +102,15 @@ public fun TermsScreen(
                 onClick = { navController.navigate(BecalmRoute.Login.path) },
                 enabled = accepted,
                 variant = BecalmButtonVariant.Primary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            // Clean exit path for users who decline terms — required so declining consent
+            // never leaves the user stuck on this screen (PIPA finding #3 fix).
+            BecalmButton(
+                text = stringResource(R.string.terms_decline_cta),
+                onClick = { (context as? android.app.Activity)?.finish() },
+                variant = BecalmButtonVariant.Secondary,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

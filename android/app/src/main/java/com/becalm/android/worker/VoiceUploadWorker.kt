@@ -22,6 +22,7 @@ import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -69,7 +70,8 @@ import java.util.UUID
  *      (non-retryable). `vertex_upstream_error` or parse failure → [handleFailure] (transient retry).
  *    - HTTP 429/500/503 or IOException: quarantine when the current execution is already the
  *      [MAX_ATTEMPTS]th (runAttemptCount ≥ [MAX_ATTEMPTS] - 1) — mark "failed", [Result.success];
- *      else increment retry metadata and return [Result.retry].
+ *      else return [Result.retry] (WorkManager's runAttemptCount is the single retry counter;
+ *      the DB retry_count column is only bumped on terminal failure to avoid double-counting).
  *
  * ## Privacy (VOI-007)
  * Audio bytes flow: ContentResolver → OkHttp RequestBody stream → Railway.
@@ -113,8 +115,14 @@ public class VoiceUploadWorker @AssistedInject constructor(
             return@withContext Result.failure()
         }
 
-        // Step 3: load entity
-        val entity = rawIngestionEventDao.findById(rawEventId)
+        // Step 3: load entity — scoped to the current user so a stale enqueue from a previous
+        // session cannot read another user's row if the DB was not wiped on sign-out.
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) {
+            logger.e(TAG, "no active userId — failing id=${redact(rawEventId)}")
+            return@withContext Result.failure()
+        }
+        val entity = rawIngestionEventDao.findById(id = rawEventId, userId = userId)
         if (entity == null) {
             logger.e(TAG, "RawIngestionEventEntity not found id=${redact(rawEventId)}")
             return@withContext Result.failure()
@@ -131,11 +139,21 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
         val audioUri = Uri.parse(audioUriString)
 
-        // VOI-007: stream audio bytes directly — no temp-file copy
+        // VOI-007: stream audio bytes directly — no temp-file copy.
+        //
+        // URI accessibility guard: content:// URIs backed by MediaStore (see MediaStoreWorker)
+        // can become unreachable if the underlying file was deleted by the user or if a
+        // temporary URI permission expired after device restart. When openInputStream fails,
+        // retrying won't help — the URI is permanently gone — so quarantine the row directly
+        // instead of wasting the remaining WorkManager retry attempts.
         val audioPart = buildAudioPart(audioUri)
             ?: run {
-                logger.e(TAG, "cannot open audio stream uri=${redact(audioUriString)}")
-                return@withContext handleFailure(entity)
+                logger.e(
+                    TAG,
+                    "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
+                )
+                markFailed(entity)
+                return@withContext Result.success()
             }
 
         // VOI-004: second PIPA gate — consent may have been withdrawn while this job was queued
@@ -279,6 +297,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 moshi.adapter(VoiceErrorEnvelope::class.java).fromJson(it)
             }
         } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel the worker.
+            if (e is CancellationException) throw e
             logger.w(TAG, "HTTP 502 — failed to parse error envelope id=${redact(rawEventId)}: ${e.message}")
             null
         }
@@ -310,6 +330,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
         val inputStream = try {
             appContext.contentResolver.openInputStream(uri) ?: return null
         } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel the worker.
+            if (e is CancellationException) throw e
             logger.w(TAG, "openInputStream failed uri=${redact(uri.toString())}: ${e.message}")
             return null
         }
@@ -344,9 +366,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
             markFailed(entity)
             return Result.success()
         }
-        // Record transient attempt: increment retry_count and stamp last_attempt_at without
-        // changing sync_status so the row stays "pending" for the next WorkManager attempt.
-        rawIngestionEventDao.markTransientFailure(id = entity.id, now = Clock.System.now())
+        // Rely solely on WorkManager's runAttemptCount for retry accounting; do NOT increment
+        // the DB retry_count column here. Previously the worker maintained two independent
+        // counters (WorkManager's runAttemptCount + the DB retry_count via markTransientFailure),
+        // which double-counted transient failures. The row stays "pending" so WorkManager can
+        // retry it on the next attempt.
         return Result.retry()
     }
 
@@ -354,12 +378,13 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * Permanently quarantines the entity by setting [RawIngestionEventEntity.syncStatus] to
      * "failed" via the existing [RawIngestionEventDao.markFailed] query.
      *
-     * Passes [retryIncrement]=0 because [retry_count] was already incremented on each prior
-     * transient failure by [handleFailure]. We only need to stamp the final attempt time and
-     * flip the status (VOI-006 finding #6 fix).
+     * Passes [retryIncrement]=1 so the DB retry_count reflects that a final terminal attempt
+     * occurred. Transient retries no longer touch retry_count (WorkManager's runAttemptCount
+     * is the single source of truth for retry counting), so this is the only place the column
+     * is bumped for voice uploads.
      */
     private suspend fun markFailed(entity: RawIngestionEventEntity) {
-        rawIngestionEventDao.markFailed(id = entity.id, retryIncrement = 0, now = Clock.System.now())
+        rawIngestionEventDao.markFailed(id = entity.id, retryIncrement = 1, now = Clock.System.now())
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

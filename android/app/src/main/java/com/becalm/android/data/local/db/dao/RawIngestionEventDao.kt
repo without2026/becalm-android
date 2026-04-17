@@ -228,21 +228,27 @@ public interface RawIngestionEventDao {
     public suspend fun deleteAllForUser(userId: String): Int
 
     /**
-     * Looks up a single event by its primary key [id].
+     * Looks up a single event by its primary key [id], scoped to [userId].
      *
-     * Uses index: primary key lookup on `id` — O(1).
+     * The user_id predicate prevents cross-user data leaks in multi-account or stale
+     * back-stack scenarios: if one user's event UUID ends up in another user's navigation
+     * arguments (e.g. process-death restore), this query returns null rather than the other
+     * user's row. PK lookup stays O(1); the user_id check is a constant-time residual filter
+     * on the fetched row.
      *
      * @param id The [RawIngestionEventEntity.id] UUID to look up.
-     * @return The matching entity, or null if no row exists with this [id].
+     * @param userId The Supabase auth.users UUID of the owning user — enforces row-level scope.
+     * @return The matching entity, or null if no row exists with this [id] for [userId].
      */
     @Query(
         """
         SELECT * FROM raw_ingestion_events
         WHERE id = :id
+          AND user_id = :userId
         LIMIT 1
         """,
     )
-    public suspend fun findById(id: String): RawIngestionEventEntity?
+    public suspend fun findById(id: String, userId: String): RawIngestionEventEntity?
 
     /**
      * Returns all voice events for [userId] that are blocked waiting for PIPA consent

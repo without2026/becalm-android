@@ -41,9 +41,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 // which is the correct starting point for the SP-36 state machine.
 private val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            "ALTER TABLE commitments ADD COLUMN commitment_state TEXT NOT NULL DEFAULT 'DRAFT'"
-        )
+        // Idempotency: SQLite's ALTER TABLE ADD COLUMN has no IF NOT EXISTS clause.
+        // If a prior migration attempt added the column before crashing, replaying
+        // this statement would throw "duplicate column name". Swallowing the error
+        // here makes the migration safely re-runnable.
+        try {
+            db.execSQL(
+                "ALTER TABLE commitments ADD COLUMN commitment_state TEXT NOT NULL DEFAULT 'DRAFT'"
+            )
+        } catch (e: android.database.sqlite.SQLiteException) {
+            // Column already exists — migration is idempotent, continue.
+        }
     }
 }
 

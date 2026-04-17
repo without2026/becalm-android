@@ -1,6 +1,7 @@
 package com.becalm.android.ui.onboarding
 
 import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,14 @@ public fun RecordingFolderScreen(
         navController.navigate(BecalmRoute.OnboardingContacts.path)
     }
 
+    // READ_MEDIA_AUDIO was introduced in Android 13 (API 33). On API 28–32 the
+    // equivalent capability is covered by READ_EXTERNAL_STORAGE.
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
     BecalmScaffold(title = stringResource(R.string.onb_recording_folder_title)) { padding ->
         Column(
             modifier = Modifier
@@ -85,7 +94,7 @@ public fun RecordingFolderScreen(
             Spacer(modifier = Modifier.height(32.dp))
             BecalmButton(
                 text = stringResource(R.string.action_grant),
-                onClick = { launcher.launch(Manifest.permission.READ_MEDIA_AUDIO) },
+                onClick = { launcher.launch(audioPermission) },
                 variant = BecalmButtonVariant.Primary,
                 modifier = Modifier.fillMaxWidth(),
             )

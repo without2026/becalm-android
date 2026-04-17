@@ -41,6 +41,7 @@
     <string name="terms_accept">이용약관 및 개인정보처리방침에 동의합니다</string>
     <string name="terms_accept_checkbox">약관을 읽고 동의합니다</string>
     <string name="terms_cta">계속</string>
+    <string name="terms_decline_cta">동의 안 함 · 앱 종료</string>
 
     <!-- Login -->
     <string name="login_title">로그인</string>

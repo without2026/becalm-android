@@ -180,11 +180,11 @@ class PipaConsentReleaseFlowTest {
         )
 
         // voice-failed-001 must remain failed (not transitioned)
-        val failedEntity = dao.findById("voice-failed-001")
+        val failedEntity = dao.findById(id = "voice-failed-001", userId = testUserId)
         assertEquals("failed", failedEntity?.syncStatus)
 
         // voice-synced-001 must remain synced (not transitioned)
-        val syncedEntity = dao.findById("voice-synced-001")
+        val syncedEntity = dao.findById(id = "voice-synced-001", userId = testUserId)
         assertEquals("synced", syncedEntity?.syncStatus)
     }
 }

@@ -4,12 +4,14 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.RawIngestionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 // ─── UI model ─────────────────────────────────────────────────────────────────
@@ -50,11 +52,16 @@ internal const val ARG_EVENT_ID = "event_id"
  * [RawIngestionRepository.findById] and exposes display-safe fields via
  * [RawEventDetailUiState].
  *
+ * The current user ID is resolved from [UserPrefsStore.observeCurrentUserId] and passed
+ * to the user-scoped [RawIngestionRepository.findById] call — prevents cross-user leaks
+ * when a stale navigation arg references another user's event UUID.
+ *
  * @param savedStateHandle navigation argument; expects key [ARG_EVENT_ID].
  */
 @HiltViewModel
 public class RawEventDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
+    private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
 ) : ViewModel() {
@@ -77,7 +84,16 @@ public class RawEventDetailViewModel @Inject constructor(
 
     private fun loadEvent() {
         viewModelScope.launch {
-            val entity = rawIngestionRepository.findById(eventId)
+            // Resolve the current user ID so the DAO can reject cross-user reads. When no
+            // session is active we cannot scope the query, so report "not found" rather than
+            // returning an arbitrary row.
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                logger.w(TAG, "loadEvent id=%08x userId absent — treating as not found".format(eventId.hashCode()))
+                _uiState.value = RawEventDetailUiState(loading = false, error = "Event not found")
+                return@launch
+            }
+            val entity = rawIngestionRepository.findById(id = eventId, userId = userId)
             logger.d(TAG, "loadEvent id=%08x found=${entity != null}".format(eventId.hashCode()))
             _uiState.value = if (entity != null) {
                 RawEventDetailUiState(
@@ -85,7 +101,7 @@ public class RawEventDetailViewModel @Inject constructor(
                     sourceType = entity.sourceType,
                     eventTitle = entity.eventTitle,
                     timestamp = entity.timestamp,
-                    snippet = entity.eventBody?.take(200),
+                    snippet = entity.eventSnippet?.take(200),
                     loading = false,
                 )
             } else {

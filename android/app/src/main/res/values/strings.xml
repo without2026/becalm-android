@@ -41,6 +41,7 @@
     <string name="terms_accept">I agree to the Terms and Privacy Policy</string>
     <string name="terms_accept_checkbox">I have read and agree to the Terms</string>
     <string name="terms_cta">Continue</string>
+    <string name="terms_decline_cta">Decline &amp; exit</string>
 
     <!-- Login -->
     <string name="login_title">Sign In</string>

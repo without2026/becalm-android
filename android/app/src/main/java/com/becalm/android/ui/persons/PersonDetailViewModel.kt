@@ -14,6 +14,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,12 +54,14 @@ public sealed class InteractionRow {
      * @property title Commitment title.
      * @property direction "give" or "take".
      * @property actionState Current follow-through state of this commitment.
+     * @property commitmentState SP-36 lifecycle state name (e.g. "DRAFT", "DONE", "DISMISSED").
      */
     public data class Commitment(
         val timestamp: Instant,
         val title: String,
         val direction: String,
         val actionState: String,
+        val commitmentState: String,
     ) : InteractionRow()
 
     /**
@@ -138,7 +141,7 @@ public class PersonDetailViewModel @Inject constructor(
 
     init {
         if (personRef.isEmpty()) {
-            _uiState.value = PersonDetailUiState(loading = false, error = "Person ID missing")
+            _uiState.update { it.copy(loading = false, error = "Person ID missing") }
         } else {
             observeDetail()
         }
@@ -155,6 +158,7 @@ public class PersonDetailViewModel @Inject constructor(
 
     // ─── Private ──────────────────────────────────────────────────────────────
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeDetail() {
         viewModelScope.launch {
             userPrefsStore.observeCurrentUserId()
@@ -193,7 +197,7 @@ public class PersonDetailViewModel @Inject constructor(
                     }
                 }
                 .collect { state ->
-                    _uiState.value = state
+                    _uiState.update { state }
                 }
         }
     }
@@ -230,6 +234,7 @@ public class PersonDetailViewModel @Inject constructor(
                 title = c.title,
                 direction = c.direction,
                 actionState = c.actionState,
+                commitmentState = c.commitmentState.name,
             )
         }
         val calendarRows: List<InteractionRow> = calendarEvents.map { m ->
@@ -239,8 +244,8 @@ public class PersonDetailViewModel @Inject constructor(
             )
         }
         val (completed, pending) = commitmentRows.partition { c ->
-            val s = c.actionState.lowercase()
-            s == "completed" || s == "done"
+            val s = c.commitmentState.uppercase()
+            s == "DONE" || s == "DISMISSED"
         }
         val history = (eventRows + calendarRows)
             .sortedByDescending { row ->

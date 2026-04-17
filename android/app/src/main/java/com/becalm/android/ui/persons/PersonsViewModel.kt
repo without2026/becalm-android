@@ -46,7 +46,7 @@ public data class PersonRow(
      * User-facing label. Falls back to a redacted prefix of [personRef] so raw
      * phone numbers / emails are never shown (SRC-001, ENR-006).
      */
-    val displayLabel: String get() = displayName ?: personRef.take(3) + "***"
+    val displayLabel: String get() = displayName ?: if (personRef.length <= 3) "***" else personRef.take(3) + "***"
 }
 
 /**

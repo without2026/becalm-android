@@ -3,12 +3,15 @@ package com.becalm.android.ui.persons
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.RawIngestionRepository
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -27,15 +30,18 @@ class RawEventDetailViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
 
     // The VM looks up by primary-key id (findById), not by clientEventId.
     private val eventId = "raw-primary-id-abc-123"
+    private val userId = "user-1"
     private val now = Clock.System.now()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(userId)
     }
 
     @After
@@ -47,6 +53,7 @@ class RawEventDetailViewModelTest {
         val handle = SavedStateHandle(mapOf(ARG_EVENT_ID to eventId))
         return RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
+            userPrefsStore = userPrefsStore,
             savedStateHandle = handle,
             logger = logger,
         )
@@ -54,7 +61,7 @@ class RawEventDetailViewModelTest {
 
     private fun makeEntity(): RawIngestionEventEntity = RawIngestionEventEntity(
         id = eventId,
-        userId = "user-1",
+        userId = userId,
         clientEventId = "client-event-abc",
         sourceType = "voice",
         eventTitle = "Team stand-up recording",
@@ -67,7 +74,7 @@ class RawEventDetailViewModelTest {
     fun `loads event and emits it in uiState when repository returns non-null`() =
         runTest(testDispatcher) {
             val entity = makeEntity()
-            coEvery { rawIngestionRepository.findById(eventId) } returns entity
+            coEvery { rawIngestionRepository.findById(id = eventId, userId = userId) } returns entity
 
             val vm = buildViewModel()
 
@@ -91,7 +98,7 @@ class RawEventDetailViewModelTest {
      */
     @Test
     fun `null result from repository sets generic error in uiState`() = runTest(testDispatcher) {
-        coEvery { rawIngestionRepository.findById(eventId) } returns null
+        coEvery { rawIngestionRepository.findById(id = eventId, userId = userId) } returns null
 
         val vm = buildViewModel()
 

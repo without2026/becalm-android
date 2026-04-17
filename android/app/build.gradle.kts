@@ -87,6 +87,10 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     // ─── KotlinX ─────────────────────────────────────────────────────────────
     implementation(libs.kotlinx.coroutines.android)

@@ -15,7 +15,9 @@ import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -64,10 +66,31 @@ public interface AuthRepository {
      * Every wipe step is attempted regardless of individual step failures. The first
      * failure encountered is returned, but subsequent steps are never skipped.
      *
+     * Use this only for the deliberate "로컬 데이터 전체 삭제" flow. For a routine sign-out
+     * that preserves local Room data per the local-first spec invariant, call
+     * [invalidateSession] instead.
+     *
      * @return [BecalmResult.Success] if all wipe steps succeeded; the first [BecalmResult.Failure]
      *   encountered otherwise (remaining steps were still executed).
      */
     public suspend fun signOut(): BecalmResult<Unit>
+
+    /**
+     * Invalidates the current session without touching Room-persisted user data.
+     *
+     * Per the spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", routine sign-out
+     * must only clear authentication state (tokens, session store, current-user pref, worker
+     * schedules keyed on the session) so that the user can sign back in and resume locally
+     * cached content. This differs from [signOut], which additionally calls
+     * `database.clearAllTables()` for the deliberate full PIPA wipe.
+     *
+     * Every step is attempted regardless of individual step failures; the first failure is
+     * returned after all steps complete.
+     *
+     * @return [BecalmResult.Success] if all steps succeeded; the first [BecalmResult.Failure]
+     *   encountered otherwise (remaining steps were still executed).
+     */
+    public suspend fun invalidateSession(): BecalmResult<Unit>
 
     /**
      * Exchanges the stored refresh token for a new session (AUTH-004 / AUTH-007).
@@ -83,11 +106,8 @@ public interface AuthRepository {
     public suspend fun currentSession(): SupabaseSession?
 
     /**
-     * Emits [AuthState] once on collection by reading the session store.
-     *
-     * MVP note: this is a cold [Flow] that reads [SupabaseSessionStore.load] once per
-     * collection. A reactive [kotlinx.coroutines.flow.StateFlow] observed across save/clear
-     * boundaries is deferred to SP-38 (AuthViewModel scope).
+     * Emits [AuthState] reactively: once on subscription (seeded from the session store)
+     * and again on every subsequent sign-in / sign-out that mutates the persisted session.
      */
     public fun observeAuthState(): Flow<AuthState>
 }
@@ -114,14 +134,33 @@ public class AuthRepositoryImpl @Inject constructor(
     private val logger: Logger,
 ) : AuthRepository {
 
+    // Broadcasts the latest session across save/clear boundaries so that observers of
+    // [observeAuthState] re-emit after sign-in and sign-out. `null` means no session is
+    // currently persisted. Seeded lazily from [sessionStore] on first collection.
+    private val sessionFlow = MutableStateFlow<SupabaseSession?>(null)
+
     override suspend fun signInWithEmail(
         email: String,
         password: String,
     ): BecalmResult<SupabaseSession> =
-        authClient.signInWithEmail(email, password).map { it.session }
+        authClient.signInWithEmail(email, password)
+            .map { it.session }
+            .also { result ->
+                if (result is BecalmResult.Success) {
+                    userPrefsStore.setCurrentUserId(result.value.userId)
+                    sessionFlow.value = result.value
+                }
+            }
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
-        authClient.signInWithGoogleIdToken(idToken).map { it.session }
+        authClient.signInWithGoogleIdToken(idToken)
+            .map { it.session }
+            .also { result ->
+                if (result is BecalmResult.Success) {
+                    userPrefsStore.setCurrentUserId(result.value.userId)
+                    sessionFlow.value = result.value
+                }
+            }
 
     override suspend fun signOut(): BecalmResult<Unit> {
         // PIPA wipe — every step runs regardless of prior step failures.
@@ -176,6 +215,65 @@ public class AuthRepositoryImpl @Inject constructor(
         recordIfFirst(runStep(10) { userPrefsStore.clearAll() })
         recordIfFirst(runStep(11) { database.clearAllTables() })
 
+        // Broadcast the cleared state so observers transition to Unauthenticated.
+        sessionFlow.value = null
+
+        return firstFailure ?: BecalmResult.Success(Unit)
+    }
+
+    override suspend fun invalidateSession(): BecalmResult<Unit> {
+        // Session-only cleanup — preserves Room data per the local-first spec invariant
+        // "로그아웃 시 Room DB 데이터는 삭제하지 않는다". Every step runs regardless of prior
+        // step failures; the first failure is captured and returned after all steps complete.
+        var firstFailure: BecalmResult.Failure? = null
+
+        fun recordIfFirst(result: BecalmResult<*>) {
+            if (firstFailure == null && result is BecalmResult.Failure) {
+                firstFailure = result
+            }
+        }
+
+        // Step 1: load session to obtain access token for server-side revoke.
+        val session = runStep(1) { sessionStore.load() }
+            .let { result ->
+                when (result) {
+                    is BecalmResult.Success -> result.value
+                    is BecalmResult.Failure -> {
+                        recordIfFirst(result)
+                        null
+                    }
+                }
+            }
+
+        // Step 2: cancel all WorkManager jobs so no worker runs against the stale session.
+        recordIfFirst(runStep(2) { workScheduler.cancelAll() })
+
+        // Step 3: stop content observers so no ghost callbacks fire after sign-out.
+        recordIfFirst(runStep(3) { contentObserverBootstrap.stop() })
+
+        // Step 4: best-effort server-side revoke.
+        if (session != null) {
+            recordIfFirst(runStep(4) { authClient.signOut(session.accessToken) })
+        }
+
+        // Steps 5–7: clear auth-related local stores only.
+        // IMAP credentials are tied to the current account (not the raw Room event data),
+        // so they are considered part of "session" and are cleared here.
+        recordIfFirst(runStep(5) { imapCredentialStore.clear() })
+        recordIfFirst(runStep(6) { sessionStore.clear() })
+        recordIfFirst(runStep(7) { deviceKeyStore.clear() })
+
+        // Step 8: clear the non-secret current-user-id mirror. Other UI preferences
+        // (locale, notifications flag, onboarding completion) are intentionally preserved.
+        recordIfFirst(runStep(8) { userPrefsStore.setCurrentUserId(null) })
+
+        // NOTE: Intentionally NOT calling database.clearAllTables(),
+        // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
+        // userPrefsStore.clearAll() — those belong to the full PIPA wipe in [signOut].
+
+        // Broadcast the cleared state so observers transition to Unauthenticated.
+        sessionFlow.value = null
+
         return firstFailure ?: BecalmResult.Success(Unit)
     }
 
@@ -189,10 +287,17 @@ public class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun currentSession(): SupabaseSession? = sessionStore.load()
 
-    override fun observeAuthState(): Flow<AuthState> = flow {
-        val session = sessionStore.load()
-        emit(if (session != null) AuthState.Authenticated(session) else AuthState.Unauthenticated)
-    }
+    override fun observeAuthState(): Flow<AuthState> = sessionFlow
+        .onStart {
+            // Seed from the persisted store on first collection so cold starts immediately
+            // see any previously saved session without waiting for a sign-in event.
+            if (sessionFlow.value == null) {
+                sessionStore.load()?.let { sessionFlow.value = it }
+            }
+        }
+        .map { session ->
+            if (session != null) AuthState.Authenticated(session) else AuthState.Unauthenticated
+        }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 

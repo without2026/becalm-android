@@ -255,9 +255,15 @@ public class OnboardingViewModel @Inject constructor(
                     val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
                     val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
                     logger.d(TAG, "onPipaConsentDeclined: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
+                    // Mark PIPA_CONSENT as DENIED and RECORDING_FOLDER as SKIPPED so the
+                    // onCompleteOnboarding() terminal-status gate does not block the user
+                    // from finishing — leaving RECORDING_FOLDER as NOT_STARTED caused a
+                    // lockout (PIPA compliance fix).
                     state.copy(
                         currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
-                        stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED),
+                        stepStates = state.stepStates +
+                            (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
+                            (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
                         error = null,
                     )
                 }

@@ -132,8 +132,13 @@ class VoiceUploadWorkerTest {
         every { workerParams.inputData.getString(VoiceUploadWorker.KEY_AUDIO_URI) } returns fakeAudioUri
         every { workerParams.runAttemptCount } returns 0
 
-        // Default: entity found
-        coEvery { rawIngestionEventDao.findById(fakeEntity.id) } returns fakeEntity
+        // Default: current user session present
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(fakeEntity.userId)
+
+        // Default: entity found (scoped to current user — fix for cross-user leak)
+        coEvery {
+            rawIngestionEventDao.findById(id = fakeEntity.id, userId = fakeEntity.userId)
+        } returns fakeEntity
         coEvery { rawIngestionEventDao.update(any()) } returns 1
         coEvery { commitmentDao.insertAll(any()) } returns listOf(1L, 2L)
 

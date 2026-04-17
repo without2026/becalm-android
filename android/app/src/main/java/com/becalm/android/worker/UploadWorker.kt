@@ -129,10 +129,57 @@ public class UploadWorker @AssistedInject constructor(
 
             when (val uploadResult = rawIngestionRepository.uploadBatch(pending)) {
                 is BecalmResult.Success -> {
-                    val ids = pending.map { it.id }
-                    rawIngestionRepository.markSynced(ids)
-                    totalUploaded += pending.size
-                    logger.d(TAG, "rawIngestion batch acked batchSize=${pending.size}")
+                    // Server may return partial failures in body.failed. Events flagged
+                    // retryable=false must be quarantined (marked failed in DB) rather than
+                    // marked synced — otherwise the quarantine signal is silently dropped.
+                    // Retryable failures are left pending so the next worker run re-uploads them.
+                    val response = uploadResult.value
+                    val failedByClientId = response.failed.associateBy { it.clientEventId }
+                    val now = Clock.System.now()
+
+                    val syncedIds = mutableListOf<String>()
+                    var quarantinedCount = 0
+                    var retryableFailedCount = 0
+                    for (event in pending) {
+                        val failure = failedByClientId[event.clientEventId]
+                        when {
+                            failure == null -> syncedIds.add(event.id)
+                            !failure.retryable -> {
+                                // Persist quarantine: server has deterministically rejected this event.
+                                // TODO: Add a dedicated `updateQuarantineStatus(id, reason)` DAO method
+                                //   so the quarantine reason code from the server is preserved.
+                                //   Today we reuse markFailed which only records sync_status="failed".
+                                rawIngestionRepository.markFailed(event.id, now)
+                                quarantinedCount++
+                            }
+                            else -> {
+                                // Retryable: leave pending (do not markSynced) so next run re-uploads.
+                                retryableFailedCount++
+                            }
+                        }
+                    }
+
+                    if (syncedIds.isNotEmpty()) {
+                        rawIngestionRepository.markSynced(syncedIds)
+                    }
+                    totalUploaded += syncedIds.size
+                    logger.d(
+                        TAG,
+                        "rawIngestion batch acked batchSize=${pending.size} " +
+                            "synced=${syncedIds.size} quarantined=$quarantinedCount " +
+                            "retryable=$retryableFailedCount",
+                    )
+
+                    // Guard against infinite loop: if the whole page came back as retryable
+                    // failures (none synced, none quarantined), findPendingSync would return
+                    // the same rows on the next iteration. Break so WorkManager retries later.
+                    if (syncedIds.isEmpty() && quarantinedCount == 0 && retryableFailedCount > 0) {
+                        logger.w(
+                            TAG,
+                            "rawIngestion batch all retryable — breaking loop to let WorkManager retry",
+                        )
+                        break
+                    }
                 }
 
                 is BecalmResult.Failure -> {

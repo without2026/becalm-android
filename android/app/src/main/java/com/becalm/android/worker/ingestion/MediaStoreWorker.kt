@@ -18,6 +18,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -170,6 +171,9 @@ public class MediaStoreWorker @AssistedInject constructor(
                 }
             }
         } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel the worker;
+            // swallowing it would cause the coroutine to continue after cancellation.
+            if (e is CancellationException) throw e
             logger.e(TAG, "SMS query failed", e)
             sourceStatusRepository.recordSyncError(SOURCE_SMS_MMS, e.message ?: "query failed", now)
             return 0
@@ -319,6 +323,8 @@ public class MediaStoreWorker @AssistedInject constructor(
                     val rowId = try {
                         rawIngestionEventDao.insert(entity)
                     } catch (e: Exception) {
+                        // Rethrow CancellationException so WorkManager can properly cancel.
+                        if (e is CancellationException) throw e
                         // Per-row failure: log and continue so one bad row doesn't abort the batch.
                         // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
                         // next run. The >= predicate combined with clientEventId dedup ensures it is
@@ -355,12 +361,16 @@ public class MediaStoreWorker @AssistedInject constructor(
                         workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
                         logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=${rowId != -1L}")
                     } catch (e: Exception) {
+                        // Rethrow CancellationException so WorkManager can properly cancel.
+                        if (e is CancellationException) throw e
                         logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
                         hasInsertFailure = true
                     }
                 }
             }
         } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel the worker.
+            if (e is CancellationException) throw e
             logger.e(TAG, "voice MediaStore query failed", e)
             sourceStatusRepository.recordSyncError(SOURCE_VOICE, e.message ?: "query failed", now)
             return 0

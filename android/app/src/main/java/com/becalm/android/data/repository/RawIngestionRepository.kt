@@ -76,16 +76,19 @@ public interface RawIngestionRepository {
     public suspend fun findByClientEventId(userId: String, clientEventId: String): RawIngestionEventEntity?
 
     /**
-     * Returns the event with the given primary-key [id], or null when no row exists.
+     * Returns the event with the given primary-key [id] scoped to [userId], or null when
+     * no row exists for that user.
      *
-     * The primary key is a UUID assigned at insert time. Because every UUID is unique across
-     * the entire table, no userId filter is needed — the PK itself scopes the row to a single
-     * user by virtue of the composite unique index on (user_id, client_event_id).
+     * Although the primary key is globally unique, callers MUST pass the current user's
+     * [userId] so that the DAO can reject cross-user reads: in multi-account or stale
+     * back-stack scenarios one user's event UUID can end up in another user's navigation
+     * stack, and we must never return another user's row.
      *
      * @param id The [RawIngestionEventEntity.id] UUID to look up.
-     * @return The matching entity, or null.
+     * @param userId The Supabase auth.users UUID of the requesting user.
+     * @return The matching entity owned by [userId], or null.
      */
-    public suspend fun findById(id: String): RawIngestionEventEntity?
+    public suspend fun findById(id: String, userId: String): RawIngestionEventEntity?
 
     // ── Sync queue ────────────────────────────────────────────────────────────
 
@@ -254,8 +257,8 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     ): RawIngestionEventEntity? =
         dao.findByClientEventId(userId, clientEventId)
 
-    override suspend fun findById(id: String): RawIngestionEventEntity? =
-        dao.findById(id)
+    override suspend fun findById(id: String, userId: String): RawIngestionEventEntity? =
+        dao.findById(id = id, userId = userId)
 
     // ── Sync queue ────────────────────────────────────────────────────────────
 
