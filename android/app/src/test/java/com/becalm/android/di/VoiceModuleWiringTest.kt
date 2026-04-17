@@ -12,6 +12,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -123,8 +124,4 @@ class VoiceModuleWiringTest {
             method.parameterCount >= 7,
         )
     }
-}
-
-private fun assertTrue(msg: String, value: Boolean) {
-    org.junit.Assert.assertTrue(msg, value)
 }

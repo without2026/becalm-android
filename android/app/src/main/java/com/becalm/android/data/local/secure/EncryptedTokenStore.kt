@@ -80,10 +80,6 @@ public class EncryptedTokenStore @Inject constructor(
         const val KEY_USER_ID = "user_id"
         const val KEY_EMAIL = "email"
         const val KEY_EXPIRES_AT_EPOCH_MILLIS = "expires_at_epoch_millis"
-
-        // Sentinel value stored for the email field when the original value was an empty string.
-        // SupabaseSession.email is non-nullable (String); an empty string is a valid, expected
-        // value (e.g. OAuth providers that do not return an email). No null sentinel is required.
     }
 
     // Lazily constructed so that the first disk access is always off the main thread.

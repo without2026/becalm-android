@@ -267,10 +267,14 @@ public class DefaultAuthTokenProvider @Inject constructor(
     private val cachedAccessToken = AtomicReference<String?>(null)
     private val refreshMutex = Mutex()
 
-    // Unconfined: the collector does a trivial AtomicReference.set() and must run inline on
-    // the emitter thread to avoid races where refresh() returns before the observer updates
-    // the cache. Emitters run inside EncryptedTokenStore.save/clear (Dispatchers.IO), so the
-    // collector simply resumes on IO.
+    /**
+     * Scope that owns the [sessionStore] observer subscription.
+     *
+     * Dispatcher rationale: the collector does a trivial [AtomicReference.set] and must run
+     * inline on the emitter thread to avoid races where `refresh()` returns before the observer
+     * has updated the cache. Emitters run inside `EncryptedTokenStore.save/clear`
+     * ([Dispatchers.IO]), so [Dispatchers.Unconfined] simply resumes the collector on IO.
+     */
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     init {
