@@ -15,8 +15,10 @@ import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.imap.ImapClient
+import com.becalm.android.data.remote.imap.ImapFetchResult
 import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -80,12 +82,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
-        val credentials = imapCredentialStore.getCredentials()
-
-        if (credentials == null) {
-            logger.w(TAG, "IMAP Naver credentials absent — provisioned by SP-53")
-            return Result.failure()
-        }
+        val credentials = loadCredentials() ?: return Result.failure()
 
         val imapEmail = credentials.username
         val imapPassword = credentials.appPassword
@@ -121,20 +118,52 @@ public class ImapNaverWorker @AssistedInject constructor(
         )
 
         if (fetchResult is BecalmResult.Failure) {
-            val error = fetchResult.error
-            logger.e(TAG, "IMAP fetch failed error=${error::class.simpleName}")
-            sourceStatusRepository.recordSyncError(
-                sourceType = SourceType.NAVER_IMAP,
-                error = error::class.simpleName ?: "unknown",
-                at = Clock.System.now(),
-            )
-            return when (error) {
-                is BecalmError.Unauthorized -> Result.failure()
-                else -> Result.retry()
-            }
+            return handleFetchFailure(fetchResult.error)
         }
 
         val fetched = (fetchResult as BecalmResult.Success).value
+        return persistFetchedAndSucceed(fetched, userId)
+    }
+
+    /**
+     * Reads IMAP credentials from [ImapCredentialStore]. Logs the provisioning hint when
+     * absent and returns `null` so the caller can short-circuit to [Result.failure].
+     */
+    private suspend fun loadCredentials(): ImapCredentials? {
+        val credentials = imapCredentialStore.getCredentials()
+        if (credentials == null) {
+            logger.w(TAG, "IMAP Naver credentials absent — provisioned by SP-53")
+        }
+        return credentials
+    }
+
+    /**
+     * Logs + records the IMAP fetch error and maps it to the appropriate WorkManager [Result].
+     * Auth failures terminate the worker; any other error retries with backoff.
+     */
+    private suspend fun handleFetchFailure(error: BecalmError): Result {
+        logger.e(TAG, "IMAP fetch failed error=${error::class.simpleName}")
+        sourceStatusRepository.recordSyncError(
+            sourceType = SourceType.NAVER_IMAP,
+            error = error::class.simpleName ?: "unknown",
+            at = Clock.System.now(),
+        )
+        return when (error) {
+            is BecalmError.Unauthorized -> Result.failure()
+            else -> Result.retry()
+        }
+    }
+
+    /**
+     * Handles phases 4-7 of the sync: insert fetched messages, advance the IMAP cursor,
+     * record success in [SourceStatusRepository], and emit the closing log before returning.
+     *
+     * Log strings are byte-identical with the former inlined sequence in [doWork].
+     */
+    private suspend fun persistFetchedAndSucceed(
+        fetched: ImapFetchResult,
+        userId: String,
+    ): Result {
         val serverUidValidity = fetched.newUidValidity
         val serverUidNext = fetched.newUidNext
 

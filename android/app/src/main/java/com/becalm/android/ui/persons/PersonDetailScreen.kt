@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -143,64 +144,64 @@ private fun InteractionList(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
-        if (pendingCommitments.isNotEmpty()) {
-            item(key = "header-pending") {
-                SectionHeader(text = commitmentsHeader)
-            }
-            items(
-                items = pendingCommitments,
-                key = { row ->
-                    "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                },
-            ) { row ->
-                InteractionRowItem(
-                    row = row,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-        }
-        if (completedCommitments.isNotEmpty()) {
-            item(key = "header-completed") {
-                SectionHeader(text = commitmentsHeader)
-            }
-            items(
-                items = completedCommitments,
-                key = { row ->
-                    "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                },
-            ) { row ->
-                InteractionRowItem(
-                    row = row,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-        }
-        if (interactionHistory.isNotEmpty()) {
-            item(key = "header-history") {
-                SectionHeader(text = historyHeader)
-            }
-            items(
-                items = interactionHistory,
-                key = { row ->
-                    when (row) {
-                        is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
-                        is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                        is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                    }
-                },
-            ) { row ->
-                InteractionRowItem(
-                    row = row,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-        }
+        interactionSection(
+            header = commitmentsHeader,
+            headerKey = "header-pending",
+            rows = pendingCommitments,
+            itemKey = { row ->
+                "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+            },
+        )
+        interactionSection(
+            header = commitmentsHeader,
+            headerKey = "header-completed",
+            rows = completedCommitments,
+            itemKey = { row ->
+                "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+            },
+        )
+        interactionSection(
+            header = historyHeader,
+            headerKey = "header-history",
+            rows = interactionHistory,
+            itemKey = { row ->
+                when (row) {
+                    is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
+                    is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                    is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Emits a `SectionHeader` + list of [InteractionRowItem]s into this [LazyListScope].
+ *
+ * No-op when [rows] is empty, matching the `isNotEmpty()` guard at each former call site.
+ * The generic bound `<T : InteractionRow>` lets callers pass either a `List<InteractionRow.Commitment>`
+ * (covariant) or the polymorphic `List<InteractionRow>` without forcing a cast.
+ */
+private fun <T : InteractionRow> LazyListScope.interactionSection(
+    header: String,
+    headerKey: String,
+    rows: List<T>,
+    itemKey: (T) -> String,
+) {
+    if (rows.isEmpty()) return
+    item(key = headerKey) {
+        SectionHeader(text = header)
+    }
+    items(
+        items = rows,
+        key = itemKey,
+    ) { row ->
+        InteractionRowItem(
+            row = row,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -243,33 +244,44 @@ private fun InteractionRowItem(
                 }
             }
             is InteractionRow.Commitment -> {
-                Text(
-                    text = stringResource(R.string.person_detail_commitments_section),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = row.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                InteractionLabelAndBody(
+                    label = stringResource(R.string.person_detail_commitments_section),
+                    body = row.title,
                 )
             }
             is InteractionRow.CalendarMeeting -> {
-                Text(
-                    text = stringResource(R.string.today_section_meetings),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = row.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                InteractionLabelAndBody(
+                    label = stringResource(R.string.today_section_meetings),
+                    body = row.title,
                 )
             }
         }
     }
+}
+
+/**
+ * Label + body text pair used by [InteractionRowItem] for the Commitment and CalendarMeeting
+ * branches. The Event branch intentionally inlines its own layout because it wraps the label
+ * in a `Row` (preserving the original Compose tree).
+ *
+ * Visual parity with the former inlined forms:
+ *  - Label: `labelSmall` typography, primary colour.
+ *  - 4.dp spacer between label and body.
+ *  - Body: `bodyMedium` typography, onSurface colour.
+ */
+@Composable
+private fun InteractionLabelAndBody(label: String, body: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = body,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
 }
 
 @PreviewLightDark

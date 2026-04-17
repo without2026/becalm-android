@@ -215,6 +215,20 @@ public class GmailWorker @AssistedInject constructor(
             }
         }
 
+        seedHistoryIdCursor()
+
+        return SyncOutcome.Success(totalFetched)
+    }
+
+    /**
+     * Full-sync 직후 다음 run에서 incremental-sync를 쓸 수 있도록 historyId 커서를 1회 심는다.
+     * `history.list("1")`은 관례적인 부트스트랩 호출이며 실패해도 치명적이지 않다 — 다음 run에서
+     * storedHistoryId 가 null이면 full-sync가 다시 실행된다.
+     *
+     * 원본 인라인 로직과 byte-identical: `BecalmResult.Success` 분기에서만 커서 갱신이 일어나고,
+     * 로그 문구(`"full-sync seeded historyId=$bootstrapHistoryId"`)와 `toLongOrNull` 가드도 그대로다.
+     */
+    private suspend fun seedHistoryIdCursor() {
         // Seed the historyId cursor by calling history.list with the earliest valid value.
         // Gmail requires a real historyId; we use "1" as the conventional bootstrap value
         // to retrieve the current mailbox historyId without processing history records.
@@ -227,8 +241,6 @@ public class GmailWorker @AssistedInject constructor(
             }
         }
         // A failure to seed the historyId is non-fatal: the next run will full-sync again.
-
-        return SyncOutcome.Success(totalFetched)
     }
 
     // ── Message insertion ─────────────────────────────────────────────────────
@@ -243,25 +255,30 @@ public class GmailWorker @AssistedInject constructor(
     private suspend fun insertMessages(userId: String, messageIds: List<String>): Int {
         var count = 0
         for (messageId in messageIds) {
-            when (val msgResult = gmailClient.getMessage(messageId)) {
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
-                }
-                is BecalmResult.Success -> {
-                    val entity = msgResult.value.toEntity(userId)
-                    when (val insertResult = rawIngestionRepository.insertLocal(entity)) {
-                        is BecalmResult.Failure -> {
-                            logger.e(TAG, "insertLocal failed id_hash=${redact(messageId)} err=${insertResult.error}")
-                        }
-                        is BecalmResult.Success -> {
-                            logger.d(TAG, "insertLocal ok id_hash=${redact(messageId)}")
-                            count++
-                        }
-                    }
-                }
-            }
+            if (fetchAndInsert(userId, messageId)) count++
         }
         return count
+    }
+
+    /**
+     * 단일 메시지에 대한 `getMessage → toEntity → insertLocal` 파이프라인을 4-level 중첩
+     * when 밖으로 평탄화한다. 각 실패 분기의 로그 레벨(`w`/`e`)과 문자열은 원본과 byte-identical.
+     * 성공 시에만 `true`를 반환해 [insertMessages]의 count 증가 시맨틱을 그대로 보존한다.
+     */
+    private suspend fun fetchAndInsert(userId: String, messageId: String): Boolean {
+        val msgResult = gmailClient.getMessage(messageId)
+        if (msgResult is BecalmResult.Failure) {
+            logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
+            return false
+        }
+        val entity = (msgResult as BecalmResult.Success).value.toEntity(userId)
+        val insertResult = rawIngestionRepository.insertLocal(entity)
+        if (insertResult is BecalmResult.Failure) {
+            logger.e(TAG, "insertLocal failed id_hash=${redact(messageId)} err=${insertResult.error}")
+            return false
+        }
+        logger.d(TAG, "insertLocal ok id_hash=${redact(messageId)}")
+        return true
     }
 
     // ── Conversion ────────────────────────────────────────────────────────────

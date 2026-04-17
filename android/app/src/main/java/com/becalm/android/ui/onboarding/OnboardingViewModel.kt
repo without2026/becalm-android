@@ -216,38 +216,51 @@ public class OnboardingViewModel @Inject constructor(
                 } else {
                     logger.i(TAG, "PIPA third-party provision consent DECLINED — voice auto-upload disabled")
                 }
-                _uiState.update { state ->
-                    val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
-                    if (granted) {
-                        val recordingFolderIndex = steps.indexOf(OnboardingStep.RECORDING_FOLDER)
-                        logger.d(TAG, "$caller: advancing to RECORDING_FOLDER (index=$recordingFolderIndex)")
-                        state.copy(
-                            currentStepIndex = recordingFolderIndex.coerceAtLeast(pipaIndex + 1),
-                            stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED),
-                            error = null,
-                        )
-                    } else {
-                        // Skip RECORDING_FOLDER — go straight to CONTACTS_PERM. Mark RECORDING_FOLDER
-                        // as SKIPPED so the onCompleteOnboarding() terminal-status gate doesn't lock
-                        // the user out (PIPA compliance fix).
-                        val contactsIndex = steps.indexOf(OnboardingStep.CONTACTS_PERM)
-                        val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
-                        logger.d(TAG, "$caller: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
-                        state.copy(
-                            currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
-                            stepStates = state.stepStates +
-                                (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
-                                (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
-                            error = null,
-                        )
-                    }
-                }
+                _uiState.update { state -> computePipaStateAfterWrite(state, granted, caller) }
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = granted))
             } catch (e: Exception) {
                 logger.e(TAG, "$caller: DataStore write failed", e)
                 _uiState.update { it.copy(error = e.message ?: "consent write failed") }
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaveFailed(e.message ?: "consent write failed"))
             }
+        }
+    }
+
+    /**
+     * Pure state reducer for [setPipa]'s granted/declined branches. Returns the new
+     * [OnboardingUiState] produced by applying the PIPA write outcome to [state].
+     *
+     * Log strings are preserved byte-identical to the inlined form — [caller] is used as
+     * the prefix so the log pipeline's function-name filter keeps working.
+     */
+    private fun computePipaStateAfterWrite(
+        state: OnboardingUiState,
+        granted: Boolean,
+        caller: String,
+    ): OnboardingUiState {
+        val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
+        return if (granted) {
+            val recordingFolderIndex = steps.indexOf(OnboardingStep.RECORDING_FOLDER)
+            logger.d(TAG, "$caller: advancing to RECORDING_FOLDER (index=$recordingFolderIndex)")
+            state.copy(
+                currentStepIndex = recordingFolderIndex.coerceAtLeast(pipaIndex + 1),
+                stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED),
+                error = null,
+            )
+        } else {
+            // Skip RECORDING_FOLDER — go straight to CONTACTS_PERM. Mark RECORDING_FOLDER
+            // as SKIPPED so the onCompleteOnboarding() terminal-status gate doesn't lock
+            // the user out (PIPA compliance fix).
+            val contactsIndex = steps.indexOf(OnboardingStep.CONTACTS_PERM)
+            val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
+            logger.d(TAG, "$caller: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
+            state.copy(
+                currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
+                stepStates = state.stepStates +
+                    (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
+                    (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
+                error = null,
+            )
         }
     }
 
@@ -295,31 +308,8 @@ public class OnboardingViewModel @Inject constructor(
     public fun onCompleteOnboarding() {
         viewModelScope.launch {
             _uiState.update { it.copy(isCompleting = true, error = null) }
-            // spec: ONB-008 — gate completion on every non-COMPLETE step having reached a terminal
-            // status. DENIED is accepted per the ONB-PIPA invariant (declining PIPA consent must
-            // not block the user from finishing onboarding).
             val stepStates = _uiState.value.stepStates
-            val terminalStatuses = setOf(
-                StepStatus.GRANTED,
-                StepStatus.COMPLETE,
-                StepStatus.SKIPPED,
-                StepStatus.DENIED,
-            )
-            // Steps that have no dedicated onboarding screen are excluded from the gate.
-            // WELCOME is a non-interactive splash; SMS_PERM, CALL_PERM, NOTIF_PERM have no
-            // screens yet (deferred to a future sprint). Without this exclusion, the gate
-            // would never pass because nothing marks these steps as terminal.
-            val stepsWithoutScreen = setOf(
-                OnboardingStep.WELCOME,
-                OnboardingStep.SMS_PERM,
-                OnboardingStep.CALL_PERM,
-                OnboardingStep.NOTIF_PERM,
-                OnboardingStep.COMPLETE,
-            )
-            val allStepsDone = OnboardingStep.entries
-                .filter { it !in stepsWithoutScreen }
-                .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
-            if (!allStepsDone) {
+            if (!isTerminalGatePassed(stepStates)) {
                 logger.d(TAG, "onCompleteOnboarding: blocked — not all steps finished; stepStates=$stepStates")
                 _uiState.update {
                     it.copy(isCompleting = false, error = "Please complete all steps before finishing")
@@ -340,5 +330,35 @@ public class OnboardingViewModel @Inject constructor(
                 _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
             }
         }
+    }
+
+    /**
+     * spec: ONB-008 — gate completion on every non-COMPLETE step having reached a terminal status.
+     *
+     * DENIED is accepted per the ONB-PIPA invariant (declining PIPA consent must not block the user
+     * from finishing onboarding).
+     *
+     * Steps that have no dedicated onboarding screen are excluded from the gate. WELCOME is a
+     * non-interactive splash; SMS_PERM, CALL_PERM, NOTIF_PERM have no screens yet (deferred to a
+     * future sprint). Without this exclusion, the gate would never pass because nothing marks
+     * these steps as terminal.
+     */
+    private fun isTerminalGatePassed(stepStates: Map<OnboardingStep, StepStatus>): Boolean {
+        val terminalStatuses = setOf(
+            StepStatus.GRANTED,
+            StepStatus.COMPLETE,
+            StepStatus.SKIPPED,
+            StepStatus.DENIED,
+        )
+        val stepsWithoutScreen = setOf(
+            OnboardingStep.WELCOME,
+            OnboardingStep.SMS_PERM,
+            OnboardingStep.CALL_PERM,
+            OnboardingStep.NOTIF_PERM,
+            OnboardingStep.COMPLETE,
+        )
+        return OnboardingStep.entries
+            .filter { it !in stepsWithoutScreen }
+            .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
     }
 }

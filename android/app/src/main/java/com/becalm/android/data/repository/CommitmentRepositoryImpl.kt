@@ -29,7 +29,7 @@ import javax.inject.Singleton
 
 private const val CURSOR_KEY = "commitments_cursor"
 private const val PAGE_LIMIT = 50
-private const val MAX_PAGES = 5
+private const val MAX_PAGES = REFRESH_PAGE_CAP
 private const val TAG = "CommitmentRepository"
 
 /** Legal action_state values per data-model.yml:134-139 / commitment-management.spec.yml CMT-005..007. */
@@ -138,14 +138,12 @@ public class CommitmentRepositoryImpl @Inject constructor(
             is BecalmResult.Success -> apiResult.value
         }
 
-        return response.toBecalmResult { it.data }.let { result ->
-            when (result) {
-                is BecalmResult.Failure -> result
-                is BecalmResult.Success -> {
-                    val entity = result.value.toEntity(result.value.userId)
-                    dao.insert(entity)
-                    BecalmResult.Success(entity)
-                }
+        return when (val result = response.toBecalmResult { it.data }) {
+            is BecalmResult.Failure -> result
+            is BecalmResult.Success -> {
+                val entity = result.value.toEntity(result.value.userId)
+                dao.insert(entity)
+                BecalmResult.Success(entity)
             }
         }
     }

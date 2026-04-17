@@ -282,84 +282,45 @@ public class MediaStoreWorker @AssistedInject constructor(
             val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
 
             while (cursor.moveToNext()) {
-                val mediaId = cursor.getLong(idxId)
-                val dateAddedSec = cursor.getLong(idxDateAdded)
-                // MediaStore DURATION is in milliseconds; store as integer seconds
-                val durationMs = cursor.getLong(idxDuration)
-                val durationSec = (durationMs / 1_000L).toInt()
-                val displayName = cursor.getString(idxDisplayName) ?: ""
+                val row = readVoiceRow(cursor, idxId, idxDateAdded, idxDuration, idxDisplayName)
 
                 // PII guard: log only a hash of the file name, never the raw path
                 logger.d(
                     TAG,
-                    "voice row nameHash=${redact(displayName)} durationSec=$durationSec dateAddedSec=$dateAddedSec",
+                    "voice row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} dateAddedSec=${row.dateAddedSec}",
                 )
 
-                // Build the audio content URI — openInputStream on this returns real audio bytes
-                val audioUri = ContentUris.withAppendedId(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    mediaId,
-                ).toString()
-
-                // Deterministic idempotency key: same mediaId always yields same clientEventId
-                val clientEventId = "mediastore:voice:$mediaId"
-
-                val entity = RawIngestionEventEntity(
-                    id = UUID.randomUUID().toString(),
-                    userId = userId,
-                    clientEventId = clientEventId,
-                    sourceType = SourceType.VOICE,
-                    sourceRef = audioUri,
-                    durationSeconds = durationSec,
-                    timestamp = Instant.fromEpochSeconds(dateAddedSec),
-                    syncStatus = "pending",
-                )
-
-                val rowId = try {
-                    rawIngestionEventDao.insert(entity)
-                } catch (e: Exception) {
-                    // Rethrow CancellationException so WorkManager can properly cancel.
-                    if (e is CancellationException) throw e
-                    // Per-row failure: log and continue so one bad row doesn't abort the batch.
-                    // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
-                    // next run. The >= predicate combined with clientEventId dedup ensures it is
-                    // re-discovered without double-inserting already-processed siblings.
-                    logger.e(TAG, "DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}", e)
-                    hasInsertFailure = true
-                    continue
-                }
-
-                val rowMs = dateAddedSec * 1_000L
-                if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
-
-                // Resolve the actual row ID for enqueue. On fresh insert, use entity.id.
-                // On dedup hit (rowId == -1L), the generated UUID was NOT persisted —
-                // look up the existing row to get its real ID.
-                val enqueueId = if (rowId != -1L) {
-                    insertedCount++
-                    entity.id
-                } else {
-                    val existing = rawIngestionEventDao.findByClientEventId(userId, clientEventId)
-                    if (existing == null ||
-                        existing.syncStatus != "pending" ||
-                        existing.commitmentsExtractedCount > 0
-                    ) {
-                        // Row not found, already extracted, or not in pending state — skip
+                when (val insertResult = insertVoiceRow(row, userId)) {
+                    VoiceInsertResult.Failed -> {
+                        hasInsertFailure = true
+                        // Per-row failure: continue so one bad row doesn't abort the batch.
+                        // Do NOT advance maxDateAddedMs here — the failed row must be retried on the
+                        // next run. The >= predicate combined with clientEventId dedup ensures it is
+                        // re-discovered without double-inserting already-processed siblings.
                         continue
                     }
-                    existing.id
-                }
+                    VoiceInsertResult.DedupSkip -> {
+                        // Row not found, already extracted, or not in pending state — skip without
+                        // advancing the cursor.
+                        continue
+                    }
+                    is VoiceInsertResult.Fresh, is VoiceInsertResult.Dedup -> {
+                        val rowMs = row.dateAddedSec * 1_000L
+                        if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
 
-                // Enqueue (or re-enqueue on dedup recovery). The dedup path above
-                // already guards against re-uploading extracted/non-pending rows.
-                try {
-                    workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
-                    logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=${rowId != -1L}")
-                } catch (e: Exception) {
-                    // Rethrow CancellationException so WorkManager can properly cancel.
-                    if (e is CancellationException) throw e
-                    logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
-                    hasInsertFailure = true
+                        val enqueueId = when (insertResult) {
+                            is VoiceInsertResult.Fresh -> {
+                                insertedCount++
+                                insertResult.id
+                            }
+                            is VoiceInsertResult.Dedup -> insertResult.id
+                            else -> error("unreachable")
+                        }
+                        val wasFresh = insertResult is VoiceInsertResult.Fresh
+                        if (!enqueueVoice(enqueueId, row.audioUri, wasFresh)) {
+                            hasInsertFailure = true
+                        }
+                    }
                 }
             }
         }
@@ -419,6 +380,139 @@ public class MediaStoreWorker @AssistedInject constructor(
     private fun isMissing(perm: String): Boolean =
         ContextCompat.checkSelfPermission(appContext, perm) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    // ── Voice-row processing helpers (Round 5) ────────────────────────────────
+
+    /**
+     * ingestVoiceRecordings 루프에서 커서 한 행을 읽어 필요한 필드를 추출한 결과다.
+     * MediaStore.Audio.Media 커서에 의존하지 않는 순수 데이터 컨테이너로,
+     * 이후 단계(insert/enqueue)는 [Cursor] 없이 이 값만으로 동작한다.
+     */
+    private data class VoiceRow(
+        val mediaId: Long,
+        val dateAddedSec: Long,
+        val durationSec: Int,
+        val displayName: String,
+        val audioUri: String,
+        val clientEventId: String,
+    )
+
+    /**
+     * insertVoiceRow 결과를 판별한 sealed 타입.
+     * - [Fresh]     : DAO insert 성공, 신규 row. insertedCount 증가 대상.
+     * - [Dedup]     : UNIQUE index 충돌로 기존 row 재사용 (cursor 진행).
+     * - [DedupSkip] : 기존 row가 재업로드 부적격 상태 — cursor 진행 금지.
+     * - [Failed]    : DAO insert 중 예외 — cursor 진행 금지 + hasInsertFailure=true.
+     */
+    private sealed interface VoiceInsertResult {
+        data class Fresh(val id: String) : VoiceInsertResult
+        data class Dedup(val id: String) : VoiceInsertResult
+        data object DedupSkip : VoiceInsertResult
+        data object Failed : VoiceInsertResult
+    }
+
+    /**
+     * 커서에서 한 행의 컬럼을 읽어 [VoiceRow]로 반환한다.
+     *
+     * - DURATION은 MediaStore 규약에 따라 밀리초이므로 정수 초로 변환한다.
+     * - 표시 이름이 null이면 빈 문자열로 표준화한다 (원본과 동일 — PII hash 계산 안정성 보존).
+     * - audioUri / clientEventId는 [ingestVoiceRecordings]의 원본 생성 식과 byte-identical 하다.
+     */
+    private fun readVoiceRow(
+        cursor: Cursor,
+        idxId: Int,
+        idxDateAdded: Int,
+        idxDuration: Int,
+        idxDisplayName: Int,
+    ): VoiceRow {
+        val mediaId = cursor.getLong(idxId)
+        val dateAddedSec = cursor.getLong(idxDateAdded)
+        val durationMs = cursor.getLong(idxDuration)
+        val durationSec = (durationMs / 1_000L).toInt()
+        val displayName = cursor.getString(idxDisplayName) ?: ""
+        val audioUri = ContentUris.withAppendedId(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            mediaId,
+        ).toString()
+        return VoiceRow(
+            mediaId = mediaId,
+            dateAddedSec = dateAddedSec,
+            durationSec = durationSec,
+            displayName = displayName,
+            audioUri = audioUri,
+            // Deterministic idempotency key: same mediaId always yields same clientEventId
+            clientEventId = "mediastore:voice:$mediaId",
+        )
+    }
+
+    /**
+     * DAO insert를 시도하고 결과를 [VoiceInsertResult]로 분류한다.
+     *
+     * - insert 성공(rowId != -1L)  → [VoiceInsertResult.Fresh]
+     * - UNIQUE 충돌(rowId == -1L) → 기존 row를 조회해 업로드 재개 가능 여부 판정
+     *     - 재개 가능 (pending & extracted=0) → [VoiceInsertResult.Dedup]
+     *     - 재개 불가 (없거나 상태 불일치)     → [VoiceInsertResult.DedupSkip]
+     * - 예외 (CancellationException 제외) → 로그 남기고 [VoiceInsertResult.Failed]
+     *
+     * 에러 로그 문자열("DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}")은
+     * 원본 ingestVoiceRecordings 구현과 완전히 동일하게 유지한다.
+     */
+    private suspend fun insertVoiceRow(row: VoiceRow, userId: String): VoiceInsertResult {
+        val entity = RawIngestionEventEntity(
+            id = UUID.randomUUID().toString(),
+            userId = userId,
+            clientEventId = row.clientEventId,
+            sourceType = SourceType.VOICE,
+            sourceRef = row.audioUri,
+            durationSeconds = row.durationSec,
+            timestamp = Instant.fromEpochSeconds(row.dateAddedSec),
+            syncStatus = "pending",
+        )
+
+        val rowId = try {
+            rawIngestionEventDao.insert(entity)
+        } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel.
+            if (e is CancellationException) throw e
+            logger.e(TAG, "DAO insert failed mediaId=${row.mediaId} nameHash=${redact(row.displayName)}", e)
+            return VoiceInsertResult.Failed
+        }
+
+        if (rowId != -1L) return VoiceInsertResult.Fresh(entity.id)
+
+        // UNIQUE(user_id, client_event_id) 충돌 — 기존 row 조회 후 재업로드 가능 여부 판정.
+        val existing = rawIngestionEventDao.findByClientEventId(userId, row.clientEventId)
+        return if (existing == null ||
+            existing.syncStatus != "pending" ||
+            existing.commitmentsExtractedCount > 0
+        ) {
+            VoiceInsertResult.DedupSkip
+        } else {
+            VoiceInsertResult.Dedup(existing.id)
+        }
+    }
+
+    /**
+     * [WorkScheduler.enqueueVoiceUpload] 호출을 감싸고 성공/실패를 로그한다.
+     *
+     * @return 성공이면 true, WorkScheduler 호출 중 예외가 발생하면 false — 호출부가
+     * `hasInsertFailure = true` 로 cursor persist를 억제한다.
+     *
+     * 성공 로그("voice enqueued id=... fresh=...")와 실패 로그("enqueueVoiceUpload failed id=...")는
+     * 원본 구현과 byte-identical 하게 유지한다.
+     */
+    private fun enqueueVoice(enqueueId: String, audioUri: String, wasFresh: Boolean): Boolean {
+        return try {
+            workScheduler.enqueueVoiceUpload(enqueueId, audioUri)
+            logger.d(TAG, "voice enqueued id=${redact(enqueueId)} fresh=$wasFresh")
+            true
+        } catch (e: Exception) {
+            // Rethrow CancellationException so WorkManager can properly cancel.
+            if (e is CancellationException) throw e
+            logger.e(TAG, "enqueueVoiceUpload failed id=${redact(enqueueId)}", e)
+            false
+        }
+    }
 
     public companion object {
         private const val TAG = "MediaStoreWorker"

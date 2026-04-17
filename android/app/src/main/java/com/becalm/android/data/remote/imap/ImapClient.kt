@@ -136,22 +136,9 @@ public class ImapClientImpl @Inject constructor() : ImapClient {
         val props = buildImapsProperties(host, port)
         val session = Session.getInstance(props)
 
-        val store = try {
-            session.getStore("imaps")
-        } catch (e: Exception) {
-            return@withContext BecalmResult.Failure(BecalmError.Unknown(e))
-        }
-
-        try {
-            store.connect(host, port, user, password)
-        } catch (e: AuthenticationFailedException) {
-            return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
-        } catch (e: MessagingException) {
-            return@withContext BecalmResult.Failure(
-                BecalmError.Network(-1, e.message ?: "IMAP connect failed"),
-            )
-        } catch (e: Exception) {
-            return@withContext BecalmResult.Failure(BecalmError.Unknown(e))
+        val store = when (val r = connectStore(session, host, port, user, password)) {
+            is BecalmResult.Success -> r.value
+            is BecalmResult.Failure -> return@withContext BecalmResult.Failure(r.error)
         }
 
         var folder: Folder? = null
@@ -175,11 +162,7 @@ public class ImapClientImpl @Inject constructor() : ImapClient {
             val rawMessages = uidFolder.getMessagesByUID(fetchFromUid, UIDFolder.LASTUID)
 
             // Cap to maxMessages (newest messages are at higher UIDs — take the tail).
-            val capped = if (rawMessages.size > maxMessages) {
-                rawMessages.copyOfRange(rawMessages.size - maxMessages, rawMessages.size)
-            } else {
-                rawMessages
-            }
+            val capped = rawMessages.capTail(maxMessages)
 
             // Prefetch headers + partial body in a single round-trip.
             if (capped.isNotEmpty()) {
@@ -192,37 +175,7 @@ public class ImapClientImpl @Inject constructor() : ImapClient {
             }
 
             val messages = capped.mapNotNull { msg ->
-                runCatching {
-                    val uid = uidFolder.getUID(msg)
-                    val internalDate = msg.receivedDate ?: msg.sentDate
-                    val sentAt = internalDate?.let {
-                        Instant.fromEpochMilliseconds(it.time)
-                    } ?: Instant.fromEpochMilliseconds(0L)
-
-                    val fromAddresses = msg.from
-                    val firstFrom = fromAddresses?.firstOrNull()
-                    val (fromEmail, fromDisplayName) = parseFromAddress(firstFrom)
-
-                    val rawSubject = msg.subject
-                    val decodedSubject = rawSubject?.let {
-                        runCatching { MimeUtility.decodeText(it) }.getOrDefault(it)
-                    }
-
-                    val messageId = msg.getHeader("Message-Id")?.firstOrNull()
-
-                    val bodyPreview = extractBodyPreview(msg)
-
-                    ImapMessage(
-                        uid = uid,
-                        uidValidity = serverUidValidity,
-                        messageId = messageId,
-                        subject = decodedSubject,
-                        fromEmail = fromEmail,
-                        fromDisplayName = fromDisplayName,
-                        bodyPreview = bodyPreview,
-                        sentAt = sentAt,
-                    )
-                }.getOrNull()
+                msg.toImapMessage(uidFolder, serverUidValidity)
             }
 
             // When a UIDVALIDITY mismatch triggered a full resync, return newUidNext = 1
@@ -246,6 +199,92 @@ public class ImapClientImpl @Inject constructor() : ImapClient {
             runCatching { store.close() }
         }
     }
+
+    /**
+     * Opens an IMAPS [jakarta.mail.Store] against [host]:[port] and authenticates with [user]/[password].
+     *
+     * Error mapping preserved byte-identical with the former inlined sequence in [fetchSince]:
+     *  - `session.getStore("imaps")` Exception → [BecalmError.Unknown]
+     *  - `AuthenticationFailedException` on connect → [BecalmError.Unauthorized]
+     *  - `MessagingException` on connect → [BecalmError.Network] with "IMAP connect failed" default message
+     *  - Any other Exception on connect → [BecalmError.Unknown]
+     */
+    private fun connectStore(
+        session: Session,
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+    ): BecalmResult<jakarta.mail.Store> {
+        val store = try {
+            session.getStore("imaps")
+        } catch (e: Exception) {
+            return BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+        try {
+            store.connect(host, port, user, password)
+        } catch (e: AuthenticationFailedException) {
+            return BecalmResult.Failure(BecalmError.Unauthorized)
+        } catch (e: MessagingException) {
+            return BecalmResult.Failure(
+                BecalmError.Network(-1, e.message ?: "IMAP connect failed"),
+            )
+        } catch (e: Exception) {
+            return BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+        return BecalmResult.Success(store)
+    }
+
+    /**
+     * Returns a trailing slice of this array of at most [maxSize] elements. When the array is
+     * already within the bound the receiver is returned unchanged (no copy).
+     *
+     * Newest IMAP messages sit at higher UIDs — taking the tail yields the newest [maxSize].
+     */
+    private fun Array<jakarta.mail.Message>.capTail(maxSize: Int): Array<jakarta.mail.Message> =
+        if (size > maxSize) copyOfRange(size - maxSize, size) else this
+
+    /**
+     * Projects a prefetched [jakarta.mail.Message] onto the display-safe [ImapMessage] shape.
+     *
+     * Runs inside `runCatching` so a single malformed message (bad header, decoding failure, etc.)
+     * skips that message rather than aborting the whole batch — preserving the prior inlined
+     * `mapNotNull { runCatching { ... }.getOrNull() }` semantics.
+     */
+    private fun jakarta.mail.Message.toImapMessage(
+        uidFolder: UIDFolder,
+        serverUidValidity: Long,
+    ): ImapMessage? = runCatching {
+        val uid = uidFolder.getUID(this)
+        val internalDate = receivedDate ?: sentDate
+        val sentAt = internalDate?.let {
+            Instant.fromEpochMilliseconds(it.time)
+        } ?: Instant.fromEpochMilliseconds(0L)
+
+        val fromAddresses = from
+        val firstFrom = fromAddresses?.firstOrNull()
+        val (fromEmail, fromDisplayName) = parseFromAddress(firstFrom)
+
+        val rawSubject = subject
+        val decodedSubject = rawSubject?.let {
+            runCatching { MimeUtility.decodeText(it) }.getOrDefault(it)
+        }
+
+        val messageId = getHeader("Message-Id")?.firstOrNull()
+
+        val bodyPreview = extractBodyPreview(this)
+
+        ImapMessage(
+            uid = uid,
+            uidValidity = serverUidValidity,
+            messageId = messageId,
+            subject = decodedSubject,
+            fromEmail = fromEmail,
+            fromDisplayName = fromDisplayName,
+            bodyPreview = bodyPreview,
+            sentAt = sentAt,
+        )
+    }.getOrNull()
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 

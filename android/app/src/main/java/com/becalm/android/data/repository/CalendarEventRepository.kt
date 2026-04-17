@@ -125,7 +125,7 @@ public interface CalendarEventRepository {
 
 private const val TAG = "CalendarEventRepository"
 private const val CURSOR_KEY = "calendar_events"
-private const val MAX_PAGES = 5
+private const val MAX_PAGES = REFRESH_PAGE_CAP
 private val EPOCH_START: Instant = Instant.fromEpochMilliseconds(0)
 private val EPOCH_END: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
 
@@ -177,34 +177,17 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             var lastCursor: String? = cursor
 
             for (page in 1..MAX_PAGES) {
-                val response = api.getCalendarEvents(
-                    cursor = cursor,
-                    since = sinceStr,
-                )
-                if (!response.isSuccessful) {
-                    logger.w(TAG, "refreshSince HTTP ${response.code()} on page $page")
-                    return BecalmResult.Failure(response.toError())
+                val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page)) {
+                    is BecalmResult.Success -> r.value
+                    is BecalmResult.Failure -> return BecalmResult.Failure(r.error)
                 }
-                val body = response.body()
-                    ?: return BecalmResult.Failure(
-                        BecalmError.Unknown(IllegalStateException("null body on page $page")),
-                    )
+                totalFetched += outcome.fetched
+                totalUpserted += outcome.upserted
+                lastCursor = outcome.cursor
+                serverHasMore = outcome.hasMore
 
-                val entities = body.data.map { it.toEntity(userId) }
-                dao.insertAll(entities)
-
-                // Persist the cursor immediately after each page is durably written.
-                // If the process is killed mid-refresh, the next run resumes from the
-                // last successfully upserted page instead of re-fetching from scratch.
-                cursorStore.setCursor(CURSOR_KEY, body.cursor)
-
-                totalFetched += body.data.size
-                totalUpserted += entities.size
-                lastCursor = body.cursor
-                serverHasMore = body.hasMore
-
-                if (!body.hasMore) break
-                cursor = body.cursor
+                if (!outcome.hasMore) break
+                cursor = outcome.cursor
             }
 
             logger.d(TAG, "refreshSince done fetched=$totalFetched upserted=$totalUpserted hasMore=$serverHasMore")
@@ -224,6 +207,60 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }
+
+    /**
+     * Single-page fetch + persist unit for [refreshSince].
+     *
+     * Reads one page from [RailwayApi.getCalendarEvents], writes entities via [CalendarEventDao.insertAll],
+     * and advances the [SyncCursorStore] cursor on successful persistence. Returns a [PageOutcome]
+     * describing counts + server paging hints, or a typed [BecalmError] on HTTP / null-body failure.
+     *
+     * Log strings preserved byte-identical with the former inlined loop body.
+     */
+    private suspend fun fetchAndPersistPage(
+        userId: String,
+        cursor: String?,
+        sinceStr: String?,
+        page: Int,
+    ): BecalmResult<PageOutcome> {
+        val response = api.getCalendarEvents(
+            cursor = cursor,
+            since = sinceStr,
+        )
+        if (!response.isSuccessful) {
+            logger.w(TAG, "refreshSince HTTP ${response.code()} on page $page")
+            return BecalmResult.Failure(response.toError())
+        }
+        val body = response.body()
+            ?: return BecalmResult.Failure(
+                BecalmError.Unknown(IllegalStateException("null body on page $page")),
+            )
+
+        val entities = body.data.map { it.toEntity(userId) }
+        dao.insertAll(entities)
+
+        // Persist the cursor immediately after each page is durably written.
+        // If the process is killed mid-refresh, the next run resumes from the
+        // last successfully upserted page instead of re-fetching from scratch.
+        cursorStore.setCursor(CURSOR_KEY, body.cursor)
+
+        return BecalmResult.Success(
+            PageOutcome(
+                fetched = body.data.size,
+                upserted = entities.size,
+                cursor = body.cursor,
+                hasMore = body.hasMore,
+            ),
+        )
+    }
+
+    /** Per-page result for [fetchAndPersistPage]. */
+    private data class PageOutcome(
+        val fetched: Int,
+        val upserted: Int,
+        val cursor: String?,
+        val hasMore: Boolean,
+    )
 
     override suspend fun insertLocalBatch(entities: List<CalendarEventEntity>): BecalmResult<Int> {
         if (entities.isEmpty()) return BecalmResult.Success(0)

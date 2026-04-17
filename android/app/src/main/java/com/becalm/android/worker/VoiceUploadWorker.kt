@@ -182,7 +182,6 @@ public class VoiceUploadWorker @AssistedInject constructor(
                     return@withContext handleFailure(entity)
                 }
 
-                val userId = entity.userId
                 val now = Clock.System.now()
 
                 // Insert commitments into Room.

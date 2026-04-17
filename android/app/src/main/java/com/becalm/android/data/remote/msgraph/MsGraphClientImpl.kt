@@ -11,6 +11,7 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
 import kotlin.time.Duration.Companion.days
 
@@ -223,19 +224,7 @@ public class MsGraphClientImpl(
             try {
                 val response = okHttpClient.newCall(request).execute()
                 val body = response.body?.string() ?: ""
-                when (response.code) {
-                    in 200..299 -> BecalmResult.Success(body)
-                    401 -> BecalmResult.Failure(BecalmError.Unauthorized)
-                    410 -> BecalmResult.Failure(
-                        BecalmError.NotFound("MS Graph delta token expired — full re-sync required"),
-                    )
-                    429 -> {
-                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
-                        BecalmResult.Failure(BecalmError.RateLimited(retryAfter))
-                    }
-                    in 500..599 -> BecalmResult.Failure(BecalmError.ServerError(response.code, body.take(200)))
-                    else -> BecalmResult.Failure(BecalmError.Network(response.code, body.take(200)))
-                }
+                mapHttpStatus(response, body)
             } catch (e: IOException) {
                 BecalmResult.Failure(BecalmError.Network(-1, e.message ?: "network I/O failure"))
             } catch (e: Exception) {
@@ -243,6 +232,32 @@ public class MsGraphClientImpl(
             }
         }
     }
+
+    /**
+     * Maps an OkHttp [response] + already-consumed [body] into a typed [BecalmResult].
+     *
+     * Branch preservation (keep byte-identical error strings / error types):
+     *  - 2xx → Success(body)
+     *  - 401 → Unauthorized
+     *  - 410 → NotFound("MS Graph delta token expired — full re-sync required")
+     *  - 429 → RateLimited(retryAfter) from `Retry-After` header (seconds)
+     *  - 5xx → ServerError(code, body.take(200))
+     *  - other → Network(code, body.take(200))
+     */
+    private fun mapHttpStatus(response: Response, body: String): BecalmResult<String> =
+        when (response.code) {
+            in 200..299 -> BecalmResult.Success(body)
+            401 -> BecalmResult.Failure(BecalmError.Unauthorized)
+            410 -> BecalmResult.Failure(
+                BecalmError.NotFound("MS Graph delta token expired — full re-sync required"),
+            )
+            429 -> {
+                val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                BecalmResult.Failure(BecalmError.RateLimited(retryAfter))
+            }
+            in 500..599 -> BecalmResult.Failure(BecalmError.ServerError(response.code, body.take(200)))
+            else -> BecalmResult.Failure(BecalmError.Network(response.code, body.take(200)))
+        }
 
     // ─── Map → domain model parsers ───────────────────────────────────────────
 

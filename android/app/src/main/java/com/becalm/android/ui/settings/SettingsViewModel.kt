@@ -240,22 +240,7 @@ public class SettingsViewModel @Inject constructor(
                         result = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId),
                         failureLogPrefix = "releaseAwaitingConsentVoiceAndReturnIds failed",
                     )
-
-                    var enqueuedCount = 0
-                    for (id in releasedIds) {
-                        val entity = rawIngestionRepository.findById(id = id, userId = userId)
-                        if (entity == null) {
-                            logger.w(TAG, "released voice row id=$id not found for re-enqueue — skipping")
-                            continue
-                        }
-                        val audioUri = entity.sourceRef
-                        if (audioUri.isNullOrBlank()) {
-                            logger.w(TAG, "voice row id=$id has null sourceRef — skipping enqueue")
-                            continue
-                        }
-                        workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = audioUri)
-                        enqueuedCount++
-                    }
+                    val enqueuedCount = reenqueueReleasedVoice(userId, releasedIds)
                     logger.d(TAG, "re-enqueued $enqueuedCount voice uploads after consent grant")
                 } else {
                     // Consent withdrawn: park pending/queued voice rows and cancel their WorkManager
@@ -362,6 +347,33 @@ public class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(error = result.error.toString()) }
             emptyList()
         }
+    }
+
+    /**
+     * 릴리스된 voice row ID 각각에 대해 `findById → sourceRef 유효성 확인 → WorkScheduler 호출`을
+     * 수행하고 실제 enqueue 성공한 개수를 돌려준다. 원본 인라인 for-loop과 동일하게
+     *  - entity == null → `logger.w("released voice row id=$id not found ...")` + skip
+     *  - sourceRef 가 null/blank → `logger.w("voice row id=$id has null sourceRef ...")` + skip
+     *  - 정상 → `workScheduler.enqueueVoiceUpload` 호출 후 카운터 증가
+     * 순서와 로그 문구를 그대로 보존한다 (finding #2 경로).
+     */
+    private suspend fun reenqueueReleasedVoice(userId: String, releasedIds: List<String>): Int {
+        var enqueuedCount = 0
+        for (id in releasedIds) {
+            val entity = rawIngestionRepository.findById(id = id, userId = userId)
+            if (entity == null) {
+                logger.w(TAG, "released voice row id=$id not found for re-enqueue — skipping")
+                continue
+            }
+            val audioUri = entity.sourceRef
+            if (audioUri.isNullOrBlank()) {
+                logger.w(TAG, "voice row id=$id has null sourceRef — skipping enqueue")
+                continue
+            }
+            workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = audioUri)
+            enqueuedCount++
+        }
+        return enqueuedCount
     }
 }
 

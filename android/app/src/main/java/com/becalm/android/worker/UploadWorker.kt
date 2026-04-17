@@ -8,6 +8,8 @@ import androidx.work.WorkerParameters
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -15,6 +17,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 
 /**
  * Periodic and on-demand [CoroutineWorker] that drains pending rows from
@@ -126,51 +129,19 @@ public class UploadWorker @AssistedInject constructor(
 
             when (val uploadResult = rawIngestionRepository.uploadBatch(pending)) {
                 is BecalmResult.Success -> {
-                    // Server may return partial failures in body.failed. Events flagged
-                    // retryable=false must be quarantined (marked failed in DB) rather than
-                    // marked synced — otherwise the quarantine signal is silently dropped.
-                    // Retryable failures are left pending so the next worker run re-uploads them.
-                    val response = uploadResult.value
-                    val failedByClientId = response.failed.associateBy { it.clientEventId }
-                    val now = Clock.System.now()
-
-                    val syncedIds = mutableListOf<String>()
-                    var quarantinedCount = 0
-                    var retryableFailedCount = 0
-                    for (event in pending) {
-                        val failure = failedByClientId[event.clientEventId]
-                        when {
-                            failure == null -> syncedIds.add(event.id)
-                            !failure.retryable -> {
-                                // Persist quarantine: server has deterministically rejected this event.
-                                // TODO: Add a dedicated `updateQuarantineStatus(id, reason)` DAO method
-                                //   so the quarantine reason code from the server is preserved.
-                                //   Today we reuse markFailed which only records sync_status="failed".
-                                rawIngestionRepository.markFailed(event.id, now)
-                                quarantinedCount++
-                            }
-                            else -> {
-                                // Retryable: leave pending (do not markSynced) so next run re-uploads.
-                                retryableFailedCount++
-                            }
-                        }
-                    }
-
-                    if (syncedIds.isNotEmpty()) {
-                        rawIngestionRepository.markSynced(syncedIds)
-                    }
-                    totalUploaded += syncedIds.size
+                    val ack = partitionAndAckBatch(pending, uploadResult.value, Clock.System.now())
+                    totalUploaded += ack.syncedCount
                     logger.d(
                         TAG,
                         "rawIngestion batch acked batchSize=${pending.size} " +
-                            "synced=${syncedIds.size} quarantined=$quarantinedCount " +
-                            "retryable=$retryableFailedCount",
+                            "synced=${ack.syncedCount} quarantined=${ack.quarantinedCount} " +
+                            "retryable=${ack.retryableFailedCount}",
                     )
 
                     // Guard against infinite loop: if the whole page came back as retryable
                     // failures (none synced, none quarantined), findPendingSync would return
                     // the same rows on the next iteration. Break so WorkManager retries later.
-                    if (syncedIds.isEmpty() && quarantinedCount == 0 && retryableFailedCount > 0) {
+                    if (ack.syncedCount == 0 && ack.quarantinedCount == 0 && ack.retryableFailedCount > 0) {
                         logger.w(
                             TAG,
                             "rawIngestion batch all retryable — breaking loop to let WorkManager retry",
@@ -195,6 +166,58 @@ public class UploadWorker @AssistedInject constructor(
 
         return FlushOutcome.Success(totalUploaded)
     }
+
+    /**
+     * 배치 응답의 부분 실패(response.failed)를 3-way로 분류하고 DB 반영까지 한 번에 끝낸다.
+     * `failure == null` → synced IDs에 적재, `retryable=false` → markFailed(quarantine),
+     * `retryable=true` → pending 유지(다음 run 재시도). synced가 1건 이상이면 markSynced 일괄 호출.
+     *
+     * 원본 인라인 로직과 동일하게 동작한다 — 배치 순회 순서, markFailed per-event 호출, 그리고
+     * syncedIds 비어있을 때 markSynced를 생략하는 가드를 그대로 유지한다.
+     */
+    private suspend fun partitionAndAckBatch(
+        pending: List<RawIngestionEventEntity>,
+        response: BatchUploadResponse,
+        now: Instant,
+    ): BatchAckResult {
+        val failedByClientId = response.failed.associateBy { it.clientEventId }
+        val syncedIds = mutableListOf<String>()
+        var quarantinedCount = 0
+        var retryableFailedCount = 0
+        for (event in pending) {
+            val failure = failedByClientId[event.clientEventId]
+            when {
+                failure == null -> syncedIds.add(event.id)
+                !failure.retryable -> {
+                    // Persist quarantine: server has deterministically rejected this event.
+                    // TODO: Add a dedicated `updateQuarantineStatus(id, reason)` DAO method
+                    //   so the quarantine reason code from the server is preserved.
+                    //   Today we reuse markFailed which only records sync_status="failed".
+                    rawIngestionRepository.markFailed(event.id, now)
+                    quarantinedCount++
+                }
+                else -> {
+                    // Retryable: leave pending (do not markSynced) so next run re-uploads.
+                    retryableFailedCount++
+                }
+            }
+        }
+        if (syncedIds.isNotEmpty()) {
+            rawIngestionRepository.markSynced(syncedIds)
+        }
+        return BatchAckResult(
+            syncedCount = syncedIds.size,
+            quarantinedCount = quarantinedCount,
+            retryableFailedCount = retryableFailedCount,
+        )
+    }
+
+    /** Aggregate counts returned by [partitionAndAckBatch] for logging + loop-safety guard. */
+    private data class BatchAckResult(
+        val syncedCount: Int,
+        val quarantinedCount: Int,
+        val retryableFailedCount: Int,
+    )
 
     // ── Commitment flush ──────────────────────────────────────────────────────
 
@@ -284,23 +307,23 @@ public class UploadWorker @AssistedInject constructor(
                 )
             }
 
-            is BecalmError.Network -> {
-                if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
-                    logger.e(TAG, "$domain network error maxAttempts=$attempt — permanent failure code=${error.code}")
-                } else {
-                    logger.w(TAG, "$domain network error code=${error.code} attempt=$attempt — retry")
-                }
-                retryableOutcome(attempt, "network_error", "network_max_attempts")
-            }
+            is BecalmError.Network -> logAndRetryable(
+                attempt = attempt,
+                domain = domain,
+                noun = "network error",
+                code = error.code,
+                retryReason = "network_error",
+                permanentReason = "network_max_attempts",
+            )
 
-            is BecalmError.ServerError -> {
-                if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
-                    logger.e(TAG, "$domain server error maxAttempts=$attempt — permanent failure code=${error.code}")
-                } else {
-                    logger.w(TAG, "$domain server error code=${error.code} attempt=$attempt — retry")
-                }
-                retryableOutcome(attempt, "server_error", "server_error_max_attempts")
-            }
+            is BecalmError.ServerError -> logAndRetryable(
+                attempt = attempt,
+                domain = domain,
+                noun = "server error",
+                code = error.code,
+                retryReason = "server_error",
+                permanentReason = "server_error_max_attempts",
+            )
 
             else -> {
                 logger.e(TAG, "$domain unrecoverable error ${error::class.simpleName} attempt=$attempt")
@@ -325,6 +348,31 @@ public class UploadWorker @AssistedInject constructor(
             return FlushOutcome.PermanentFailure(Result.failure(retryOutput(permanentReason, attempt).build()))
         }
         return FlushOutcome.RetryNeeded(Result.retry(retryOutput(retryReason, attempt).build()))
+    }
+
+    /**
+     * Formats the shared `Network` / `ServerError` log lines and delegates to
+     * [retryableOutcome] for the Retry-vs-PermanentFailure decision.
+     *
+     * [noun] is the human-facing phrase (`"network error"` / `"server error"`) that made the
+     * former two branches textually distinct; [retryReason] / [permanentReason] flow straight
+     * into [retryOutput] keys. The emitted log strings are byte-identical with the former
+     * inlined `is BecalmError.Network` / `is BecalmError.ServerError` arms.
+     */
+    private fun logAndRetryable(
+        attempt: Int,
+        domain: String,
+        noun: String,
+        code: Int,
+        retryReason: String,
+        permanentReason: String,
+    ): FlushOutcome {
+        if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
+            logger.e(TAG, "$domain $noun maxAttempts=$attempt — permanent failure code=$code")
+        } else {
+            logger.w(TAG, "$domain $noun code=$code attempt=$attempt — retry")
+        }
+        return retryableOutcome(attempt, retryReason, permanentReason)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

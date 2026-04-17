@@ -217,34 +217,39 @@ public class TodayViewModel @Inject constructor(
     private fun buildTimeline(
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
-    ): List<TimelineItem> {
-        val commitmentItems = commitments.map { c ->
-            TimelineItem.Commitment(
-                id = c.id,
-                title = c.title,
-                direction = c.direction,
-                counterpartyDisplayName = c.counterpartyRaw,
-                sortKey = c.sourceEventOccurredAt,
+    ): List<TimelineItem> =
+        (commitments.map { it.toTimelineItem() } + calendarEvents.map { it.toTimelineItem() })
+            .sortedBy { it.sortKey }
+
+    /** Projection of [CommitmentEntity] into the Today timeline. Field mapping is display-safe. */
+    private fun CommitmentEntity.toTimelineItem(): TimelineItem.Commitment =
+        TimelineItem.Commitment(
+            id = id,
+            title = title,
+            direction = direction,
+            counterpartyDisplayName = counterpartyRaw,
+            sortKey = sourceEventOccurredAt,
+        )
+
+    /**
+     * Projection of [CalendarEventEntity] into the Today timeline. `attendeesRaw` 존재 여부로
+     * Meeting / CalendarEvent 를 분기하며, 원본 인라인 분기와 byte-identical 하게 필드를 매핑한다.
+     */
+    private fun CalendarEventEntity.toTimelineItem(): TimelineItem =
+        if (!attendeesRaw.isNullOrBlank()) {
+            TimelineItem.Meeting(
+                id = id,
+                title = title,
+                attendeesRaw = attendeesRaw,
+                sortKey = startAt,
+            )
+        } else {
+            TimelineItem.CalendarEvent(
+                id = id,
+                title = title,
+                sortKey = startAt,
             )
         }
-        val calendarItems = calendarEvents.map { event ->
-            if (!event.attendeesRaw.isNullOrBlank()) {
-                TimelineItem.Meeting(
-                    id = event.id,
-                    title = event.title,
-                    attendeesRaw = event.attendeesRaw,
-                    sortKey = event.startAt,
-                )
-            } else {
-                TimelineItem.CalendarEvent(
-                    id = event.id,
-                    title = event.title,
-                    sortKey = event.startAt,
-                )
-            }
-        }
-        return (commitmentItems + calendarItems).sortedBy { it.sortKey }
-    }
 
     private fun todayIso(): String {
         val tz = TimeZone.currentSystemDefault()

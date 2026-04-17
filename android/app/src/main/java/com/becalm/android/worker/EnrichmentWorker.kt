@@ -2,6 +2,7 @@ package com.becalm.android.worker
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import androidx.hilt.work.HiltWorker
@@ -166,87 +167,71 @@ public class EnrichmentWorker @AssistedInject constructor(
             RefKind.NAME -> lookupByDisplayName(personRef)
         }
 
-    private fun lookupByEmail(email: String): ContactResult? {
-        val projection = arrayOf(
+    private fun lookupByEmail(email: String): ContactResult? = queryContact(
+        uri = ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+        projection = arrayOf(
             ContactsContract.CommonDataKinds.Email.CONTACT_ID,
             ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
-        )
-        val selection = "${ContactsContract.CommonDataKinds.Email.DATA1} = ?"
-        val selectionArgs = arrayOf(email)
+        ),
+        selection = "${ContactsContract.CommonDataKinds.Email.DATA1} = ?",
+        selectionArgs = arrayOf(email),
+        idColumn = ContactsContract.CommonDataKinds.Email.CONTACT_ID,
+        nameColumn = ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
+    )
 
-        return appContext.contentResolver.query(
-            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Email.CONTACT_ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(
-                    ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
-                ),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
-    }
-
-    private fun lookupByPhone(phone: String): ContactResult? {
-        val lookupUri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI
+    private fun lookupByPhone(phone: String): ContactResult? = queryContact(
+        uri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI
             .buildUpon()
             .appendPath(phone)
-            .build()
-
-        val projection = arrayOf(
+            .build(),
+        projection = arrayOf(
             ContactsContract.PhoneLookup._ID,
             ContactsContract.PhoneLookup.DISPLAY_NAME,
-        )
+        ),
+        selection = null,
+        selectionArgs = null,
+        idColumn = ContactsContract.PhoneLookup._ID,
+        nameColumn = ContactsContract.PhoneLookup.DISPLAY_NAME,
+    )
 
-        return appContext.contentResolver.query(
-            lookupUri,
-            projection,
-            null,
-            null,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup._ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.DISPLAY_NAME),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
-    }
-
-    private fun lookupByDisplayName(name: String): ContactResult? {
-        val projection = arrayOf(
+    private fun lookupByDisplayName(name: String): ContactResult? = queryContact(
+        uri = ContactsContract.Contacts.CONTENT_URI,
+        projection = arrayOf(
             ContactsContract.Contacts._ID,
             ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
-        )
-        val selection = "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} = ?"
-        val selectionArgs = arrayOf(name)
+        ),
+        selection = "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} = ?",
+        selectionArgs = arrayOf(name),
+        idColumn = ContactsContract.Contacts._ID,
+        nameColumn = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
+    )
 
-        return appContext.contentResolver.query(
-            ContactsContract.Contacts.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
+    /**
+     * 세 개의 `lookupByX`에서 반복되던 `ContentResolver.query(...)?.use { ... }` 커서 보일러플레이트를
+     * 한 곳으로 통합한다. 각 호출부가 넘기는 [uri] / [projection] / [selection] / [selectionArgs] /
+     * [idColumn] / [nameColumn]은 원본과 byte-identical 하게 유지된다.
+     *
+     * 커서 라이프사이클(`?.use`), `moveToFirst` 가드, `getColumnIndexOrThrow` 사용, 그리고
+     * `displayName?.takeIf { it.isNotBlank() }` 공백 처리도 모두 보존한다.
+     */
+    private fun queryContact(
+        uri: Uri,
+        projection: Array<String>,
+        selection: String?,
+        selectionArgs: Array<String>?,
+        idColumn: String,
+        nameColumn: String,
+    ): ContactResult? = appContext.contentResolver.query(
+        uri,
+        projection,
+        selection,
+        selectionArgs,
+        null,
+    )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val contactId = cursor.getString(cursor.getColumnIndexOrThrow(idColumn))
+        val displayName = cursor.getString(cursor.getColumnIndexOrThrow(nameColumn))
+        ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
     }
 
     // ── Internal types ────────────────────────────────────────────────────────
