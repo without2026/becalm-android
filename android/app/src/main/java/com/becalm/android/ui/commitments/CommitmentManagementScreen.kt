@@ -110,7 +110,7 @@ public fun CommitmentManagementScreen(
                                 direction = row.entity.direction,
                                 derivedStatus = row.derivedStatus,
                                 dueDate = row.entity.dueDate,
-                                counterparty = row.entity.counterpartyRef?.take(COUNTERPARTY_MAX_CHARS),
+                                counterpartyDisplayName = row.entity.counterpartyRef?.take(COUNTERPARTY_MAX_CHARS),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
@@ -188,7 +188,7 @@ private fun PreviewCommitmentManagementScreenPopulated() {
                             direction = dir,
                             derivedStatus = status,
                             dueDate = LocalDate(2026, 4, 20),
-                            counterparty = "Alice Kim",
+                            counterpartyDisplayName = "Alice Kim",
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),

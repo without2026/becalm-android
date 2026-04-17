@@ -70,6 +70,11 @@ public class OutlookMailWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (runAttemptCount >= MAX_RETRIES) {
+            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
+            return@withContext Result.failure()
+        }
+
         val now = Clock.System.now()
         logger.d(TAG, "doWork started runAttemptCount=$runAttemptCount")
 
@@ -210,6 +215,9 @@ public class OutlookMailWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "OutlookMailWorker"
+
+        /** Maximum number of WorkManager retry attempts before failing permanently. */
+        public const val MAX_RETRIES: Int = 5
 
         /**
          * Key used with [SyncCursorStore.observeCursor] / [SyncCursorStore.setCursor] to

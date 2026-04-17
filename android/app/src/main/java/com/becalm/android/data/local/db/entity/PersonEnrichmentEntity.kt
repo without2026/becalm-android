@@ -2,7 +2,6 @@ package com.becalm.android.data.local.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
-import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.datetime.Instant
 
@@ -34,18 +33,12 @@ import kotlinx.datetime.Instant
  * (epoch milliseconds). Do not add inline converters here.
  *
  * Indices defined per `data-model.yml § persons_enrichment`:
- * - `person_ref` is the primary key; Room automatically creates a unique index on it.
- *   An explicit named index is also declared so coverage queries can reference it by name.
+ * - `person_ref` is the primary key; SQLite automatically maintains a unique index on
+ *   it, satisfying the `[person_ref]` btree index declared in the spec. No explicit
+ *   `@Index` is needed (and declaring one would create a redundant duplicate index).
  */
 @Entity(
     tableName = "persons_enrichment",
-    indices = [
-        Index(
-            name = "idx_persons_enrichment_person_ref",
-            value = ["person_ref"],
-            unique = true,
-        ),
-    ],
 )
 public data class PersonEnrichmentEntity(
 

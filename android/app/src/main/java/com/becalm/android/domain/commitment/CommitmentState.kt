@@ -9,7 +9,8 @@ package com.becalm.android.domain.commitment
  * - [DRAFT]      — Initial state; the commitment has been extracted but not yet acted on.
  * - [CONFIRMED]  — The user has acknowledged the commitment; ready to be scheduled or closed.
  * - [SCHEDULED]  — A concrete follow-up time has been assigned via [CommitmentEvent.Schedule].
- * - [DONE]       — The commitment has been fulfilled.
+ * - [DONE]       — The commitment has been fulfilled; terminal state with no further transitions
+ *                  (per spec CMT-007).
  * - [DISMISSED]  — The commitment has been discarded; terminal state with no further transitions.
  */
 public enum class CommitmentState {

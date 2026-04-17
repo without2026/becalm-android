@@ -47,4 +47,18 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-public val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+// ─── Migration 2 → 3 (R2-02/04/05: drop out-of-spec indices) ────────────────
+//
+// Removes three indices not declared in `.spec/contracts/data-model.yml`:
+//   1. idx_raw_events_user_client_event — dedup enforced at Supabase/Railway layer
+//   2. index_calendar_events_user_id_source_type_source_ref — spec only has (user_id, start_at)
+//   3. idx_persons_enrichment_person_ref — redundant with PK auto-index
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP INDEX IF EXISTS `idx_raw_events_user_client_event`")
+        db.execSQL("DROP INDEX IF EXISTS `index_calendar_events_user_id_source_type_source_ref`")
+        db.execSQL("DROP INDEX IF EXISTS `idx_persons_enrichment_person_ref`")
+    }
+}
+
+public val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)

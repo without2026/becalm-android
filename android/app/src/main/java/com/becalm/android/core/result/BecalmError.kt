@@ -53,6 +53,17 @@ public sealed class BecalmError {
     /** Operation was cancelled; typically swallowed rather than surfaced as UI error. */
     public data object Cancelled : BecalmError()
 
-    /** Unexpected exception with no specific mapping. */
-    public data class Unknown(val throwable: Throwable) : BecalmError()
+    /**
+     * Unexpected exception with no specific mapping.
+     *
+     * The raw [throwable] is retained for internal callers that need programmatic access
+     * (e.g. workers inspecting specific exception types). For logging and user-facing
+     * surfaces, prefer [safeMessage], which exposes only the exception class name and
+     * avoids leaking PII or internal details carried in the exception message/stack.
+     */
+    public data class Unknown(val throwable: Throwable) : BecalmError() {
+        /** Exception class name only; safe to log or display. */
+        public val safeMessage: String
+            get() = throwable::class.simpleName ?: "Unknown"
+    }
 }

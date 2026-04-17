@@ -17,23 +17,29 @@ import kotlinx.datetime.Instant
  * SP-13 (BeCalmDatabase) supplies the TypeConverter that maps [Instant] ↔ [Long]
  * (epoch milliseconds). Do not add inline converters here.
  *
- * Indices defined per spec:
- * - `idx_raw_events_user_client_event` — UNIQUE; enforces idempotency dedup at the DB
- *   layer so a concurrent second insert with the same `client_event_id` is rejected
- *   rather than silently duplicated (the read-then-insert guard in the DAO is not
- *   sufficient under concurrency).
+ * Indices defined per spec (`data-model.yml § raw_ingestion_events.indexes`):
  * - `idx_raw_events_user_sync` — supports [RawIngestionEventDao.findPendingForUpload]
  * - `idx_raw_events_user_time` — supports chronological timeline queries
  * - `idx_raw_events_user_person_time` — supports PersonDetailScreen timeline query
+ *
+ * Logical foreign key (not enforced by Room):
+ * - `user_id` → `auth.users.id` (many-to-one, on_delete: cascade) per
+ *   `data-model.yml § relationships`. `auth.users` is a Supabase Auth-managed table
+ *   (see `data-model.yml § migration_notes`) and is not a Room entity, so a Room
+ *   `@ForeignKey` annotation is not possible. Referential integrity is enforced at
+ *   the Supabase/Railway tier; the Android client treats `user_id` as an opaque
+ *   server-owned UUID.
+ *
+ * Idempotency note:
+ * Dedup on `(user_id, client_event_id)` is enforced at Railway/Supabase via a UNIQUE
+ * constraint; the local Room layer relies on the read-then-insert guard in
+ * [RawIngestionEventDao.findByClientEventId] and does NOT declare a local UNIQUE
+ * index (out of spec — `data-model.yml § raw_ingestion_events.indexes` lists only
+ * the three btree indexes above).
  */
 @Entity(
     tableName = "raw_ingestion_events",
     indices = [
-        Index(
-            name = "idx_raw_events_user_client_event",
-            value = ["user_id", "client_event_id"],
-            unique = true,
-        ),
         Index(
             name = "idx_raw_events_user_sync",
             value = ["user_id", "sync_status"],

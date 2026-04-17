@@ -11,7 +11,6 @@ import com.becalm.android.data.remote.dto.CalendarEventDto
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Instant
 import retrofit2.Response
@@ -159,9 +158,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         }
 
     override fun observeById(id: String): Flow<CalendarEventEntity?> =
-        // Cold single-emit — the DAO has no user-agnostic reactive query by PK.
-        // A dedicated DAO Flow query (SP-later) should replace this for live updates.
-        flow { emit(dao.findById(id)) }
+        dao.observeById(id)
 
     override suspend fun findById(id: String): CalendarEventEntity? = dao.findById(id)
 

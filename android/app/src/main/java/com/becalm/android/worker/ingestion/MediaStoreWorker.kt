@@ -87,6 +87,11 @@ public class MediaStoreWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (runAttemptCount >= MAX_RETRIES) {
+            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
+            return@withContext Result.failure()
+        }
+
         val smsMissing = ContextCompat.checkSelfPermission(
             appContext,
             android.Manifest.permission.READ_SMS,
@@ -387,6 +392,9 @@ public class MediaStoreWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "MediaStoreWorker"
+
+        /** Maximum WorkManager attempts before permanently failing (R4-02). */
+        public const val MAX_RETRIES: Int = 5
 
         /** [SyncCursorStore] MediaStore kind key for SMS. */
         public const val KIND_SMS: String = "sms"

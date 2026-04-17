@@ -14,12 +14,14 @@ import kotlinx.datetime.Instant
  * the Railway batch API. [syncStatus] tracks whether a locally-staged mutation
  * has been acknowledged by Railway.
  *
- * Two indices are maintained:
+ * Indices:
  * 1. `(user_id, start_at)` — primary timeline query backing [CalendarEventDao.observeUpcoming]
- *    and [CalendarEventDao.observeInRange].
- * 2. `(user_id, source_type, source_ref)` unique — backs upsert-by-external-ref dedup in
- *    [CalendarEventDao.findBySourceRef]. Room treats NULLs in a UNIQUE index as distinct,
- *    so rows with `source_ref = null` do not conflict with each other.
+ *    and [CalendarEventDao.observeInRange]. Defined by `.spec/contracts/data-model.yml`.
+ *
+ * Logical foreign key (not enforced at the Room layer because `auth.users` is a Supabase
+ * Auth-managed table that Android never mirrors locally):
+ *   [userId] -> auth.users.id (many-to-one, on_delete: cascade).
+ * See `.spec/contracts/data-model.yml` `relationships` section.
  *
  * Valid [sourceType] values: "google_calendar" | "outlook_calendar"
  * Valid [syncStatus] values: "pending" | "synced" | "failed"
@@ -28,7 +30,6 @@ import kotlinx.datetime.Instant
     tableName = "calendar_events",
     indices = [
         Index(value = ["user_id", "start_at"]),
-        Index(value = ["user_id", "source_type", "source_ref"], unique = true),
     ],
 )
 public data class CalendarEventEntity(
@@ -52,8 +53,8 @@ public data class CalendarEventEntity(
     /**
      * External calendar event ID used for server-side upsert deduplication.
      * Null when the calendar provider does not expose a stable external ID.
-     * Room treats NULL values in the unique index on (user_id, source_type, source_ref)
-     * as distinct, so multiple null-ref rows for the same user are permitted.
+     * Dedup is performed by Railway on the server side; Room does not enforce a
+     * local uniqueness constraint on `(user_id, source_type, source_ref)`.
      */
     @ColumnInfo(name = "source_ref")
     val sourceRef: String?,

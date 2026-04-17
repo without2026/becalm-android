@@ -29,7 +29,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
@@ -127,7 +127,7 @@ public fun BecalmScaffold(
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
 
-@Preview(showBackground = false, widthDp = 360, heightDp = 640)
+@PreviewLightDark
 @Composable
 private fun PreviewBecalmScaffold() {
     BecalmTheme {

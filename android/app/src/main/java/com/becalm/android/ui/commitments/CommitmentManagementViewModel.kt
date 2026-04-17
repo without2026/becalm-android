@@ -237,16 +237,6 @@ public class CommitmentManagementViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Reopens a completed commitment, transitioning DONE → CONFIRMED.
-     */
-    // spec: CMT-009
-    public fun onReopen(id: String) {
-        launchAction("onReopen", id) {
-            commitmentRepository.transitionState(id, CommitmentEvent.ReopenFromDone)
-        }
-    }
-
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     /**

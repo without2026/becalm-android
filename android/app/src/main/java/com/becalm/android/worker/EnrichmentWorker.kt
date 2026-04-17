@@ -74,6 +74,11 @@ public class EnrichmentWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (runAttemptCount >= MAX_RETRIES) {
+            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
+            return@withContext Result.failure()
+        }
+
         // ENR-003: resolve userId; null session → terminal failure
         val userId = authRepository.currentSession()?.userId
         if (userId == null) {
@@ -256,6 +261,9 @@ public class EnrichmentWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "EnrichmentWorker"
+
+        /** Maximum WorkManager runAttemptCount before permanent failure. */
+        public const val MAX_RETRIES: Int = 5
 
         /**
          * Source identifier used with [SourceStatusRepository.recordSyncSuccess].

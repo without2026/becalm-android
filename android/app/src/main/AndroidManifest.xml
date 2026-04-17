@@ -8,8 +8,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Voice recording and transcription (SP-35, VOI-005) -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+        RECORD_AUDIO intentionally removed (R10-01).
+        On-device STT has been dropped from the voice pipeline; capture now relies on
+        Samsung Voice Recorder via SAF (user-picked file) and server-side transcription.
+        See .spec/voice-pipeline.spec.yml. If on-device recording is ever reintroduced,
+        restore this permission together with runtime request + PIPA notice.
+    -->
 
     <!-- Contacts enrichment: PIPA notice shown on ENR-001 onboarding screen; graceful skip -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -31,7 +36,16 @@
     <!-- Alarm reminders (SP-37) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
-    <!-- API 33+: runtime permission required to post notifications -->
+    <!--
+        API 33+ (TIRAMISU): POST_NOTIFICATIONS is a runtime permission.
+        The only runtime touch-point today lives in ReminderBroadcastReceiver, which
+        performs a checkSelfPermission guard and silently skips posting when denied
+        (see receiver/ReminderBroadcastReceiver.kt:37-48).
+        TODO(R10-02): there is currently NO UI site that actually *requests* this
+        permission (ActivityResultContracts.RequestPermission). Add a request during
+        onboarding or first reminder scheduling so users on API 33+ can opt in;
+        without it reminders will never surface on fresh installs.
+    -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application

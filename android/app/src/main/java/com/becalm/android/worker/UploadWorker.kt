@@ -59,6 +59,11 @@ public class UploadWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
+        if (runAttemptCount >= MAX_RETRIES) {
+            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
+            return Result.failure()
+        }
+
         val attempt = workerParams.inputData.getInt(INPUT_KEY_ATTEMPT, 0)
 
         // ── Step 1: resolve userId ─────────────────────────────────────────────
@@ -291,6 +296,9 @@ public class UploadWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "UploadWorker"
+
+        /** Maximum WorkManager runAttemptCount before permanent failure. */
+        public const val MAX_RETRIES: Int = 5
 
         /** Railway per-batch item cap (SYNC-004). */
         public const val BATCH_SIZE: Int = 100

@@ -45,14 +45,11 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *
  * ## Migrations
  * All [androidx.room.migration.Migration] instances are centralised in [MIGRATIONS].
- * `fallbackToDestructiveMigrationOnDowngrade` is enabled so that downgrades (e.g. after a hot
- * revert) do not produce a crash — the database is rebuilt from an empty state and re-populated
- * on the next sync worker pass. This is acceptable because all tables are caches of server
- * data, and [PersonEnrichmentEntity] is re-populated from on-device contacts.
- *
- * NOTE (PIPA + UX): `commitmentState` column is NOT mirrored to Railway.
- * On a forced downgrade (`fallbackToDestructiveMigrationOnDowngrade`), user-confirmed
- * commitment lifecycle state is lost. Track: KTR-COMMITMENT-STATE-SYNC (SP-29b).
+ * Downgrades fail loudly: Room will throw at open time if the on-disk schema version is greater
+ * than [DATABASE_VERSION]. We deliberately do NOT register a destructive-downgrade fallback,
+ * because silently wiping the database on downgrade would destroy user-confirmed state (e.g.
+ * `commitmentState`) that is not mirrored to Railway. Hot reverts must ship a forward-only
+ * migration path or uninstall/reinstall the app.
  *
  * ## Obtaining an instance
  * Use [build] inside a Hilt [com.becalm.android.core.di.DatabaseModule] provider.
@@ -92,7 +89,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 2
+        public const val DATABASE_VERSION: Int = 3
 
         /**
          * Creates and opens the [BeCalmDatabase] using the standard Room builder.
@@ -100,9 +97,11 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Configuration decisions:
          * - `addMigrations(*MIGRATIONS)` — Room applies the registered migrations in order when
          *   upgrading from an older schema version. See [MIGRATIONS] for the rationale.
-         * - `fallbackToDestructiveMigrationOnDowngrade()` — permits downgrade installs (e.g.
-         *   hotfix rollbacks) to succeed by wiping and recreating the database. All tables are
-         *   server-cache or on-device-restorable, so destructive downgrade is safe.
+         * - No destructive-downgrade fallback is registered. If the installed APK's
+         *   [DATABASE_VERSION] is lower than the on-disk schema version, Room will throw at open
+         *   time rather than silently dropping user data (e.g. `commitmentState`, which is not
+         *   mirrored to Railway). Downgrades must be handled explicitly by a forward migration
+         *   or by uninstalling the app.
          *
          * @param context Application context. Pass [android.app.Application] or a
          *   `@ApplicationContext`-qualified [Context] from a Hilt module — never an Activity.
@@ -115,7 +114,6 @@ public abstract class BeCalmDatabase : RoomDatabase() {
                 DATABASE_NAME,
             )
                 .addMigrations(*MIGRATIONS)
-                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
     }
 }

@@ -28,7 +28,4 @@ public sealed interface CommitmentEvent {
 
     /** The commitment has been discarded. Transitions DRAFT, CONFIRMED, or SCHEDULED → DISMISSED. */
     public data object Dismiss : CommitmentEvent
-
-    /** Reopens a completed commitment for continued tracking. Transitions DONE → CONFIRMED. */
-    public data object ReopenFromDone : CommitmentEvent
 }

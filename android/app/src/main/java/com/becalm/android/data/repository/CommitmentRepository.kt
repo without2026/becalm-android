@@ -11,6 +11,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
 import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
@@ -29,6 +30,9 @@ private const val CURSOR_KEY = "commitments_cursor"
 private const val PAGE_LIMIT = 50
 private const val PAGE_CAP = 5
 private const val TAG = "CommitmentRepository"
+
+/** Legal action_state values per data-model.yml:134-139 / commitment-management.spec.yml CMT-005..007. */
+private val ALLOWED_ACTION_STATES = setOf("pending", "reminded", "followed_up", "completed")
 
 // ─── Interface ───────────────────────────────────────────────────────────────
 
@@ -322,7 +326,47 @@ public class CommitmentRepositoryImpl @Inject constructor(
         newState: String,
         updatedAt: Instant,
     ): BecalmResult<Unit> {
+        // R3-01: All state transitions must go through CommitmentStateMachine.
+        // Validate the action_state enum value, then (for transitions that imply a
+        // lifecycle event — namely "completed" → MarkDone) run it through the state
+        // machine so illegal lifecycle transitions are rejected before touching the DB.
+        if (newState !in ALLOWED_ACTION_STATES) {
+            return BecalmResult.Failure(
+                BecalmError.Validation(
+                    field = "actionState",
+                    message = "Unknown action_state '$newState'; expected one of $ALLOWED_ACTION_STATES",
+                )
+            )
+        }
+
+        val entity = dao.findById(id)
+            ?: return BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+
+        val lifecycleEvent = actionStateToLifecycleEvent(newState, entity.commitmentState)
+        val nextLifecycleState = if (lifecycleEvent != null) {
+            when (val result = CommitmentStateMachine.transition(entity.commitmentState, lifecycleEvent)) {
+                is TransitionResult.Err -> return BecalmResult.Failure(
+                    when (result.error) {
+                        is TransitionError.IllegalTransition -> BecalmError.Validation(
+                            field = "commitmentState",
+                            message = "Illegal transition: ${result.error.from} + ${result.error.event::class.simpleName} (action_state='$newState')",
+                        )
+                        TransitionError.MissingSchedule -> BecalmError.Validation(
+                            field = "at",
+                            message = "Schedule event requires a non-null future instant",
+                        )
+                    }
+                )
+                is TransitionResult.Ok -> result.state
+            }
+        } else {
+            entity.commitmentState
+        }
+
         dao.updateActionState(id, newState, updatedAt)
+        if (nextLifecycleState != entity.commitmentState) {
+            dao.update(entity.copy(commitmentState = nextLifecycleState, updatedAt = updatedAt))
+        }
 
         val response = try {
             api.patchCommitment(id, request = PatchCommitmentRequest(newState))
@@ -332,6 +376,25 @@ public class CommitmentRepositoryImpl @Inject constructor(
         }
 
         return response.toBecalmResult { it }.map { }
+    }
+
+    /**
+     * Maps an action_state target to the [CommitmentEvent] that should drive the
+     * SP-36 lifecycle, or null when the action_state change has no lifecycle effect
+     * (e.g. pending → reminded tracks follow-up intensity without changing lifecycle).
+     *
+     * Mapping (derived from commitment-management.spec.yml CMT-005/6/7):
+     * - "completed" → [CommitmentEvent.MarkDone]
+     * - "pending"   → [CommitmentEvent.ReopenFromDone] when currently DONE; otherwise no-op
+     * - "reminded" / "followed_up" → no lifecycle change
+     */
+    private fun actionStateToLifecycleEvent(
+        actionState: String,
+        current: CommitmentState,
+    ): CommitmentEvent? = when (actionState) {
+        "completed" -> CommitmentEvent.MarkDone
+        "pending"   -> if (current == CommitmentState.DONE) CommitmentEvent.ReopenFromDone else null
+        else        -> null
     }
 
     // ── Sync helpers ──────────────────────────────────────────────────────────

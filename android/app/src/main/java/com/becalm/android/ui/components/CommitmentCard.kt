@@ -72,12 +72,16 @@ import kotlinx.datetime.LocalDate
  *                      `"DRAFT"`, `"CONFIRMED"`, `"SCHEDULED"`, `"DONE"`, `"DISMISSED"`.
  *                      Unknown values map to pending styling.
  * @param dueDate       Optional due date for the D-N badge. `null` = no badge shown.
- * @param counterparty  Display name of the counterparty shown below the title, or `null`.
- *                      Must be a resolved display label. Never pass a raw email address,
- *                      phone number, or internal identifier — the TalkBack accessibility
- *                      description includes this value verbatim. This composable is a UI
- *                      leaf; redaction and display-name resolution are the ViewModel's
- *                      responsibility.
+ * @param counterpartyDisplayName
+ *                      Resolved, human-readable display name of the counterparty shown
+ *                      below the title, or `null` to omit the line. Must already be
+ *                      enriched by the caller (ViewModel) — this composable is a pure UI
+ *                      leaf and performs NO personRef → display name resolution. The
+ *                      ViewModel is responsible for joining the raw `person_ref` against
+ *                      `PersonEnrichmentDao` (or equivalent) and passing the result here.
+ *                      Never pass a raw email address, phone number, or internal
+ *                      identifier — the TalkBack accessibility description and the
+ *                      on-screen text render this value verbatim.
  * @param modifier      Optional [Modifier] applied to the card root.
  * @param onClick       Optional click handler; when non-null the card is tappable.
  * @param onMarkDone    Optional callback for the inline check icon button. The button
@@ -90,7 +94,7 @@ public fun CommitmentCard(
     direction: String,
     derivedStatus: String,
     dueDate: LocalDate?,
-    counterparty: String?,
+    counterpartyDisplayName: String?,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     onMarkDone: (() -> Unit)? = null,
@@ -200,10 +204,10 @@ public fun CommitmentCard(
                 }
 
                 // Counterparty
-                if (counterparty != null) {
+                if (counterpartyDisplayName != null) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = counterparty,
+                        text = counterpartyDisplayName,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -297,7 +301,7 @@ private fun PreviewCommitmentCardGivePendingD2() {
                 direction = "give",
                 derivedStatus = "CONFIRMED",
                 dueDate = LocalDate(2026, 4, 18),
-                counterparty = "Alice Kim",
+                counterpartyDisplayName = "Alice Kim",
                 onClick = {},
                 onMarkDone = {},
             )
@@ -315,7 +319,7 @@ private fun PreviewCommitmentCardTakeCompleted() {
                 direction = "take",
                 derivedStatus = "DONE",
                 dueDate = null,
-                counterparty = "Bob Lee",
+                counterpartyDisplayName = "Bob Lee",
             )
         }
     }
@@ -331,7 +335,7 @@ private fun PreviewCommitmentCardOverdueReminded() {
                 direction = "give",
                 derivedStatus = "SCHEDULED",
                 dueDate = LocalDate(2026, 4, 10),
-                counterparty = null,
+                counterpartyDisplayName = null,
                 onClick = {},
             )
         }
@@ -348,7 +352,7 @@ private fun PreviewCommitmentCardNoDueDate() {
                 direction = "take",
                 derivedStatus = "DRAFT",
                 dueDate = null,
-                counterparty = "Carol Park",
+                counterpartyDisplayName = "Carol Park",
             )
         }
     }

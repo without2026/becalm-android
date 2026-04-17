@@ -76,6 +76,11 @@ public class ImapNaverWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
+        if (runAttemptCount >= MAX_RETRIES) {
+            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
+            return Result.failure()
+        }
+
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
         val credentials = imapCredentialStore.getCredentials()
 
@@ -223,6 +228,9 @@ public class ImapNaverWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "ImapNaverWorker"
+
+        /** Maximum number of WorkManager retry attempts before failing permanently. */
+        public const val MAX_RETRIES: Int = 5
 
         /** IMAPS server hostname for Naver Mail. */
         public const val NAVER_IMAP_HOST: String = "imap.naver.com"

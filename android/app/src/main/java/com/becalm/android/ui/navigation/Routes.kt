@@ -21,6 +21,20 @@ package com.becalm.android.ui.navigation
  * Route paths are derived from `.spec/contracts/ui-map.yml` (version 1, 21 entries).
  * The spec header claims 22 routes; the actual entry count in that file is 21 —
  * this implementation matches the 21 declared entries exactly.
+ *
+ * ## Leading-slash divergence (R1-03)
+ * The spec lists every route with a leading `/` (e.g. `/today`, `/persons/{person_id}`)
+ * using a URL-style notation. Compose Navigation routes, however, are **opaque string
+ * identifiers** matched verbatim by `NavHost` / `NavController`, not URL paths — the
+ * framework convention is to register and navigate to them *without* a leading `/`
+ * (see `androidx.navigation.compose.NavHost` samples and AOSP reference apps such as
+ * Now in Android). Prefixing a slash would make these strings non-idiomatic and would
+ * not match any Android Navigation deep-link or argument-binding behaviour.
+ *
+ * Therefore the leading `/` from `ui-map.yml` is **documentation-only**: the spec's
+ * `/foo/bar` maps to the Compose route `"foo/bar"` declared here. Route values in
+ * this file are the authoritative identifiers used at runtime; the spec's slashes
+ * are read as path separators for human readability only.
  */
 public sealed class BecalmRoute(public val path: String) {
 

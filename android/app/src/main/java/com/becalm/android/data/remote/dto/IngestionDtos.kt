@@ -29,8 +29,12 @@ public data class RawIngestionEventDto(
      */
     @field:Json(name = "client_event_id") val clientEventId: String,
 
-    /** Supabase auth.users UUID of the owning user. */
-    @field:Json(name = "user_id") val userId: String,
+    /**
+     * Supabase auth.users UUID of the owning user.
+     * Not serialized: the server derives user_id from the Bearer token (api-contract.yml).
+     * Retained as a property for internal wiring (Room row, logging, idempotency scoping).
+     */
+    @Json(ignore = true) val userId: String = "",
 
     /**
      * Source of this event. Valid values: [SourceType.VOICE], [SourceType.GMAIL],

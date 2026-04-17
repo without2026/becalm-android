@@ -66,6 +66,16 @@ public interface CalendarEventDao {
     public suspend fun findById(id: String): CalendarEventEntity?
 
     /**
+     * Returns a [Flow] of the calendar event with the given primary key, or null if absent.
+     *
+     * The flow re-emits automatically when the row changes (Room invalidation).
+     *
+     * @param id The UUID primary key to observe.
+     */
+    @Query("SELECT * FROM calendar_events WHERE id = :id")
+    public fun observeById(id: String): Flow<CalendarEventEntity?>
+
+    /**
      * Looks up a calendar event by its external source reference for deduplication.
      *
      * Used before inserting a server-returned event to detect a locally-cached copy

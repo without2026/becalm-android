@@ -3,6 +3,7 @@ package com.becalm.android.data.remote.interceptor
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 
 /**
  * OkHttp [Interceptor] that enforces the AUTH-007 token lifecycle on all Railway API calls.
@@ -19,14 +20,16 @@ import okhttp3.Response
  *    the header is always present; the server returns 401 which triggers step 3.
  *
  * 3. **401 refresh-and-retry** — on receiving an HTTP 401 response:
- *    a. [AuthTokenProvider.refresh] is invoked via [runBlocking] on the current OkHttp
+ *    a. The 401 response body is buffered into memory via `body.bytes()` and the response
+ *       is rebuilt with `toResponseBody(contentType)` so the caller can always read it
+ *       (R1-01 fix: guarantees the returned Response is never consumed/closed).
+ *    b. [AuthTokenProvider.refresh] is invoked via [runBlocking] on the current OkHttp
  *       dispatcher thread (refresh performs network I/O to Supabase Auth).
- *    b. If [refresh] returns `null` (refresh failed or no session), the original 401
- *       response is returned **intact** to the caller (body is NOT closed). No retry is
- *       attempted. The caller receives a fully-readable 401 response so that Retrofit can
- *       surface it to higher-layer error handlers (R1-01 fix).
- *    c. If [refresh] returns a non-null token, the original 401 response is closed to
- *       free the connection, the original request is rebuilt with the new
+ *    c. If [refresh] returns `null` (refresh failed or no session), the buffered 401
+ *       response is returned to the caller. No retry is attempted. Retrofit can surface
+ *       the body to higher-layer error handlers.
+ *    d. If [refresh] returns a non-null token, the buffered 401 response is closed to
+ *       free resources, the original request is rebuilt with the new
  *       `Authorization: Bearer <newToken>` header, and executed exactly **once**.
  *       The second response is returned unchanged — no further 401 retry occurs.
  *
@@ -65,17 +68,20 @@ public class AuthInterceptor(
             return response
         }
 
-        // Attempt token refresh. Do NOT close the response before the refresh call —
-        // if refresh fails (returns null) we must return the original 401 intact so the
-        // caller can read its body (R1-01 fix: avoids returning a closed Response).
+        // Buffer the 401 body into memory and rebuild the response so the caller can always
+        // read it, even if we consumed bytes during refresh handling (R1-01 fix).
+        val bodyContentType = response.body?.contentType()
+        val bodyBytes = response.body?.bytes() ?: ByteArray(0)
+        val bufferedResponse = response.newBuilder()
+            .body(bodyBytes.toResponseBody(bodyContentType))
+            .build()
+
         val newToken = runBlocking { authTokenProvider.refresh() }
         if (newToken == null) {
-            // Refresh failed — return the original 401 response with body still open.
-            return response
+            return bufferedResponse
         }
 
-        // Refresh succeeded: close the 401 response to release the connection, then retry once.
-        response.close()
+        bufferedResponse.close()
         val retryRequest = originalRequest.newBuilder()
             .header("Authorization", "Bearer $newToken")
             .build()

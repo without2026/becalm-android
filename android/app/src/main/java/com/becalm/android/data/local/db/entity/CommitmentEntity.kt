@@ -22,6 +22,11 @@ import kotlinx.datetime.LocalDate
  *
  * @property id Supabase-assigned UUID primary key.
  * @property userId Supabase auth.users UUID of the owning user.
+ *   Logical foreign key: `user_id → auth.users.id` (many-to-one, ON DELETE CASCADE)
+ *   per `.spec/contracts/data-model.yml` (relationships, lines 258-261). The constraint
+ *   is enforced at the Railway/Supabase layer; it is intentionally NOT declared as a
+ *   Room `@ForeignKey` here because `auth.users` is managed by Supabase Auth and has
+ *   no corresponding Room entity on-device (data-model.yml migration_notes, line 269).
  * @property direction Commitment direction from the authenticated user's perspective.
  *   Valid values: "give" (user owes counterparty) | "take" (counterparty owes user).
  * @property counterpartyRaw Raw uncanonized counterparty identifier as extracted

@@ -18,10 +18,14 @@ import kotlinx.datetime.Instant
  * CONFIRMED  + Dismiss       → DISMISSED
  * SCHEDULED  + MarkDone      → DONE
  * SCHEDULED  + Dismiss       → DISMISSED
- * DONE       + ReopenFromDone→ CONFIRMED
+ * DONE       + (any)         → [TransitionError.IllegalTransition]  (terminal)
  * DISMISSED  + (any)         → [TransitionError.IllegalTransition]  (terminal)
  * ```
  * All other combinations return [TransitionError.IllegalTransition].
+ *
+ * Per spec CMT-007, `DONE` is a terminal state: once a commitment is completed
+ * it cannot be reopened. Callers that need to resurrect a completed commitment
+ * must create a new one.
  */
 public object CommitmentStateMachine {
 
@@ -63,10 +67,8 @@ public object CommitmentStateMachine {
             else                     -> TransitionResult.Err(TransitionError.IllegalTransition(current, event))
         }
 
-        CommitmentState.DONE -> when (event) {
-            CommitmentEvent.ReopenFromDone -> TransitionResult.Ok(CommitmentState.CONFIRMED)
-            else                           -> TransitionResult.Err(TransitionError.IllegalTransition(current, event))
-        }
+        CommitmentState.DONE ->
+            TransitionResult.Err(TransitionError.IllegalTransition(current, event))
 
         CommitmentState.DISMISSED ->
             TransitionResult.Err(TransitionError.IllegalTransition(current, event))
