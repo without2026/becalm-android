@@ -46,7 +46,7 @@ class VoiceModuleWiringTest {
 
         authTokenProvider = mockk {
             every { currentAccessToken() } returns "test-jwt-token"
-            coEvery { refresh() } returns "test-refreshed-token"
+            coEvery { refresh(any()) } returns "test-refreshed-token"
         }
 
         idempotencyKeyProvider = mockk {

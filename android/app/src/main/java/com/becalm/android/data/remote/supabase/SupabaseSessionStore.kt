@@ -1,5 +1,7 @@
 package com.becalm.android.data.remote.supabase
 
+import kotlinx.coroutines.flow.SharedFlow
+
 /**
  * Persistence contract for a [SupabaseSession].
  *
@@ -8,7 +10,7 @@ package com.becalm.android.data.remote.supabase
  * using `EncryptedSharedPreferences`. No plaintext storage of tokens is permitted anywhere
  * in the codebase.
  *
- * This interface is intentionally minimal — callers only need to save, load, and clear.
+ * This interface is intentionally minimal — callers only need to save, load, clear, and observe.
  * Encryption, key management, and migration are entirely encapsulated by the SP-15 impl.
  *
  * Lifecycle note: [clear] is called by `AuthRepository` (SP-16) as part of the full sign-out
@@ -19,6 +21,8 @@ public interface SupabaseSessionStore {
 
     /**
      * Persists [session] to encrypted storage, replacing any previously saved session.
+     *
+     * Emits [session] on [observe] after the encrypted write has been applied.
      *
      * @param session The session to persist. Must not be called with a partially-constructed
      *   session — all fields must be valid before saving.
@@ -35,7 +39,21 @@ public interface SupabaseSessionStore {
     /**
      * Deletes the persisted session from encrypted storage.
      *
-     * Called by SP-16 `AuthRepository` during the sign-out wipe sequence.
+     * Emits `null` on [observe] after the wipe has been applied. Called by SP-16
+     * `AuthRepository` during the sign-out wipe sequence.
      */
     public suspend fun clear()
+
+    /**
+     * Session-change stream. Emits the new session on every [save], and `null` on every [clear].
+     *
+     * No replay: a subscriber that attaches after a save will **not** receive the prior value
+     * retroactively. Use [load] to obtain the persisted session on cold start. This is the
+     * primitive used by SP-05's `DefaultAuthTokenProvider` to keep its in-memory access-token
+     * cache in sync with encrypted storage.
+     *
+     * The stream is hot and shared across all subscribers. Buffer overflow policy is
+     * `DROP_OLDEST` so a slow or absent subscriber never suspends a writer.
+     */
+    public fun observe(): SharedFlow<SupabaseSession?>
 }

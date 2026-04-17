@@ -57,8 +57,8 @@ public interface SupabaseAuthClient {
     /**
      * Exchanges a valid [refreshToken] for a new access/refresh token pair (AUTH-004 / AUTH-007).
      *
-     * Called by the `AuthInterceptor` (SP-05) through `AuthTokenProvider.refresh()` when it
-     * receives an HTTP 401 from the Railway backend. On success the new session is persisted.
+     * Called by the `AuthInterceptor` (SP-05) through `AuthTokenProvider.refresh(previousAccessToken)`
+     * when it receives an HTTP 401 from the Railway backend. On success the new session is persisted.
      *
      * Because [SupabaseClientFactory] sets `autoLoadFromStorage = false` and
      * `alwaysAutoRefresh = false`, the client has no in-memory session at the point of a 401.
