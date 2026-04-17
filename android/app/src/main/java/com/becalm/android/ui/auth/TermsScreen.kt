@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -22,8 +23,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -49,6 +52,7 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 public fun TermsScreen(
     navController: NavHostController,
+    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
@@ -96,10 +100,12 @@ public fun TermsScreen(
                 )
             }
             Spacer(modifier = Modifier.height(24.dp))
-            // TODO(LEGAL-001): record consent timestamp in DataStore via AuthRepository.recordTermsAcceptance(Instant.now())
             BecalmButton(
                 text = stringResource(R.string.terms_cta),
-                onClick = { navController.navigate(BecalmRoute.Login.path) },
+                onClick = {
+                    onboardingViewModel.onAcceptTerms()
+                    navController.navigate(BecalmRoute.Login.path)
+                },
                 enabled = accepted,
                 variant = BecalmButtonVariant.Primary,
                 modifier = Modifier.fillMaxWidth(),

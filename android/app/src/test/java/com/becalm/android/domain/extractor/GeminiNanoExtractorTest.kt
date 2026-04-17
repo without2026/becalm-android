@@ -2,6 +2,7 @@ package com.becalm.android.domain.extractor
 
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.domain.voice.CommitmentDraft
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals

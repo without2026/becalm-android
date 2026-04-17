@@ -276,6 +276,23 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    // spec: ONB-001 — persist terms acceptance so restarting the app doesn't re-show terms.
+    /**
+     * Persists terms-of-service acceptance to DataStore.
+     *
+     * Called by [com.becalm.android.ui.auth.TermsScreen] before navigating to Login.
+     */
+    public fun onAcceptTerms() {
+        viewModelScope.launch {
+            try {
+                userPrefsStore.setTermsAccepted(true)
+                logger.i(TAG, "terms acceptance persisted")
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to persist terms acceptance", e)
+            }
+        }
+    }
+
     // spec: ONB-005, ONB-006, ONB-007, ONB-008
     /**
      * Persists onboarding completion and marks the flow as done.
@@ -297,8 +314,19 @@ public class OnboardingViewModel @Inject constructor(
                 StepStatus.SKIPPED,
                 StepStatus.DENIED,
             )
+            // Steps that have no dedicated onboarding screen are excluded from the gate.
+            // WELCOME is a non-interactive splash; SMS_PERM, CALL_PERM, NOTIF_PERM have no
+            // screens yet (deferred to a future sprint). Without this exclusion, the gate
+            // would never pass because nothing marks these steps as terminal.
+            val stepsWithoutScreen = setOf(
+                OnboardingStep.WELCOME,
+                OnboardingStep.SMS_PERM,
+                OnboardingStep.CALL_PERM,
+                OnboardingStep.NOTIF_PERM,
+                OnboardingStep.COMPLETE,
+            )
             val allStepsDone = OnboardingStep.entries
-                .filter { it != OnboardingStep.COMPLETE }
+                .filter { it !in stepsWithoutScreen }
                 .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
             if (!allStepsDone) {
                 logger.d(TAG, "onCompleteOnboarding: blocked — not all steps finished; stepStates=$stepStates")

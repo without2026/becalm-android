@@ -53,14 +53,23 @@ public fun ColdSyncScreen(
     onboardingViewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val state by coldSyncViewModel.state.collectAsStateWithLifecycle()
+    val onboardingState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
 
-    // Auto-advance when sync completes
-    LaunchedEffect(state.done) {
-        if (state.done) {
-            onboardingViewModel.onCompleteOnboarding()
+    // Navigate only after onCompleteOnboarding() has persisted successfully.
+    // The COMPLETE step in stepStates is set by the VM after DataStore write succeeds.
+    val onboardingDone = onboardingState.stepStates[OnboardingStep.COMPLETE] == StepStatus.COMPLETE
+    LaunchedEffect(onboardingDone) {
+        if (onboardingDone) {
             navController.navigate(BecalmRoute.Today.path) {
                 popUpTo(BecalmRoute.OnboardingRecordingFolder.path) { inclusive = true }
             }
+        }
+    }
+
+    // Auto-trigger completion when sync finishes
+    LaunchedEffect(state.done) {
+        if (state.done) {
+            onboardingViewModel.onCompleteOnboarding()
         }
     }
 
@@ -68,12 +77,7 @@ public fun ColdSyncScreen(
         ColdSyncContent(
             modifier = Modifier.padding(padding),
             state = state,
-            onContinue = {
-                onboardingViewModel.onCompleteOnboarding()
-                navController.navigate(BecalmRoute.Today.path) {
-                    popUpTo(BecalmRoute.OnboardingRecordingFolder.path) { inclusive = true }
-                }
-            },
+            onContinue = { onboardingViewModel.onCompleteOnboarding() },
         )
     }
 }

@@ -156,6 +156,19 @@ public interface UserPrefsStore {
     public suspend fun setThirdPartyProvisionConsent(granted: Boolean)
 
     /**
+     * Emits whether the user has accepted the terms of service.
+     *
+     * Defaults to `false`. Once accepted, the value persists across app restarts so the
+     * terms screen is not shown again (ONB-001).
+     */
+    public fun observeTermsAccepted(): Flow<Boolean>
+
+    /**
+     * Persists the terms-of-service acceptance flag.
+     */
+    public suspend fun setTermsAccepted(accepted: Boolean)
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
@@ -196,6 +209,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
     private val pipaThirdPartyConsentKey = booleanPreferencesKey("pipa_third_party_consent")
     private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
+    private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
 
     private suspend fun <T> editNullable(key: Preferences.Key<T>, value: T?) {
         dataStore.edit { prefs ->
@@ -254,6 +268,13 @@ public class UserPrefsStoreImpl @Inject constructor(
                 prefs.remove(pipaConsentTimestampKey)
             }
         }
+    }
+
+    override fun observeTermsAccepted(): Flow<Boolean> =
+        dataStore.data.map { it[termsAcceptedKey] ?: false }
+
+    override suspend fun setTermsAccepted(accepted: Boolean) {
+        dataStore.edit { prefs -> prefs[termsAcceptedKey] = accepted }
     }
 
     override suspend fun clearAll() {
