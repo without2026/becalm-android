@@ -7,6 +7,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.Instant
@@ -68,17 +69,33 @@ public class SourcesListViewModel @Inject constructor(
      */
     public val state: StateFlow<SourcesListUiState> = sourceStatusRepository.observeAll()
         .map { statuses ->
-            SourcesListUiState(
-                items = statuses.map { s ->
-                    SourceStatusRow(
-                        sourceType = s.sourceType,
-                        status = s.status.name,
-                        lastSyncAt = s.lastSyncedAt,
-                        lastError = s.errorMessage,
-                        itemsCount = 0, // SMG-002: no per-source count query exists yet
-                    )
-                },
+            val mappedStatuses = statuses.map { s ->
+                SourceStatusRow(
+                    sourceType = s.sourceType,
+                    status = s.status.name,
+                    lastSyncAt = s.lastSyncedAt,
+                    lastError = s.errorMessage,
+                    itemsCount = 0, // SMG-002: no per-source count query exists yet
+                )
+            }
+            // SMG-001 + ENR-008: contacts is a pseudo-source imported via the
+            // READ_CONTACTS permission granted during onboarding, not an OAuth flow.
+            // Status is hardcoded to "CONNECTED" because the VM layer cannot query
+            // Android runtime permissions directly. A proper permission check should
+            // be injected via a `PermissionRepository` when available, so this row
+            // reflects the real grant state rather than assuming it.
+            val contactsRow = SourceStatusRow(
+                sourceType = "contacts",
+                status = "CONNECTED",
+                lastSyncAt = null,
+                lastError = null,
+                itemsCount = 0,
             )
+            SourcesListUiState(items = listOf(contactsRow) + mappedStatuses)
+        }
+        .catch { e ->
+            logger.e(TAG, "observeAll failed", e as? Exception ?: Exception(e))
+            emit(SourcesListUiState())
         }
         .stateIn(
             scope = viewModelScope,

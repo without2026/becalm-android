@@ -79,7 +79,8 @@ public fun LoginScreen(
     // Navigate away when session is established
     LaunchedEffect(state) {
         if (state is AuthUiState.SignedIn) {
-            val destination = if (state.onboardingCompleted) {
+            val signedIn = state as AuthUiState.SignedIn
+            val destination = if (signedIn.onboardingCompleted) {
                 BecalmRoute.Today.path
             } else {
                 // ONB-PIPA: first post-login screen must be the PIPA 제3자 제공 consent screen
@@ -94,6 +95,7 @@ public fun LoginScreen(
         if (state is AuthUiState.Error) {
             scope.launch {
                 snackbarHostState.showSnackbar((state as AuthUiState.Error).message)
+                viewModel.onErrorDismissed()
             }
         }
     }

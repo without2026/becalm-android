@@ -14,8 +14,10 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
@@ -39,7 +41,13 @@ public data class PersonRow(
     val lastInteractionAt: Instant?,
     val interactionCount: Int,
     val starred: Boolean,
-)
+) {
+    /**
+     * User-facing label. Falls back to a redacted prefix of [personRef] so raw
+     * phone numbers / emails are never shown (SRC-001, ENR-006).
+     */
+    val displayLabel: String get() = displayName ?: personRef.take(3) + "***"
+}
 
 /**
  * Immutable snapshot of the PersonsScreen UI.
@@ -129,7 +137,7 @@ public class PersonsViewModel @Inject constructor(
                         else -> result.error.toString()
                     }
                     logger.w(TAG, "setStarred failed: ${result.error}")
-                    _uiState.value = _uiState.value.copy(error = message)
+                    _uiState.update { it.copy(error = message) }
                 }
             }
         }
@@ -139,7 +147,7 @@ public class PersonsViewModel @Inject constructor(
      * Clears the current error from [PersonsUiState.error].
      */
     public fun onErrorDismissed() {
-        _uiState.value = _uiState.value.copy(error = null)
+        _uiState.update { it.copy(error = null) }
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────
@@ -152,6 +160,8 @@ public class PersonsViewModel @Inject constructor(
                 _query.debounce(QUERY_DEBOUNCE_MS),
             ) { enrichmentList, query ->
                 enrichmentList to query
+            }.catch { e ->
+                _uiState.update { it.copy(loading = false, error = e.message ?: "load failed") }
             }.collect { (enrichmentList, query) ->
                 val rows = enrichmentList
                     .filter { entity ->
@@ -161,11 +171,13 @@ public class PersonsViewModel @Inject constructor(
                     }
                     .map { entity -> entity.toPersonRow() }
 
-                _uiState.value = _uiState.value.copy(
-                    query = query,
-                    people = rows,
-                    loading = false,
-                )
+                _uiState.update {
+                    it.copy(
+                        query = query,
+                        people = rows,
+                        loading = false,
+                    )
+                }
             }
         }
     }
@@ -180,6 +192,8 @@ public class PersonsViewModel @Inject constructor(
      *
      * The `starred` flag is always false until SP-05 adds the column to [PersonEnrichmentEntity].
      */
+    // TODO(SRC-001): Replace placeholder stats with a DAO aggregate query (COUNT + MAX)
+    // once the raw_ingestion_events index on person_ref is available (post-SP-05).
     private fun PersonEnrichmentEntity.toPersonRow(): PersonRow = PersonRow(
         personRef = personRef,
         displayName = displayName,

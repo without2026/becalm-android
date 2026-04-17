@@ -55,7 +55,13 @@ public fun SplashScreen(
         when (state) {
             is AuthUiState.SignedIn -> {
                 navigated = true
-                navController.navigate(BecalmRoute.Today.path) {
+                val signedIn = state as AuthUiState.SignedIn
+                val destination = if (signedIn.onboardingCompleted) {
+                    BecalmRoute.Today.path
+                } else {
+                    BecalmRoute.OnboardingPipaConsent.path
+                }
+                navController.navigate(destination) {
                     popUpTo(BecalmRoute.Splash.path) { inclusive = true }
                 }
             }

@@ -2,7 +2,6 @@ package com.becalm.android.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -13,6 +12,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -32,12 +32,10 @@ public sealed class AuthUiState {
      * A valid session is present.
      *
      * @param userId Supabase `auth.users` UUID.
-     * @param email  User's email address, or `null` when not available in the session.
      * @param onboardingCompleted Whether the user has already completed onboarding.
      */
     public data class SignedIn(
         val userId: String,
-        val email: String?,
         val onboardingCompleted: Boolean = false,
     ) : AuthUiState()
 
@@ -52,13 +50,6 @@ public sealed class AuthUiState {
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "AuthViewModel"
-
-/** Maps a [BecalmError] from a sign-in failure to a human-readable message. */
-private fun signInErrorMessage(error: BecalmError): String = when (error) {
-    is BecalmError.Unauthorized -> "Invalid email or password"
-    is BecalmError.Network -> "Network error. Please try again."
-    else -> "Sign-in failed. Please try again."
-}
 
 /**
  * ViewModel for the authentication flow.
@@ -105,7 +96,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-in failed")
-                    _uiState.value = AuthUiState.Error(signInErrorMessage(result.error))
+                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
                 }
             }
         }
@@ -126,7 +117,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "google sign-in failed")
-                    _uiState.value = AuthUiState.Error(signInErrorMessage(result.error))
+                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
                 }
             }
         }
@@ -152,7 +143,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "sign-out failed")
-                    _uiState.value = AuthUiState.Error("Sign-out failed. Please try again.")
+                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
                 }
             }
         }
@@ -168,16 +159,27 @@ public class AuthViewModel @Inject constructor(
      */
     public fun onObserveSession() {
         viewModelScope.launch {
-            authRepository.observeAuthState().collect { authState ->
-                _uiState.value = when (authState) {
-                    is AuthState.Authenticated -> AuthUiState.SignedIn(
-                        userId = authState.session.userId,
-                        email = authState.session.email,
-                        onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
-                    )
-                    is AuthState.Unauthenticated -> AuthUiState.SignedOut
+            authRepository.observeAuthState()
+                .catch { e ->
+                    _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
                 }
-            }
+                .collect { authState ->
+                    _uiState.value = when (authState) {
+                        is AuthState.Authenticated -> AuthUiState.SignedIn(
+                            userId = authState.session.userId,
+                            onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
+                        )
+                        is AuthState.Unauthenticated -> AuthUiState.SignedOut
+                    }
+                }
         }
+    }
+
+    /**
+     * Clears an [AuthUiState.Error] state so the UI can dismiss error dialogs
+     * and return to the sign-in screen.
+     */
+    public fun onErrorDismissed() {
+        _uiState.value = AuthUiState.SignedOut
     }
 }

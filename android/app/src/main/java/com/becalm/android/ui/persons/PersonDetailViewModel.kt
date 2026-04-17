@@ -7,7 +7,6 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
@@ -22,6 +21,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
@@ -77,15 +77,23 @@ public sealed class InteractionRow {
  * Immutable snapshot of the PersonDetailScreen UI.
  *
  * @property personRef Canonicalized counterparty identifier for this screen.
- * @property enrichment On-device contact enrichment data, or null when no enrichment row exists.
- * @property interactions Combined timeline of events, commitments, and meetings for this person.
+ * @property displayName Display-safe contact name from on-device enrichment, or null.
+ * @property companyName Display-safe company name from on-device enrichment, or null.
+ * @property jobTitle Display-safe job title from on-device enrichment, or null.
+ * @property pendingCommitments Commitments that are not yet completed.
+ * @property completedCommitments Commitments that have been completed/done.
+ * @property interactionHistory Non-commitment interactions (events, meetings) sorted newest-first.
  * @property loading True while the initial flow collection is in progress.
  * @property error Non-null when an error should be surfaced to the user.
  */
 public data class PersonDetailUiState(
     val personRef: String = "",
-    val enrichment: PersonEnrichmentEntity? = null,
-    val interactions: List<InteractionRow> = emptyList(),
+    val displayName: String? = null,
+    val companyName: String? = null,
+    val jobTitle: String? = null,
+    val pendingCommitments: List<InteractionRow.Commitment> = emptyList(),
+    val completedCommitments: List<InteractionRow.Commitment> = emptyList(),
+    val interactionHistory: List<InteractionRow> = emptyList(),
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -122,16 +130,18 @@ public class PersonDetailViewModel @Inject constructor(
     private val logger: Logger,
 ) : ViewModel() {
 
-    private val personRef: String = checkNotNull(savedStateHandle[ARG_PERSON_REF]) {
-        "PersonDetailViewModel requires '$ARG_PERSON_REF' in SavedStateHandle"
-    }
+    private val personRef: String = savedStateHandle[ARG_PERSON_REF] ?: ""
 
     private val _uiState: MutableStateFlow<PersonDetailUiState> =
         MutableStateFlow(PersonDetailUiState(personRef = personRef))
     public val uiState: StateFlow<PersonDetailUiState> = _uiState.asStateFlow()
 
     init {
-        observeDetail()
+        if (personRef.isEmpty()) {
+            _uiState.value = PersonDetailUiState(loading = false, error = "Person ID missing")
+        } else {
+            observeDetail()
+        }
     }
 
     // ─── Actions ──────────────────────────────────────────────────────────────
@@ -140,7 +150,7 @@ public class PersonDetailViewModel @Inject constructor(
      * Clears the current error from [PersonDetailUiState.error].
      */
     public fun onErrorDismissed() {
-        _uiState.value = _uiState.value.copy(error = null)
+        _uiState.update { it.copy(error = null) }
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────
@@ -158,11 +168,15 @@ public class PersonDetailViewModel @Inject constructor(
                             commitmentRepository.observeAllForPerson(userId, personRef),
                             calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
                         ) { enrichment, rawEvents, commitments, calendarEvents ->
-                            val interactions = buildInteractions(rawEvents, commitments, calendarEvents)
+                            val sections = buildInteractions(rawEvents, commitments, calendarEvents)
                             PersonDetailUiState(
                                 personRef = personRef,
-                                enrichment = enrichment,
-                                interactions = interactions,
+                                displayName = enrichment?.displayName,
+                                companyName = enrichment?.company,
+                                jobTitle = enrichment?.title,
+                                pendingCommitments = sections.pendingCommitments,
+                                completedCommitments = sections.completedCommitments,
+                                interactionHistory = sections.interactionHistory,
                                 loading = false,
                                 error = null,
                             )
@@ -185,14 +199,24 @@ public class PersonDetailViewModel @Inject constructor(
     }
 
     /**
-     * Merges raw events, commitments, and calendar meetings into a single timeline
-     * sorted newest-first.
+     * Container for the three UI sections produced by [buildInteractions].
+     */
+    private data class InteractionSections(
+        val pendingCommitments: List<InteractionRow.Commitment>,
+        val completedCommitments: List<InteractionRow.Commitment>,
+        val interactionHistory: List<InteractionRow>,
+    )
+
+    /**
+     * Splits raw events, commitments, and calendar meetings into three sections:
+     * pending commitments, completed commitments, and non-commitment interaction history
+     * (sorted newest-first).
      */
     private fun buildInteractions(
         rawEvents: List<RawIngestionEventEntity>,
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
-    ): List<InteractionRow> {
+    ): InteractionSections {
         val eventRows: List<InteractionRow> = rawEvents.map { e ->
             InteractionRow.Event(
                 timestamp = e.timestamp,
@@ -200,7 +224,7 @@ public class PersonDetailViewModel @Inject constructor(
                 summary = e.eventTitle,
             )
         }
-        val commitmentRows: List<InteractionRow> = commitments.map { c ->
+        val commitmentRows: List<InteractionRow.Commitment> = commitments.map { c ->
             InteractionRow.Commitment(
                 timestamp = c.sourceEventOccurredAt,
                 title = c.title,
@@ -214,7 +238,11 @@ public class PersonDetailViewModel @Inject constructor(
                 title = m.title,
             )
         }
-        return (eventRows + commitmentRows + calendarRows)
+        val (completed, pending) = commitmentRows.partition { c ->
+            val s = c.actionState.lowercase()
+            s == "completed" || s == "done"
+        }
+        val history = (eventRows + calendarRows)
             .sortedByDescending { row ->
                 when (row) {
                     is InteractionRow.Event -> row.timestamp
@@ -222,5 +250,10 @@ public class PersonDetailViewModel @Inject constructor(
                     is InteractionRow.CalendarMeeting -> row.timestamp
                 }
             }
+        return InteractionSections(
+            pendingCommitments = pending.sortedByDescending { it.timestamp },
+            completedCommitments = completed.sortedByDescending { it.timestamp },
+            interactionHistory = history,
+        )
     }
 }

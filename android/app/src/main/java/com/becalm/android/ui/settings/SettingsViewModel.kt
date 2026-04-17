@@ -107,7 +107,7 @@ public class SettingsViewModel @Inject constructor(
                 val pipaConsentEnabled = userPrefsStore.observeThirdPartyProvisionConsent().first()
                 _uiState.update { state ->
                     state.copy(
-                        userEmail = session?.email,
+                        userEmail = session?.email?.maskEmail(),
                         language = localeTag,
                         notificationsEnabled = notificationsEnabled,
                         pipaConsentEnabled = pipaConsentEnabled,
@@ -269,11 +269,17 @@ public class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Signs out the current user via [AuthRepository.signOut].
+     * Signs out the current user.
      *
-     * [AuthRepository.signOut] performs a full PIPA-compliant wipe (AUTH-005) including
-     * clearing the Room database, encrypted token store, and all prefs. No additional wipe
-     * step is needed here.
+     * Per spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", sign-out should only
+     * invalidate the current session (clear tokens) and preserve Room data so the user can
+     * resume locally cached content after signing back in. This differs from [onWipeLocalData],
+     * which is the deliberate full PIPA wipe.
+     *
+     * TODO(AUTH-005): authRepository.signOut() currently performs a full PIPA wipe including
+     * Room data. Per spec invariant "로그아웃 시 Room DB 데이터는 삭제하지 않는다", sign-out
+     * should preserve Room data. Requires splitting authRepository.signOut() into
+     * invalidateSession() + fullWipe() — tracked for next sprint.
      *
      * On failure, surfaces the error string via [SettingsUiState.error].
      */
@@ -294,13 +300,14 @@ public class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Wipes all on-device personal data and signs the user out.
+     * Wipes all on-device personal data and signs the user out — this IS the full PIPA wipe.
      *
-     * Delegates to [AuthRepository.signOut], which performs the full PIPA-compliant wipe
-     * required by PIPA Article 30 — including Room tables, encrypted tokens, sync cursors,
-     * IMAP credentials, and all DataStore preferences. Signing out is mandatory when wiping
-     * because the session is itself personal data and must be removed together with all other
-     * locally held data.
+     * Unlike [onSignOut] (which per spec should preserve Room data), this action deliberately
+     * deletes everything. Delegates to [AuthRepository.signOut], which performs the full
+     * PIPA-compliant wipe required by PIPA Article 30 — including Room tables, encrypted
+     * tokens, sync cursors, IMAP credentials, and all DataStore preferences. Signing out is
+     * mandatory when wiping because the session is itself personal data and must be removed
+     * together with all other locally held data.
      *
      * On failure, surfaces the error via [SettingsUiState.error].
      */
@@ -319,4 +326,24 @@ public class SettingsViewModel @Inject constructor(
             }
         }
     }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Masks the local-part of an email for display safety (R6-09).
+ *
+ * Keeps the first character and the domain intact, replacing intermediate characters with
+ * asterisks (capped at 5). Returns the original string if it has no '@' or the local-part is
+ * too short to mask meaningfully.
+ *
+ * Examples:
+ * - "alice@example.com" -> "a****@example.com"
+ * - "bob@x.io"          -> "b**@x.io"
+ * - "a@x.io"            -> "a@x.io" (local-part too short)
+ */
+private fun String.maskEmail(): String {
+    val atIndex = indexOf('@')
+    if (atIndex <= 1) return this
+    return first() + "*".repeat((atIndex - 1).coerceAtMost(5)) + substring(atIndex)
 }

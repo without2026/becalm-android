@@ -38,8 +38,6 @@ import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 
-private const val COUNTERPARTY_MAX_CHARS = 30
-
 /**
  * Commitment management screen — full list with filter tabs.
  *
@@ -104,17 +102,17 @@ public fun CommitmentManagementScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(items = state.items, key = { it.entity.id }) { row ->
+                        items(items = state.items, key = { it.id }) { row ->
                             CommitmentCard(
-                                title = row.entity.title,
-                                direction = row.entity.direction,
+                                title = row.title,
+                                direction = row.direction,
                                 derivedStatus = row.derivedStatus,
-                                dueDate = row.entity.dueDate,
-                                counterpartyDisplayName = row.entity.counterpartyRef?.take(COUNTERPARTY_MAX_CHARS),
+                                dueDate = row.dueDate,
+                                counterpartyDisplayName = row.counterpartyDisplayName,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
-                                onMarkDone = { viewModel.onMarkDone(row.entity.id) },
+                                onMarkDone = { viewModel.onMarkDone(row.id) },
                                 onClick = {},
                             )
                         }

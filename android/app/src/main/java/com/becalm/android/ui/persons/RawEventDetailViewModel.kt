@@ -4,7 +4,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
-import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.RawIngestionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -18,12 +17,23 @@ import kotlinx.coroutines.launch
 /**
  * Immutable snapshot of the RawEventDetailScreen UI.
  *
- * @property event The loaded [RawIngestionEventEntity], or null when not yet loaded or not found.
+ * Exposes only display-safe fields extracted from the underlying raw entity,
+ * keeping PII (full event body, person ref, etc.) out of the UI layer.
+ *
+ * @property eventId Primary-key of the loaded event.
+ * @property sourceType Source-type label (e.g. "sms", "email").
+ * @property eventTitle Human-readable title of the event, when available.
+ * @property timestamp Event occurrence time, when available.
+ * @property snippet First 200 characters of the event body for preview display (SRC-004).
  * @property loading True while the lookup is in progress.
  * @property error Non-null when the event could not be found or an error occurred.
  */
 public data class RawEventDetailUiState(
-    val event: RawIngestionEventEntity? = null,
+    val eventId: String = "",
+    val sourceType: String? = null,
+    val eventTitle: String? = null,
+    val timestamp: kotlinx.datetime.Instant? = null,
+    val snippet: String? = null,
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -36,8 +46,9 @@ internal const val ARG_EVENT_ID = "eventId"
 /**
  * ViewModel for RawEventDetailScreen (SRC-008).
  *
- * Loads a single [RawIngestionEventEntity] by its primary-key [id] using
- * [RawIngestionRepository.findById].
+ * Loads a single raw ingestion event by its primary-key [eventId] using
+ * [RawIngestionRepository.findById] and exposes display-safe fields via
+ * [RawEventDetailUiState].
  *
  * @param savedStateHandle navigation argument; expects key [ARG_EVENT_ID].
  */
@@ -48,16 +59,18 @@ public class RawEventDetailViewModel @Inject constructor(
     private val logger: Logger,
 ) : ViewModel() {
 
-    private val eventId: String = checkNotNull(savedStateHandle[ARG_EVENT_ID]) {
-        "RawEventDetailViewModel requires '$ARG_EVENT_ID' in SavedStateHandle"
-    }
+    private val eventId: String = savedStateHandle[ARG_EVENT_ID] ?: ""
 
     private val _uiState: MutableStateFlow<RawEventDetailUiState> =
         MutableStateFlow(RawEventDetailUiState())
     public val uiState: StateFlow<RawEventDetailUiState> = _uiState.asStateFlow()
 
     init {
-        loadEvent()
+        if (eventId.isEmpty()) {
+            _uiState.value = RawEventDetailUiState(loading = false, error = "Event ID missing")
+        } else {
+            loadEvent()
+        }
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────
@@ -67,10 +80,16 @@ public class RawEventDetailViewModel @Inject constructor(
             val entity = rawIngestionRepository.findById(eventId)
             logger.d(TAG, "loadEvent id=%08x found=${entity != null}".format(eventId.hashCode()))
             _uiState.value = if (entity != null) {
-                RawEventDetailUiState(event = entity, loading = false)
+                RawEventDetailUiState(
+                    eventId = entity.id,
+                    sourceType = entity.sourceType,
+                    eventTitle = entity.eventTitle,
+                    timestamp = entity.timestamp,
+                    snippet = entity.eventBody?.take(200),
+                    loading = false,
+                )
             } else {
                 RawEventDetailUiState(
-                    event = null,
                     loading = false,
                     error = "Event not found",
                 )

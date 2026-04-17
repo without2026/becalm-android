@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -34,26 +35,43 @@ import javax.inject.Inject
 public sealed class TimelineItem {
     public abstract val sortKey: Instant
 
-    /** A commitment that is pending on today's date. */
+    /**
+     * A commitment that is pending on today's date.
+     *
+     * Only display-safe fields are exposed to the UI layer; raw entity fields
+     * (quote, body, personRef, etc.) are intentionally excluded to avoid leaking
+     * legally sensitive content through the view model boundary.
+     */
     public data class Commitment(
-        val entity: CommitmentEntity,
-    ) : TimelineItem() {
-        override val sortKey: Instant get() = entity.sourceEventOccurredAt
-    }
+        val id: String,
+        val title: String,
+        val direction: String,
+        val counterpartyDisplayName: String?,
+        override val sortKey: Instant,
+    ) : TimelineItem()
 
-    /** A calendar event that starts today and has no recorded attendees. */
+    /**
+     * A calendar event that starts today and has no recorded attendees.
+     *
+     * Display-safe projection — see [Commitment] KDoc for rationale.
+     */
     public data class CalendarEvent(
-        val entity: CalendarEventEntity,
-    ) : TimelineItem() {
-        override val sortKey: Instant get() = entity.startAt
-    }
+        val id: String,
+        val title: String,
+        override val sortKey: Instant,
+    ) : TimelineItem()
 
-    /** A calendar event that starts today and has at least one attendee. */
+    /**
+     * A calendar event that starts today and has at least one attendee.
+     *
+     * Display-safe projection — see [Commitment] KDoc for rationale.
+     */
     public data class Meeting(
-        val entity: CalendarEventEntity,
-    ) : TimelineItem() {
-        override val sortKey: Instant get() = entity.startAt
-    }
+        val id: String,
+        val title: String,
+        val attendeesRaw: String?,
+        override val sortKey: Instant,
+    ) : TimelineItem()
 }
 
 /**
@@ -78,6 +96,7 @@ public data class SourceStatusUi(
  * @param overallSyncing True when at least one source is actively syncing.
  * @param error Non-null when an unrecoverable error has occurred (e.g. not authenticated).
  */
+// spec: TDY-008 — aggregate sync status
 public data class TodayUiState(
     val loading: Boolean = true,
     val timeline: List<TimelineItem> = emptyList(),
@@ -170,6 +189,14 @@ public class TodayViewModel @Inject constructor(
             overallSyncing = sourceStatuses.any { it.status == SourceConnectionStatus.SYNCING },
             error = null,
         )
+    }.catch { e ->
+        logger.w(TAG, "timeline flow failed: ${e.message}")
+        emit(
+            TodayUiState(
+                loading = false,
+                error = e.message ?: "timeline load failed",
+            ),
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -191,12 +218,29 @@ public class TodayViewModel @Inject constructor(
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
     ): List<TimelineItem> {
-        val commitmentItems = commitments.map { TimelineItem.Commitment(it) }
+        val commitmentItems = commitments.map { c ->
+            TimelineItem.Commitment(
+                id = c.id,
+                title = c.title,
+                direction = c.direction,
+                counterpartyDisplayName = c.counterpartyRaw,
+                sortKey = c.sourceEventOccurredAt,
+            )
+        }
         val calendarItems = calendarEvents.map { event ->
             if (!event.attendeesRaw.isNullOrBlank()) {
-                TimelineItem.Meeting(event)
+                TimelineItem.Meeting(
+                    id = event.id,
+                    title = event.title,
+                    attendeesRaw = event.attendeesRaw,
+                    sortKey = event.startAt,
+                )
             } else {
-                TimelineItem.CalendarEvent(event)
+                TimelineItem.CalendarEvent(
+                    id = event.id,
+                    title = event.title,
+                    sortKey = event.startAt,
+                )
             }
         }
         return (commitmentItems + calendarItems).sortedBy { it.sortKey }

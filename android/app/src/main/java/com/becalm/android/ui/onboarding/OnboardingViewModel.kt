@@ -281,6 +281,26 @@ public class OnboardingViewModel @Inject constructor(
     public fun onCompleteOnboarding() {
         viewModelScope.launch {
             _uiState.update { it.copy(isCompleting = true, error = null) }
+            // spec: ONB-008 — gate completion on every non-COMPLETE step having reached a terminal
+            // status. DENIED is accepted per the ONB-PIPA invariant (declining PIPA consent must
+            // not block the user from finishing onboarding).
+            val stepStates = _uiState.value.stepStates
+            val terminalStatuses = setOf(
+                StepStatus.GRANTED,
+                StepStatus.COMPLETE,
+                StepStatus.SKIPPED,
+                StepStatus.DENIED,
+            )
+            val allStepsDone = OnboardingStep.entries
+                .filter { it != OnboardingStep.COMPLETE }
+                .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
+            if (!allStepsDone) {
+                logger.d(TAG, "onCompleteOnboarding: blocked — not all steps finished; stepStates=$stepStates")
+                _uiState.update {
+                    it.copy(isCompleting = false, error = "Please complete all steps before finishing")
+                }
+                return@launch
+            }
             try {
                 userPrefsStore.setOnboardingCompleted(true)
                 logger.i(TAG, "onboarding marked complete")

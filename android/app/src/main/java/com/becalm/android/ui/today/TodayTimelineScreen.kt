@@ -128,9 +128,9 @@ private fun TimelineList(
             items = items,
             key = { item ->
                 when (item) {
-                    is TimelineItem.Commitment -> "commitment-${item.entity.id}"
-                    is TimelineItem.CalendarEvent -> "event-${item.entity.id}"
-                    is TimelineItem.Meeting -> "meeting-${item.entity.id}"
+                    is TimelineItem.Commitment -> "commitment-${item.id}"
+                    is TimelineItem.CalendarEvent -> "event-${item.id}"
+                    is TimelineItem.Meeting -> "meeting-${item.id}"
                 }
             },
         ) { item ->
@@ -168,9 +168,9 @@ private fun TimelineItemRow(
         }
         Spacer(modifier = Modifier.height(4.dp))
         val title = when (item) {
-            is TimelineItem.Commitment -> item.entity.title
-            is TimelineItem.CalendarEvent -> item.entity.title
-            is TimelineItem.Meeting -> item.entity.title
+            is TimelineItem.Commitment -> item.title
+            is TimelineItem.CalendarEvent -> item.title
+            is TimelineItem.Meeting -> item.title
         }
         Text(
             text = title,

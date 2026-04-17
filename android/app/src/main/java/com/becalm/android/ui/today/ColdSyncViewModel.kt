@@ -8,6 +8,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -67,6 +68,10 @@ public class ColdSyncViewModel @Inject constructor(
                 perSourceProgress = perSource,
                 done = perSource.values.all { it >= 1f },
             )
+        }
+        .catch { e ->
+            logger.e(TAG, "source status observation failed", e as? Exception ?: Exception(e))
+            emit(ColdSyncUiState())
         }
         .stateIn(
             scope = viewModelScope,

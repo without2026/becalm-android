@@ -64,12 +64,14 @@ public fun PersonDetailScreen(
 
     LaunchedEffect(state.error) {
         state.error?.let { err ->
-            scope.launch { snackbarHostState.showSnackbar(err) }
-            viewModel.onErrorDismissed()
+            scope.launch {
+                snackbarHostState.showSnackbar(err)
+                viewModel.onErrorDismissed()
+            }
         }
     }
 
-    val displayName = state.enrichment?.displayName ?: personId.take(16)
+    val displayName = state.displayName ?: personId.take(16)
 
     BecalmScaffold(
         title = displayName,
@@ -83,6 +85,9 @@ public fun PersonDetailScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
+        val hasAnyInteractions = state.pendingCommitments.isNotEmpty() ||
+            state.completedCommitments.isNotEmpty() ||
+            state.interactionHistory.isNotEmpty()
         when {
             state.loading -> {
                 Box(
@@ -94,14 +99,14 @@ public fun PersonDetailScreen(
                     CircularProgressIndicator()
                 }
             }
-            state.error != null && state.interactions.isEmpty() -> {
+            state.error != null && !hasAnyInteractions -> {
                 ErrorState(
                     title = stringResource(R.string.error_generic_title),
                     message = state.error,
                     modifier = Modifier.padding(padding),
                 )
             }
-            state.interactions.isEmpty() -> {
+            !hasAnyInteractions -> {
                 EmptyState(
                     title = stringResource(R.string.person_detail_empty_interactions),
                     modifier = Modifier.padding(padding),
@@ -109,7 +114,9 @@ public fun PersonDetailScreen(
             }
             else -> {
                 InteractionList(
-                    interactions = state.interactions,
+                    pendingCommitments = state.pendingCommitments,
+                    completedCommitments = state.completedCommitments,
+                    interactionHistory = state.interactionHistory,
                     personId = personId,
                     contentPadding = padding,
                     onEventClick = { eventId ->
@@ -123,41 +130,88 @@ public fun PersonDetailScreen(
 
 @Composable
 private fun InteractionList(
-    interactions: List<InteractionRow>,
+    pendingCommitments: List<InteractionRow.Commitment>,
+    completedCommitments: List<InteractionRow.Commitment>,
+    interactionHistory: List<InteractionRow>,
     personId: String,
     contentPadding: PaddingValues,
     onEventClick: (String) -> Unit,
 ) {
+    val commitmentsHeader = stringResource(R.string.person_detail_commitments_section)
+    val historyHeader = stringResource(R.string.person_detail_history_section)
     LazyColumn(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
-        item {
-            Text(
-                text = stringResource(R.string.person_detail_history_section),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+        if (pendingCommitments.isNotEmpty()) {
+            item(key = "header-pending") {
+                SectionHeader(text = commitmentsHeader)
+            }
+            items(
+                items = pendingCommitments,
+                key = { row ->
+                    "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                },
+            ) { row ->
+                InteractionRowItem(
+                    row = row,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
         }
-        items(
-            items = interactions,
-            key = { row ->
-                when (row) {
-                    is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
-                    is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                    is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                }
-            },
-        ) { row ->
-            InteractionRowItem(
-                row = row,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-            )
+        if (completedCommitments.isNotEmpty()) {
+            item(key = "header-completed") {
+                SectionHeader(text = commitmentsHeader)
+            }
+            items(
+                items = completedCommitments,
+                key = { row ->
+                    "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                },
+            ) { row ->
+                InteractionRowItem(
+                    row = row,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
+        if (interactionHistory.isNotEmpty()) {
+            item(key = "header-history") {
+                SectionHeader(text = historyHeader)
+            }
+            items(
+                items = interactionHistory,
+                key = { row ->
+                    when (row) {
+                        is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
+                        is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                        is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                    }
+                },
+            ) { row ->
+                InteractionRowItem(
+                    row = row,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

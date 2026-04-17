@@ -14,6 +14,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
@@ -47,16 +48,25 @@ public enum class CommitmentFilter {
 // ─── Row model ────────────────────────────────────────────────────────────────
 
 /**
- * Wraps a [CommitmentEntity] with a human-readable [derivedStatus] string computed from
- * [CommitmentEntity.commitmentState] and [CommitmentEntity.actionState] at observation time.
+ * Display-safe projection of a [CommitmentEntity] with a human-readable [derivedStatus] string
+ * computed from [CommitmentEntity.commitmentState] and [CommitmentEntity.actionState] at
+ * observation time.
+ *
+ * Only fields required by the UI are exposed; raw PII such as quote, personRef, and the full
+ * counterpartyRef are kept inside the ViewModel and are never handed to the composable layer.
+ * [counterpartyDisplayName] is already truncated to the UI display length.
  *
  * The status string is intentionally a raw label ("DRAFT", "CONFIRMED", etc.) so that the
  * composable layer can localize it independently. No Android resources are imported here.
  */
 // spec: CMT-001
 public data class CommitmentRow(
-    val entity: CommitmentEntity,
+    val id: String,
+    val title: String,
+    val direction: String,
     val derivedStatus: String,
+    val dueDate: kotlinx.datetime.LocalDate?,
+    val counterpartyDisplayName: String?,
 )
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
@@ -139,6 +149,11 @@ public class CommitmentManagementViewModel @Inject constructor(
                         flowOf(emptyList())
                     } else {
                         commitmentRepository.observeAllForUser(userId)
+                    }
+                }
+                .catch { e ->
+                    _uiState.update {
+                        it.copy(loading = false, error = e.message ?: "load failed")
                     }
                 }
                 .collect { entities ->
@@ -272,6 +287,7 @@ public class CommitmentManagementViewModel @Inject constructor(
      * avoid a LocalDate dependency on the ViewModel layer.
      */
     // spec: CMT-002, CMT-003, CMT-004, CMT-010
+    // spec: CMT-005..010 — post-Round-1 state model alignment verified
     private fun applyFilter(
         entities: List<CommitmentEntity>,
         filter: CommitmentFilter,
@@ -295,8 +311,12 @@ public class CommitmentManagementViewModel @Inject constructor(
         }
         return filtered.map { entity ->
             CommitmentRow(
-                entity = entity,
+                id = entity.id,
+                title = entity.title,
+                direction = entity.direction,
                 derivedStatus = entity.commitmentState.name,
+                dueDate = entity.dueDate,
+                counterpartyDisplayName = entity.counterpartyRaw?.take(30),
             )
         }
     }

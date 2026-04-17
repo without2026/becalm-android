@@ -69,8 +69,10 @@ public fun PersonsScreen(
 
     LaunchedEffect(state.error) {
         state.error?.let { err ->
-            scope.launch { snackbarHostState.showSnackbar(err) }
-            viewModel.onErrorDismissed()
+            scope.launch {
+                snackbarHostState.showSnackbar(err)
+                viewModel.onErrorDismissed()
+            }
         }
     }
 
@@ -162,7 +164,7 @@ private fun PersonRowItem(
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = person.displayName ?: person.personRef.take(20),
+                text = person.displayLabel,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
