@@ -42,10 +42,10 @@ behaviors:
 
   - id: AUTH-005
     type: api
-    description: "로그아웃 시 Supabase Auth 세션이 종료되고 로컬 토큰이 삭제된다"
+    description: "로그아웃 시 Supabase Auth 세션이 종료되고 로컬 토큰 및 해당 user의 in-memory Room 연결이 해제된다. Room DB 파일(AUTH-008 규칙으로 user-scoped)은 디스크에 유지되어 동일 계정으로 재로그인 시 데이터가 복원된다. DataStore에서 사용자별 cursor·온보딩 플래그도 보존 — 단 글로벌 키(PIPA 동의 timestamp 등 current session state)는 초기화"
     endpoint: "POST /auth/v1/logout"
     precondition: "유효한 access_token"
-    expected: "HTTP 204 — EncryptedSharedPreferences의 토큰 삭제됨, Room DB는 유지됨"
+    expected: "HTTP 204 — EncryptedSharedPreferences의 access_token/refresh_token 삭제됨, 현재 user의 Room DB 연결은 close()되지만 DB 파일(becalm_<user_id_hash>.db)은 삭제되지 않음, DataStore의 user-scoped key들은 보존됨. TermsScreen → LoginScreen 순으로 복귀"
     source: phase2-acceptance
     tests: []
 
@@ -68,7 +68,17 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-008
+    type: lifecycle
+    description: "Room DB 파일은 로그인한 Supabase user_id 단위로 분리된다 — 파일명 규칙 `becalm_<sha256(user_id)[:16]>.db`. 동일 디바이스에서 계정 전환(예: 회사 → 개인) 시 이전 계정의 데이터가 새 계정 세션에 섞이지 않고, 동일 계정으로 재로그인 시 기존 DB 파일이 그대로 열려 로컬 데이터가 복원된다. DataStore의 사용자별 상태(cursor_*, contacts_permission_asked, pipa_consent_timestamp 등)는 동일하게 `user_<hash>` 네임스페이스로 분리 저장"
+    trigger: "로그인 성공 (AUTH-001/003/004) 직후 RoomDatabase 인스턴스 초기화"
+    precondition: "Supabase Auth에서 user.id(UUID) 획득"
+    expected: "Application context에서 Room.databaseBuilder(ctx, AppDatabase::class.java, 'becalm_${user_id_hash}.db').build() 호출됨. 동일 계정 재로그인 시 기존 파일 re-open(데이터 보존). 다른 계정 로그인 시 별도 파일 생성. 파일 리스트는 ContextCompat.getDatabasesDir()에 복수 존재 가능. 계정 삭제(미래) 시에만 해당 파일 Context.deleteDatabase(name) 호출"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "인증 토큰은 EncryptedSharedPreferences 또는 Android Keystore에만 저장된다 — plaintext 저장 금지"
   - "로그아웃 시 Room DB 데이터는 삭제하지 않는다 (로컬 데이터 보존)"
   - "모든 Railway API 호출에는 Authorization: Bearer <supabase_jwt> 헤더가 첨부된다"
+  - "Room DB 파일은 user_id 기반으로 분리된다 — 한 디바이스에서 여러 계정 사용 시에도 데이터 격리가 보장된다 (AUTH-008)"

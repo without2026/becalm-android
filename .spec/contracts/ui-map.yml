@@ -182,7 +182,7 @@ shared_components:
   - name: CommitmentItem
     props:
       commitment: "Commitment"
-    description: "direction 배지(give=파랑/take=주황) + title + person_ref 기반 표시명 + due_date 표시. TodayTimelineScreen 전용 compact 카드"
+    description: "direction 배지(give=파랑/take=주황) + title + person_ref 기반 표시명 + due_at(KST HH:mm) 표시. due_is_approximate=true면 '~' prefix + due_hint 보조 라벨. TodayTimelineScreen 전용 compact 카드"
 
   - name: CommitmentCard
     props:
@@ -198,9 +198,10 @@ shared_components:
 
   - name: DNBadge
     props:
-      dueDate: "date?"
+      dueAt: "datetime?"
+      isApproximate: "bool"
       pendingCount: "int?"
-    description: "두 가지 사용: (1) CommitmentCard — D-N/D+N due_date 배지. D+N은 빨간색. (2) PersonCard — '미이행 N건' 약속 수 배지"
+    description: "두 가지 사용: (1) CommitmentCard — due_at 기반 D-N/D+N 배지(KST date 변환 후 계산). D+N은 빨간색, isApproximate=true면 'D~N' 물결표. (2) PersonCard — '미이행 N건' 약속 수 배지"
 
   - name: InteractionHistoryRow
     props:
