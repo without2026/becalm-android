@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>BeCalm Android — Traceability Audit (Diagrams)</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --warn: #d29922;
+    --err: #f85149;
+    --ok: #3fb950;
+    --border: #30363d;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  header {
+    padding: 24px 32px 16px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+    background: rgba(13,17,23,0.92);
+    backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+  header h1 { margin: 0 0 4px; font-size: 20px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  nav {
+    margin-top: 12px;
+    display: flex; gap: 16px; flex-wrap: wrap;
+    font-size: 13px;
+  }
+  nav a { color: var(--accent); text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  main { padding: 0 32px 64px; max-width: 1400px; margin: 0 auto; }
+  section { margin-top: 36px; }
+  section h2 {
+    font-size: 18px;
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  section .caption {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .diagram-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow: auto;
+  }
+  .diagram-wrap .mermaid { min-width: 800px; }
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    font-size: 13px; color: var(--muted);
+    margin-top: 10px;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .pill { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .pill.ok { background: rgba(63,185,80,0.15); color: var(--ok); }
+  .pill.warn { background: rgba(210,153,34,0.15); color: var(--warn); }
+  .pill.err { background: rgba(248,81,73,0.15); color: var(--err); }
+  .pill.dead { background: rgba(139,148,158,0.15); color: var(--muted); }
+  footer {
+    padding: 24px 32px;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--border);
+    margin-top: 48px;
+  }
+  code { background: rgba(110,118,129,0.2); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  a { color: var(--accent); }
+  .controls {
+    display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .controls button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .controls button:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>BeCalm Android — Traceability Audit</h1>
+  <div class="sub">DB Schema ↔ API Endpoint ↔ UI Screen · 2026-04-20 · feat/android-todo-share-auth</div>
+  <nav>
+    <a href="#er">① DB Schema (ER)</a>
+    <a href="#flow">② End-to-End Flow</a>
+    <a href="#legend">③ Legend</a>
+    <a href="traceability-audit.md">📄 Full Markdown Audit</a>
+  </nav>
+</header>
+
+<main>
+  <section id="er">
+    <h2>① DB Schema — Entity-Relationship Diagram</h2>
+    <div class="caption">
+      6개 테이블 (Supabase 미러 4 + Room-only 2) + <code>auth.users</code>.
+      <code>email_body</code> / <code>persons_enrichment</code>는 PIPA invariant로 서버 전송 금지.
+    </div>
+    <div class="controls">
+      <button onclick="zoom('er-svg', 1.2)">+</button>
+      <button onclick="zoom('er-svg', 1/1.2)">−</button>
+      <button onclick="resetZoom('er-svg')">Reset</button>
+    </div>
+    <div class="diagram-wrap">
+      <div class="mermaid" id="er-svg">
+erDiagram
+    AUTH_USERS ||--o{ RAW_INGESTION_EVENTS : "1:N"
+    AUTH_USERS ||--o{ COMMITMENTS : "1:N"
+    AUTH_USERS ||--o{ CALENDAR_EVENTS : "1:N"
+    AUTH_USERS ||--|| USER_PROFILE : "1:1"
+    COMMITMENTS ||--o{ COMMITMENTS : "supersedes chain"
+    RAW_INGESTION_EVENTS ||--o| EMAIL_BODY : "raw_event_id (Room only)"
+
+    AUTH_USERS {
+        uuid id PK
+        text email
+    }
+
+    RAW_INGESTION_EVENTS {
+        uuid id PK
+        uuid user_id FK
+        uuid client_event_id
+        text source_type
+        text source_ref
+        text person_ref
+        text event_title
+        text event_snippet
+        int duration_seconds
+        text location
+        int commitments_extracted_count
+        timestamptz timestamp
+        text sync_status
+        int retry_count
+        timestamptz last_attempt_at
+    }
+
+    COMMITMENTS {
+        uuid id PK
+        uuid user_id FK
+        text direction
+        text counterparty_raw
+        text person_ref
+        text title
+        text description
+        text quote
+        text source_event_title
+        timestamptz source_event_occurred_at
+        timestamptz due_at
+        text due_hint
+        bool due_is_approximate
+        text action_state
+        text source_type
+        text source_ref
+        float confidence
+        text sync_status
+        timestamptz created_at
+        timestamptz updated_at
+        uuid last_edited_by FK
+        timestamptz last_edited_at
+        bool quote_disputed
+        timestamptz quote_disputed_at
+        timestamptz deleted_at
+        uuid supersedes_commitment_id FK
+    }
+
+    CALENDAR_EVENTS {
+        uuid id PK
+        uuid user_id FK
+        text source_type
+        text source_ref
+        text title
+        timestamptz start_at
+        timestamptz end_at
+        text attendees_raw
+        text status
+        text recurring_event_id
+        timestamptz original_start_at
+        text sync_status
+    }
+
+    USER_PROFILE {
+        uuid user_id PK
+        text display_name_override
+        text phone_e164_self
+        text timezone
+        text preferred_locale
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EMAIL_BODY {
+        uuid id PK
+        uuid raw_event_id FK
+        text provider_message_id
+        text folder
+        text subject
+        text from_address
+        text to_addresses
+        text body_plain
+        text body_html
+        text attachments_meta
+        text raw_headers
+        bool parse_failed
+        bool group_email
+        timestamptz received_at
+    }
+
+    PERSONS_ENRICHMENT {
+        text person_ref PK
+        text display_name
+        text nickname
+        text company
+        text title
+        text source_contact_id
+        timestamptz last_synced_at
+    }
+      </div>
+    </div>
+  </section>
+
+  <section id="flow">
+    <h2>② End-to-End Flow — 음성 한 건 → 화면까지</h2>
+    <div class="caption">
+      <span class="pill ok">✅ 구현됨</span>
+      <span class="pill err">❌ 미구현 (PR-C / PR-D)</span>
+      화살표: 데이터 흐름. 점선: 향후 추가될 경로.
+    </div>
+    <div class="controls">
+      <button onclick="zoom('flow-svg', 1.2)">+</button>
+      <button onclick="zoom('flow-svg', 1/1.2)">−</button>
+      <button onclick="resetZoom('flow-svg')">Reset</button>
+    </div>
+    <div class="diagram-wrap">
+      <div class="mermaid" id="flow-svg">
+flowchart LR
+    U[사용자 음성 녹음] -->|MediaStore scan| VWD[VoiceWatchDogWorker]
+    VWD -->|INSERT| REL[("Room<br/>raw_ingestion_events")]
+    REL -->|uploadBatch| RAWR[RawIngestionRepository]
+    RAWR -->|"POST /v1/raw_ingestion_events:batch"| RAILWAY{{Railway FastAPI}}
+    RAWR -.병렬.-> VOICE[VoiceUploadWorker]
+    VOICE -->|"POST /v1/voice/transcribe_extract"| RAILWAY
+    RAILWAY -->|INSERT| SUPA[("Supabase<br/>raw + commitments")]
+    RAILWAY -->|"Vertex AI Gemini 2.5 Flash"| LLM[["CommitmentDraft array"]]
+    LLM --> RAILWAY
+    RAILWAY -->|response| VOICE
+    VOICE -->|"INSERT commitments"| CEL[("Room<br/>commitments")]
+
+    CEL -->|observeByActionState| CMTV[CommitmentRepository]
+    CMTV -->|Flow| CMV[CommitmentManagementViewModel]
+    CMV -->|StateFlow| CMS[/"CommitmentManagementScreen<br/>/commitments"/]
+
+    CEL -->|observeDueToday| TVM[TodayViewModel]
+    CAL[("Room<br/>calendar_events")] -->|observeTodayConfirmed| TVM
+    TVM -->|StateFlow| TSC[/"TodayTimelineScreen<br/>/today"/]
+
+    CMS -->|"PATCH /v1/commitments/id"| RAILWAY
+    CMS -.PR-C.-> EDIT[/"CommitmentEditScreen ❌"/]
+    EDIT -->|"PATCH title / due_at / quote_disputed"| RAILWAY
+    CMS -.PR-C.-> MANUAL[/"ManualCommitmentScreen ❌"/]
+    MANUAL -->|"POST /v1/commitments"| RAILWAY
+
+    SYNC[SyncWorker 15min] -->|"POST /v1/calendar_events:sync"| RAILWAY
+    RAILWAY -->|UPSERT| SUPA
+    SYNC -->|"GET /v1/calendar_events"| RAILWAY
+    RAILWAY -->|response| SYNC
+    SYNC -->|UPSERT| CAL
+
+    ENR[EnrichmentWorker] -->|ContactsContract READ| ENRDB[("Room only<br/>persons_enrichment")]
+    ENRDB -->|observeAll| PVM[PersonsViewModel]
+    PVM -->|StateFlow| PS[/"PersonsScreen<br/>/persons"/]
+
+    OVERDUE[OverdueSweepWorker ❌] -.PR-D.-> CEL
+      </div>
+    </div>
+  </section>
+
+  <section id="legend">
+    <h2>③ Legend / Drift 상태 기호</h2>
+    <div class="legend">
+      <span><span class="pill ok">✅ aligned</span> 스펙 = 코드 일치</span>
+      <span><span class="pill warn">⚠️ drift</span> 스펙 ≠ 코드 (수정 필요)</span>
+      <span><span class="pill err">❌ missing</span> 스펙에만 존재 (구현 필요)</span>
+      <span><span class="pill dead">🪦 dead</span> 코드에만 존재 (제거 대상)</span>
+    </div>
+    <p style="margin-top:16px; color: var(--muted); font-size: 13px;">
+      전체 drift/gap/dead code 표와 PR-A~E 체크리스트는
+      <a href="traceability-audit.md">traceability-audit.md</a>의 Part 5~8 참조.
+    </p>
+  </section>
+</main>
+
+<footer>
+  2026-04-20 · BeCalm Android MVP · 보기: 휠+Ctrl (확대) 또는 상단 +/- 버튼. 다이어그램 전체를 보려면 가로 스크롤.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      darkMode: true,
+      background: "#161b22",
+      primaryColor: "#1f6feb",
+      primaryBorderColor: "#58a6ff",
+      primaryTextColor: "#e6edf3",
+      lineColor: "#8b949e",
+      secondaryColor: "#21262d",
+      tertiaryColor: "#0d1117",
+      clusterBkg: "#21262d",
+      clusterBorder: "#30363d"
+    },
+    er: { layoutDirection: "LR" },
+    flowchart: { curve: "basis", useMaxWidth: false, htmlLabels: true }
+  });
+
+  // Simple zoom controls (CSS transform)
+  const zoomState = {};
+  function zoom(id, factor) {
+    const el = document.getElementById(id).querySelector("svg");
+    if (!el) return;
+    zoomState[id] = (zoomState[id] || 1) * factor;
+    el.style.transformOrigin = "top left";
+    el.style.transform = `scale(${zoomState[id]})`;
+    el.style.width = "auto";
+    el.style.height = "auto";
+  }
+  function resetZoom(id) {
+    const el = document.getElementById(id).querySelector("svg");
+    if (!el) return;
+    zoomState[id] = 1;
+    el.style.transform = "";
+  }
+</script>
+</body>
+</html>
