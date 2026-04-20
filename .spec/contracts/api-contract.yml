@@ -150,14 +150,20 @@ endpoints:
       person_ref?: string     # Filter by person
       direction?: string      # give | take
       action_state?: string   # pending | reminded | followed_up | completed | overdue | cancelled
+    query:
+      include_deleted?: boolean  # default false — deleted_at IS NOT NULL 레코드를 응답에 포함할지 여부. MVP 클라이언트는 항상 false로 호출 (휴지통 UI 없음)
     response:
       200:
         data: "Commitment[]"
         # Commitment type includes: id, user_id, direction, counterparty_raw, person_ref,
         # title, description, quote, source_event_title, source_event_occurred_at,
         # due_at (ISO8601 KST), due_hint, due_is_approximate,
-        # action_state, source_type, source_ref, confidence,
-        # sync_status, created_at, updated_at
+        # action_state, source_type (voice|call_recording|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
+        # source_ref, confidence,
+        # sync_status, created_at, updated_at,
+        # last_edited_by, last_edited_at, quote_disputed, quote_disputed_at,
+        # deleted_at, supersedes_commitment_id
+        # 서버는 기본값으로 deleted_at IS NULL 필터를 적용. include_deleted=true인 경우에만 soft-deleted row도 반환.
         cursor: string
         has_more: boolean
       401: { error: string, message: string }
@@ -176,13 +182,62 @@ endpoints:
     path: /v1/commitments/{id}
     auth: required
     body:
-      action_state: string    # pending | reminded | followed_up | completed | overdue | cancelled
+      # 모든 필드 optional — 변경하려는 필드만 포함. 하나 이상의 필드가 제공되어야 함(빈 body는 400).
+      action_state?: string    # pending | reminded | followed_up | completed | overdue | cancelled
+      title?: string           # 1..200 chars (commitment-edit EDIT-004)
+      due_at?: string          # ISO8601 KST +09:00, nullable(null로 명시적 clear 허용)
+      due_hint?: string        # LLM 원문 시점 표현 혹은 사용자 입력(nullable)
+      due_is_approximate?: boolean
+      person_ref?: string      # canonicalized counterparty(nullable)
+      direction?: string       # give | take
+      quote_disputed?: boolean # true = 이의 제기, false = 해제 (EDIT-005)
+      quote_disputed_at?: string  # 서버가 set — client가 보내도 무시(server-generated)
+      deleted_at?: string      # ISO8601 — soft delete 시 client가 now() 값 전송(EDIT-006). null 전송은 deleted 복구 허용(post-MVP에서 사용, MVP 클라이언트는 미사용)
+      last_edited_at: string   # required — 모든 PATCH 호출에 첨부(클라이언트가 now() 값 전송)
+      # 금지: quote(법적 증거, 절대 편집 불가), source_type, source_ref, source_event_title, source_event_occurred_at, confidence, created_at, id, user_id, supersedes_commitment_id
+      #   → 이 중 하나라도 body에 포함되면 422 { error: 'immutable_field', field: '<field>' }.
     response:
       200: { data: Commitment }
+      400: { error: string, message: string }  # empty body
       401: { error: string, message: string }
       404: { error: string, message: string }
-      422: { error: string, message: string }  # Invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
-    spec_refs: [CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, CMT-013]
+      422: { error: string, message: string, field?: string }
+      # 422 cases:
+      #   - invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
+      #   - immutable_field: body에 quote 또는 기타 금지 필드 포함
+      #   - validation_failed: title 길이·direction enum·due_at ISO8601·person_ref 정규화 실패
+    spec_refs: [CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, CMT-013, EDIT-003, EDIT-005, EDIT-006]
+
+  - method: POST
+    path: /v1/commitments
+    auth: required
+    # manual commitment 생성(manual-commitment.spec.yml MAN-003) 및 EDIT-007 supersede 경로 양쪽에서 사용.
+    body:
+      id: string               # client-generated UUID v4 (멱등성 키 — ING-015와 동일 패턴)
+      direction: string        # give | take
+      title: string            # 1..200 chars
+      quote: string            # manual: 1..500 chars(사용자 입력) / supersede: 원본 commitment에서 복사된 verbatim
+      source_type: string      # enum. manual = 'manual', supersede = 원본의 source_type 상속
+      source_event_title?: string  # manual: null, supersede: 원본값
+      source_event_occurred_at: string  # manual: now() at save time, supersede: 원본값
+      person_ref?: string
+      due_at?: string
+      due_hint?: string
+      due_is_approximate: boolean
+      confidence: float        # manual: 1.0, supersede: 1.0 (사용자 확정)
+      supersedes_commitment_id?: string  # EDIT-007에서만 non-null. 서버는 old row.deleted_at을 함께 set(atomic tx)
+      last_edited_by: string   # user_id
+      last_edited_at: string   # ISO8601
+    response:
+      201: { data: Commitment }
+      401: { error: string, message: string }
+      409: { error: string, message: string }  # 동일 id 중복 — 멱등 처리로 기존 row 반환 가능(서버 선택) 또는 409
+      422: { error: string, message: string, field?: string }
+      # 422 cases:
+      #   - invalid_source_type: source_type 값이 enum에 없음
+      #   - supersede_target_not_found: supersedes_commitment_id가 존재하지 않거나 다른 user 소유
+      #   - validation_failed: title/quote/direction 규칙 위반
+    spec_refs: [MAN-003, EDIT-007]
 
   # ========== RAILWAY — CALENDAR EVENTS ==========
 
@@ -196,7 +251,7 @@ endpoints:
       status?: string         # confirmed | cancelled — optional filter. 기본(미지정) 시 양쪽 모두 반환하며 client가 status='cancelled'를 strike-through로 렌더링
     response:
       200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
-      # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), sync_status
+      # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), recurring_event_id, original_start_at, sync_status
       401: { error: string, message: string }
     spec_refs: [TDY-005, ING-009, ING-010]
 
