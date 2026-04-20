@@ -6,7 +6,6 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import kotlinx.coroutines.flow.Flow
-import kotlinx.datetime.Instant
 
 /**
  * Room DAO for the `persons_enrichment` table.
@@ -84,46 +83,6 @@ public interface PersonEnrichmentDao {
      */
     @Query("SELECT * FROM persons_enrichment ORDER BY person_ref ASC")
     public fun observeAll(): Flow<List<PersonEnrichmentEntity>>
-
-    /**
-     * Returns a one-shot snapshot of every enrichment row.
-     *
-     * Use this for bulk reads that do not need reactivity (e.g., building an
-     * in-memory lookup map before processing a batch of raw ingestion events).
-     */
-    @Query("SELECT * FROM persons_enrichment ORDER BY person_ref ASC")
-    public suspend fun findAllSnapshot(): List<PersonEnrichmentEntity>
-
-    /**
-     * Returns up to [limit] enrichment rows whose [PersonEnrichmentEntity.lastSyncedAt]
-     * is strictly earlier than [beforeInstant], ordered by staleness (oldest first).
-     *
-     * `EnrichmentWorker` calls this to identify contacts that need incremental
-     * re-enrichment without re-scanning the entire ContactsContract on every run.
-     *
-     * @param beforeInstant exclusive upper bound on [PersonEnrichmentEntity.lastSyncedAt];
-     *   rows synced at or after this instant are excluded.
-     * @param limit maximum number of stale rows to return in a single worker batch.
-     */
-    @Query(
-        """
-        SELECT * FROM persons_enrichment
-        WHERE last_synced_at < :beforeInstant
-        ORDER BY last_synced_at ASC
-        LIMIT :limit
-        """,
-    )
-    public suspend fun findStale(beforeInstant: Instant, limit: Int): List<PersonEnrichmentEntity>
-
-    /**
-     * Deletes the enrichment row for the given [personRef].
-     *
-     * @param personRef the canonicalized counterparty identifier whose row should
-     *   be removed.
-     * @return the number of rows deleted (0 if no row existed, 1 on success).
-     */
-    @Query("DELETE FROM persons_enrichment WHERE person_ref = :personRef")
-    public suspend fun deleteByPersonRef(personRef: String): Int
 
     /**
      * Deletes every row in `persons_enrichment`.

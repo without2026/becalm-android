@@ -2,12 +2,15 @@ package com.becalm.android.worker
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -15,7 +18,7 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -33,7 +36,7 @@ import kotlin.time.Duration.Companion.days
  *
  * ## ENR-002 — Worker identity and scheduling
  * Registered as a periodic [CoroutineWorker] by the WorkScheduler (SP-32). Runs
- * on [Dispatchers.IO] inside [doWork].
+ * on the injected IO dispatcher inside [doWork].
  *
  * ## ENR-003 — Auth guard
  * Resolves the current userId from [AuthRepository.currentSession]. Returns
@@ -60,7 +63,7 @@ import kotlin.time.Duration.Companion.days
  * - Otherwise (display-name surrogate) → [ContactsContract.Contacts.CONTENT_URI]
  *
  * PII guard: personRef values are NEVER passed to [Logger]. A non-reversible 8-char
- * hex surrogate is logged instead (see [redactPersonRef]).
+ * hex surrogate is logged instead (see [com.becalm.android.core.util.redact]).
  */
 @HiltWorker
 public class EnrichmentWorker @AssistedInject constructor(
@@ -71,13 +74,11 @@ public class EnrichmentWorker @AssistedInject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+    public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         // ENR-003: resolve userId; null session → terminal failure
         val userId = authRepository.currentSession()?.userId
@@ -120,7 +121,7 @@ public class EnrichmentWorker @AssistedInject constructor(
             // ENR-006: freshness gate — skip if row is <7 days old
             val existing = personEnrichmentRepository.findByPersonRef(ref)
             if (existing != null && isWithinTtl(existing.lastSyncedAt, now)) {
-                logger.d(TAG, "skip fresh ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "skip fresh ref=${redact(ref)}")
                 continue
             }
 
@@ -135,7 +136,7 @@ public class EnrichmentWorker @AssistedInject constructor(
                         lastSyncedAt = now,
                     ),
                 )
-                logger.d(TAG, "enriched ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "enriched ref=${redact(ref)}")
                 enrichedCount++
             } else {
                 // No matching ContactsContract row — upsert a minimal row so that
@@ -146,7 +147,7 @@ public class EnrichmentWorker @AssistedInject constructor(
                         lastSyncedAt = now,
                     ),
                 )
-                logger.d(TAG, "no contact found ref=${redactPersonRef(ref)}")
+                logger.d(TAG, "no contact found ref=${redact(ref)}")
             }
         }
 
@@ -168,87 +169,71 @@ public class EnrichmentWorker @AssistedInject constructor(
             RefKind.NAME -> lookupByDisplayName(personRef)
         }
 
-    private fun lookupByEmail(email: String): ContactResult? {
-        val projection = arrayOf(
+    private fun lookupByEmail(email: String): ContactResult? = queryContact(
+        uri = ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+        projection = arrayOf(
             ContactsContract.CommonDataKinds.Email.CONTACT_ID,
             ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
-        )
-        val selection = "${ContactsContract.CommonDataKinds.Email.DATA1} = ?"
-        val selectionArgs = arrayOf(email)
+        ),
+        selection = "${ContactsContract.CommonDataKinds.Email.DATA1} = ?",
+        selectionArgs = arrayOf(email),
+        idColumn = ContactsContract.CommonDataKinds.Email.CONTACT_ID,
+        nameColumn = ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
+    )
 
-        return appContext.contentResolver.query(
-            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Email.CONTACT_ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(
-                    ContactsContract.CommonDataKinds.Email.DISPLAY_NAME_PRIMARY,
-                ),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
-    }
-
-    private fun lookupByPhone(phone: String): ContactResult? {
-        val lookupUri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI
+    private fun lookupByPhone(phone: String): ContactResult? = queryContact(
+        uri = ContactsContract.PhoneLookup.CONTENT_FILTER_URI
             .buildUpon()
             .appendPath(phone)
-            .build()
-
-        val projection = arrayOf(
+            .build(),
+        projection = arrayOf(
             ContactsContract.PhoneLookup._ID,
             ContactsContract.PhoneLookup.DISPLAY_NAME,
-        )
+        ),
+        selection = null,
+        selectionArgs = null,
+        idColumn = ContactsContract.PhoneLookup._ID,
+        nameColumn = ContactsContract.PhoneLookup.DISPLAY_NAME,
+    )
 
-        return appContext.contentResolver.query(
-            lookupUri,
-            projection,
-            null,
-            null,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup._ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.DISPLAY_NAME),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
-    }
-
-    private fun lookupByDisplayName(name: String): ContactResult? {
-        val projection = arrayOf(
+    private fun lookupByDisplayName(name: String): ContactResult? = queryContact(
+        uri = ContactsContract.Contacts.CONTENT_URI,
+        projection = arrayOf(
             ContactsContract.Contacts._ID,
             ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
-        )
-        val selection = "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} = ?"
-        val selectionArgs = arrayOf(name)
+        ),
+        selection = "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} = ?",
+        selectionArgs = arrayOf(name),
+        idColumn = ContactsContract.Contacts._ID,
+        nameColumn = ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
+    )
 
-        return appContext.contentResolver.query(
-            ContactsContract.Contacts.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            null,
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val contactId = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID),
-            )
-            val displayName = cursor.getString(
-                cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY),
-            )
-            ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
-        }
+    /**
+     * 세 개의 `lookupByX`에서 반복되던 `ContentResolver.query(...)?.use { ... }` 커서 보일러플레이트를
+     * 한 곳으로 통합한다. 각 호출부가 넘기는 [uri] / [projection] / [selection] / [selectionArgs] /
+     * [idColumn] / [nameColumn]은 원본과 byte-identical 하게 유지된다.
+     *
+     * 커서 라이프사이클(`?.use`), `moveToFirst` 가드, `getColumnIndexOrThrow` 사용, 그리고
+     * `displayName?.takeIf { it.isNotBlank() }` 공백 처리도 모두 보존한다.
+     */
+    private fun queryContact(
+        uri: Uri,
+        projection: Array<String>,
+        selection: String?,
+        selectionArgs: Array<String>?,
+        idColumn: String,
+        nameColumn: String,
+    ): ContactResult? = appContext.contentResolver.query(
+        uri,
+        projection,
+        selection,
+        selectionArgs,
+        null,
+    )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val contactId = cursor.getString(cursor.getColumnIndexOrThrow(idColumn))
+        val displayName = cursor.getString(cursor.getColumnIndexOrThrow(nameColumn))
+        ContactResult(contactId = contactId, displayName = displayName?.takeIf { it.isNotBlank() })
     }
 
     // ── Internal types ────────────────────────────────────────────────────────
@@ -305,11 +290,3 @@ private fun classifyRef(ref: String): RefKind = when {
     else -> RefKind.NAME
 }
 
-/**
- * Returns a non-reversible 8-char hex surrogate for [personRef].
- *
- * personRef is PII under PIPA; raw values must never appear in logcat.
- * Mirrors the pattern used in [com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl].
- */
-private fun redactPersonRef(personRef: String): String =
-    "%08x".format(personRef.hashCode())

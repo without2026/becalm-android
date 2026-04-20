@@ -2,10 +2,11 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import timber.log.Timber
@@ -58,6 +59,7 @@ import javax.inject.Singleton
 @Singleton
 public class EncryptedTokenStore @Inject constructor(
     @ApplicationContext private val context: Context,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : SupabaseSessionStore {
 
     private companion object {
@@ -81,7 +83,8 @@ public class EncryptedTokenStore @Inject constructor(
     }
 
     // Lazily constructed so that the first disk access is always off the main thread.
-    // The lazy block runs inside withContext(Dispatchers.IO), so the initializer itself runs on IO.
+    // Every public accessor wraps `prefs` access in withContext(Dispatchers.IO), so the lazy
+    // initializer itself runs on IO on first access — the lazy block does not switch dispatchers.
     // Double-checked locking is handled by Kotlin's lazy(LazyThreadSafetyMode.SYNCHRONIZED).
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         buildStorePrefs(context, FILE_NAME, MASTER_KEY_ALIAS, "EncryptedTokenStore")
@@ -93,7 +96,7 @@ public class EncryptedTokenStore @Inject constructor(
      * Returns `null` on first launch, after [clear], or if any mandatory field is absent.
      * Disk access is performed on [Dispatchers.IO].
      */
-    override suspend fun load(): SupabaseSession? = withContext(Dispatchers.IO) {
+    override suspend fun load(): SupabaseSession? = withContext(ioDispatcher) {
         val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null) ?: return@withContext null
         val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null) ?: return@withContext null
         val userId = prefs.getString(KEY_USER_ID, null) ?: return@withContext null
@@ -119,7 +122,7 @@ public class EncryptedTokenStore @Inject constructor(
      * with `apply()` (async disk write; in-memory visibility is immediate). Disk access is
      * dispatched on [Dispatchers.IO].
      */
-    override suspend fun save(session: SupabaseSession): Unit = withContext(Dispatchers.IO) {
+    override suspend fun save(session: SupabaseSession): Unit = withContext(ioDispatcher) {
         prefs.edit()
             .putString(KEY_ACCESS_TOKEN, session.accessToken)
             .putString(KEY_REFRESH_TOKEN, session.refreshToken)
@@ -137,7 +140,7 @@ public class EncryptedTokenStore @Inject constructor(
      * PIPA right-to-erasure obligation for credential data. Disk access is performed on
      * [Dispatchers.IO].
      */
-    override suspend fun clear(): Unit = withContext(Dispatchers.IO) {
+    override suspend fun clear(): Unit = withContext(ioDispatcher) {
         // Editor.clear() drops every entry atomically, so a future SupabaseSession field that
         // forgets to mirror itself into an explicit .remove() cannot silently survive a PIPA
         // right-to-erasure wipe.

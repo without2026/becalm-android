@@ -34,6 +34,30 @@ public interface AuthTokenProvider {
      * on an HTTP 401 response (AUTH-007). Returns the new access token on success,
      * or `null` if the refresh itself fails (expired refresh token, network error, etc.).
      * When `null` is returned the interceptor propagates the original 401 to the caller.
+     *
+     * Implementations must deduplicate concurrent calls: N simultaneous invocations during
+     * a thundering-herd of 401s must trigger exactly one upstream refresh request. All
+     * waiters observe the result of that single refresh.
      */
     public suspend fun refresh(): String?
+
+    /**
+     * Loads the access token from persistent storage into the in-memory cache, returning
+     * the warmed value (or `null` if no session is persisted).
+     *
+     * Intended to be called after a fresh sign-in or a successful refresh so the next
+     * [currentAccessToken] call does not hit disk. Safe to call repeatedly; concurrent
+     * calls coalesce to one disk read.
+     */
+    public suspend fun primeCache(): String?
+
+    /**
+     * Clears the in-memory token cache. Must be invoked by the authentication wipe
+     * sequence (sign-out / invalidate-session) so the next [currentAccessToken] read
+     * re-consults storage rather than returning a stale token.
+     *
+     * Does not touch persistent storage — the caller is responsible for clearing
+     * [com.becalm.android.data.remote.supabase.SupabaseSessionStore].
+     */
+    public fun invalidate()
 }

@@ -37,7 +37,7 @@ public fun OutlookMailOAuthScreen(
             connectLabel = stringResource(R.string.action_connect),
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Outlook Mail OAuth via MSAL
-                viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK, StepStatus.COMPLETE)
+                viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK_MAIL, StepStatus.COMPLETE)
                 navController.navigate(BecalmRoute.OnboardingImap.path)
             },
             onSkip = {

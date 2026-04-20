@@ -27,8 +27,6 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
@@ -41,7 +39,8 @@ import kotlinx.datetime.LocalDate
 /**
  * Commitment management screen — full list with filter tabs.
  *
- * Filter tabs: 전체 / 내가 한 / 상대가 한 / 오늘 마감 / 기한 초과 / 완료
+ * Filter tabs: 전체 / 내가 한 / 상대가 한.
+ * Due-today / overdue indicators surface as per-card DN badges, not top-level filters.
  * Each [CommitmentRow] is rendered via [CommitmentCard].
  * Error surfaced via [SnackbarHost].
  *
@@ -53,7 +52,6 @@ import kotlinx.datetime.LocalDate
  */
 @Composable
 public fun CommitmentManagementScreen(
-    navController: NavHostController,
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -133,9 +131,6 @@ private fun FilterChipRow(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
         CommitmentFilter.GIVE to stringResource(R.string.commitments_filter_give),
         CommitmentFilter.TAKE to stringResource(R.string.commitments_filter_take),
-        CommitmentFilter.DUE_TODAY to stringResource(R.string.commitments_filter_due_today),
-        CommitmentFilter.OVERDUE to stringResource(R.string.commitments_filter_overdue),
-        CommitmentFilter.DONE to stringResource(R.string.commitments_filter_done),
     )
     LazyRow(
         modifier = modifier,

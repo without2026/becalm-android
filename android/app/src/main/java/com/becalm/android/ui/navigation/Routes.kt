@@ -115,9 +115,6 @@ public sealed class BecalmRoute(public val path: String) {
         public companion object {
             /** NavHost destination template. */
             public const val PATH: String = "persons/{person_id}"
-
-            /** `navArgument` key for [personId]. */
-            public const val ARG_PERSON_ID: String = "person_id"
         }
     }
 
@@ -137,12 +134,6 @@ public sealed class BecalmRoute(public val path: String) {
         public companion object {
             /** NavHost destination template. */
             public const val PATH: String = "persons/{person_id}/events/{event_id}"
-
-            /** `navArgument` key for [personId]. */
-            public const val ARG_PERSON_ID: String = "person_id"
-
-            /** `navArgument` key for [eventId]. */
-            public const val ARG_EVENT_ID: String = "event_id"
         }
     }
 
@@ -171,9 +162,6 @@ public sealed class BecalmRoute(public val path: String) {
         public companion object {
             /** NavHost destination template. */
             public const val PATH: String = "settings/sources/{source_id}"
-
-            /** `navArgument` key for [sourceId]. */
-            public const val ARG_SOURCE_ID: String = "source_id"
         }
     }
 }

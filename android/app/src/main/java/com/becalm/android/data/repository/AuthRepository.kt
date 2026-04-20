@@ -2,13 +2,15 @@ package com.becalm.android.data.repository
 
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.result.map
+import com.becalm.android.core.result.onSuccess
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -123,6 +125,7 @@ private const val TAG = "AuthRepository"
 public class AuthRepositoryImpl @Inject constructor(
     private val authClient: SupabaseAuthClient,
     private val sessionStore: SupabaseSessionStore,
+    private val tokenProvider: AuthTokenProvider,
     private val deviceKeyStore: DeviceKeyStore,
     private val syncCursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
@@ -144,137 +147,116 @@ public class AuthRepositoryImpl @Inject constructor(
         password: String,
     ): BecalmResult<SupabaseSession> =
         authClient.signInWithEmail(email, password)
-            .map { it.session }
-            .also { result ->
-                if (result is BecalmResult.Success) {
-                    userPrefsStore.setCurrentUserId(result.value.userId)
-                    sessionFlow.value = result.value
-                }
+            .onSuccess { value ->
+                userPrefsStore.setCurrentUserId(value.userId)
+                sessionFlow.value = value
+                // Warm the token cache from persisted session so the first hot-path request
+                // avoids a disk read (Round 6A.4).
+                tokenProvider.primeCache()
             }
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
         authClient.signInWithGoogleIdToken(idToken)
-            .map { it.session }
-            .also { result ->
-                if (result is BecalmResult.Success) {
-                    userPrefsStore.setCurrentUserId(result.value.userId)
-                    sessionFlow.value = result.value
-                }
+            .onSuccess { value ->
+                userPrefsStore.setCurrentUserId(value.userId)
+                sessionFlow.value = value
+                tokenProvider.primeCache()
             }
 
     override suspend fun signOut(): BecalmResult<Unit> {
         // PIPA wipe — every step runs regardless of prior step failures.
         // The first failure is captured and returned after all steps complete.
         // Order: cancel workers first, then clear enrichment + IMAP creds, then clear tokens.
-        var firstFailure: BecalmResult.Failure? = null
+        val preludeFailure = mutableListOf<BecalmResult.Failure>()
+        val session = loadSessionForLogout(preludeFailure)
 
-        fun recordIfFirst(result: BecalmResult<*>) {
-            if (firstFailure == null && result is BecalmResult.Failure) {
-                firstFailure = result
+        val steps = buildList {
+            add(NamedStep("cancelAllWorkers") { workScheduler.cancelAll() })
+            add(NamedStep("stopContentObservers") { contentObserverBootstrap.stop() })
+            if (session != null) {
+                // Best-effort server-side revoke; always returns Success per authClient contract.
+                add(NamedStep("serverRevoke") { authClient.signOut(session.accessToken) })
             }
+            // personEnrichmentRepository.deleteAll() already returns BecalmResult<Int>;
+            // wrap its throw semantics without double-wrapping the returned Result.
+            add(NamedStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
+            add(NamedStep("imapCredentialClear") { imapCredentialStore.clear() })
+            add(NamedStep("sessionStoreClear") { sessionStore.clear() })
+            // Drop the in-memory access-token cache in lockstep with the persisted session
+            // so the next hot-path request re-consults storage and reflects the cleared state
+            // (Round 6A.4). This is synchronous and always succeeds.
+            add(NamedStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
+            add(NamedStep("deviceKeyClear") { deviceKeyStore.clear() })
+            add(NamedStep("syncCursorClear") { syncCursorStore.clearAll() })
+            add(NamedStep("userPrefsClearAll") { userPrefsStore.clearAll() })
+            add(NamedStep("databaseClearAll") { database.clearAllTables() })
         }
 
-        // Step 1: load session to obtain access token for server-side revoke.
-        val session = runStep(1) { sessionStore.load() }
-            .let { result ->
-                when (result) {
-                    is BecalmResult.Success -> result.value
-                    is BecalmResult.Failure -> {
-                        recordIfFirst(result)
-                        null
-                    }
-                }
-            }
-
-        // Step 2: cancel all WorkManager jobs so no worker runs against the stale session.
-        recordIfFirst(runStep(2) { workScheduler.cancelAll() })
-
-        // Step 3: stop content observers so no ghost callbacks fire after sign-out.
-        recordIfFirst(runStep(3) { contentObserverBootstrap.stop() })
-
-        // Step 4: best-effort server-side revoke; always returns Success per authClient contract.
-        if (session != null) {
-            val result = runStep(4) { authClient.signOut(session.accessToken) }
-            recordIfFirst(result)
-        }
-
-        // Steps 5–11: local wipe — must all run even after an earlier failure.
-        // personEnrichmentRepository.deleteAll() already returns BecalmResult<Int>;
-        // call it directly rather than wrapping it in runStep to avoid double-wrapping.
-        recordIfFirst(
-            runCatching { personEnrichmentRepository.deleteAll() }
-                .getOrElse { e ->
-                    logger.e(TAG, "signOut step 5 unexpected error", e)
-                    BecalmResult.Failure(BecalmError.Unknown(e))
-                },
-        )
-        recordIfFirst(runStep(6) { imapCredentialStore.clear() })
-        recordIfFirst(runStep(7) { sessionStore.clear() })
-        recordIfFirst(runStep(8) { deviceKeyStore.clear() })
-        recordIfFirst(runStep(9) { syncCursorStore.clearAll() })
-        recordIfFirst(runStep(10) { userPrefsStore.clearAll() })
-        recordIfFirst(runStep(11) { database.clearAllTables() })
+        val stepResult = runAllSteps("signOut", steps)
 
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
 
-        return firstFailure ?: BecalmResult.Success(Unit)
+        return preludeFailure.firstOrNull() ?: stepResult
     }
 
     override suspend fun invalidateSession(): BecalmResult<Unit> {
         // Session-only cleanup — preserves Room data per the local-first spec invariant
         // "로그아웃 시 Room DB 데이터는 삭제하지 않는다". Every step runs regardless of prior
         // step failures; the first failure is captured and returned after all steps complete.
-        var firstFailure: BecalmResult.Failure? = null
+        val preludeFailure = mutableListOf<BecalmResult.Failure>()
+        val session = loadSessionForLogout(preludeFailure)
 
-        fun recordIfFirst(result: BecalmResult<*>) {
-            if (firstFailure == null && result is BecalmResult.Failure) {
-                firstFailure = result
+        val steps = buildList {
+            add(NamedStep("cancelAllWorkers") { workScheduler.cancelAll() })
+            add(NamedStep("stopContentObservers") { contentObserverBootstrap.stop() })
+            if (session != null) {
+                add(NamedStep("serverRevoke") { authClient.signOut(session.accessToken) })
             }
+            // IMAP credentials are tied to the current account (not the raw Room event data),
+            // so they are considered part of "session" and are cleared here.
+            add(NamedStep("imapCredentialClear") { imapCredentialStore.clear() })
+            add(NamedStep("sessionStoreClear") { sessionStore.clear() })
+            // Drop the in-memory access-token cache in lockstep with the persisted session
+            // so the next hot-path request re-consults storage (Round 6A.4).
+            add(NamedStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
+            add(NamedStep("deviceKeyClear") { deviceKeyStore.clear() })
+            // Clear the non-secret current-user-id mirror. Other UI preferences
+            // (locale, notifications flag, onboarding completion) are intentionally preserved.
+            add(NamedStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
         }
-
-        // Step 1: load session to obtain access token for server-side revoke.
-        val session = runStep(1) { sessionStore.load() }
-            .let { result ->
-                when (result) {
-                    is BecalmResult.Success -> result.value
-                    is BecalmResult.Failure -> {
-                        recordIfFirst(result)
-                        null
-                    }
-                }
-            }
-
-        // Step 2: cancel all WorkManager jobs so no worker runs against the stale session.
-        recordIfFirst(runStep(2) { workScheduler.cancelAll() })
-
-        // Step 3: stop content observers so no ghost callbacks fire after sign-out.
-        recordIfFirst(runStep(3) { contentObserverBootstrap.stop() })
-
-        // Step 4: best-effort server-side revoke.
-        if (session != null) {
-            recordIfFirst(runStep(4) { authClient.signOut(session.accessToken) })
-        }
-
-        // Steps 5–7: clear auth-related local stores only.
-        // IMAP credentials are tied to the current account (not the raw Room event data),
-        // so they are considered part of "session" and are cleared here.
-        recordIfFirst(runStep(5) { imapCredentialStore.clear() })
-        recordIfFirst(runStep(6) { sessionStore.clear() })
-        recordIfFirst(runStep(7) { deviceKeyStore.clear() })
-
-        // Step 8: clear the non-secret current-user-id mirror. Other UI preferences
-        // (locale, notifications flag, onboarding completion) are intentionally preserved.
-        recordIfFirst(runStep(8) { userPrefsStore.setCurrentUserId(null) })
 
         // NOTE: Intentionally NOT calling database.clearAllTables(),
         // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
         // userPrefsStore.clearAll() — those belong to the full PIPA wipe in [signOut].
 
+        val stepResult = runAllSteps("invalidateSession", steps)
+
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
 
-        return firstFailure ?: BecalmResult.Success(Unit)
+        return preludeFailure.firstOrNull() ?: stepResult
+    }
+
+    /**
+     * Loads the current persisted session for server-side revoke.
+     *
+     * Shared prelude for [signOut] and [invalidateSession]. Any [IOException] surfaced by
+     * [SupabaseSessionStore.load] is captured into [outFailures] as a [BecalmResult.Failure]
+     * so the caller can return it as the first failure if no later step also fails.
+     *
+     * @return the loaded session, or `null` when no session is persisted or load failed.
+     */
+    private suspend fun loadSessionForLogout(
+        outFailures: MutableList<BecalmResult.Failure>,
+    ): SupabaseSession? {
+        return when (val result = runStepNamed("loadSession") { sessionStore.load() }) {
+            is BecalmResult.Success -> result.value
+            is BecalmResult.Failure -> {
+                outFailures += result
+                null
+            }
+        }
     }
 
     override suspend fun refreshSession(): BecalmResult<SupabaseSession> {
@@ -282,7 +264,15 @@ public class AuthRepositoryImpl @Inject constructor(
         if (session == null || session.refreshToken.isBlank()) {
             return BecalmResult.Failure(BecalmError.Unauthorized)
         }
-        return authClient.refresh(session.refreshToken).map { it.session }
+        return authClient.refresh(session.refreshToken)
+            .onSuccess {
+                // Keep the in-memory token cache in lockstep with the freshly-persisted
+                // session. Invalidate first so [primeCache] actually re-reads the new
+                // access token rather than returning the (now-stale) cached value
+                // (Round 6A.4).
+                tokenProvider.invalidate()
+                tokenProvider.primeCache()
+            }
     }
 
     override suspend fun currentSession(): SupabaseSession? = sessionStore.load()
@@ -302,18 +292,65 @@ public class AuthRepositoryImpl @Inject constructor(
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     /**
-     * Executes [block] inside a try/catch, logging the step number on completion or failure.
-     * Maps [IOException] to [BecalmError.Io] and all other [Throwable] to [BecalmError.Unknown].
+     * One named step in a multi-step logout sequence.
+     *
+     * Each step is identified by a human-readable [name] used in log messages so that
+     * operators can correlate a failure to the exact wipe operation. [block] encapsulates
+     * the actual side-effect; exceptions thrown from [block] are mapped to [BecalmResult.Failure]
+     * by [runStepNamed].
      */
-    private suspend fun <T> runStep(step: Int, block: suspend () -> T): BecalmResult<T> = try {
+    private data class NamedStep(val name: String, val block: suspend () -> Any?)
+
+    /**
+     * Executes every step in [steps] in order, returning the first [BecalmResult.Failure]
+     * encountered while still running the remaining steps (PIPA wipe invariant).
+     *
+     * If a step's block itself returns a [BecalmResult.Failure] (e.g.
+     * [PersonEnrichmentRepository.deleteAll]), that failure is surfaced directly without
+     * re-wrapping — avoiding a silent `Success(Failure(...))` outer/inner double-wrap bug.
+     *
+     * [flow] is prepended to each log tag so that mixed signOut / invalidateSession traces
+     * remain distinguishable in aggregated logs.
+     */
+    private suspend fun runAllSteps(flow: String, steps: List<NamedStep>): BecalmResult<Unit> {
+        var firstFailure: BecalmResult.Failure? = null
+        for (step in steps) {
+            val wrapped = runStepNamed("$flow/${step.name}") { step.block() }
+            val stepResult: BecalmResult<*> = when (wrapped) {
+                is BecalmResult.Failure -> wrapped
+                is BecalmResult.Success -> {
+                    // Unwrap one level when the step block itself returned a BecalmResult
+                    // (e.g. deleteAll() returns BecalmResult<Int>), otherwise treat as success.
+                    when (val inner = wrapped.value) {
+                        is BecalmResult.Failure -> inner
+                        else -> wrapped
+                    }
+                }
+            }
+            if (firstFailure == null && stepResult is BecalmResult.Failure) {
+                firstFailure = stepResult
+            }
+        }
+        return firstFailure ?: BecalmResult.Success(Unit)
+    }
+
+    /**
+     * Executes [block] inside a try/catch, logging on success or failure.
+     *
+     * Maps [IOException] to [BecalmError.Io] and all other non-cancellation [Throwable]
+     * to [BecalmError.Unknown]. [CancellationException]s are re-thrown via
+     * [rethrowIfCancellation] so that structured concurrency cancellation propagates.
+     */
+    private suspend fun <T> runStepNamed(label: String, block: suspend () -> T): BecalmResult<T> = try {
         val value = block()
-        logger.d(TAG, "signOut step $step completed")
+        logger.d(TAG, "$label completed")
         BecalmResult.Success(value)
     } catch (e: IOException) {
-        logger.e(TAG, "signOut step $step IOException", e)
+        logger.e(TAG, "$label IOException", e)
         BecalmResult.Failure(BecalmError.Io(e.message ?: "IO error"))
     } catch (e: Throwable) {
-        logger.e(TAG, "signOut step $step unexpected error", e)
+        e.rethrowIfCancellation()
+        logger.e(TAG, "$label unexpected error", e)
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
 }

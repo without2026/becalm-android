@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,12 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
-import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -198,9 +195,9 @@ private fun PreviewPersonsScreenPopulated() {
                 ) {
                     items(
                         listOf(
-                            PersonRow("ref1", "Alice Kim", null, 12, false),
-                            PersonRow("ref2", "Bob Lee", null, 5, false),
-                            PersonRow("ref3", "Carol Park", null, 3, true),
+                            PersonRow("ref1", "Alice Kim", null, 12),
+                            PersonRow("ref2", "Bob Lee", null, 5),
+                            PersonRow("ref3", "Carol Park", null, 3),
                         ),
                     ) { person ->
                         PersonRowItem(

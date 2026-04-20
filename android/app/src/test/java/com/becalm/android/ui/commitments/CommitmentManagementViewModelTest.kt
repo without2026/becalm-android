@@ -6,7 +6,9 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
@@ -225,8 +227,7 @@ class CommitmentManagementViewModelTest {
 
     /**
      * When onSchedule succeeds, ReminderScheduler.schedule is called with the
-     * commitment id and a java.time.Instant matching the provided kotlinx Instant.
-     * Covers CMT-006.
+     * commitment id and the kotlinx Instant forwarded unchanged. Covers CMT-006.
      */
     @Test
     fun `onSchedule calls reminderScheduler on success`() = runTest {
@@ -250,10 +251,7 @@ class CommitmentManagementViewModelTest {
             assertNull(afterSchedule.error)
 
             verify(exactly = 1) {
-                reminderScheduler.schedule(
-                    "s-1",
-                    java.time.Instant.ofEpochMilli(at.toEpochMilliseconds()),
-                )
+                reminderScheduler.schedule("s-1", at)
             }
 
             cancelAndIgnoreRemainingEvents()

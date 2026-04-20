@@ -5,10 +5,12 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import javax.inject.Inject
 
 /**
  * Observes device network reachability.
@@ -58,7 +60,9 @@ public interface NetworkMonitor {
  *
  * @param context Application context used to obtain the [ConnectivityManager] system service.
  */
-public class AndroidNetworkMonitor(context: Context) : NetworkMonitor {
+public class AndroidNetworkMonitor @Inject constructor(
+    @ApplicationContext context: Context,
+) : NetworkMonitor {
 
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

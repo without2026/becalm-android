@@ -30,21 +30,6 @@ import javax.inject.Singleton
  * Each infrastructure concern has its own Hilt module to keep the Hilt graph
  * readable and to allow test modules to replace just the database layer without
  * disturbing the network or logging bindings.
- *
- * ## Testing
- * Override this module in instrumented tests with `@TestInstallIn`:
- * ```kotlin
- * @TestInstallIn(components = [SingletonComponent::class], replaces = [DatabaseModule::class])
- * @Module
- * object TestDatabaseModule {
- *     @Provides @Singleton
- *     fun provideBeCalmDatabase(@ApplicationContext context: Context): BeCalmDatabase =
- *         Room.inMemoryDatabaseBuilder(context, BeCalmDatabase::class.java)
- *             .allowMainThreadQueries()
- *             .build()
- *     // ... DAO providers identical to DatabaseModule
- * }
- * ```
  */
 @Module
 @InstallIn(SingletonComponent::class)

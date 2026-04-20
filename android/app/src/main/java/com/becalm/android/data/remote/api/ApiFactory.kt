@@ -44,7 +44,7 @@ public object ApiFactory {
      * @param isDebug When `true` enables `BASIC` HTTP logging; `false` disables all logging.
      *   Pass `BuildConfig.DEBUG` from the application module.
      * @param timeouts Timeout configuration. Defaults to [HttpTimeouts.Default].
-     *   Pass [HttpTimeouts.Upload] for batch upload calls.
+     *   Pass [HttpTimeouts.Voice] for audio upload calls.
      */
     public fun createOkHttpClient(
         authProvider: AuthTokenProvider,

@@ -37,7 +37,7 @@ public fun GoogleCalendarOAuthScreen(
             connectLabel = stringResource(R.string.action_connect),
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Google Calendar OAuth
-                viewModel.onMarkStepStatus(OnboardingStep.CALENDAR_PERM, StepStatus.COMPLETE)
+                viewModel.onMarkStepStatus(OnboardingStep.LINK_GOOGLE_CALENDAR, StepStatus.COMPLETE)
                 navController.navigate(BecalmRoute.OnboardingOutlookCalendar.path)
             },
             onSkip = {

@@ -1,5 +1,7 @@
 package com.becalm.android.domain.voice
 
+import kotlinx.datetime.Instant
+
 /**
  * Represents the directionality of a commitment extracted from business audio.
  *
@@ -39,6 +41,6 @@ public data class CommitmentDraft(
     val text: String,
     val quote: String,
     val personRef: String?,
-    val dueAt: kotlinx.datetime.Instant?,
+    val dueAt: Instant?,
     val confidence: Float,
 )

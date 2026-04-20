@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState

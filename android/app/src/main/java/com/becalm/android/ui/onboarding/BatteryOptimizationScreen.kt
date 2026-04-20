@@ -54,7 +54,7 @@ public fun BatteryOptimizationScreen(
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
-        viewModel.onMarkStepStatus(OnboardingStep.SAMSUNG_DOZE, StepStatus.COMPLETE)
+        viewModel.onMarkStepStatus(OnboardingStep.BATTERY_OPT, StepStatus.COMPLETE)
         navController.navigate(BecalmRoute.OnboardingColdSync.path)
     }
 

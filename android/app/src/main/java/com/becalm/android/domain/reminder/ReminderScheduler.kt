@@ -8,10 +8,10 @@ import android.os.Build
 import com.becalm.android.core.util.Logger
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.datetime.Instant
 
 /**
  * Schedules and cancels exact-alarm reminders for commitments.
@@ -49,7 +49,9 @@ public class ReminderScheduler @Inject constructor(
     public fun schedule(commitmentId: String, triggerAt: Instant) {
         val requestCode = commitmentIdToRequestCode(commitmentId)
         val pi = buildPendingIntent(commitmentId, requestCode)
-        val triggerMs = triggerAt.toEpochMilli()
+        // AlarmManager accepts a Long epoch-ms at the boundary; we convert here so that
+        // ReminderScheduler's own signature stays on kotlinx.datetime.Instant.
+        val triggerMs = triggerAt.toEpochMilliseconds()
 
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()

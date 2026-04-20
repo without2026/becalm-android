@@ -6,15 +6,21 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.internal.mergeServerState
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import java.io.IOException
 import javax.inject.Inject
@@ -52,13 +58,14 @@ public data class SourceStatus(
 /**
  * Reactive read/write facade over per-source sync health metadata.
  *
- * ## Contract gap (spec TDY-003, SMG-002)
- * There is no `/v1/source_status` endpoint in `api-contract.yml` v1. Source status is
- * derived entirely client-side from [SyncCursorStore] + the `@UserPrefs`
- * `DataStore<Preferences>`. If a server endpoint is added in a future contract version,
- * migrate to a hybrid client/server model then; do not eagerly wire `RailwayApi` now.
+ * ## Server-first with offline fallback (TDY-003, SMG-002)
+ * When [refreshFromServer] succeeds, the authoritative state comes from
+ * Railway's `GET /v1/source_status` response (api-contract.yml) and is merged into the
+ * local DataStore-backed cache. When the server is unreachable or returns an error,
+ * the client continues to derive state from [SyncCursorStore] + the `@UserPrefs`
+ * `DataStore<Preferences>` so the Today screen remains functional offline.
  *
- * ## Status derivation
+ * ## Status derivation (offline fallback)
  * For each source in [SourceType.ALL]:
  * 1. `lastSyncedAt == null` AND `lastError == null` → [SourceConnectionStatus.NEVER_CONNECTED]
  * 2. `inProgress == true` → [SourceConnectionStatus.SYNCING]
@@ -74,11 +81,33 @@ public interface SourceStatusRepository {
     public fun observeAll(): Flow<List<SourceStatus>>
 
     /**
+     * Emits a source_type → status map covering every [SourceType.ALL] entry,
+     * re-emitting on every cursor or prefs change.
+     *
+     * Convenience for consumers (e.g. [com.becalm.android.ui.today.TodayViewModel]) that
+     * need keyed lookup without rebuilding an `associateBy` on every emission.
+     */
+    public fun observeSources(): Flow<Map<String, SourceStatus>>
+
+    /**
      * Emits the status for a single [sourceType] whenever its cursor or prefs change.
      *
      * @param sourceType One of the [SourceType] string constants.
      */
     public fun observeFor(sourceType: String): Flow<SourceStatus>
+
+    /**
+     * Pulls the authoritative per-source state from Railway `GET /v1/source_status`
+     * and merges it into the local DataStore-backed cache.
+     *
+     * Exactly six items are returned (voice excluded per TDY-003 / CTO Q7); any `voice`
+     * entry the server sends is ignored and any missing source_type is left untouched.
+     *
+     * On non-2xx or network error the local cache is left intact so the offline fallback
+     * remains authoritative. [BecalmResult.Failure] is returned so callers can surface
+     * a banner ("일부 소스 실패 — 설정에서 확인") without losing previous state.
+     */
+    public suspend fun refreshFromServer(): BecalmResult<Unit>
 
     /**
      * Records a successful sync completion for [sourceType].
@@ -128,24 +157,29 @@ public interface SourceStatusRepository {
 private const val TAG = "SourceStatusRepository"
 
 /**
- * [DataStore]-backed implementation of [SourceStatusRepository].
+ * [DataStore]-backed implementation of [SourceStatusRepository] with server-merge support.
  *
- * ## Contract gap (spec TDY-003, SMG-002)
- * There is no `/v1/source_status` endpoint in `api-contract.yml` v1. Source status is
- * derived entirely client-side from [SyncCursorStore] + the `@UserPrefs`
- * `DataStore<Preferences>`. If a server endpoint is added in a future contract version,
- * migrate to a hybrid client/server model then; do not eagerly wire `RailwayApi` now.
+ * ## Server-first with offline fallback (TDY-003, SMG-002)
+ * [refreshFromServer] calls [RailwayApi.getSourceStatus] and merges each wire item into the
+ * DataStore cache via the same keys used by the offline-derivation path. When the server is
+ * unreachable or returns an error, the local cache is left intact and the reactive flows
+ * continue to emit derived state, so the Today screen stays functional offline.
  *
  * @param cursorStore   Provides cursor presence signals (cursor present = source ever synced).
  * @param userPrefs     Raw `@UserPrefs` DataStore used for source-status-specific keys that
  *                      are not part of [com.becalm.android.data.local.datastore.UserPrefsStore]'s
  *                      typed API.
+ * @param api           Railway client for `GET /v1/source_status`.
+ * @param ioDispatcher  Injected [kotlinx.coroutines.Dispatchers.IO] qualifier; no hard-coded
+ *                      dispatcher references per rubric C4.
  * @param logger        Structured log sink.
  */
 @Singleton
 public class SourceStatusRepositoryImpl @Inject constructor(
     private val cursorStore: SyncCursorStore,
     @UserPrefs private val userPrefs: DataStore<Preferences>,
+    private val api: RailwayApi,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : SourceStatusRepository {
 
@@ -174,6 +208,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         return combine(flows) { statuses -> statuses.toList() }
     }
 
+    override fun observeSources(): Flow<Map<String, SourceStatus>> =
+        observeAll().map { list -> list.associateBy { it.sourceType } }
+
     override fun observeFor(sourceType: String): Flow<SourceStatus> =
         userPrefs.data.map { prefs ->
             val lastSyncedAtMs = prefs[lastSyncedAt(sourceType)]
@@ -182,12 +219,50 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             deriveStatus(sourceType, lastSyncedAtMs, lastError, isInProgress)
         }
 
+    // ─── Server refresh (TDY-006 / TDY-008) ──────────────────────────────────
+
+    override suspend fun refreshFromServer(): BecalmResult<Unit> = withContext(ioDispatcher) {
+        try {
+            val response = api.getSourceStatus()
+            if (!response.isSuccessful) {
+                logger.w(TAG, "refreshFromServer HTTP ${response.code()}")
+                return@withContext BecalmResult.Failure(
+                    BecalmError.Network(response.code(), response.message()),
+                )
+            }
+            val body = response.body()
+            if (body == null) {
+                logger.w(TAG, "refreshFromServer null body")
+                return@withContext BecalmResult.Failure(
+                    BecalmError.Unknown(IllegalStateException("null body")),
+                )
+            }
+            mergeServerState(
+                userPrefs = userPrefs,
+                items = body.sources,
+                logger = logger,
+                lastSyncedAt = Keys::lastSyncedAt,
+                lastError = Keys::lastError,
+                inProgress = Keys::inProgress,
+            )
+            logger.d(TAG, "refreshFromServer merged=${body.sources.size}")
+            BecalmResult.Success(Unit)
+        } catch (e: IOException) {
+            logger.w(TAG, "refreshFromServer IO error — offline fallback remains authoritative", e)
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
+        } catch (e: Throwable) {
+            e.rethrowIfCancellation()
+            logger.e(TAG, "refreshFromServer unexpected failure", e)
+            BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+    }
+
     // ─── Writes ──────────────────────────────────────────────────────────────
 
     override suspend fun recordSyncSuccess(
         sourceType: String,
         at: Instant,
-    ): BecalmResult<Unit> = runCatching(sourceType, "recordSyncSuccess") {
+    ): BecalmResult<Unit> = runOp(sourceType, "recordSyncSuccess") {
         userPrefs.edit { prefs ->
             prefs[lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
             prefs.remove(lastError(sourceType))
@@ -200,7 +275,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         sourceType: String,
         error: String,
         at: Instant,
-    ): BecalmResult<Unit> = runCatching(sourceType, "recordSyncError") {
+    ): BecalmResult<Unit> = runOp(sourceType, "recordSyncError") {
         userPrefs.edit { prefs ->
             prefs[lastError(sourceType)] = error
             prefs[lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
@@ -210,7 +285,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     }
 
     override suspend fun recordSyncStart(sourceType: String): BecalmResult<Unit> =
-        runCatching(sourceType, "recordSyncStart") {
+        runOp(sourceType, "recordSyncStart") {
             userPrefs.edit { prefs ->
                 prefs[inProgress(sourceType)] = true
             }
@@ -231,6 +306,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         logger.e(TAG, "clearAll IO failure", e)
         BecalmResult.Failure(BecalmError.Io(e.message ?: "IO error during clearAll"))
     } catch (e: Throwable) {
+        e.rethrowIfCancellation()
         logger.e(TAG, "clearAll unexpected failure", e)
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
@@ -258,7 +334,12 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         )
     }
 
-    private suspend fun runCatching(
+    /**
+     * try/catch wrapper replacing the previous `runCatching`-style helper. Re-throws
+     * [kotlinx.coroutines.CancellationException] via [rethrowIfCancellation] so structured
+     * concurrency cancellation propagates instead of being swallowed into [BecalmError.Unknown].
+     */
+    private suspend fun runOp(
         sourceType: String,
         op: String,
         block: suspend () -> Unit,
@@ -269,7 +350,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         logger.e(TAG, "$op source=$sourceType IO failure", e)
         BecalmResult.Failure(BecalmError.Io(e.message ?: "IO error during $op"))
     } catch (e: Throwable) {
+        e.rethrowIfCancellation()
         logger.e(TAG, "$op source=$sourceType unexpected failure", e)
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
 }
+

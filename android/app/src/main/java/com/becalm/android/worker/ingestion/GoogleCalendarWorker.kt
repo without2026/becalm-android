@@ -32,10 +32,6 @@ import dagger.assisted.AssistedInject
  * 4. [SourceStatusRepository.recordSyncSuccess] / [SourceStatusRepository.recordSyncError] —
  *    persist sync health metadata observed by the dashboard UI.
  *
- * ### Direct-API path
- * The [com.becalm.android.data.remote.gcal.GCalClient] interface is reserved for a future
- * direct-API catch-up path (SP-26.1). It is not used here.
- *
  * ### Retry policy
  * - No session → [Result.failure]: no point retrying until the user re-authenticates.
  * - Rate-limited (HTTP 429) → [Result.retry]: WorkManager exponential back-off will honour
@@ -95,16 +91,10 @@ public class GoogleCalendarWorker @AssistedInject constructor(
                         )
                         Result.failure()
                     }
-                    is BecalmError.Network -> {
+                    is BecalmError.Network, is BecalmError.ServerError -> {
                         val msg = error.toMessage()
-                        logger.w(TAG, "triggerServerSync network error: $msg — scheduling retry")
-                        // Transient network failure — retry with exponential back-off.
-                        Result.retry()
-                    }
-                    is BecalmError.ServerError -> {
-                        val msg = error.toMessage()
-                        logger.w(TAG, "triggerServerSync server error: $msg — scheduling retry")
-                        // Transient 5xx — retry with exponential back-off.
+                        logger.w(TAG, "triggerServerSync transient error: $msg — scheduling retry")
+                        // Transient network / 5xx failure — retry with exponential back-off.
                         Result.retry()
                     }
                     else -> {

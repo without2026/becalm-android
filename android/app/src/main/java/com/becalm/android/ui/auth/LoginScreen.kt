@@ -30,13 +30,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.onboarding.OnboardingStep
+import com.becalm.android.ui.onboarding.OnboardingViewModel
+import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 
@@ -61,6 +63,7 @@ import kotlinx.coroutines.launch
 public fun LoginScreen(
     navController: NavHostController,
     viewModel: AuthViewModel = hiltViewModel(),
+    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -80,6 +83,9 @@ public fun LoginScreen(
     LaunchedEffect(state) {
         if (state is AuthUiState.SignedIn) {
             val signedIn = state as AuthUiState.SignedIn
+            // Mark the onboarding LOGIN step terminal before leaving this screen so the
+            // onCompleteOnboarding() gate can ever pass (LOGIN is step 2 of the canonical 12).
+            onboardingViewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
             val destination = if (signedIn.onboardingCompleted) {
                 BecalmRoute.Today.path
             } else {

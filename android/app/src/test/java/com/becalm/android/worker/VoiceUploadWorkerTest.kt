@@ -24,6 +24,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -117,6 +118,7 @@ class VoiceUploadWorkerTest {
             sourceStatusRepository = sourceStatusRepository,
             moshi = Moshi.Builder().build(),
             logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
         )
         // Default: permission granted
         every {

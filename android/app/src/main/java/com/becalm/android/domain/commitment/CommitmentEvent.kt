@@ -18,7 +18,7 @@ public sealed interface CommitmentEvent {
      * A follow-up time has been assigned to the commitment.
      *
      * @property at The absolute instant at which the follow-up is scheduled.
-     *   Must be non-null and in the future relative to the caller's clock;
+     *   Must be in the future relative to the caller's clock;
      *   violations surface as [TransitionError.MissingSchedule].
      */
     public data class Schedule(val at: Instant) : CommitmentEvent

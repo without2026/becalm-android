@@ -99,9 +99,8 @@ public data class PersonEnrichmentEntity(
 
     /**
      * Timestamp of the most recent `EnrichmentWorker` run that wrote this row.
-     * Updated on every upsert so that [PersonEnrichmentDao.findStale] can identify
-     * rows that have not been refreshed within a given window and re-enrich them
-     * incrementally.
+     * Updated on every upsert so freshness/staleness of enrichment data can be
+     * inspected by future scheduling logic.
      *
      * Stored as epoch milliseconds via the BeCalmDatabase TypeConverter.
      */

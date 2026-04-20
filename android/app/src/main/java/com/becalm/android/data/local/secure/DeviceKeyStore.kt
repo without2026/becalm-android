@@ -2,8 +2,9 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.becalm.android.core.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.UUID
@@ -48,6 +49,7 @@ import javax.inject.Singleton
 @Singleton
 public class DeviceKeyStore @Inject constructor(
     @ApplicationContext private val context: Context,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
     private companion object {
@@ -77,7 +79,7 @@ public class DeviceKeyStore @Inject constructor(
      *
      * @return A UUID v4 string identifying this app installation.
      */
-    public suspend fun getOrCreateDeviceId(): String = withContext(Dispatchers.IO) {
+    public suspend fun getOrCreateDeviceId(): String = withContext(ioDispatcher) {
         val existing = prefs.getString(KEY_DEVICE_ID, null)
         if (existing != null) return@withContext existing
 
@@ -95,7 +97,7 @@ public class DeviceKeyStore @Inject constructor(
      *
      * Disk access is performed on [Dispatchers.IO].
      */
-    public suspend fun clear(): Unit = withContext(Dispatchers.IO) {
+    public suspend fun clear(): Unit = withContext(ioDispatcher) {
         // Editor.clear() drops every entry atomically. When future key material (signing keys,
         // WebAuthn handles) is added, there is no "remember to mirror into clear()" footgun.
         prefs.edit().clear().apply()

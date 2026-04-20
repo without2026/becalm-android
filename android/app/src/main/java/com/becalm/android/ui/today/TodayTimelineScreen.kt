@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,16 +33,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.OverallSyncIndicator
+import com.becalm.android.ui.components.SourceStatusStrip
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.dimens
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.datetime.Instant
 
 /**
  * Today screen — unified calendar events + due commitments timeline.
@@ -48,7 +50,15 @@ import kotlinx.datetime.Instant
  * spinner while [TodayUiState.loading] is true. Shows [ErrorState] when
  * [TodayUiState.error] is non-null (e.g. unauthenticated).
  *
- * spec: TDY-001..TDY-007
+ * Composition (TDY-003 / TDY-006 / TDY-008 / TDY-009):
+ * ```
+ * BecalmScaffold(title=Today)
+ *   OverallSyncIndicator(state)            // TDY-008 banner
+ *   SourceStatusStrip(chips)               // TDY-003 read-only chips (no tap)
+ *   PullRefreshIndicator + TimelineList    // TDY-006 pull-to-refresh + TDY-009 catch-up
+ * ```
+ *
+ * spec: TDY-001..TDY-009
  *
  * Primary VM: [TodayViewModel]
  * Navigation entry: [BecalmRoute.Today]
@@ -61,7 +71,34 @@ public fun TodayTimelineScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    TodayTimelineContent(
+        state = state,
+        onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
+        onPullRefresh = viewModel::onPullRefresh,
+    )
+}
+
+/**
+ * Stateless Today screen content.
+ *
+ * Hoisted from [TodayTimelineScreen] per rubric D1 so Compose UI tests can drive the
+ * rendered tree with a raw [TodayUiState] + lambdas, without booting a ViewModel.
+ */
+@OptIn(ExperimentalMaterialApi::class)
+@Composable
+public fun TodayTimelineContent(
+    state: TodayUiState,
+    onOpenSettings: () -> Unit,
+    onPullRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pullState = rememberPullRefreshState(
+        refreshing = state.refreshing,
+        onRefresh = onPullRefresh,
+    )
+
     BecalmScaffold(
+        modifier = modifier,
         title = stringResource(R.string.today_title),
         actions = {
             if (state.overallSyncing) {
@@ -72,7 +109,7 @@ public fun TodayTimelineScreen(
                     strokeWidth = 2.dp,
                 )
             }
-            IconButton(onClick = { navController.navigate(BecalmRoute.Settings.path) }) {
+            IconButton(onClick = onOpenSettings) {
                 Icon(
                     imageVector = Icons.Filled.Settings,
                     contentDescription = stringResource(R.string.label_settings),
@@ -80,35 +117,47 @@ public fun TodayTimelineScreen(
             }
         },
     ) { padding ->
-        when {
-            state.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
+        Column(modifier = Modifier.padding(padding)) {
+            OverallSyncIndicator(state = state.overall)
+            SourceStatusStrip(sources = buildChips(state.sourceStatus))
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pullRefresh(pullState),
+            ) {
+                when {
+                    state.loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    state.error != null -> {
+                        ErrorState(
+                            title = stringResource(R.string.error_generic_title),
+                            message = state.error,
+                        )
+                    }
+                    state.timeline.isEmpty() -> {
+                        EmptyState(
+                            title = stringResource(R.string.today_empty_title),
+                            message = stringResource(R.string.today_empty_message),
+                        )
+                    }
+                    else -> {
+                        TimelineList(
+                            items = state.timeline,
+                            contentPadding = PaddingValues(vertical = 4.dp),
+                        )
+                    }
                 }
-            }
-            state.error != null -> {
-                ErrorState(
-                    title = stringResource(R.string.error_generic_title),
-                    message = state.error,
-                    modifier = Modifier.padding(padding),
-                )
-            }
-            state.timeline.isEmpty() -> {
-                EmptyState(
-                    title = stringResource(R.string.today_empty_title),
-                    message = stringResource(R.string.today_empty_message),
-                    modifier = Modifier.padding(padding),
-                )
-            }
-            else -> {
-                TimelineList(
-                    items = state.timeline,
-                    contentPadding = padding,
+
+                PullRefreshIndicator(
+                    refreshing = state.refreshing,
+                    state = pullState,
+                    modifier = Modifier.align(Alignment.TopCenter),
                 )
             }
         }

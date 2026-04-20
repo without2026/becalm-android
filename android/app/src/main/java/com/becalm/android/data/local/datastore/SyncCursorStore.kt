@@ -186,12 +186,6 @@ public class SyncCursorStoreImpl @Inject constructor(
 
     // ─── Private helpers ─────────────────────────────────────────────────────
 
-    private suspend fun <T> editNullable(key: Preferences.Key<T>, value: T?) {
-        dataStore.edit { prefs ->
-            if (value != null) prefs[key] = value else prefs.remove(key)
-        }
-    }
-
     private fun imapValidityKey(mailbox: String) = longPreferencesKey("imap_${mailbox}_uidvalidity")
     private fun imapUidKey(mailbox: String) = longPreferencesKey("imap_${mailbox}_uid")
     private fun mediaStoreKey(kind: String) = longPreferencesKey("mediastore_${kind}_last_seen")
@@ -202,10 +196,9 @@ public class SyncCursorStoreImpl @Inject constructor(
         dataStore.data.map { it[stringPreferencesKey("cursor_$source")] }
 
     override suspend fun setCursor(source: String, cursor: String?) =
-        editNullable(stringPreferencesKey("cursor_$source"), cursor)
+        dataStore.editNullable(stringPreferencesKey("cursor_$source"), cursor)
 
-    override suspend fun clearCursor(source: String) =
-        editNullable(stringPreferencesKey("cursor_$source"), null)
+    override suspend fun clearCursor(source: String) = setCursor(source, null)
 
     override suspend fun clearAll() {
         dataStore.edit { it.clear() }
@@ -219,7 +212,7 @@ public class SyncCursorStoreImpl @Inject constructor(
         dataStore.data.map { it[gmailHistoryIdKey] }
 
     override suspend fun setGmailHistoryId(historyId: Long?) =
-        editNullable(gmailHistoryIdKey, historyId)
+        dataStore.editNullable(gmailHistoryIdKey, historyId)
 
     // ─── IMAP ────────────────────────────────────────────────────────────────
 
@@ -248,5 +241,5 @@ public class SyncCursorStoreImpl @Inject constructor(
         dataStore.data.map { it[mediaStoreKey(kind)] }
 
     override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) =
-        editNullable(mediaStoreKey(kind), epochMs)
+        dataStore.editNullable(mediaStoreKey(kind), epochMs)
 }

@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -18,7 +20,7 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -64,9 +66,10 @@ public class GmailWorker @AssistedInject constructor(
     private val cursorStore: SyncCursorStore,
     private val authRepository: AuthRepository,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         logger.d(TAG, "doWork start")
 
         // Every ingested row must be tagged with the authenticated user's UUID. Without a
@@ -92,64 +95,50 @@ public class GmailWorker @AssistedInject constructor(
         }
 
         return@withContext when (syncResult) {
-            is SyncOutcome.Success -> {
-                sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
-                logger.d(TAG, "doWork complete fetched=${syncResult.fetchedCount}")
-                Result.success()
-            }
             is SyncOutcome.HistoryExpired -> {
                 // historyId expired (404/410) — clear cursor then full-sync
                 logger.d(TAG, "doWork historyId expired, falling back to full-sync")
                 cursorStore.setGmailHistoryId(null)
-                val fallbackOutcome = runFullSync(userId)
-                when (fallbackOutcome) {
-                    is SyncOutcome.Success -> {
-                        sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
-                        logger.d(TAG, "doWork fallback-full-sync complete fetched=${fallbackOutcome.fetchedCount}")
-                        Result.success()
-                    }
-                    is SyncOutcome.Unauthorized -> {
-                        sourceStatusRepository.recordSyncError(
-                            SourceType.GMAIL,
-                            "unauthorized",
-                            Clock.System.now(),
-                        )
-                        logger.e(TAG, "doWork fallback-full-sync unauthorized — user must re-auth")
-                        Result.failure()
-                    }
-                    is SyncOutcome.Retryable -> {
-                        sourceStatusRepository.recordSyncError(
-                            SourceType.GMAIL,
-                            fallbackOutcome.reason,
-                            Clock.System.now(),
-                        )
-                        logger.w(TAG, "doWork fallback-full-sync retryable reason=${fallbackOutcome.reason}")
-                        Result.retry()
-                    }
-                    is SyncOutcome.HistoryExpired -> {
-                        // Cannot happen during a full-sync; guard against it anyway.
-                        Result.retry()
-                    }
-                }
+                runFullSync(userId).toWorkerResult(" fallback-full-sync")
             }
-            is SyncOutcome.Unauthorized -> {
-                sourceStatusRepository.recordSyncError(
-                    SourceType.GMAIL,
-                    "unauthorized",
-                    Clock.System.now(),
-                )
-                logger.e(TAG, "doWork unauthorized — user must re-auth")
-                Result.failure()
-            }
-            is SyncOutcome.Retryable -> {
-                sourceStatusRepository.recordSyncError(
-                    SourceType.GMAIL,
-                    syncResult.reason,
-                    Clock.System.now(),
-                )
-                logger.w(TAG, "doWork retryable reason=${syncResult.reason}")
-                Result.retry()
-            }
+            else -> syncResult.toWorkerResult("")
+        }
+    }
+
+    /**
+     * 외부 `doWork`의 `when(syncResult)`와 HistoryExpired 내부의 `when(fallbackOutcome)`가
+     * Success/Unauthorized/Retryable 세 분기에서 동일한 Result 매핑을 중복하던 것을
+     * 한 함수로 통합해 두 호출 사이트에서 바이트 단위로 동일한 결과를 보장한다.
+     * HistoryExpired는 의도적으로 제외되며, fallback 분기 자체의 시맨틱(커서 클리어 →
+     * 전체 동기화)은 변경하지 않는다. [phase]는 로그 메시지에 삽입되는 접두 문자열이다.
+     */
+    private suspend fun SyncOutcome.toWorkerResult(phase: String): Result = when (this) {
+        is SyncOutcome.Success -> {
+            sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
+            logger.d(TAG, "doWork$phase complete fetched=$fetchedCount")
+            Result.success()
+        }
+        is SyncOutcome.Unauthorized -> {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                "unauthorized",
+                Clock.System.now(),
+            )
+            logger.e(TAG, "doWork$phase unauthorized — user must re-auth")
+            Result.failure()
+        }
+        is SyncOutcome.Retryable -> {
+            sourceStatusRepository.recordSyncError(
+                SourceType.GMAIL,
+                reason,
+                Clock.System.now(),
+            )
+            logger.w(TAG, "doWork$phase retryable reason=$reason")
+            Result.retry()
+        }
+        is SyncOutcome.HistoryExpired -> {
+            // Handled at each call site (outer: fallback branch; inner: guarded retry).
+            Result.retry()
         }
     }
 
@@ -221,6 +210,20 @@ public class GmailWorker @AssistedInject constructor(
             }
         }
 
+        seedHistoryIdCursor()
+
+        return SyncOutcome.Success(totalFetched)
+    }
+
+    /**
+     * Full-sync 직후 다음 run에서 incremental-sync를 쓸 수 있도록 historyId 커서를 1회 심는다.
+     * `history.list("1")`은 관례적인 부트스트랩 호출이며 실패해도 치명적이지 않다 — 다음 run에서
+     * storedHistoryId 가 null이면 full-sync가 다시 실행된다.
+     *
+     * 원본 인라인 로직과 byte-identical: `BecalmResult.Success` 분기에서만 커서 갱신이 일어나고,
+     * 로그 문구(`"full-sync seeded historyId=$bootstrapHistoryId"`)와 `toLongOrNull` 가드도 그대로다.
+     */
+    private suspend fun seedHistoryIdCursor() {
         // Seed the historyId cursor by calling history.list with the earliest valid value.
         // Gmail requires a real historyId; we use "1" as the conventional bootstrap value
         // to retrieve the current mailbox historyId without processing history records.
@@ -233,8 +236,6 @@ public class GmailWorker @AssistedInject constructor(
             }
         }
         // A failure to seed the historyId is non-fatal: the next run will full-sync again.
-
-        return SyncOutcome.Success(totalFetched)
     }
 
     // ── Message insertion ─────────────────────────────────────────────────────
@@ -249,25 +250,30 @@ public class GmailWorker @AssistedInject constructor(
     private suspend fun insertMessages(userId: String, messageIds: List<String>): Int {
         var count = 0
         for (messageId in messageIds) {
-            when (val msgResult = gmailClient.getMessage(messageId)) {
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
-                }
-                is BecalmResult.Success -> {
-                    val entity = msgResult.value.toEntity(userId)
-                    when (val insertResult = rawIngestionRepository.insertLocal(entity)) {
-                        is BecalmResult.Failure -> {
-                            logger.e(TAG, "insertLocal failed id_hash=${redact(messageId)} err=${insertResult.error}")
-                        }
-                        is BecalmResult.Success -> {
-                            logger.d(TAG, "insertLocal ok id_hash=${redact(messageId)}")
-                            count++
-                        }
-                    }
-                }
-            }
+            if (fetchAndInsert(userId, messageId)) count++
         }
         return count
+    }
+
+    /**
+     * 단일 메시지에 대한 `getMessage → toEntity → insertLocal` 파이프라인을 4-level 중첩
+     * when 밖으로 평탄화한다. 각 실패 분기의 로그 레벨(`w`/`e`)과 문자열은 원본과 byte-identical.
+     * 성공 시에만 `true`를 반환해 [insertMessages]의 count 증가 시맨틱을 그대로 보존한다.
+     */
+    private suspend fun fetchAndInsert(userId: String, messageId: String): Boolean {
+        val msgResult = gmailClient.getMessage(messageId)
+        if (msgResult is BecalmResult.Failure) {
+            logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
+            return false
+        }
+        val entity = (msgResult as BecalmResult.Success).value.toEntity(userId)
+        val insertResult = rawIngestionRepository.insertLocal(entity)
+        if (insertResult is BecalmResult.Failure) {
+            logger.e(TAG, "insertLocal failed id_hash=${redact(messageId)} err=${insertResult.error}")
+            return false
+        }
+        logger.d(TAG, "insertLocal ok id_hash=${redact(messageId)}")
+        return true
     }
 
     // ── Conversion ────────────────────────────────────────────────────────────
@@ -329,12 +335,6 @@ public class GmailWorker @AssistedInject constructor(
         }
         return raw.lowercase().ifBlank { null }
     }
-
-    /**
-     * Returns an 8-char hex surrogate for [value] to prevent PII from appearing in logcat.
-     * Mirrors the pattern used in [MediaStoreWorker].
-     */
-    private fun redact(value: String): String = "%08x".format(value.hashCode())
 
     public companion object {
         private const val TAG = "GmailWorker"

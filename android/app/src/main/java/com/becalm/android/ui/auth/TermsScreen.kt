@@ -14,7 +14,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,14 +25,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingViewModel
+import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.dimens
 import com.becalm.android.ui.theme.glassPanel
 
 /**
@@ -104,6 +104,7 @@ public fun TermsScreen(
                 text = stringResource(R.string.terms_cta),
                 onClick = {
                     onboardingViewModel.onAcceptTerms()
+                    onboardingViewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
                     navController.navigate(BecalmRoute.Login.path)
                 },
                 enabled = accepted,

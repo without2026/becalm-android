@@ -12,10 +12,22 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * Unit tests for [OnboardingViewModel] against the canonical 12-step onboarding flow
+ * defined in `.spec/onboarding.spec.yml` (invariant line 110).
+ *
+ * Step ordering (1-indexed):
+ * 1 TERMS → 2 LOGIN → 3 PIPA_CONSENT → 4 RECORDING_FOLDER → 5 CONTACTS_PERM
+ *   → 6 LINK_GMAIL → 7 LINK_OUTLOOK_MAIL → 8 LINK_IMAP
+ *   → 9 LINK_GOOGLE_CALENDAR → 10 LINK_OUTLOOK_CALENDAR
+ *   → 11 BATTERY_OPT → 12 COLD_SYNC
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class OnboardingViewModelTest {
 
@@ -38,7 +50,57 @@ class OnboardingViewModelTest {
         Dispatchers.resetMain()
     }
 
-    // ─── Step navigation ───────────────────────────────────────────────────────
+    // ─── Enum shape & ordering ────────────────────────────────────────────────
+
+    @Test
+    fun `canonical onboarding has exactly 12 steps`() {
+        assertEquals(12, OnboardingStep.entries.size)
+        assertEquals(12, viewModel.steps.size)
+    }
+
+    @Test
+    fun `first step is TERMS and last step is COLD_SYNC`() {
+        assertEquals(OnboardingStep.TERMS, viewModel.steps.first())
+        assertEquals(OnboardingStep.COLD_SYNC, viewModel.steps.last())
+    }
+
+    @Test
+    fun `canonical step order matches the spec invariant`() {
+        val expected = listOf(
+            OnboardingStep.TERMS,
+            OnboardingStep.LOGIN,
+            OnboardingStep.PIPA_CONSENT,
+            OnboardingStep.RECORDING_FOLDER,
+            OnboardingStep.CONTACTS_PERM,
+            OnboardingStep.LINK_GMAIL,
+            OnboardingStep.LINK_OUTLOOK_MAIL,
+            OnboardingStep.LINK_IMAP,
+            OnboardingStep.LINK_GOOGLE_CALENDAR,
+            OnboardingStep.LINK_OUTLOOK_CALENDAR,
+            OnboardingStep.BATTERY_OPT,
+            OnboardingStep.COLD_SYNC,
+        )
+        assertEquals(expected, viewModel.steps)
+    }
+
+    // ─── First-run bootstrap ──────────────────────────────────────────────────
+
+    @Test
+    fun `first-run onboarding starts at TERMS with index 0`() {
+        val state = viewModel.uiState.value
+        assertEquals(0, state.currentStepIndex)
+        assertEquals(OnboardingStep.TERMS, viewModel.steps[state.currentStepIndex])
+        // All steps begin NOT_STARTED
+        OnboardingStep.entries.forEach { step ->
+            assertEquals(
+                "Expected $step to start as NOT_STARTED",
+                StepStatus.NOT_STARTED,
+                state.stepStates[step],
+            )
+        }
+    }
+
+    // ─── Sequential navigation ────────────────────────────────────────────────
 
     @Test
     fun `onNext advances currentStepIndex by one`() {
@@ -51,8 +113,15 @@ class OnboardingViewModelTest {
     }
 
     @Test
+    fun `onNext advances sequentially through all 12 steps`() {
+        // From index 0 (TERMS), 11 onNext() calls should land at COLD_SYNC (index 11).
+        repeat(11) { viewModel.onNext() }
+        assertEquals(11, viewModel.uiState.value.currentStepIndex)
+        assertEquals(OnboardingStep.COLD_SYNC, viewModel.steps[viewModel.uiState.value.currentStepIndex])
+    }
+
+    @Test
     fun `onBack decrements currentStepIndex and clamps at zero`() {
-        // Advance to step 2 first
         viewModel.onNext()
         viewModel.onNext()
         assertEquals(2, viewModel.uiState.value.currentStepIndex)
@@ -74,44 +143,44 @@ class OnboardingViewModelTest {
         assertEquals(lastIndex, viewModel.uiState.value.currentStepIndex)
     }
 
+    // ─── Progress arithmetic ("N/12" display) ─────────────────────────────────
+
+    @Test
+    fun `progress index plus one over steps size displays as one-based N over 12`() {
+        assertEquals(12, viewModel.steps.size)
+        // Step 1 of 12 at first render
+        assertEquals(1, viewModel.uiState.value.currentStepIndex + 1)
+        viewModel.onNext()
+        assertEquals(2, viewModel.uiState.value.currentStepIndex + 1)
+        // Skip ahead to the terminal step
+        repeat(viewModel.steps.lastIndex) { viewModel.onNext() }
+        assertEquals(12, viewModel.uiState.value.currentStepIndex + 1)
+    }
+
     // ─── onMarkStepStatus ─────────────────────────────────────────────────────
 
     @Test
-    fun `onMarkStepStatus updates the stepStates map for the given step`() {
-        viewModel.onMarkStepStatus(OnboardingStep.SMS_PERM, StepStatus.GRANTED)
+    fun `onMarkStepStatus updates stepStates map for the given step`() {
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GMAIL, StepStatus.GRANTED)
 
         val states = viewModel.uiState.value.stepStates
-        assertEquals(StepStatus.GRANTED, states[OnboardingStep.SMS_PERM])
+        assertEquals(StepStatus.GRANTED, states[OnboardingStep.LINK_GMAIL])
         // Other steps remain NOT_STARTED
-        assertEquals(StepStatus.NOT_STARTED, states[OnboardingStep.CALL_PERM])
+        assertEquals(StepStatus.NOT_STARTED, states[OnboardingStep.LINK_IMAP])
     }
 
     @Test
-    fun `onMarkStepStatus for CONTACTS_PERM records DENIED correctly`() {
+    fun `onMarkStepStatus records DENIED for CONTACTS_PERM graceful skip`() {
+        // ONB-CONTACTS: "나중에" or denied system dialog must not block onboarding.
         viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, StepStatus.DENIED)
 
-        assertEquals(StepStatus.DENIED, viewModel.uiState.value.stepStates[OnboardingStep.CONTACTS_PERM])
+        assertEquals(
+            StepStatus.DENIED,
+            viewModel.uiState.value.stepStates[OnboardingStep.CONTACTS_PERM],
+        )
     }
 
-    // ─── onCompleteOnboarding ─────────────────────────────────────────────────
-
-    @Test
-    fun `onCompleteOnboarding calls UserPrefsStore setOnboardingCompleted true`() = runTest {
-        viewModel.onCompleteOnboarding()
-        testDispatcher.scheduler.advanceUntilIdle()
-
-        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
-    }
-
-    @Test
-    fun `onCompleteOnboarding marks COMPLETE step as COMPLETE in stepStates`() = runTest {
-        viewModel.onCompleteOnboarding()
-        testDispatcher.scheduler.advanceUntilIdle()
-
-        val state = viewModel.uiState.value
-        assertTrue("isCompleting should be false after completion", !state.isCompleting)
-        assertEquals(StepStatus.COMPLETE, state.stepStates[OnboardingStep.COMPLETE])
-    }
+    // ─── onSkipStep (OAuth skip) ──────────────────────────────────────────────
 
     @Test
     fun `onSkipStep marks current step as SKIPPED and advances index`() {
@@ -121,5 +190,136 @@ class OnboardingViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(StepStatus.SKIPPED, state.stepStates[step])
         assertEquals(1, state.currentStepIndex)
+    }
+
+    @Test
+    fun `OAuth screen skip advances from LINK_GMAIL through to LINK_IMAP`() {
+        // Advance to LINK_GMAIL (index 5).
+        repeat(5) { viewModel.onNext() }
+        assertEquals(OnboardingStep.LINK_GMAIL, viewModel.steps[viewModel.uiState.value.currentStepIndex])
+
+        viewModel.onSkipStep()
+        assertEquals(
+            OnboardingStep.LINK_OUTLOOK_MAIL,
+            viewModel.steps[viewModel.uiState.value.currentStepIndex],
+        )
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
+        )
+
+        viewModel.onSkipStep()
+        assertEquals(
+            OnboardingStep.LINK_IMAP,
+            viewModel.steps[viewModel.uiState.value.currentStepIndex],
+        )
+    }
+
+    // ─── PIPA consent: denied path skips RECORDING_FOLDER ─────────────────────
+
+    @Test
+    fun `PIPA consent denied skips RECORDING_FOLDER and advances to CONTACTS_PERM`() = runTest {
+        // Position VM at PIPA_CONSENT (index 2)
+        viewModel.onNext()
+        viewModel.onNext()
+        assertEquals(OnboardingStep.PIPA_CONSENT, viewModel.steps[viewModel.uiState.value.currentStepIndex])
+
+        viewModel.onPipaConsentDeclined()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(
+            OnboardingStep.CONTACTS_PERM,
+            viewModel.steps[state.currentStepIndex],
+        )
+        assertEquals(StepStatus.DENIED, state.stepStates[OnboardingStep.PIPA_CONSENT])
+        assertEquals(
+            "RECORDING_FOLDER must be marked SKIPPED when PIPA declined",
+            StepStatus.SKIPPED,
+            state.stepStates[OnboardingStep.RECORDING_FOLDER],
+        )
+
+        coVerify(exactly = 1) { userPrefsStore.setThirdPartyProvisionConsent(false) }
+    }
+
+    @Test
+    fun `PIPA consent granted advances to RECORDING_FOLDER`() = runTest {
+        viewModel.onNext()
+        viewModel.onNext()
+        assertEquals(OnboardingStep.PIPA_CONSENT, viewModel.steps[viewModel.uiState.value.currentStepIndex])
+
+        viewModel.onPipaConsentGranted()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(
+            OnboardingStep.RECORDING_FOLDER,
+            viewModel.steps[state.currentStepIndex],
+        )
+        assertEquals(StepStatus.GRANTED, state.stepStates[OnboardingStep.PIPA_CONSENT])
+        coVerify(exactly = 1) { userPrefsStore.setThirdPartyProvisionConsent(true) }
+    }
+
+    // ─── Terminal gate ────────────────────────────────────────────────────────
+
+    @Test
+    fun `isTerminalGatePassed blocks completion while any step is NOT_STARTED`() = runTest {
+        viewModel.onCompleteOnboarding()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse("should not be in-flight after gate rejection", state.isCompleting)
+        assertNotNull("gate rejection must surface an error", state.error)
+        // COLD_SYNC should NOT be marked COMPLETE — DataStore write was never attempted.
+        assertEquals(
+            StepStatus.NOT_STARTED,
+            state.stepStates[OnboardingStep.COLD_SYNC],
+        )
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+    }
+
+    @Test
+    fun `onCompleteOnboarding passes gate and marks COLD_SYNC COMPLETE once every step is terminal`() = runTest {
+        // Drive every step to a terminal status. Mix GRANTED / SKIPPED / DENIED to exercise
+        // the full terminal set allowed by the gate.
+        val terminalAssignments = mapOf(
+            OnboardingStep.TERMS to StepStatus.GRANTED,
+            OnboardingStep.LOGIN to StepStatus.GRANTED,
+            OnboardingStep.PIPA_CONSENT to StepStatus.DENIED,
+            OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED,
+            OnboardingStep.CONTACTS_PERM to StepStatus.DENIED,
+            OnboardingStep.LINK_GMAIL to StepStatus.SKIPPED,
+            OnboardingStep.LINK_OUTLOOK_MAIL to StepStatus.SKIPPED,
+            OnboardingStep.LINK_IMAP to StepStatus.SKIPPED,
+            OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.SKIPPED,
+            OnboardingStep.LINK_OUTLOOK_CALENDAR to StepStatus.SKIPPED,
+            OnboardingStep.BATTERY_OPT to StepStatus.COMPLETE,
+            // COLD_SYNC starts NOT_STARTED in this setup — gate must reject here.
+        )
+        terminalAssignments.forEach { (step, status) -> viewModel.onMarkStepStatus(step, status) }
+
+        // Gate should still reject because COLD_SYNC is NOT_STARTED.
+        viewModel.onCompleteOnboarding()
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertNotNull(
+            "gate must still reject when terminal step COLD_SYNC is NOT_STARTED",
+            viewModel.uiState.value.error,
+        )
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+
+        // Mark COLD_SYNC terminal (the ColdSyncScreen signals this on sync-done or dismiss).
+        viewModel.onMarkStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
+
+        viewModel.onCompleteOnboarding()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse("isCompleting must clear after persistence", state.isCompleting)
+        assertEquals(
+            "COLD_SYNC must reflect COMPLETE after successful write",
+            StepStatus.COMPLETE,
+            state.stepStates[OnboardingStep.COLD_SYNC],
+        )
+        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
     }
 }

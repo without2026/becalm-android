@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
@@ -14,9 +15,10 @@ import com.becalm.android.data.remote.msgraph.MsGraphClient
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -67,13 +69,11 @@ public class OutlookMailWorker @AssistedInject constructor(
     private val syncCursorStore: SyncCursorStore,
     private val authRepository: AuthRepository,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    public override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+    public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         val now = Clock.System.now()
         logger.d(TAG, "doWork started runAttemptCount=$runAttemptCount")

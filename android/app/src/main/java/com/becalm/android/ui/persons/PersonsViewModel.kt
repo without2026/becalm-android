@@ -2,12 +2,8 @@ package com.becalm.android.ui.persons
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.becalm.android.core.result.BecalmError
-import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
-import com.becalm.android.data.repository.RawIngestionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.FlowPreview
@@ -25,22 +21,20 @@ import kotlinx.datetime.Instant
 
 /**
  * A single row in the persons list, derived from [PersonEnrichmentEntity] enriched
- * with interaction statistics aggregated from [RawIngestionRepository].
+ * with interaction statistics (placeholders until a dedicated DAO aggregate query lands;
+ * see the [PersonsViewModel] KDoc).
  *
  * @property personRef Canonicalized counterparty identifier.
  * @property displayName Human-readable name from the on-device contact, or null when absent.
  * @property lastInteractionAt Timestamp of the most recent raw ingestion event for this person,
  *   or null when no events exist locally yet.
  * @property interactionCount Count of raw ingestion events recorded for this person.
- * @property starred Whether the person has been starred by the user.
- *   Always false until SP-05 lands the `starred` column on [PersonEnrichmentEntity].
  */
 public data class PersonRow(
     val personRef: String,
     val displayName: String?,
     val lastInteractionAt: Instant?,
     val interactionCount: Int,
-    val starred: Boolean,
 ) {
     /**
      * User-facing label. Falls back to a redacted prefix of [personRef] so raw
@@ -66,30 +60,21 @@ public data class PersonsUiState(
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
-private const val TAG = "PersonsViewModel"
 private const val QUERY_DEBOUNCE_MS = 300L
-private const val EVENTS_PER_PERSON_LIMIT = 100
 
 /**
  * ViewModel for PersonsScreen (SRC-001, SRC-002).
  *
- * Combines [PersonEnrichmentRepository.observeAll] with per-person event counts
- * derived from [RawIngestionRepository.observeForPerson].  The event stats are
- * approximated by collecting the most recent events slice per person; a future
- * DAO query will replace this with a single aggregation query once the index is
- * available.
+ * Observes [PersonEnrichmentRepository.observeAll] and maps each entity to a
+ * [PersonRow]. Per-person interaction stats are placeholders until a dedicated
+ * DAO aggregate query lands (planned post-SP-05).
  *
  * Search filtering is debounced at [QUERY_DEBOUNCE_MS] ms to avoid re-rendering
  * on every keystroke.
- *
- * Star toggling fails loudly via [error] when [PersonEnrichmentRepository.setStarred]
- * returns [BecalmResult.Failure] (expected until SP-05 ships).
  */
 @HiltViewModel
 public class PersonsViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
-    private val rawIngestionRepository: RawIngestionRepository,
-    private val logger: Logger,
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<PersonsUiState> = MutableStateFlow(PersonsUiState())
@@ -112,35 +97,6 @@ public class PersonsViewModel @Inject constructor(
      */
     public fun onQueryChange(q: String) {
         _query.value = q
-    }
-
-    /**
-     * Requests a star-state change for [personRef].
-     *
-     * If [PersonEnrichmentRepository.setStarred] fails (expected while SP-05 is pending),
-     * the error is surfaced in [PersonsUiState.error] rather than crashing or silently
-     * dropping the request.
-     *
-     * Covers SRC-001.
-     */
-    public fun onToggleStar(personRef: String, starred: Boolean) {
-        viewModelScope.launch {
-            when (val result = personEnrichmentRepository.setStarred(personRef, starred)) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "setStarred ok personRef=${redact(personRef)} starred=$starred")
-                }
-                is BecalmResult.Failure -> {
-                    val message = when {
-                        result.error is BecalmError.Unknown &&
-                            result.error.throwable is UnsupportedOperationException ->
-                            "Starred not yet supported (SP-05 pending)"
-                        else -> result.error.toString()
-                    }
-                    logger.w(TAG, "setStarred failed: ${result.error}")
-                    _uiState.update { it.copy(error = message) }
-                }
-            }
-        }
     }
 
     /**
@@ -189,8 +145,6 @@ public class PersonsViewModel @Inject constructor(
      * database call per-person which would N+1 the list query.  PersonRow carries
      * placeholder defaults (null / 0) here; a dedicated DAO aggregate query (planned
      * post-SP-05) will replace this with a single JOIN once the index is available.
-     *
-     * The `starred` flag is always false until SP-05 adds the column to [PersonEnrichmentEntity].
      */
     // TODO(SRC-001): Replace placeholder stats with a DAO aggregate query (COUNT + MAX)
     // once the raw_ingestion_events index on person_ref is available (post-SP-05).
@@ -199,8 +153,5 @@ public class PersonsViewModel @Inject constructor(
         displayName = displayName,
         lastInteractionAt = null,
         interactionCount = 0,
-        starred = false,
     )
-
-    private fun redact(personRef: String): String = "%08x".format(personRef.hashCode())
 }

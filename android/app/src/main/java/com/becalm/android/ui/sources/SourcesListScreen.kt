@@ -32,12 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.statusStringToSyncStatus
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -144,15 +144,6 @@ private fun SourceRowItem(
             label = statusLabel,
         )
     }
-}
-
-/** Maps raw ViewModel status string to [SourceSyncStatus] for the indicator. */
-private fun statusStringToSyncStatus(status: String): SourceSyncStatus = when (status.uppercase()) {
-    "CONNECTED" -> SourceSyncStatus.Ok
-    "SYNCING" -> SourceSyncStatus.Ok
-    "ERROR" -> SourceSyncStatus.Error
-    "NEVER_CONNECTED" -> SourceSyncStatus.Unknown
-    else -> SourceSyncStatus.Stale
 }
 
 @PreviewLightDark

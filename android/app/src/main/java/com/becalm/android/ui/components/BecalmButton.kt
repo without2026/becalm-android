@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -153,19 +154,19 @@ private fun ButtonContent(
 ) {
     if (loading) {
         CircularProgressIndicator(
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(ButtonLoadingIndicatorSize),
             color = LocalContentColor.current,
             strokeWidth = 2.dp,
         )
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (leadingIcon != null) {
-                androidx.compose.material3.Icon(
+                Icon(
                     imageVector = leadingIcon,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(ButtonLeadingIconSize),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(ButtonLeadingIconSpacing))
             }
             Text(text = text, style = MaterialTheme.typography.labelLarge)
         }

@@ -3,6 +3,7 @@ package com.becalm.android.data.remote.gmail
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.squareup.moshi.Json
+import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import okhttp3.OkHttpClient
@@ -175,6 +176,7 @@ public data class GmailMessage(
  * - 404 → [BecalmError.NotFound] (historyId has expired; caller falls back to full-sync)
  * - 410 → [BecalmError.NotFound] (historyId gone; same fallback)
  * - 429 → [BecalmError.RateLimited] with parsed `Retry-After` seconds
+ * - HTTP 5xx → [BecalmError.ServerError]
  * - Network / IO → [BecalmError.Network]
  * - Other non-2xx → [BecalmError.Network] with HTTP code
  */
@@ -215,7 +217,6 @@ public interface GmailClient {
 // ─── Implementation ───────────────────────────────────────────────────────────
 
 private const val GMAIL_BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
-private const val GMAIL_HISTORY_NOT_FOUND_KEY = "gmail_history"
 
 /**
  * Production [GmailClient] backed by raw [OkHttpClient] + Moshi.
@@ -250,22 +251,18 @@ public class GmailClientImpl(
             "?startHistoryId=$startHistoryId" +
             "&historyTypes=messageAdded"
         return executeRequest(url) { body ->
-            val parsed = historyListAdapter.fromJson(body)
-                ?: return@executeRequest BecalmResult.Failure(
-                    BecalmError.Unknown(IllegalStateException("null body from history.list")),
-                )
-            val messageIds = parsed.history
-                ?.flatMap { record -> record.messagesAdded.orEmpty() }
-                ?.map { added -> added.message.id }
-                ?.distinct()
-                ?: emptyList()
-            BecalmResult.Success(
+            parseOrFail(historyListAdapter, body, "history.list") { parsed ->
+                val messageIds = parsed.history
+                    ?.flatMap { record -> record.messagesAdded.orEmpty() }
+                    ?.map { added -> added.message.id }
+                    ?.distinct()
+                    ?: emptyList()
                 GmailHistoryPage(
                     messageIds = messageIds,
                     nextPageToken = parsed.nextPageToken,
                     historyId = parsed.historyId,
-                ),
-            )
+                )
+            }
         }
     }
 
@@ -275,16 +272,12 @@ public class GmailClientImpl(
             if (pageToken != null) append("&pageToken=$pageToken")
         }
         return executeRequest(url) { body ->
-            val parsed = messageListAdapter.fromJson(body)
-                ?: return@executeRequest BecalmResult.Failure(
-                    BecalmError.Unknown(IllegalStateException("null body from messages.list")),
-                )
-            BecalmResult.Success(
+            parseOrFail(messageListAdapter, body, "messages.list") { parsed ->
                 GmailMessagePage(
                     messageIds = parsed.messages?.map { it.id } ?: emptyList(),
                     nextPageToken = parsed.nextPageToken,
-                ),
-            )
+                )
+            }
         }
     }
 
@@ -294,24 +287,38 @@ public class GmailClientImpl(
             "&metadataHeaders=From" +
             "&metadataHeaders=Subject"
         return executeRequest(url) { body ->
-            val parsed = messageGetAdapter.fromJson(body)
-                ?: return@executeRequest BecalmResult.Failure(
-                    BecalmError.Unknown(IllegalStateException("null body from messages.get")),
-                )
-            val headers = parsed.payload?.headers.orEmpty()
-            BecalmResult.Success(
+            parseOrFail(messageGetAdapter, body, "messages.get") { parsed ->
+                val headers = parsed.payload?.headers.orEmpty()
                 GmailMessage(
                     messageId = parsed.id,
                     subject = headers.firstOrNull { it.name.equals("Subject", ignoreCase = true) }?.value,
                     from = headers.firstOrNull { it.name.equals("From", ignoreCase = true) }?.value,
                     snippet = parsed.snippet,
                     internalDate = parsed.internalDate,
-                ),
-            )
+                )
+            }
         }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * 세 엔드포인트(history.list / messages.list / messages.get)에서 반복되던
+     * "adapter.fromJson → null이면 Unknown 실패, 아니면 매핑해서 Success" 패턴을 한 곳으로 모은다.
+     * 원본 `BecalmError.Unknown(IllegalStateException("null body from <label>"))` 페이로드 형태를 그대로 보존한다.
+     */
+    private inline fun <T, R> parseOrFail(
+        adapter: JsonAdapter<T>,
+        body: String,
+        label: String,
+        map: (T) -> R,
+    ): BecalmResult<R> {
+        val parsed = adapter.fromJson(body)
+            ?: return BecalmResult.Failure(
+                BecalmError.Unknown(IllegalStateException("null body from $label")),
+            )
+        return BecalmResult.Success(map(parsed))
+    }
 
     /**
      * Executes an authenticated GET request, maps HTTP error codes to [BecalmError],
@@ -353,7 +360,7 @@ public class GmailClientImpl(
             parseBody(bodyString)
         }
         401 -> BecalmResult.Failure(BecalmError.Unauthorized)
-        404, 410 -> BecalmResult.Failure(BecalmError.NotFound(GMAIL_HISTORY_NOT_FOUND_KEY))
+        404, 410 -> BecalmResult.Failure(BecalmError.NotFound("gmail_history"))
         429 -> {
             val retryAfter = response.header("Retry-After")?.toLongOrNull()
             BecalmResult.Failure(BecalmError.RateLimited(retryAfter))

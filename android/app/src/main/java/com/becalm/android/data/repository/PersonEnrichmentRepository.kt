@@ -3,12 +3,15 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.coroutines.rethrowIfCancellation
+import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * PIPA INVARIANT — ON-DEVICE ONLY.
@@ -35,23 +38,24 @@ public interface PersonEnrichmentRepository {
     public fun observeAll(): Flow<List<PersonEnrichmentEntity>>
 
     /**
+     * Emits a `person_ref → PersonEnrichmentEntity` map keyed by
+     * [PersonEnrichmentEntity.personRef], re-emitting whenever [observeAll] re-emits.
+     *
+     * Intended for ViewModels (e.g. Today, CommitmentManagement) that need to join raw
+     * [com.becalm.android.data.local.db.entity.CommitmentEntity.personRef] / raw ingestion
+     * event `person_ref` against the on-device enrichment table. Consumers MUST fall back
+     * to the raw counterparty text when a key is absent from the map rather than display
+     * a blank — see TDY-001 / CMT-001.
+     */
+    public fun observeEnrichmentMap(): Flow<Map<String, PersonEnrichmentEntity>>
+
+    /**
      * Emits the enrichment row for [personRef] whenever the underlying Room row changes,
      * or emits null when no matching row exists.
      *
      * @param personRef canonicalized counterparty identifier to observe.
      */
     public fun observeByPersonRef(personRef: String): Flow<PersonEnrichmentEntity?>
-
-    /**
-     * Emits the list of starred enrichment rows, re-emitting on every table change.
-     *
-     * Note: the `starred` field is not present on [PersonEnrichmentEntity] in the
-     * current schema (it is not uploaded and not part of the ContactsContract sync).
-     * This method is retained in the interface for forward-compatibility with SP-05
-     * when the starred flag is added to the entity. Until then it delegates to
-     * [observeAll] filtered in-memory.
-     */
-    public fun observeStarred(): Flow<List<PersonEnrichmentEntity>>
 
     /**
      * Returns the enrichment row for [personRef], or null when no row exists.
@@ -80,24 +84,6 @@ public interface PersonEnrichmentRepository {
      * @param entities list of enrichment rows to persist.
      */
     public suspend fun upsertAll(entities: List<PersonEnrichmentEntity>): BecalmResult<Int>
-
-    /**
-     * Sets the starred state for the person identified by [personRef].
-     *
-     * Exposed as a domain verb so that PersonDetailScreen (R8) via PersonsViewModel (R6)
-     * can call it directly without knowing DAO internals. Starred state is local-only.
-     *
-     * @param personRef canonicalized counterparty identifier.
-     * @param starred true to star, false to unstar.
-     */
-    public suspend fun setStarred(personRef: String, starred: Boolean): BecalmResult<Unit>
-
-    /**
-     * Deletes the enrichment row for [personRef].
-     *
-     * @param personRef canonicalized counterparty identifier whose row should be removed.
-     */
-    public suspend fun deleteByPersonRef(personRef: String): BecalmResult<Unit>
 
     /**
      * Deletes every row in the `persons_enrichment` table, returning
@@ -130,11 +116,11 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
     override fun observeAll(): Flow<List<PersonEnrichmentEntity>> =
         dao.observeAll()
 
+    override fun observeEnrichmentMap(): Flow<Map<String, PersonEnrichmentEntity>> =
+        dao.observeAll().map { list -> list.associateBy { it.personRef } }
+
     override fun observeByPersonRef(personRef: String): Flow<PersonEnrichmentEntity?> =
         dao.observeByPersonRef(personRef)
-
-    override fun observeStarred(): Flow<List<PersonEnrichmentEntity>> =
-        dao.observeAll()
 
     override suspend fun findByPersonRef(personRef: String): PersonEnrichmentEntity? =
         dao.findByPersonRef(personRef)
@@ -144,6 +130,7 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
             .fold(
                 onSuccess = { BecalmResult.Success(Unit) },
                 onFailure = { e ->
+                    e.rethrowIfCancellation()
                     logger.e(TAG, "upsert failed for ref=${redact(entity.personRef)}", e)
                     BecalmResult.Failure(e.toBecalmError("enrichment write failed"))
                 },
@@ -154,33 +141,9 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
             .fold(
                 onSuccess = { rowIds -> BecalmResult.Success(rowIds.size) },
                 onFailure = { e ->
+                    e.rethrowIfCancellation()
                     logger.e(TAG, "upsertAll failed for ${entities.size} entities", e)
                     BecalmResult.Failure(e.toBecalmError("enrichment batch write failed"))
-                },
-            )
-
-    override suspend fun setStarred(personRef: String, starred: Boolean): BecalmResult<Unit> {
-        // The `starred` column is not yet on PersonEnrichmentEntity (SP-05 pending).
-        // Historically this method performed a read-then-write that silently dropped the
-        // `starred` flag — a bug that would only surface when PersonDetailScreen (R8) tried
-        // to toggle a star. Failing loudly here forces R6/R8 to depend on SP-05 correctly.
-        logger.w(TAG, "setStarred called before SP-05 — refusing (ref=${redact(personRef)})")
-        return BecalmResult.Failure(
-            BecalmError.Unknown(
-                UnsupportedOperationException(
-                    "starred column not yet present on PersonEnrichmentEntity (SP-05 pending)",
-                ),
-            ),
-        )
-    }
-
-    override suspend fun deleteByPersonRef(personRef: String): BecalmResult<Unit> =
-        runCatching { dao.deleteByPersonRef(personRef) }
-            .fold(
-                onSuccess = { BecalmResult.Success(Unit) },
-                onFailure = { e ->
-                    logger.e(TAG, "deleteByPersonRef failed for ref=${redact(personRef)}", e)
-                    BecalmResult.Failure(e.toBecalmError("enrichment delete failed"))
                 },
             )
 
@@ -189,19 +152,11 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
             .fold(
                 onSuccess = { count -> BecalmResult.Success(count) },
                 onFailure = { e ->
+                    e.rethrowIfCancellation()
                     logger.e(TAG, "deleteAll failed", e)
                     BecalmResult.Failure(e.toBecalmError("enrichment wipe failed"))
                 },
             )
-
-    /**
-     * Replaces a raw personRef (email, E.164 phone, or normalized display name) with a
-     * non-reversible 8-char hex surrogate. personRef is PII under PIPA; logcat is
-     * readable by any app with READ_LOGS on pre-JellyBean devices and by ADB attackers
-     * with physical access, so the raw value must never land there.
-     */
-    private fun redact(personRef: String): String =
-        "%08x".format(personRef.hashCode())
 
     private companion object {
         private const val TAG = "PersonEnrichmentRepo"

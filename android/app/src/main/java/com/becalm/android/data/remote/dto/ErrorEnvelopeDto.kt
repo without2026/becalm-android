@@ -11,8 +11,6 @@ import com.squareup.moshi.Json
  *
  * Note: the field name is "error" (not "code"). Every Railway endpoint that
  * returns 400/401/404/413/422/429/500/503 uses this shape.
- * Supabase Auth errors use a distinct { error, error_description } shape —
- * those are handled by [SupabaseAuthErrorDto], not this class.
  */
 @JsonClass(generateAdapter = true)
 public data class ErrorEnvelopeDto(
@@ -27,17 +25,4 @@ public data class ErrorEnvelopeDto(
      * Use for support escalation.
      */
     @field:Json(name = "request_id") val requestId: String? = null,
-)
-
-/**
- * Error shape returned by the Supabase Auth endpoints directly
- * (POST /auth/v1/token → 400).
- *
- * Wire format: { error: string, error_description: string }
- * Distinct from [ErrorEnvelopeDto] — used only in AuthRemoteDataSource.
- */
-@JsonClass(generateAdapter = true)
-public data class SupabaseAuthErrorDto(
-    @field:Json(name = "error") val error: String,
-    @field:Json(name = "error_description") val errorDescription: String,
 )

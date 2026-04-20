@@ -4,8 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import dagger.hilt.android.AndroidEntryPoint
 import com.becalm.android.ui.theme.BecalmTheme
+import dagger.hilt.android.AndroidEntryPoint
 
 /**
  * Single-activity entry point for the BeCalm Android app.

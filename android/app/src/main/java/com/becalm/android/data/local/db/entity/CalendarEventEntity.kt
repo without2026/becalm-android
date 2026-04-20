@@ -15,8 +15,8 @@ import kotlinx.datetime.Instant
  * has been acknowledged by Railway.
  *
  * Indices:
- * 1. `(user_id, start_at)` — primary timeline query backing [CalendarEventDao.observeUpcoming]
- *    and [CalendarEventDao.observeInRange]. Defined by `.spec/contracts/data-model.yml`.
+ * 1. `(user_id, start_at)` — primary timeline query backing [CalendarEventDao.observeInRange].
+ *    Defined by `.spec/contracts/data-model.yml`.
  *
  * Logical foreign key (not enforced at the Room layer because `auth.users` is a Supabase
  * Auth-managed table that Android never mirrors locally):

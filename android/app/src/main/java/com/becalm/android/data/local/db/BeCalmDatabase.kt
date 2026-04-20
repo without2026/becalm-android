@@ -114,7 +114,6 @@ public abstract class BeCalmDatabase : RoomDatabase() {
                 DATABASE_NAME,
             )
                 .addMigrations(*MIGRATIONS)
-                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
     }
 }

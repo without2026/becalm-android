@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
@@ -32,7 +31,6 @@ import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.datetime.Clock
 
 /**
  * Raw event detail screen — extended fields loaded from Room for a single ingestion event.
