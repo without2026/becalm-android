@@ -35,29 +35,18 @@ public interface AuthTokenProvider {
      * or `null` if the refresh itself fails (expired refresh token, network error, etc.).
      * When `null` is returned the interceptor propagates the original 401 to the caller.
      *
-     * Implementations must deduplicate concurrent calls: N simultaneous invocations during
-     * a thundering-herd of 401s must trigger exactly one upstream refresh request. All
-     * waiters observe the result of that single refresh.
-     */
-    public suspend fun refresh(): String?
-
-    /**
-     * Loads the access token from persistent storage into the in-memory cache, returning
-     * the warmed value (or `null` if no session is persisted).
+     * ## Refresh coalescing
+     * Under a burst of parallel 401s the implementation is expected to serialize refresh
+     * calls and short-circuit later callers when the in-memory cache has already advanced
+     * past [previousAccessToken]. Supabase rotates refresh tokens on every refresh call, so
+     * N parallel refresh attempts with the same refresh token would cause N-1 to fail at
+     * the server; the implementation uses [previousAccessToken] to detect "the 401 I'm
+     * recovering from is already stale" and return the newer cached token without hitting
+     * the server.
      *
-     * Intended to be called after a fresh sign-in or a successful refresh so the next
-     * [currentAccessToken] call does not hit disk. Safe to call repeatedly; concurrent
-     * calls coalesce to one disk read.
+     * @param previousAccessToken The token value the caller attached to the request that
+     *   returned 401. Used only for the coalescing double-check; never sent to Supabase.
+     *   Pass an empty string when the caller had no token (first call with no session).
      */
-    public suspend fun primeCache(): String?
-
-    /**
-     * Clears the in-memory token cache. Must be invoked by the authentication wipe
-     * sequence (sign-out / invalidate-session) so the next [currentAccessToken] read
-     * re-consults storage rather than returning a stale token.
-     *
-     * Does not touch persistent storage — the caller is responsible for clearing
-     * [com.becalm.android.data.remote.supabase.SupabaseSessionStore].
-     */
-    public fun invalidate()
+    public suspend fun refresh(previousAccessToken: String): String?
 }

@@ -12,6 +12,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -46,7 +47,7 @@ class VoiceModuleWiringTest {
 
         authTokenProvider = mockk {
             every { currentAccessToken() } returns "test-jwt-token"
-            coEvery { refresh() } returns "test-refreshed-token"
+            coEvery { refresh(any()) } returns "test-refreshed-token"
         }
 
         idempotencyKeyProvider = mockk {
@@ -123,8 +124,4 @@ class VoiceModuleWiringTest {
             method.parameterCount >= 7,
         )
     }
-}
-
-private fun assertTrue(msg: String, value: Boolean) {
-    org.junit.Assert.assertTrue(msg, value)
 }

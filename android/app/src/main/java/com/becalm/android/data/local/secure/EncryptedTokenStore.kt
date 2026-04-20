@@ -6,7 +6,11 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import timber.log.Timber
@@ -76,10 +80,6 @@ public class EncryptedTokenStore @Inject constructor(
         const val KEY_USER_ID = "user_id"
         const val KEY_EMAIL = "email"
         const val KEY_EXPIRES_AT_EPOCH_MILLIS = "expires_at_epoch_millis"
-
-        // Sentinel value stored for the email field when the original value was an empty string.
-        // SupabaseSession.email is non-nullable (String); an empty string is a valid, expected
-        // value (e.g. OAuth providers that do not return an email). No null sentinel is required.
     }
 
     // Lazily constructed so that the first disk access is always off the main thread.
@@ -89,6 +89,15 @@ public class EncryptedTokenStore @Inject constructor(
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         buildStorePrefs(context, FILE_NAME, MASTER_KEY_ALIAS, "EncryptedTokenStore")
     }
+
+    // No replay: late subscribers do not retroactively receive prior sessions.
+    // DROP_OLDEST: a writer never suspends on a full buffer; at most the most recent emission
+    // is retained for a subscriber that has not yet resumed.
+    private val sessionChanges = MutableSharedFlow<SupabaseSession?>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     /**
      * Loads the persisted [SupabaseSession], or returns `null` if no complete session exists.
@@ -131,6 +140,8 @@ public class EncryptedTokenStore @Inject constructor(
             .putLong(KEY_EXPIRES_AT_EPOCH_MILLIS, session.expiresAt.toEpochMilliseconds())
             .apply()
         Timber.d("EncryptedTokenStore: session saved, expires=%d", session.expiresAt.toEpochMilliseconds())
+        // Emit AFTER apply() so subscribers never observe a session that isn't yet persisted.
+        sessionChanges.tryEmit(session)
     }
 
     /**
@@ -146,5 +157,9 @@ public class EncryptedTokenStore @Inject constructor(
         // right-to-erasure wipe.
         prefs.edit().clear().apply()
         Timber.d("EncryptedTokenStore: session cleared")
+        // Emit AFTER apply() so subscribers never observe a cleared state that isn't persisted.
+        sessionChanges.tryEmit(null)
     }
+
+    override fun observe(): SharedFlow<SupabaseSession?> = sessionChanges.asSharedFlow()
 }
