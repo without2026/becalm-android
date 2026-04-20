@@ -12,10 +12,10 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.Before
 import org.junit.Test
+import kotlinx.datetime.Instant
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.time.Instant
 
 /**
  * Unit tests for [ReminderScheduler].
@@ -61,7 +61,7 @@ class ReminderSchedulerTest {
         verify(exactly = 1) {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
-                TRIGGER_INSTANT.toEpochMilli(),
+                TRIGGER_INSTANT.toEpochMilliseconds(),
                 any(),
             )
         }
@@ -81,7 +81,7 @@ class ReminderSchedulerTest {
         verify(exactly = 1) {
             alarmManager.setAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
-                TRIGGER_INSTANT.toEpochMilli(),
+                TRIGGER_INSTANT.toEpochMilliseconds(),
                 any(),
             )
         }
@@ -172,6 +172,6 @@ class ReminderSchedulerTest {
 
     private companion object {
         private const val COMMITMENT_ID = "test-commitment-abc123"
-        private val TRIGGER_INSTANT: Instant = Instant.ofEpochMilli(1_800_000_000_000L)
+        private val TRIGGER_INSTANT: Instant = Instant.fromEpochMilliseconds(1_800_000_000_000L)
     }
 }

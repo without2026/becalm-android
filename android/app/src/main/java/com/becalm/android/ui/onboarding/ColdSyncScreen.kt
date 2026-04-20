@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -56,8 +55,9 @@ public fun ColdSyncScreen(
     val onboardingState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
 
     // Navigate only after onCompleteOnboarding() has persisted successfully.
-    // The COMPLETE step in stepStates is set by the VM after DataStore write succeeds.
-    val onboardingDone = onboardingState.stepStates[OnboardingStep.COMPLETE] == StepStatus.COMPLETE
+    // COLD_SYNC is the terminal onboarding step; the VM marks it COMPLETE after the
+    // DataStore write succeeds (no separate "COMPLETE" enum).
+    val onboardingDone = onboardingState.stepStates[OnboardingStep.COLD_SYNC] == StepStatus.COMPLETE
     LaunchedEffect(onboardingDone) {
         if (onboardingDone) {
             navController.navigate(BecalmRoute.Today.path) {

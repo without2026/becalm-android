@@ -218,17 +218,11 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
 
-    private suspend fun <T> editNullable(key: Preferences.Key<T>, value: T?) {
-        dataStore.edit { prefs ->
-            if (value != null) prefs[key] = value else prefs.remove(key)
-        }
-    }
-
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
 
     override suspend fun setCurrentUserId(userId: String?) =
-        editNullable(currentUserIdKey, userId)
+        dataStore.editNullable(currentUserIdKey, userId)
 
     override fun observeOnboardingCompleted(): Flow<Boolean> =
         dataStore.data.map { it[onboardingCompletedKey] ?: false }
@@ -248,13 +242,13 @@ public class UserPrefsStoreImpl @Inject constructor(
         dataStore.data.map { it[localeTagKey] }
 
     override suspend fun setLocaleTag(tag: String?) =
-        editNullable(localeTagKey, tag)
+        dataStore.editNullable(localeTagKey, tag)
 
     override fun observeDozePromptDismissedAt(): Flow<Long?> =
         dataStore.data.map { it[dozePromptDismissedAtKey] }
 
     override suspend fun setDozePromptDismissedAt(epochMs: Long?) =
-        editNullable(dozePromptDismissedAtKey, epochMs)
+        dataStore.editNullable(dozePromptDismissedAtKey, epochMs)
 
     override fun observeNotificationsEnabled(): Flow<Boolean> =
         dataStore.data.map { it[notificationsEnabledKey] ?: true }

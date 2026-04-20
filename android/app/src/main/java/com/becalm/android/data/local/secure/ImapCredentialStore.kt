@@ -2,8 +2,9 @@ package com.becalm.android.data.local.secure
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.becalm.android.core.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -21,8 +22,8 @@ import javax.inject.Singleton
 public data class ImapCredentials(
     val username: String,
     val appPassword: String,
-    val host: String = "imap.naver.com",
-    val port: Int = 993,
+    val host: String = ImapCredentialStore.DEFAULT_HOST,
+    val port: Int = ImapCredentialStore.DEFAULT_PORT,
 )
 
 /**
@@ -49,22 +50,23 @@ public data class ImapCredentials(
 @Singleton
 public class ImapCredentialStore @Inject constructor(
     @ApplicationContext private val context: Context,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
-    private companion object {
-        const val FILE_NAME = "becalm_imap_credentials"
+    public companion object {
+        internal const val FILE_NAME = "becalm_imap_credentials"
 
         // Distinct from EncryptedTokenStore alias ("becalm_token_store_master_key")
         // and DeviceKeyStore alias ("becalm_device_key_store_master_key").
-        const val MASTER_KEY_ALIAS = "becalm_imap_credential_store_master_key"
+        internal const val MASTER_KEY_ALIAS = "becalm_imap_credential_store_master_key"
 
-        const val KEY_USERNAME = "imap_username"
-        const val KEY_APP_PASSWORD = "imap_app_password"
-        const val KEY_HOST = "imap_host"
-        const val KEY_PORT = "imap_port"
+        internal const val KEY_USERNAME = "imap_username"
+        internal const val KEY_APP_PASSWORD = "imap_app_password"
+        internal const val KEY_HOST = "imap_host"
+        internal const val KEY_PORT = "imap_port"
 
-        const val DEFAULT_HOST = "imap.naver.com"
-        const val DEFAULT_PORT = 993
+        public const val DEFAULT_HOST: String = "imap.naver.com"
+        public const val DEFAULT_PORT: Int = 993
     }
 
     private val prefs: SharedPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -76,7 +78,7 @@ public class ImapCredentialStore @Inject constructor(
      *
      * Disk access is performed on [Dispatchers.IO].
      */
-    public suspend fun getCredentials(): ImapCredentials? = withContext(Dispatchers.IO) {
+    public suspend fun getCredentials(): ImapCredentials? = withContext(ioDispatcher) {
         val username = prefs.getString(KEY_USERNAME, null) ?: return@withContext null
         val appPassword = prefs.getString(KEY_APP_PASSWORD, null) ?: return@withContext null
         val host = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
@@ -89,7 +91,7 @@ public class ImapCredentialStore @Inject constructor(
      *
      * Disk access is performed on [Dispatchers.IO].
      */
-    public suspend fun saveCredentials(c: ImapCredentials): Unit = withContext(Dispatchers.IO) {
+    public suspend fun saveCredentials(c: ImapCredentials): Unit = withContext(ioDispatcher) {
         prefs.edit()
             .putString(KEY_USERNAME, c.username)
             .putString(KEY_APP_PASSWORD, c.appPassword)
@@ -105,7 +107,7 @@ public class ImapCredentialStore @Inject constructor(
      * Called during user sign-out as part of the PIPA right-to-erasure wipe (AUTH-005).
      * Disk access is performed on [Dispatchers.IO].
      */
-    public suspend fun clear(): Unit = withContext(Dispatchers.IO) {
+    public suspend fun clear(): Unit = withContext(ioDispatcher) {
         prefs.edit().clear().apply()
         Timber.d("ImapCredentialStore: credentials cleared")
     }

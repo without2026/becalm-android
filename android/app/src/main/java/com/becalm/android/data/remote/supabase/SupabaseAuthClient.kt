@@ -4,7 +4,6 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.SignOutScope
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
@@ -16,31 +15,6 @@ import kotlinx.datetime.Instant
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
-
-// ─── Supporting types ────────────────────────────────────────────────────────
-
-/**
- * Enumerates the two OAuth providers supported in the BeCalm Android MVP.
- *
- * Additional providers (Apple, Kakao, etc.) are out of scope until post-MVP.
- */
-public enum class AuthProvider {
-    EMAIL,
-    GOOGLE,
-}
-
-/**
- * Wraps the [SupabaseSession] produced by a successful authentication operation.
- *
- * Keeping this as a separate data class (rather than returning [SupabaseSession] directly)
- * allows the auth layer to attach additional metadata (e.g. `isNewUser`) in a later sprint
- * without breaking call sites.
- *
- * @param session The authenticated session ready for immediate use.
- */
-public data class AuthResult(
-    val session: SupabaseSession,
-)
 
 // ─── Interface ───────────────────────────────────────────────────────────────
 
@@ -64,10 +38,10 @@ public interface SupabaseAuthClient {
      *
      * @param email The user's registered email address.
      * @param password The user's plaintext password (transmitted over TLS; never stored).
-     * @return [BecalmResult.Success] with the new session, or [BecalmResult.Failure] with
-     *   [BecalmError.Unauthorized] on bad credentials or [BecalmError.Network] on transport error.
+     * @return [BecalmResult.Success] with the new [SupabaseSession], or [BecalmResult.Failure]
+     *   with [BecalmError.Unauthorized] on bad credentials or [BecalmError.Network] on transport error.
      */
-    public suspend fun signInWithEmail(email: String, password: String): BecalmResult<AuthResult>
+    public suspend fun signInWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
 
     /**
      * Authenticates using a Google ID token obtained from the Google Sign-In SDK (AUTH-002 / AUTH-003).
@@ -75,10 +49,10 @@ public interface SupabaseAuthClient {
      * On success the session is persisted to [SupabaseSessionStore] before returning.
      *
      * @param idToken The raw JWT ID token returned by Google Sign-In.
-     * @return [BecalmResult.Success] with the new session, or [BecalmResult.Failure] with an
-     *   appropriate [BecalmError] on failure.
+     * @return [BecalmResult.Success] with the new [SupabaseSession], or [BecalmResult.Failure]
+     *   with an appropriate [BecalmError] on failure.
      */
-    public suspend fun signInWithGoogleIdToken(idToken: String): BecalmResult<AuthResult>
+    public suspend fun signInWithGoogleIdToken(idToken: String): BecalmResult<SupabaseSession>
 
     /**
      * Exchanges a valid [refreshToken] for a new access/refresh token pair (AUTH-004 / AUTH-007).
@@ -92,10 +66,10 @@ public interface SupabaseAuthClient {
      * endpoint, ensuring the underlying Ktor request carries the correct grant.
      *
      * @param refreshToken The refresh token loaded from [SupabaseSessionStore] by the caller.
-     * @return [BecalmResult.Success] with the refreshed session, or [BecalmResult.Failure] with
-     *   [BecalmError.Unauthorized] if the refresh token is expired/revoked.
+     * @return [BecalmResult.Success] with the refreshed [SupabaseSession], or [BecalmResult.Failure]
+     *   with [BecalmError.Unauthorized] if the refresh token is expired/revoked.
      */
-    public suspend fun refresh(refreshToken: String): BecalmResult<AuthResult>
+    public suspend fun refresh(refreshToken: String): BecalmResult<SupabaseSession>
 
     /**
      * Revokes the Supabase-side session for the given [accessToken] (AUTH-005).
@@ -150,31 +124,31 @@ public class SupabaseAuthClientImpl @Inject constructor(
     override suspend fun signInWithEmail(
         email: String,
         password: String,
-    ): BecalmResult<AuthResult> = runCatchingAuth("signInWithEmail") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth("signInWithEmail") {
         client.auth.signInWith(Email) {
             this.email = email
             this.password = password
         }
         val session = requireCurrentSession()
         sessionStore.save(session)
-        AuthResult(session)
+        session
     }
 
     override suspend fun signInWithGoogleIdToken(
         idToken: String,
-    ): BecalmResult<AuthResult> = runCatchingAuth("signInWithGoogleIdToken") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth("signInWithGoogleIdToken") {
         client.auth.signInWith(IDToken) {
             provider = Google
             this.idToken = idToken
         }
         val session = requireCurrentSession()
         sessionStore.save(session)
-        AuthResult(session)
+        session
     }
 
     override suspend fun refresh(
         refreshToken: String,
-    ): BecalmResult<AuthResult> = runCatchingAuth("refresh") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth("refresh") {
         // supabase-kt 2.6.0: with autoLoadFromStorage=false the client holds no in-memory
         // session after process restart or a cold 401. We must import a minimal UserSession
         // so that refreshCurrentSession() knows which refresh token to exchange.
@@ -193,7 +167,7 @@ public class SupabaseAuthClientImpl @Inject constructor(
 
         val session = requireCurrentSession()
         sessionStore.save(session)
-        AuthResult(session)
+        session
     }
 
     override suspend fun signOut(accessToken: String): BecalmResult<Unit> {

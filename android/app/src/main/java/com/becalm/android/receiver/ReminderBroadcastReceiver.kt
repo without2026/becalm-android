@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.becalm.android.MainActivity
+import com.becalm.android.core.util.redact
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 
@@ -51,7 +53,7 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
 
         val notificationId = commitmentIdToNotificationId(commitmentId)
 
-        val tapIntent = Intent(context, Class.forName("com.becalm.android.MainActivity")).apply {
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_COMMITMENT_ID, commitmentId)
         }
@@ -114,8 +116,5 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
             } catch (_: IllegalArgumentException) {
                 commitmentId.hashCode() and 0x7FFFFFFF
             }
-
-        /** Returns an 8-char hex surrogate so PII never appears in logcat. */
-        private fun redact(s: String): String = "%08x".format(s.hashCode())
     }
 }

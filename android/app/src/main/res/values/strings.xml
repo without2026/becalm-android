@@ -6,29 +6,18 @@
     <!-- Common -->
     <string name="action_skip">Skip</string>
     <string name="action_back">Back</string>
-    <string name="action_retry">Retry</string>
-    <string name="action_next">Next</string>
     <string name="action_connect">Connect</string>
     <string name="action_grant">Grant Permission</string>
-    <string name="action_continue">Continue</string>
     <string name="action_confirm">Confirm</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_sign_out">Sign Out</string>
     <string name="action_wipe_data">Wipe Local Data</string>
-    <string name="action_save">Save</string>
     <string name="action_reconnect">Reconnect</string>
     <string name="action_disconnect">Disconnect</string>
-    <string name="action_sync_now">Sync Now</string>
-    <string name="action_mark_done">Mark done</string>
-    <string name="action_reopen">Reopen</string>
-    <string name="action_dismiss">Dismiss</string>
     <string name="label_settings">Settings</string>
-    <string name="label_loading">Loading…</string>
 
     <!-- Error / empty states -->
     <string name="error_generic_title">Something went wrong</string>
-    <string name="error_generic_message">An unexpected error occurred. Please try again.</string>
-    <string name="empty_list_title">Nothing here yet</string>
 
     <!-- Splash -->
     <string name="splash_title">BeCalm</string>
@@ -38,7 +27,6 @@
     <string name="terms_title">Terms &amp; Privacy</string>
     <string name="terms_subtitle">Please read and accept before continuing.</string>
     <string name="terms_pipa_notice">BeCalm collects and processes personal information (contacts, calendar events, emails) on-device under your consent as required by the Personal Information Protection Act (PIPA). Your data is stored locally first and only shared with our servers with your explicit consent.</string>
-    <string name="terms_accept">I agree to the Terms and Privacy Policy</string>
     <string name="terms_accept_checkbox">I have read and agree to the Terms</string>
     <string name="terms_cta">Continue</string>
     <string name="terms_decline_cta">Decline &amp; exit</string>
@@ -114,11 +102,9 @@
     <string name="today_title">Today</string>
     <string name="today_empty_title">Clear day ahead</string>
     <string name="today_empty_message">No commitments or meetings scheduled for today.</string>
-    <string name="today_error_not_authenticated">Not signed in. Please sign in to view your timeline.</string>
     <string name="today_section_commitments">Commitments</string>
     <string name="today_section_meetings">Meetings</string>
     <string name="today_section_events">Events</string>
-    <string name="today_syncing">Syncing…</string>
 
     <!-- Persons -->
     <string name="persons_title">People</string>
@@ -129,11 +115,9 @@
     <string name="persons_unassigned_title">Unassigned Events</string>
     <string name="persons_unassigned_empty_title">No unassigned events</string>
     <string name="persons_unassigned_empty_message">All events have been matched to a person.</string>
-    <string name="persons_last_interaction">Last interaction</string>
     <string name="persons_interactions_count">%d interactions</string>
 
     <!-- Person detail -->
-    <string name="person_detail_title">Person</string>
     <string name="person_detail_commitments_section">Commitments</string>
     <string name="person_detail_history_section">Interaction History</string>
     <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
@@ -150,31 +134,20 @@
     <string name="commitments_filter_all">All</string>
     <string name="commitments_filter_give">I give</string>
     <string name="commitments_filter_take">I take</string>
-    <string name="commitments_filter_due_today">Due today</string>
-    <string name="commitments_filter_overdue">Overdue</string>
-    <string name="commitments_filter_done">Done</string>
     <string name="commitments_empty_title">No commitments</string>
     <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
-    <string name="commitments_direction_give">Give</string>
-    <string name="commitments_direction_take">Take</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_account_section">Account</string>
     <string name="settings_preferences_section">Preferences</string>
     <string name="settings_data_section">Data</string>
-    <string name="settings_language_label">Language</string>
     <string name="settings_notifications_label">Notifications</string>
     <string name="settings_sources_label">Data Sources</string>
-    <string name="settings_storage_label">Local storage</string>
-    <string name="settings_storage_unknown">Unknown</string>
     <string name="settings_sign_out_confirm_title">Sign out?</string>
     <string name="settings_sign_out_confirm_message">You will be signed out of BeCalm. Local data remains until you wipe it.</string>
     <string name="settings_wipe_confirm_title">Wipe all data?</string>
     <string name="settings_wipe_confirm_message">This will permanently delete all locally stored personal data and sign you out. This action cannot be undone.</string>
-    <string name="settings_lang_korean">Korean (한국어)</string>
-    <string name="settings_lang_english">English</string>
-    <string name="settings_lang_system">Follow device language</string>
 
     <!-- Sources list -->
     <string name="sources_title">Data Sources</string>
@@ -184,8 +157,6 @@
     <string name="sources_status_stale">Stale</string>
     <string name="sources_status_error">Error</string>
     <string name="sources_status_unknown">Not connected</string>
-    <string name="sources_last_sync_label">Last sync</string>
-    <string name="sources_never_synced">Never synced</string>
 
     <!-- Bottom navigation -->
     <string name="nav_today">Today</string>

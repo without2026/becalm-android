@@ -4,12 +4,15 @@ import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.CalendarEventListResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
+import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
+import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
+import com.becalm.android.data.remote.dto.SourceStatusResponseDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -101,20 +104,6 @@ public interface RailwayApi {
     ): Response<PaginatedCommitmentsResponse>
 
     /**
-     * Fetches a single commitment by server-assigned UUID.
-     *
-     * Returns 404 when [id] does not exist or belongs to a different user.
-     *
-     * Spec refs: CMT-003.
-     *
-     * @param id Supabase-assigned UUID of the commitment.
-     */
-    @GET("v1/commitments/{id}")
-    public suspend fun getCommitment(
-        @Path("id") id: String,
-    ): Response<SingleCommitmentResponse>
-
-    /**
      * Updates the [actionState] of a single commitment.
      *
      * The `X-BeCalm-Idempotent: 1` header opts this request into idempotency key injection
@@ -135,6 +124,51 @@ public interface RailwayApi {
         @Header("X-BeCalm-Idempotent") idem: String = "1",
         @Body request: PatchCommitmentRequest,
     ): Response<SingleCommitmentResponse>
+
+    /**
+     * Uploads a batch of commitments to Railway (partial-success semantics).
+     *
+     * Idempotent per (user_id, client_event_id) — duplicate submissions return HTTP 200
+     * without creating a new row. Used by [com.becalm.android.worker.UploadWorker] to
+     * drain rows whose `sync_status='pending'` after a failed PATCH (CMT-005..007 +
+     * commitment-management.spec.yml invariant 3).
+     *
+     * Constraints: max 100 commitments per batch; max 1 MiB body (HTTP 413 if exceeded).
+     *
+     * The `X-BeCalm-Idempotent: 1` header opts this request into idempotency key injection
+     * by [com.becalm.android.data.remote.interceptor.IdempotencyInterceptor].
+     *
+     * Possible responses: 200 (partial or full success), 401, 413, 422, 429, 500, 503.
+     *
+     * Spec refs: CMT-005, CMT-006, CMT-007, SYNC-001.
+     *
+     * @param idem Opt-in sentinel; keep default `"1"` to enable idempotency key injection.
+     * @param request Batch body containing up to 100 [CommitmentBatchRequestDto.commitments].
+     */
+    @POST("v1/commitments:batch")
+    public suspend fun uploadCommitmentsBatch(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: CommitmentBatchRequestDto,
+    ): Response<CommitmentBatchResponseDto>
+
+    // =========================================================================
+    // SOURCE STATUS
+    // =========================================================================
+
+    /**
+     * Fetches per-source sync health for the six ingestion sources (voice excluded).
+     *
+     * The server returns exactly six items — one per source_type in the TDY-003 chip strip:
+     * gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar.
+     *
+     * Possible responses: 200, 401 (token refresh), 500 (server error), 503 (upstream unavailable).
+     * The client falls back to local [com.becalm.android.data.local.datastore.SyncCursorStore]
+     * derivation on any non-2xx — see [com.becalm.android.data.repository.SourceStatusRepository].
+     *
+     * Spec refs: TDY-003, SMG-001.
+     */
+    @GET("v1/source_status")
+    public suspend fun getSourceStatus(): Response<SourceStatusResponseDto>
 
     // =========================================================================
     // CALENDAR EVENTS

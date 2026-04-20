@@ -6,29 +6,18 @@
     <!-- Common -->
     <string name="action_skip">건너뛰기</string>
     <string name="action_back">뒤로</string>
-    <string name="action_retry">다시 시도</string>
-    <string name="action_next">다음</string>
     <string name="action_connect">연결</string>
     <string name="action_grant">권한 허용</string>
-    <string name="action_continue">계속</string>
     <string name="action_confirm">확인</string>
     <string name="action_cancel">취소</string>
     <string name="action_sign_out">로그아웃</string>
     <string name="action_wipe_data">데이터 삭제</string>
-    <string name="action_save">저장</string>
     <string name="action_reconnect">다시 연결</string>
     <string name="action_disconnect">연결 해제</string>
-    <string name="action_sync_now">지금 동기화</string>
-    <string name="action_mark_done">완료 처리</string>
-    <string name="action_reopen">다시 열기</string>
-    <string name="action_dismiss">닫기</string>
     <string name="label_settings">설정</string>
-    <string name="label_loading">불러오는 중…</string>
 
     <!-- Error / empty states -->
     <string name="error_generic_title">오류가 발생했습니다</string>
-    <string name="error_generic_message">예기치 않은 오류가 발생했습니다. 다시 시도해 주세요.</string>
-    <string name="empty_list_title">아직 항목이 없습니다</string>
 
     <!-- Splash -->
     <string name="splash_title">비캄</string>
@@ -38,7 +27,6 @@
     <string name="terms_title">이용약관 및 개인정보처리방침</string>
     <string name="terms_subtitle">계속하기 전에 아래 내용을 읽고 동의해 주세요.</string>
     <string name="terms_pipa_notice">비캄은 개인정보 보호법(PIPA)에 따라 귀하의 동의 하에 연락처, 캘린더 일정, 이메일 등 개인정보를 기기 내에서 수집·처리합니다. 귀하의 데이터는 우선 기기에 로컬 저장되며, 귀하의 명시적 동의 항목만 서버로 전송됩니다.</string>
-    <string name="terms_accept">이용약관 및 개인정보처리방침에 동의합니다</string>
     <string name="terms_accept_checkbox">약관을 읽고 동의합니다</string>
     <string name="terms_cta">계속</string>
     <string name="terms_decline_cta">동의 안 함 · 앱 종료</string>
@@ -114,11 +102,9 @@
     <string name="today_title">오늘</string>
     <string name="today_empty_title">오늘 일정 없음</string>
     <string name="today_empty_message">오늘 예정된 약속이나 회의가 없습니다.</string>
-    <string name="today_error_not_authenticated">로그인이 필요합니다.</string>
     <string name="today_section_commitments">약속</string>
     <string name="today_section_meetings">회의</string>
     <string name="today_section_events">이벤트</string>
-    <string name="today_syncing">동기화 중…</string>
 
     <!-- Persons -->
     <string name="persons_title">사람</string>
@@ -129,11 +115,9 @@
     <string name="persons_unassigned_title">미할당 이벤트</string>
     <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
     <string name="persons_unassigned_empty_message">모든 이벤트가 특정 사람과 연결되었습니다.</string>
-    <string name="persons_last_interaction">마지막 상호작용</string>
     <string name="persons_interactions_count">%d회 상호작용</string>
 
     <!-- Person detail -->
-    <string name="person_detail_title">사람 상세</string>
     <string name="person_detail_commitments_section">약속</string>
     <string name="person_detail_history_section">상호작용 기록</string>
     <string name="person_detail_empty_interactions">아직 기록된 상호작용이 없습니다.</string>
@@ -150,31 +134,20 @@
     <string name="commitments_filter_all">전체</string>
     <string name="commitments_filter_give">내가 한</string>
     <string name="commitments_filter_take">상대가 한</string>
-    <string name="commitments_filter_due_today">오늘 마감</string>
-    <string name="commitments_filter_overdue">기한 초과</string>
-    <string name="commitments_filter_done">완료</string>
     <string name="commitments_empty_title">약속 없음</string>
     <string name="commitments_empty_message">회의와 이메일에서 추출된 약속이 여기에 표시됩니다.</string>
-    <string name="commitments_direction_give">줄 것</string>
-    <string name="commitments_direction_take">받을 것</string>
 
     <!-- Settings -->
     <string name="settings_title">설정</string>
     <string name="settings_account_section">계정</string>
     <string name="settings_preferences_section">환경설정</string>
     <string name="settings_data_section">데이터</string>
-    <string name="settings_language_label">언어</string>
     <string name="settings_notifications_label">알림</string>
     <string name="settings_sources_label">데이터 소스</string>
-    <string name="settings_storage_label">로컬 저장소</string>
-    <string name="settings_storage_unknown">알 수 없음</string>
     <string name="settings_sign_out_confirm_title">로그아웃하시겠습니까?</string>
     <string name="settings_sign_out_confirm_message">비캄에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
     <string name="settings_wipe_confirm_title">모든 데이터를 삭제하시겠습니까?</string>
     <string name="settings_wipe_confirm_message">로컬에 저장된 모든 개인정보가 영구적으로 삭제되고 로그아웃됩니다. 이 작업은 취소할 수 없습니다.</string>
-    <string name="settings_lang_korean">한국어</string>
-    <string name="settings_lang_english">English (영어)</string>
-    <string name="settings_lang_system">시스템 언어 따름</string>
 
     <!-- Sources list -->
     <string name="sources_title">데이터 소스</string>
@@ -184,8 +157,6 @@
     <string name="sources_status_stale">오래됨</string>
     <string name="sources_status_error">오류</string>
     <string name="sources_status_unknown">연결 안 됨</string>
-    <string name="sources_last_sync_label">마지막 동기화</string>
-    <string name="sources_never_synced">동기화 없음</string>
 
     <!-- Bottom navigation -->
     <string name="nav_today">오늘</string>

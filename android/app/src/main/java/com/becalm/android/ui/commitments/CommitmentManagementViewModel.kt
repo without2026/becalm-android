@@ -5,22 +5,23 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
-import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import java.time.Instant as JavaInstant
 import javax.inject.Inject
 
 // ─── Filter ───────────────────────────────────────────────────────────────────
@@ -28,21 +29,18 @@ import javax.inject.Inject
 /**
  * Display filter applied in-memory to the full commitment list.
  *
- * - [ALL]       — no filter; shows every row for the current user.
- * - [GIVE]      — direction == "give".
- * - [TAKE]      — direction == "take".
- * - [DUE_TODAY] — due_date == today (client clock).
- * - [OVERDUE]   — due_date < today and not yet done/dismissed.
- * - [DONE]      — commitmentState == [CommitmentState.DONE].
+ * - [ALL]  — no filter; shows every row for the current user.
+ * - [GIVE] — direction == "give".
+ * - [TAKE] — direction == "take".
+ *
+ * Due-today and overdue state is surfaced per-card as a DN badge rather than as a
+ * top-level filter (CTO Q5).
  */
 // spec: CMT-001
 public enum class CommitmentFilter {
     ALL,
     GIVE,
     TAKE,
-    DUE_TODAY,
-    OVERDUE,
-    DONE,
 }
 
 // ─── Row model ────────────────────────────────────────────────────────────────
@@ -90,26 +88,37 @@ public data class CommitmentUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "CommitmentMgmtVM"
+private const val COUNTERPARTY_DISPLAY_MAX = 30
 
 /**
  * ViewModel for CommitmentManagementScreen.
  *
- * Collects all commitments for the current user from [CommitmentRepository.observeAllForUser],
- * then applies [CommitmentFilter] in-memory so that a single Room subscription drives all
- * filter tabs.
+ * Collects all commitments for the current user from [CommitmentRepository.observeAllForUser]
+ * and joins them against the on-device enrichment map from
+ * [PersonEnrichmentRepository.observeEnrichmentMap] (Room-only; PIPA-protected, never
+ * uploaded). [CommitmentFilter] is applied in-memory so that a single Room subscription
+ * drives all filter tabs.
  *
  * All mutating actions delegate to [CommitmentRepository.transitionState]; on
  * [BecalmResult.Failure] the error is surfaced via [CommitmentUiState.error] — never
  * swallowed.
  *
- * @param commitmentRepository Source of truth for commitment data.
- * @param reminderScheduler    Schedules / cancels AlarmManager reminders.
- * @param userPrefsStore       Provides the reactive current user ID.
- * @param logger               Structured log sink.
+ * Enrichment resolution for commitment counterparty display (CMT-001):
+ * 1. `enrichment[personRef]?.displayName`
+ * 2. `enrichment[personRef]?.nickname`
+ * 3. `personRef` itself (already canonicalized — phone E.164 / email / display name)
+ * 4. `counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows without personRef
+ *
+ * @param commitmentRepository      Source of truth for commitment data.
+ * @param personEnrichmentRepository On-device PIPA-only contact enrichment map source.
+ * @param reminderScheduler         Schedules / cancels AlarmManager reminders.
+ * @param userPrefsStore            Provides the reactive current user ID.
+ * @param logger                    Structured log sink.
  */
 @HiltViewModel
 public class CommitmentManagementViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
+    private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
@@ -133,8 +142,15 @@ public class CommitmentManagementViewModel @Inject constructor(
 
     // ─── Private observation ──────────────────────────────────────────────────
 
+    /** Latest enrichment map from [PersonEnrichmentRepository], kept in-memory so filter
+     *  switches can re-render with the current enrichment without re-collecting.
+     */
+    private val enrichmentMap: MutableStateFlow<Map<String, PersonEnrichmentEntity>> =
+        MutableStateFlow(emptyMap())
+
     /**
-     * Subscribes to the reactive commitment list for the current user.
+     * Subscribes to the reactive commitment list for the current user, joined against the
+     * on-device enrichment map (CMT-001 — person_ref → display_name / nickname).
      *
      * The current user ID is sourced from [UserPrefsStore.observeCurrentUserId]. When the
      * ID is absent (not yet signed in) the item list is cleared. When present, all commitments
@@ -143,7 +159,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     // spec: CMT-001, CMT-002
     private fun observeCommitments() {
         viewModelScope.launch {
-            userPrefsStore.observeCurrentUserId()
+            val commitmentsByUser = userPrefsStore.observeCurrentUserId()
                 .flatMapLatest { userId ->
                     if (userId == null) {
                         flowOf(emptyList())
@@ -151,17 +167,24 @@ public class CommitmentManagementViewModel @Inject constructor(
                         commitmentRepository.observeAllForUser(userId)
                     }
                 }
+            combine(
+                commitmentsByUser,
+                personEnrichmentRepository.observeEnrichmentMap(),
+            ) { entities, enrichment ->
+                entities to enrichment
+            }
                 .catch { e ->
                     _uiState.update {
                         it.copy(loading = false, error = e.message ?: "load failed")
                     }
                 }
-                .collect { entities ->
+                .collect { (entities, enrichment) ->
                     allEntities.value = entities
+                    enrichmentMap.value = enrichment
                     val filter = _uiState.value.filter
                     _uiState.update { state ->
                         state.copy(
-                            items = applyFilter(entities, filter),
+                            items = applyFilter(entities, filter, enrichment),
                             loading = false,
                         )
                     }
@@ -188,7 +211,7 @@ public class CommitmentManagementViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 filter = filter,
-                items = applyFilter(allEntities.value, filter),
+                items = applyFilter(allEntities.value, filter, enrichmentMap.value),
             )
         }
     }
@@ -216,10 +239,14 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-006
     public fun onSchedule(id: String, at: Instant) {
-        launchActionWithEffect("onSchedule", id, {
+        launchAction(
+            name = "onSchedule",
+            id = id,
+            effect = {
+                reminderScheduler.schedule(id, at)
+            },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))
-        }) {
-            reminderScheduler.schedule(id, JavaInstant.ofEpochMilli(at.toEpochMilliseconds()))
         }
     }
 
@@ -230,10 +257,12 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-007
     public fun onMarkDone(id: String) {
-        launchActionWithEffect("onMarkDone", id, {
+        launchAction(
+            name = "onMarkDone",
+            id = id,
+            effect = { reminderScheduler.cancel(id) },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)
-        }) {
-            reminderScheduler.cancel(id)
         }
     }
 
@@ -245,59 +274,40 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-008
     public fun onDismiss(id: String) {
-        launchActionWithEffect("onDismiss", id, {
+        launchAction(
+            name = "onDismiss",
+            id = id,
+            effect = { reminderScheduler.cancel(id) },
+        ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)
-        }) {
-            reminderScheduler.cancel(id)
         }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
+    /** id 해시를 로그용 8자리 hex 문자열로 변환한다. */
+    private fun hashId(id: String): String = "%08x".format(id.hashCode())
+
     /**
-     * Launches a simple action that returns [BecalmResult] and surfaces failure to
-     * [CommitmentUiState.error]. Used for actions that do not require post-success
-     * side effects beyond clearing the error flag.
+     * 원래 launchAction / launchActionWithEffect 두 버전을 하나로 병합한 헬퍼.
+     * effect는 block이 Success일 때만, 상태 머신 업데이트(_uiState) 이후에 실행되며,
+     * null이면 실행을 건너뛴다. CMT-005/6/7 FSM 전이 순서는 block 내부 책임이다.
      */
     private fun launchAction(
         name: String,
         id: String,
+        effect: (suspend () -> Unit)? = null,
         block: suspend () -> BecalmResult<*>,
     ) {
         viewModelScope.launch {
             when (val result = block()) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "$name succeeded id=%08x".format(id.hashCode()))
+                    logger.d(TAG, "$name succeeded id=${hashId(id)}")
                     _uiState.update { it.copy(error = null) }
+                    effect?.invoke()
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "$name failed id=%08x: ${result.error}".format(id.hashCode()))
-                    _uiState.update { it.copy(error = result.error.toString()) }
-                }
-            }
-        }
-    }
-
-    /**
-     * Like [launchAction], but on success runs an additional side-effect [effect] (e.g.
-     * schedule/cancel an alarm). The effect runs after the state transition succeeds and
-     * is not wrapped in a try-catch — if the effect throws, the transition is still committed.
-     */
-    private fun launchActionWithEffect(
-        name: String,
-        id: String,
-        block: suspend () -> BecalmResult<*>,
-        effect: suspend () -> Unit,
-    ) {
-        viewModelScope.launch {
-            when (val result = block()) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "$name succeeded id=%08x".format(id.hashCode()))
-                    _uiState.update { it.copy(error = null) }
-                    effect()
-                }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "$name failed id=%08x: ${result.error}".format(id.hashCode()))
+                    logger.w(TAG, "$name failed id=${hashId(id)}: ${result.error}")
                     _uiState.update { it.copy(error = result.error.toString()) }
                 }
             }
@@ -307,33 +317,20 @@ public class CommitmentManagementViewModel @Inject constructor(
     /**
      * Derives a [CommitmentRow] list by applying [filter] to [entities] in-memory.
      *
-     * Today is determined by the JVM default clock at the moment of each filter evaluation.
-     * Filter [CommitmentFilter.DUE_TODAY] and [CommitmentFilter.OVERDUE] compare
-     * [CommitmentEntity.dueDate] as an ISO-8601 string against the system date in UTC to
-     * avoid a LocalDate dependency on the ViewModel layer.
+     * Only direction-based filters are exposed to the UI; due-today and overdue are
+     * surfaced per-card via a DN badge rather than as a top-level filter (CTO Q5).
      */
     // spec: CMT-002, CMT-003, CMT-004, CMT-010
     // spec: CMT-005..010 — post-Round-1 state model alignment verified
     private fun applyFilter(
         entities: List<CommitmentEntity>,
         filter: CommitmentFilter,
+        enrichment: Map<String, PersonEnrichmentEntity>,
     ): List<CommitmentRow> {
-        val todayIso = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
         val filtered = when (filter) {
             CommitmentFilter.ALL -> entities
             CommitmentFilter.GIVE -> entities.filter { it.direction == "give" }
             CommitmentFilter.TAKE -> entities.filter { it.direction == "take" }
-            CommitmentFilter.DUE_TODAY -> entities.filter { it.dueDate?.toString() == todayIso }
-            CommitmentFilter.OVERDUE -> entities.filter { entity ->
-                val due = entity.dueDate?.toString()
-                due != null &&
-                    due < todayIso &&
-                    entity.commitmentState != CommitmentState.DONE &&
-                    entity.commitmentState != CommitmentState.DISMISSED
-            }
-            CommitmentFilter.DONE -> entities.filter {
-                it.commitmentState == CommitmentState.DONE
-            }
         }
         return filtered.map { entity ->
             CommitmentRow(
@@ -342,8 +339,30 @@ public class CommitmentManagementViewModel @Inject constructor(
                 direction = entity.direction,
                 derivedStatus = entity.commitmentState.name,
                 dueDate = entity.dueDate,
-                counterpartyDisplayName = entity.counterpartyRaw?.take(30),
+                counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),
             )
+        }
+    }
+
+    /**
+     * CMT-001 counterparty display resolution. Fallback chain:
+     * 1. `enrichment[personRef].displayName`
+     * 2. `enrichment[personRef].nickname`
+     * 3. `personRef` itself (canonicalized identifier is acceptable as last-mile label)
+     * 4. `counterpartyRaw.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows without personRef
+     *
+     * Returns `null` only when the commitment has no personRef AND no counterpartyRaw.
+     */
+    private fun resolveCounterpartyDisplay(
+        commitment: CommitmentEntity,
+        enrichment: Map<String, PersonEnrichmentEntity>,
+    ): String? {
+        val ref = commitment.personRef
+        return if (ref != null) {
+            val hit = enrichment[ref]
+            hit?.displayName ?: hit?.nickname ?: ref
+        } else {
+            commitment.counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)
         }
     }
 }

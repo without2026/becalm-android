@@ -11,7 +11,7 @@ import timber.log.Timber
  * Application class for BeCalm Android.
  *
  * Implements [Configuration.Provider] so that WorkManager uses [HiltWorkerFactory],
- * which is required because multiple workers are annotated with [@HiltWorker][dagger.hilt.android.HiltAndroidApp].
+ * which is required because multiple workers are annotated with [@HiltWorker][androidx.hilt.work.HiltWorker].
  * Default WorkManager auto-initialization is disabled in AndroidManifest.xml.
  *
  * Plants the Timber tree in debug builds only. In release builds nothing is planted so

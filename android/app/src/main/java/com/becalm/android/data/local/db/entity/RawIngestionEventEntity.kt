@@ -155,7 +155,7 @@ public data class RawIngestionEventEntity(
      * - "failed"            — upload exhausted max retries; event quarantined.
      * - "awaiting_consent"  — voice source only. pipa_third_party_consent=false at worker
      *                         run time; upload blocked until consent is granted (VOI-004).
-     *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoice] is called.
+     *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoiceAndReturnIds] is called.
      */
     @ColumnInfo(name = "sync_status")
     val syncStatus: String = "pending",

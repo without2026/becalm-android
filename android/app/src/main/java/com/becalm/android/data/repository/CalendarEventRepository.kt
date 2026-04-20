@@ -2,6 +2,7 @@ package com.becalm.android.data.repository
 
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.CalendarEventDao
@@ -51,16 +52,6 @@ public interface CalendarEventRepository {
         personRef: String,
         limit: Int = 100,
     ): Flow<List<CalendarEventEntity>>
-
-    /**
-     * Emits the event with [id], or `null` when absent, re-emitting on every table change.
-     */
-    public fun observeById(id: String): Flow<CalendarEventEntity?>
-
-    /**
-     * Returns the event with [id], or `null` when absent.
-     */
-    public suspend fun findById(id: String): CalendarEventEntity?
 
     /**
      * Pulls calendar events from Railway that have changed since [since], upserts them
@@ -125,7 +116,6 @@ public interface CalendarEventRepository {
 
 private const val TAG = "CalendarEventRepository"
 private const val CURSOR_KEY = "calendar_events"
-private const val MAX_PAGES = 5
 private val EPOCH_START: Instant = Instant.fromEpochMilliseconds(0)
 private val EPOCH_END: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
 
@@ -157,123 +147,160 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             events.filter { it.attendeesRaw?.contains(personRef) == true }.take(limit)
         }
 
-    override fun observeById(id: String): Flow<CalendarEventEntity?> =
-        dao.observeById(id)
-
-    override suspend fun findById(id: String): CalendarEventEntity? = dao.findById(id)
-
     override suspend fun refreshSince(
         userId: String,
         since: Instant?,
-    ): BecalmResult<RefreshStats> {
-        return try {
-            // Resume from the persisted cursor; override start-time via `since` when supplied.
-            var cursor: String? = cursorStore.observeCursor(CURSOR_KEY).first()
-            val sinceStr: String? = since?.toString()
+    ): BecalmResult<RefreshStats> = safeApi(
+        ioLogMessage = "refreshSince network error",
+        unexpectedLogMessage = "refreshSince unexpected error",
+    ) {
+        // Resume from the persisted cursor; override start-time via `since` when supplied.
+        var cursor: String? = cursorStore.observeCursor(CURSOR_KEY).first()
+        val sinceStr: String? = since?.toString()
 
-            var totalFetched = 0
-            var totalUpserted = 0
-            var serverHasMore = false
-            var lastCursor: String? = cursor
+        var totalFetched = 0
+        var totalUpserted = 0
+        var serverHasMore = false
+        var lastCursor: String? = cursor
 
-            for (page in 1..MAX_PAGES) {
-                val response = api.getCalendarEvents(
-                    cursor = cursor,
-                    since = sinceStr,
-                )
-                if (!response.isSuccessful) {
-                    logger.w(TAG, "refreshSince HTTP ${response.code()} on page $page")
-                    return BecalmResult.Failure(response.toError())
-                }
-                val body = response.body()
-                    ?: return BecalmResult.Failure(
-                        BecalmError.Unknown(IllegalStateException("null body on page $page")),
-                    )
-
-                val entities = body.data.map { it.toEntity(userId) }
-                dao.insertAll(entities)
-
-                // Persist the cursor immediately after each page is durably written.
-                // If the process is killed mid-refresh, the next run resumes from the
-                // last successfully upserted page instead of re-fetching from scratch.
-                cursorStore.setCursor(CURSOR_KEY, body.cursor)
-
-                totalFetched += body.data.size
-                totalUpserted += entities.size
-                lastCursor = body.cursor
-                serverHasMore = body.hasMore
-
-                if (!body.hasMore) break
-                cursor = body.cursor
+        for (page in 1..REFRESH_PAGE_CAP) {
+            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page)) {
+                is BecalmResult.Success -> r.value
+                is BecalmResult.Failure -> return@safeApi BecalmResult.Failure(r.error)
             }
+            totalFetched += outcome.fetched
+            totalUpserted += outcome.upserted
+            lastCursor = outcome.cursor
+            serverHasMore = outcome.hasMore
 
-            logger.d(TAG, "refreshSince done fetched=$totalFetched upserted=$totalUpserted hasMore=$serverHasMore")
-            BecalmResult.Success(
-                CalendarEventRepository.RefreshStats(
-                    fetched = totalFetched,
-                    upserted = totalUpserted,
-                    hasMore = serverHasMore,
-                    nextCursor = lastCursor,
-                ),
-            )
-        } catch (e: IOException) {
-            logger.e(TAG, "refreshSince network error", e)
-            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
-        } catch (e: Throwable) {
-            logger.e(TAG, "refreshSince unexpected error", e)
-            BecalmResult.Failure(BecalmError.Unknown(e))
+            if (!outcome.hasMore) break
+            cursor = outcome.cursor
         }
+
+        logger.d(TAG, "refreshSince done fetched=$totalFetched upserted=$totalUpserted hasMore=$serverHasMore")
+        BecalmResult.Success(
+            CalendarEventRepository.RefreshStats(
+                fetched = totalFetched,
+                upserted = totalUpserted,
+                hasMore = serverHasMore,
+                nextCursor = lastCursor,
+            ),
+        )
     }
+
+    /**
+     * Single-page fetch + persist unit for [refreshSince].
+     *
+     * Reads one page from [RailwayApi.getCalendarEvents], writes entities via [CalendarEventDao.insertAll],
+     * and advances the [SyncCursorStore] cursor on successful persistence. Returns a [PageOutcome]
+     * describing counts + server paging hints, or a typed [BecalmError] on HTTP / null-body failure.
+     *
+     * Log strings preserved byte-identical with the former inlined loop body.
+     */
+    private suspend fun fetchAndPersistPage(
+        userId: String,
+        cursor: String?,
+        sinceStr: String?,
+        page: Int,
+    ): BecalmResult<PageOutcome> {
+        val response = api.getCalendarEvents(
+            cursor = cursor,
+            since = sinceStr,
+        )
+        if (!response.isSuccessful) {
+            logger.w(TAG, "refreshSince HTTP ${response.code()} on page $page")
+            return BecalmResult.Failure(response.toError())
+        }
+        val body = response.body()
+            ?: return BecalmResult.Failure(
+                BecalmError.Unknown(IllegalStateException("null body on page $page")),
+            )
+
+        val entities = body.data.map { it.toEntity(userId) }
+        dao.insertAll(entities)
+
+        // Persist the cursor immediately after each page is durably written.
+        // If the process is killed mid-refresh, the next run resumes from the
+        // last successfully upserted page instead of re-fetching from scratch.
+        cursorStore.setCursor(CURSOR_KEY, body.cursor)
+
+        return BecalmResult.Success(
+            PageOutcome(
+                fetched = body.data.size,
+                upserted = entities.size,
+                cursor = body.cursor,
+                hasMore = body.hasMore,
+            ),
+        )
+    }
+
+    /** Per-page result for [fetchAndPersistPage]. */
+    private data class PageOutcome(
+        val fetched: Int,
+        val upserted: Int,
+        val cursor: String?,
+        val hasMore: Boolean,
+    )
 
     override suspend fun insertLocalBatch(entities: List<CalendarEventEntity>): BecalmResult<Int> {
         if (entities.isEmpty()) return BecalmResult.Success(0)
-        return try {
+        return logger.daoOp(TAG, "insertLocalBatch failed") {
             val rowIds = dao.insertAll(entities)
             logger.d(TAG, "insertLocalBatch wrote=${rowIds.size}")
-            BecalmResult.Success(rowIds.size)
-        } catch (e: IOException) {
-            logger.e(TAG, "insertLocalBatch IO error", e)
-            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
-        } catch (e: Throwable) {
-            logger.e(TAG, "insertLocalBatch unexpected error", e)
-            BecalmResult.Failure(BecalmError.Unknown(e))
+            rowIds.size
         }
     }
 
-    override suspend fun triggerServerSync(): BecalmResult<CalendarSyncResponse> {
-        return try {
-            val response = api.syncCalendarEvents()
-            if (!response.isSuccessful) {
-                logger.w(TAG, "triggerServerSync HTTP ${response.code()}")
-                return BecalmResult.Failure(response.toError())
-            }
-            val body = response.body()
-                ?: return BecalmResult.Failure(
-                    BecalmError.Unknown(IllegalStateException("null body")),
-                )
-            logger.d(TAG, "triggerServerSync synced=${body.synced}")
-            BecalmResult.Success(body)
-        } catch (e: IOException) {
-            logger.e(TAG, "triggerServerSync network error", e)
-            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
-        } catch (e: Throwable) {
-            logger.e(TAG, "triggerServerSync unexpected error", e)
-            BecalmResult.Failure(BecalmError.Unknown(e))
+    override suspend fun triggerServerSync(): BecalmResult<CalendarSyncResponse> = safeApi(
+        ioLogMessage = "triggerServerSync network error",
+        unexpectedLogMessage = "triggerServerSync unexpected error",
+    ) {
+        val response = api.syncCalendarEvents()
+        if (!response.isSuccessful) {
+            logger.w(TAG, "triggerServerSync HTTP ${response.code()}")
+            return@safeApi BecalmResult.Failure(response.toError())
         }
+        val body = response.body()
+            ?: return@safeApi BecalmResult.Failure(
+                BecalmError.Unknown(IllegalStateException("null body")),
+            )
+        logger.d(TAG, "triggerServerSync synced=${body.synced}")
+        BecalmResult.Success(body)
     }
 
-    override suspend fun deleteAllForUser(userId: String): BecalmResult<Int> {
-        return try {
+    override suspend fun deleteAllForUser(userId: String): BecalmResult<Int> =
+        logger.daoOp(TAG, "deleteAllForUser failed userId=$userId") {
             val count = dao.deleteAllForUser(userId)
             logger.d(TAG, "deleteAllForUser userId=$userId deleted=$count")
-            BecalmResult.Success(count)
-        } catch (e: Throwable) {
-            logger.e(TAG, "deleteAllForUser error", e)
-            BecalmResult.Failure(BecalmError.Unknown(e))
+            count
         }
-    }
 
     // ─── Private helpers ─────────────────────────────────────────────────────
+
+    /**
+     * refreshSince·triggerServerSync 두 곳의 동일한
+     * `catch (IOException) → Network(0, e.message ?: "IO"); catch (Throwable) → Unknown(e)`
+     * 블록을 통합한다. 두 호출지 모두 같은 예외 타입 쌍, 같은 로그 레벨(e),
+     * 같은 에러 변환을 사용하기 때문에 바이트-동일 패턴이 유지된다.
+     * [ioLogMessage]·[unexpectedLogMessage]는 원본 인라인 블록의 문자열을 그대로
+     * 보존한다(예: "refreshSince network error" vs "triggerServerSync network error").
+     * [block]은 이미 BecalmResult를 돌려주므로(성공 분기가 Failure를 섞어 돌려보낼 수 있음),
+     * 이 helper는 오직 예외 → BecalmResult.Failure 변환만 담당한다. 다른 예외 타입을
+     * 잡아야 하거나 다른 BecalmError로 매핑해야 하면 이 helper를 쓰지 말고 inline 유지.
+     */
+    private suspend inline fun <T> safeApi(
+        ioLogMessage: String,
+        unexpectedLogMessage: String,
+        block: () -> BecalmResult<T>,
+    ): BecalmResult<T> = try {
+        block()
+    } catch (e: IOException) {
+        logger.e(TAG, ioLogMessage, e)
+        BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
+    } catch (e: Throwable) {
+        logger.e(TAG, unexpectedLogMessage, e)
+        BecalmResult.Failure(BecalmError.Unknown(e))
+    }
 
     /** Maps a non-2xx [Response] to the appropriate [BecalmError] subtype. */
     private fun <T> Response<T>.toError(): BecalmError = when (code()) {

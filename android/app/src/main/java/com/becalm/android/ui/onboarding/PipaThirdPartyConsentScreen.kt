@@ -28,7 +28,7 @@ import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 
 /**
- * Onboarding step 3 of 12: PIPA 제3자 제공 + 국외 이전 동의.
+ * Onboarding step 3 of 13: PIPA 제3자 제공 + 국외 이전 동의.
  *
  * Displays the 6 mandatory disclosure items required by PIPA Article 17 (제3자 제공) and
  * Article 28-8 (국외 이전) before BeCalm may upload audio bytes to Google LLC / Vertex AI.
@@ -121,35 +121,21 @@ internal fun PipaThirdPartyConsentContent(
                     .glassPanel(MaterialTheme.shapes.medium)
                     .padding(16.dp),
             ) {
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_1_label),
-                    value = stringResource(R.string.onb_pipa_bullet_1_value),
+                val bullets = listOf(
+                    R.string.onb_pipa_bullet_1_label to R.string.onb_pipa_bullet_1_value,
+                    R.string.onb_pipa_bullet_2_label to R.string.onb_pipa_bullet_2_value,
+                    R.string.onb_pipa_bullet_3_label to R.string.onb_pipa_bullet_3_value,
+                    R.string.onb_pipa_bullet_4_label to R.string.onb_pipa_bullet_4_value,
+                    R.string.onb_pipa_bullet_5_label to R.string.onb_pipa_bullet_5_value,
+                    R.string.onb_pipa_bullet_6_label to R.string.onb_pipa_bullet_6_value,
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_2_label),
-                    value = stringResource(R.string.onb_pipa_bullet_2_value),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_3_label),
-                    value = stringResource(R.string.onb_pipa_bullet_3_value),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_4_label),
-                    value = stringResource(R.string.onb_pipa_bullet_4_value),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_5_label),
-                    value = stringResource(R.string.onb_pipa_bullet_5_value),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                PipaDisclosureBullet(
-                    label = stringResource(R.string.onb_pipa_bullet_6_label),
-                    value = stringResource(R.string.onb_pipa_bullet_6_value),
-                )
+                bullets.forEachIndexed { index, (labelRes, valueRes) ->
+                    if (index > 0) Spacer(modifier = Modifier.height(12.dp))
+                    PipaDisclosureBullet(
+                        label = stringResource(labelRes),
+                        value = stringResource(valueRes),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

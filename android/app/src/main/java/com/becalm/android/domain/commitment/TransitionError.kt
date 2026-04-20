@@ -4,7 +4,7 @@ package com.becalm.android.domain.commitment
  * Errors that can be returned by [CommitmentStateMachine.transition].
  *
  * - [IllegalTransition] — the requested [CommitmentEvent] is not a legal edge from [from].
- * - [MissingSchedule]   — a [CommitmentEvent.Schedule] event carried a null or past [at] value.
+ * - [MissingSchedule]   — a [CommitmentEvent.Schedule] event carried a past [at] value.
  */
 public sealed interface TransitionError {
 
@@ -21,7 +21,7 @@ public sealed interface TransitionError {
 
     /**
      * A [CommitmentEvent.Schedule] event was applied but the [CommitmentEvent.Schedule.at]
-     * instant is null or refers to a past moment.
+     * instant refers to a past moment.
      */
     public data object MissingSchedule : TransitionError
 }

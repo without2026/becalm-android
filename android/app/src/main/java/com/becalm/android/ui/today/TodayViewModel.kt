@@ -2,15 +2,22 @@ package com.becalm.android.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.ForegroundCatchUpScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
@@ -19,7 +26,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.datetime.Clock
+import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -80,11 +87,15 @@ public sealed class TimelineItem {
  * @param syncing True when the source is in [SourceConnectionStatus.SYNCING].
  * @param statusLabel Human-readable status string for display.
  * @param errorMessage Non-null only when the source is in [SourceConnectionStatus.ERROR].
+ * @param lastSyncedAt Wall-clock instant of the most-recently completed successful sync,
+ *                     or `null` when no sync has ever finished successfully. Drives the
+ *                     TDY-003 synced chip HH:mm label.
  */
 public data class SourceStatusUi(
     val syncing: Boolean,
     val statusLabel: String,
     val errorMessage: String?,
+    val lastSyncedAt: Instant?,
 )
 
 /**
@@ -94,6 +105,10 @@ public data class SourceStatusUi(
  * @param timeline Merged, time-sorted list of commitments and calendar items for today.
  * @param sourceStatus Per-source-type sync health snapshot keyed by [SourceType] string.
  * @param overallSyncing True when at least one source is actively syncing.
+ *                       Kept for backwards compatibility with existing consumers
+ *                       (top-bar spinner in [com.becalm.android.ui.today.TodayTimelineScreen]).
+ * @param overall  Aggregate sync state driving the TDY-008 banner.
+ * @param refreshing True while a user-initiated pull-to-refresh (TDY-006) is in flight.
  * @param error Non-null when an unrecoverable error has occurred (e.g. not authenticated).
  */
 // spec: TDY-008 — aggregate sync status
@@ -102,32 +117,48 @@ public data class TodayUiState(
     val timeline: List<TimelineItem> = emptyList(),
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
+    val overall: OverallSyncState = OverallSyncState.Idle,
+    val refreshing: Boolean = false,
     val error: String? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "TodayViewModel"
+private const val COUNTERPARTY_DISPLAY_MAX = 30
 
 /**
  * ViewModel for the Today screen (TDY-001..010).
  *
- * Combines commitments pending today, calendar events starting today, and per-source
- * sync health into a single [TodayUiState] flow. If the user is not authenticated the
- * state immediately shows an error and no downstream repository flows are subscribed.
+ * Combines commitments pending today, calendar events starting today, per-source
+ * sync health, and the on-device person-enrichment map (PIPA Room-only) into a
+ * single [TodayUiState] flow. If the user is not authenticated the state immediately
+ * shows an error and no downstream repository flows are subscribed.
  *
  * Architecture:
  * 1. A [userIdFlow] resolves the session once and emits either a userId string or null.
  * 2. [commitmentFlow] and [calendarFlow] flatMapLatest on [userIdFlow], emitting empty
- *    lists when userId is null so the combine always has three active flows.
- * 3. The three flows are combined into [state].
+ *    lists when userId is null so the combine always has active flows.
+ * 3. Six upstream flows are combined into [state]: [userIdFlow], [commitmentFlow],
+ *    [calendarFlow], [SourceStatusRepository.observeAll],
+ *    [PersonEnrichmentRepository.observeEnrichmentMap], and the [refreshingFlow]
+ *    side-channel.
+ *
+ * Enrichment resolution for commitment counterparty display (TDY-001):
+ * 1. `enrichment[personRef]?.displayName` (ContactsContract DISPLAY_NAME), then
+ * 2. `enrichment[personRef]?.nickname`, then
+ * 3. `personRef` itself (already canonicalized — phone E.164 / email / display name), then
+ * 4. `counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows with no personRef.
  */
 @HiltViewModel
 public class TodayViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val authRepository: AuthRepository,
+    private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
+    private val clock: Clock,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -155,11 +186,14 @@ public class TodayViewModel @Inject constructor(
         calendarEventRepository.observeForUser(userId, dayStart, dayEnd)
     }
 
+    /** Drives the [PullRefreshIndicator] while [onPullRefresh] is in flight (TDY-006). */
+    private val refreshingFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
     /**
      * Observable state consumed by the Today screen composable.
      *
      * Transitions from [TodayUiState.loading]=true to the first real emission as soon
-     * as all three upstream flows produce their first values. When userId is null the
+     * as all upstream flows produce their first values. When userId is null the
      * combined emission sets [TodayUiState.error].
      */
     public val state: StateFlow<TodayUiState> = combine(
@@ -167,19 +201,35 @@ public class TodayViewModel @Inject constructor(
         commitmentFlow,
         calendarFlow,
         sourceStatusRepository.observeAll(),
-    ) { userId, commitments, calendarEvents, sourceStatuses ->
+        personEnrichmentRepository.observeEnrichmentMap(),
+        refreshingFlow,
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        val userId = values[0] as String?
+        @Suppress("UNCHECKED_CAST")
+        val commitments = values[1] as List<CommitmentEntity>
+        @Suppress("UNCHECKED_CAST")
+        val calendarEvents = values[2] as List<CalendarEventEntity>
+        @Suppress("UNCHECKED_CAST")
+        val sourceStatuses = values[3] as List<SourceStatus>
+        @Suppress("UNCHECKED_CAST")
+        val enrichment = values[4] as Map<String, PersonEnrichmentEntity>
+        val refreshing = values[5] as Boolean
+
         if (userId == null) {
             return@combine TodayUiState(
                 loading = false,
+                refreshing = refreshing,
                 error = "not authenticated",
             )
         }
-        val timeline = buildTimeline(commitments, calendarEvents)
+        val timeline = buildTimeline(commitments, calendarEvents, enrichment)
         val statusMap = sourceStatuses.associate { s ->
             s.sourceType to SourceStatusUi(
                 syncing = s.status == SourceConnectionStatus.SYNCING,
                 statusLabel = s.status.name,
                 errorMessage = s.errorMessage,
+                lastSyncedAt = s.lastSyncedAt,
             )
         }
         TodayUiState(
@@ -187,6 +237,8 @@ public class TodayViewModel @Inject constructor(
             timeline = timeline,
             sourceStatus = statusMap,
             overallSyncing = sourceStatuses.any { it.status == SourceConnectionStatus.SYNCING },
+            overall = deriveOverallState(sourceStatuses),
+            refreshing = refreshing,
             error = null,
         )
     }.catch { e ->
@@ -212,48 +264,113 @@ public class TodayViewModel @Inject constructor(
         logger.d(TAG, "cleared")
     }
 
+    // ─── Public intents ──────────────────────────────────────────────────────
+
+    /**
+     * Pull-to-refresh handler (TDY-006 / TDY-009).
+     *
+     * Per TDY-009 the pull gesture both:
+     * 1. Refreshes Room-backed state from Railway for all three repositories so the
+     *    timeline reflects the server truth once the round-trip completes.
+     * 2. Fires [ForegroundCatchUpScheduler.triggerCatchUp] to enqueue the ING-011
+     *    parallel 6-source catch-up + SYNC-006 immediate upload pass without waiting
+     *    for the next foreground transition.
+     *
+     * The timeline itself is driven by Room (offline-first), so the user sees cached data
+     * immediately while the server refresh and catch-up run in the background. Failures do
+     * not clobber local state.
+     */
+    public fun onPullRefresh() {
+        // TDY-009: tap-driven catch-up on the strip is explicitly prohibited ("칩 탭
+        // 인터랙션 없음") — this pull gesture is the single user-facing trigger.
+        foregroundCatchUpScheduler.triggerCatchUp()
+        viewModelScope.launch {
+            val userId = authRepository.currentSession()?.userId
+            refreshingFlow.value = true
+            try {
+                sourceStatusRepository.refreshFromServer()
+                if (userId != null) {
+                    commitmentRepository.refreshSince(userId = userId, since = null)
+                    calendarEventRepository.refreshSince(userId = userId, since = null)
+                }
+            } finally {
+                refreshingFlow.value = false
+            }
+        }
+    }
+
     // ─── Private helpers ──────────────────────────────────────────────────────
 
     private fun buildTimeline(
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
-    ): List<TimelineItem> {
-        val commitmentItems = commitments.map { c ->
-            TimelineItem.Commitment(
-                id = c.id,
-                title = c.title,
-                direction = c.direction,
-                counterpartyDisplayName = c.counterpartyRaw,
-                sortKey = c.sourceEventOccurredAt,
+        enrichment: Map<String, PersonEnrichmentEntity>,
+    ): List<TimelineItem> =
+        (commitments.map { it.toTimelineItem(enrichment) } + calendarEvents.map { it.toTimelineItem() })
+            .sortedBy { it.sortKey }
+
+    /** Projection of [CommitmentEntity] into the Today timeline. Field mapping is display-safe. */
+    private fun CommitmentEntity.toTimelineItem(
+        enrichment: Map<String, PersonEnrichmentEntity>,
+    ): TimelineItem.Commitment =
+        TimelineItem.Commitment(
+            id = id,
+            title = title,
+            direction = direction,
+            counterpartyDisplayName = resolveCounterpartyDisplay(this, enrichment),
+            sortKey = sourceEventOccurredAt,
+        )
+
+    /**
+     * TDY-001 counterparty display resolution. Fallback chain:
+     * 1. `enrichment[personRef].displayName`
+     * 2. `enrichment[personRef].nickname`
+     * 3. `personRef` itself (canonicalized identifier is acceptable as last-mile label)
+     * 4. `counterpartyRaw.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows without personRef
+     *
+     * Returns `null` only when the commitment has no personRef AND no counterpartyRaw.
+     */
+    private fun resolveCounterpartyDisplay(
+        commitment: CommitmentEntity,
+        enrichment: Map<String, PersonEnrichmentEntity>,
+    ): String? {
+        val ref = commitment.personRef
+        return if (ref != null) {
+            val hit = enrichment[ref]
+            hit?.displayName ?: hit?.nickname ?: ref
+        } else {
+            commitment.counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)
+        }
+    }
+
+    /**
+     * Projection of [CalendarEventEntity] into the Today timeline. `attendeesRaw` 존재 여부로
+     * Meeting / CalendarEvent 를 분기하며, 원본 인라인 분기와 byte-identical 하게 필드를 매핑한다.
+     */
+    private fun CalendarEventEntity.toTimelineItem(): TimelineItem =
+        if (!attendeesRaw.isNullOrBlank()) {
+            TimelineItem.Meeting(
+                id = id,
+                title = title,
+                attendeesRaw = attendeesRaw,
+                sortKey = startAt,
+            )
+        } else {
+            TimelineItem.CalendarEvent(
+                id = id,
+                title = title,
+                sortKey = startAt,
             )
         }
-        val calendarItems = calendarEvents.map { event ->
-            if (!event.attendeesRaw.isNullOrBlank()) {
-                TimelineItem.Meeting(
-                    id = event.id,
-                    title = event.title,
-                    attendeesRaw = event.attendeesRaw,
-                    sortKey = event.startAt,
-                )
-            } else {
-                TimelineItem.CalendarEvent(
-                    id = event.id,
-                    title = event.title,
-                    sortKey = event.startAt,
-                )
-            }
-        }
-        return (commitmentItems + calendarItems).sortedBy { it.sortKey }
-    }
 
     private fun todayIso(): String {
         val tz = TimeZone.currentSystemDefault()
-        return Clock.System.now().toLocalDateTime(tz).date.toString()
+        return clock.today(tz).toString()
     }
 
     private fun todayRange(): Pair<Instant, Instant> {
         val tz = TimeZone.currentSystemDefault()
-        val today = Clock.System.now().toLocalDateTime(tz).date
+        val today = clock.today(tz)
         val start = today.atStartOfDayIn(tz)
         val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(tz)
         return start to end

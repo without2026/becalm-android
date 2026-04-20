@@ -1,5 +1,5 @@
 /**
- * Three Modifier extension functions that replicate BeCalm v3's cosmic
+ * Modifier extension functions that replicate BeCalm v3's cosmic
  * glassmorphism panel recipes in Jetpack Compose.
  *
  * Each recipe is a precise port of a CSS pattern from v3 global.css:
@@ -10,10 +10,9 @@
  *   - SDK 28–30 fallback: blur is omitted; background fill alpha is raised to
  *     partially compensate for the absent backdrop effect (spec §3 fallback values).
  *
- * The three recipes:
+ * The recipes:
  *   1. [glassPanel]         — default cards and list items (12 dp corners)
  *   2. [glassPanelElevated] — modals and bottom sheets (20 dp corners)
- *   3. [glassPanelMuted]    — disabled / secondary surfaces (12 dp corners, dimmed)
  *
  * Source of truth: design token spec §3.
  */
@@ -26,15 +25,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -180,30 +176,3 @@ public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large
         .border(1.dp, colors.glassBorder, shape)
 }
 
-/**
- * Muted glass surface recipe — disabled and secondary surfaces.
- *
- * Property stack (spec §3 `glassPanelMuted`):
- * - Background fill: `0x08FFFFFF` (α=0.03); SDK 28–30 raises to `0x14FFFFFF` (α=0.08)
- * - Border: 1 dp `0x0DFFFFFF` (α=0.05) — dimmer than standard recipe
- * - Corner radius: 12 dp (matches [BecalmShapes.medium])
- * - No outer shadow (intentional — de-emphasis)
- * - Blur: 10 dp (API 31+ only; omitted on SDK 28–30)
- * - Container alpha: 0.55f applied to the entire surface to dim content
- *   (used for `completed` commitments per CMT-009)
- *
- * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (12 dp rounded).
- */
-@Composable
-public fun Modifier.glassPanelMuted(shape: Shape = MaterialTheme.shapes.medium): Modifier {
-    val colors = MaterialTheme.becalmColors
-    val fill = if (canBlur) colors.glassPanelFillMuted else colors.glassPanelFillMutedLegacy
-
-    return this
-        .alpha(0.55f)
-        .then(
-            if (canBlur) Modifier.blur(10.dp, BlurredEdgeTreatment.Unbounded) else Modifier
-        )
-        .background(fill, shape)
-        .border(1.dp, colors.glassBorderMuted, shape)
-}

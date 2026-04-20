@@ -18,16 +18,16 @@ public object UniqueWorkKeys {
     /** One-shot and periodic Naver IMAP ingestion via [com.becalm.android.worker.ingestion.ImapNaverWorker]. */
     public const val NAVER_IMAP: String = "ingest.naver_imap"
 
+    /** One-shot and periodic Daum IMAP ingestion via [com.becalm.android.worker.ingestion.ImapDaumWorker]. */
+    public const val DAUM_IMAP: String = "ingest.daum_imap"
+
     /** One-shot and periodic Outlook Mail ingestion via [com.becalm.android.worker.ingestion.OutlookMailWorker]. */
     public const val OUTLOOK_MAIL: String = "ingest.outlook_mail"
 
     /** One-shot and periodic Google Calendar ingestion via [com.becalm.android.worker.ingestion.GoogleCalendarWorker]. */
     public const val GCAL: String = "ingest.gcal"
 
-    /**
-     * Outlook Calendar ingestion key. Reserved for SP-27b; no worker is enqueued under this
-     * key until that SP lands.
-     */
+    /** One-shot and periodic Outlook Calendar ingestion via [com.becalm.android.worker.ingestion.OutlookCalendarWorker]. */
     public const val OUTLOOK_CAL: String = "ingest.outlook_cal"
 
     /** Batch upload to Railway backend via [com.becalm.android.worker.UploadWorker]. */

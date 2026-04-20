@@ -24,14 +24,6 @@ public fun <T> BecalmResult<T>.getOrNull(): T? = when (this) {
 }
 
 /**
- * Returns the contained [BecalmError] when this is [BecalmResult.Failure], or `null` for [BecalmResult.Success].
- */
-public fun <T> BecalmResult<T>.errorOrNull(): BecalmError? = when (this) {
-    is BecalmResult.Success -> null
-    is BecalmResult.Failure -> error
-}
-
-/**
  * Transforms a [BecalmResult.Success] value using [transform], propagating [BecalmResult.Failure] unchanged.
  */
 public inline fun <T, R> BecalmResult<T>.map(transform: (T) -> R): BecalmResult<R> = when (this) {
@@ -40,27 +32,10 @@ public inline fun <T, R> BecalmResult<T>.map(transform: (T) -> R): BecalmResult<
 }
 
 /**
- * Chains a computation that itself returns a [BecalmResult], short-circuiting on [BecalmResult.Failure].
- */
-public inline fun <T, R> BecalmResult<T>.flatMap(transform: (T) -> BecalmResult<R>): BecalmResult<R> =
-    when (this) {
-        is BecalmResult.Success -> transform(value)
-        is BecalmResult.Failure -> this
-    }
-
-/**
  * Executes [block] as a side effect when this is [BecalmResult.Success], then returns the receiver unchanged.
  */
 public inline fun <T> BecalmResult<T>.onSuccess(block: (T) -> Unit): BecalmResult<T> {
     if (this is BecalmResult.Success) block(value)
-    return this
-}
-
-/**
- * Executes [block] as a side effect when this is [BecalmResult.Failure], then returns the receiver unchanged.
- */
-public inline fun <T> BecalmResult<T>.onFailure(block: (BecalmError) -> Unit): BecalmResult<T> {
-    if (this is BecalmResult.Failure) block(error)
     return this
 }
 

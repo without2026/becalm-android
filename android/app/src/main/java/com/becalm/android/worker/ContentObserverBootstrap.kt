@@ -58,8 +58,8 @@ public class ContentObserverBootstrap @Inject constructor(
 
     // ── State ─────────────────────────────────────────────────────────────────
 
-    private var smsObserver: SmsInboxObserver? = null
-    private var callLogObserver: CallLogObserver? = null
+    private var smsObserver: UriFilteredObserver? = null
+    private var callLogObserver: UriFilteredObserver? = null
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -111,7 +111,11 @@ public class ContentObserverBootstrap @Inject constructor(
             return
         }
 
-        val observer = SmsInboxObserver()
+        val observer = UriFilteredObserver(
+            expectedUri = Telephony.Sms.CONTENT_URI,
+            label = "SmsInboxObserver",
+            skipLogSuffix = "non-SMS URI",
+        )
         context.contentResolver.registerContentObserver(
             Telephony.Sms.CONTENT_URI,
             /* notifyForDescendants = */ true,
@@ -137,7 +141,11 @@ public class ContentObserverBootstrap @Inject constructor(
             return
         }
 
-        val observer = CallLogObserver()
+        val observer = UriFilteredObserver(
+            expectedUri = CallLog.Calls.CONTENT_URI,
+            label = "CallLogObserver",
+            skipLogSuffix = "non-call-log URI",
+        )
         context.contentResolver.registerContentObserver(
             CallLog.Calls.CONTENT_URI,
             /* notifyForDescendants = */ true,
@@ -147,49 +155,35 @@ public class ContentObserverBootstrap @Inject constructor(
         logger.d(TAG, "call-log observer registered on ${CallLog.Calls.CONTENT_URI}")
     }
 
-    // ── Inner observers ───────────────────────────────────────────────────────
+    // ── Inner observer ────────────────────────────────────────────────────────
 
     /**
-     * Watches `Telephony.Sms.CONTENT_URI` for new inbox/sent rows.
+     * Watches [expectedUri] (SMS inbox or call-log) for new rows.
      *
-     * On any non-self change, enqueues a one-shot [com.becalm.android.worker.ingestion.MediaStoreWorker]
-     * via [workScheduler]. WorkManager deduplicates concurrent enqueues, so SMS bursts
-     * do not spawn parallel worker instances.
+     * On any non-self change whose URI matches (or is null), enqueues a one-shot
+     * [com.becalm.android.worker.ingestion.MediaStoreWorker] via [workScheduler].
+     * WorkManager deduplicates concurrent enqueues, so bursts do not spawn parallel
+     * worker instances.
+     *
+     * Log messages preserve the original per-observer prefix via [label] and the
+     * per-URI skip suffix via [skipLogSuffix] so logcat grep patterns continue to work.
      */
-    private inner class SmsInboxObserver : ContentObserver(Handler(Looper.getMainLooper())) {
+    private inner class UriFilteredObserver(
+        private val expectedUri: Uri,
+        private val label: String,
+        private val skipLogSuffix: String,
+    ) : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             if (selfChange) return
 
-            val isSmsUri = uri == null ||
-                uri.toString().startsWith(Telephony.Sms.CONTENT_URI.toString())
-            if (!isSmsUri) {
-                logger.d(TAG, "SmsInboxObserver: onChange skipped — non-SMS URI")
+            val uriMatches = uri == null ||
+                uri.toString().startsWith(expectedUri.toString())
+            if (!uriMatches) {
+                logger.d(TAG, "$label: onChange skipped — $skipLogSuffix")
                 return
             }
 
-            logger.d(TAG, "SmsInboxObserver: onChange — enqueueing MediaStoreWorker one-shot")
-            workScheduler.enqueueMediaStoreOneShotNow()
-        }
-    }
-
-    /**
-     * Watches `CallLog.Calls.CONTENT_URI` for new call-log entries.
-     *
-     * On any non-self change, enqueues a one-shot [com.becalm.android.worker.ingestion.MediaStoreWorker]
-     * via [workScheduler]. The same deduplication guarantee applies.
-     */
-    private inner class CallLogObserver : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean, uri: Uri?) {
-            if (selfChange) return
-
-            val isCallLogUri = uri == null ||
-                uri.toString().startsWith(CallLog.Calls.CONTENT_URI.toString())
-            if (!isCallLogUri) {
-                logger.d(TAG, "CallLogObserver: onChange skipped — non-call-log URI")
-                return
-            }
-
-            logger.d(TAG, "CallLogObserver: onChange — enqueueing MediaStoreWorker one-shot")
+            logger.d(TAG, "$label: onChange — enqueueing MediaStoreWorker one-shot")
             workScheduler.enqueueMediaStoreOneShotNow()
         }
     }

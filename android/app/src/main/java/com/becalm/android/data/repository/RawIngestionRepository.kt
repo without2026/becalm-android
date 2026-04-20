@@ -2,6 +2,7 @@ package com.becalm.android.data.repository
 
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
@@ -10,7 +11,6 @@ import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventDto
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
@@ -52,11 +52,13 @@ public interface RawIngestionRepository {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     /**
-     * Emits a live list of the most recent events for [userId], newest-first.
+     * Emits a live list of the most recent unassigned-counterparty events for [userId],
+     * newest-first.
      *
-     * Note: the DAO exposes separate flows for null-personRef and per-person events.
-     * This method merges and sorts them. A future DAO query addition will replace
-     * this implementation with a single covered index scan.
+     * Delegates directly to [RawIngestionEventDao.observeUnassignedRecent]; the former
+     * merge-and-sort implementation was redundant because the per-personRef branch always
+     * emitted empty (no entity carries a blank personRef). A future DAO query addition
+     * will widen this to include per-person events behind a covered index scan.
      *
      * @param limit Maximum list size per emission.
      */
@@ -127,29 +129,15 @@ public interface RawIngestionRepository {
     // ── PIPA consent release / park ───────────────────────────────────────────
 
     /**
-     * Transitions all voice events for [userId] from "awaiting_consent" to "pending"
-     * so that [com.becalm.android.worker.VoiceUploadWorker] will pick them up.
-     *
-     * Called by [com.becalm.android.ui.settings.SettingsViewModel] when the user grants
-     * PIPA third-party provision consent via the Settings toggle.
-     *
-     * @return [BecalmResult.Success] with the count of rows updated (0 if none were waiting).
-     *
-     * Spec refs: VOI-004, ONB-PIPA invariant.
-     */
-    public suspend fun releaseAwaitingConsentVoice(userId: String): BecalmResult<Int>
-
-    /**
      * Atomically transitions all voice events for [userId] from "awaiting_consent" to
      * "pending" and returns the exact list of released IDs.
      *
-     * Supersedes [releaseAwaitingConsentVoice] for the consent-grant flow because the
-     * caller needs to enqueue [com.becalm.android.worker.VoiceUploadWorker] for precisely
-     * the released rows — no more, no less (finding #2 fix).
+     * The caller needs to enqueue [com.becalm.android.worker.VoiceUploadWorker] for
+     * precisely the released rows — no more, no less (finding #2 fix).
      *
      * @return [BecalmResult.Success] with the released IDs (empty list if none were waiting).
      *
-     * Spec refs: VOI-004.
+     * Spec refs: VOI-004, ONB-PIPA invariant.
      */
     public suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): BecalmResult<List<String>>
 
@@ -205,7 +193,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             logger.d(TAG, "insertLocal dedup hit for id=${existing.id}")
             return BecalmResult.Success(existing.id)
         }
-        return daoOp(TAG, "insert failed") {
+        return logger.daoOp(TAG, "insert failed") {
             dao.insert(resolved)
             logger.d(TAG, "insertLocal ok id=${resolved.id}")
             resolved.id
@@ -216,7 +204,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         if (events.isEmpty()) return BecalmResult.Success(emptyList())
         val resolved = events.map { it.ensureClientEventId() }
         // Room @Insert(onConflict = IGNORE) on insertAll handles duplicates at the schema layer.
-        return daoOp(TAG, "batch insert failed") {
+        return logger.daoOp(TAG, "batch insert failed") {
             dao.insertAll(resolved)
             logger.d(TAG, "insertLocalBatch ok count=${resolved.size}")
             resolved.map { it.id }
@@ -229,20 +217,11 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         userId: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>> =
-        // The DAO exposes two reactive entry points: events with a known personRef and
-        // events with a null personRef. We combine them here because the DAO (R1/R2)
-        // does not yet expose a single all-events-for-user reactive query.
-        // The placeholder empty-string personRef returns an empty list in practice since
-        // no entity carries a blank personRef, so only null-personRef events are emitted.
-        // A future DAO method backed by idx_raw_events_user_time replaces this path.
-        combine(
-            dao.observeUnassignedRecent(userId, limit),
-            dao.observeRecentForPerson(userId, "", limit),
-        ) { unassigned, withPerson ->
-            (unassigned + withPerson)
-                .sortedByDescending { it.timestamp }
-                .take(limit)
-        }
+        // The placeholder empty-string personRef branch always returned an empty list
+        // (no entity carries a blank personRef), so combining it was a no-op. This
+        // direct delegation is behavior-identical and removes needless flow plumbing.
+        // A future DAO method backed by idx_raw_events_user_time will replace this path.
+        dao.observeUnassignedRecent(userId, limit)
 
     override fun observeForPerson(
         userId: String,
@@ -270,14 +249,14 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     override suspend fun markSynced(ids: List<String>): BecalmResult<Unit> {
         if (ids.isEmpty()) return BecalmResult.Success(Unit)
-        return daoOp(TAG, "markSynced failed") {
+        return logger.daoOp(TAG, "markSynced failed") {
             dao.markSynced(ids)
             logger.d(TAG, "markSynced count=${ids.size}")
         }
     }
 
     override suspend fun markFailed(id: String, lastAttemptAt: Instant): BecalmResult<Unit> =
-        daoOp(TAG, "markFailed failed") {
+        logger.daoOp(TAG, "markFailed failed") {
             dao.markFailed(id = id, retryIncrement = 1, now = lastAttemptAt)
             logger.d(TAG, "markFailed id=$id")
         }
@@ -293,7 +272,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             response.toBecalmResult()
         } catch (e: IOException) {
             logger.e(TAG, "uploadBatch network error count=${events.size}", e)
-            BecalmResult.Failure(BecalmError.Network(-1, e.message ?: "network error"))
+            BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
         } catch (e: Exception) {
             logger.e(TAG, "uploadBatch unexpected error count=${events.size}", e)
             BecalmResult.Failure(BecalmError.Unknown(e))
@@ -302,28 +281,15 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     // ── PIPA consent release / park ───────────────────────────────────────────
 
-    override suspend fun releaseAwaitingConsentVoice(userId: String): BecalmResult<Int> =
-        try {
-            val count = dao.releaseAwaitingConsentVoice(userId)
-            logger.d(TAG, "releaseAwaitingConsentVoice userId_hash=${userId.hashCode()} count=$count")
-            BecalmResult.Success(count)
-        } catch (e: Exception) {
-            logger.e(TAG, "releaseAwaitingConsentVoice failed", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "release failed"))
-        }
-
     override suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): BecalmResult<List<String>> =
-        try {
+        logger.daoOp(TAG, "releaseAwaitingConsentVoiceAndReturnIds failed") {
             val ids = dao.releaseAwaitingConsentVoiceAndReturnIds(userId)
             logger.d(TAG, "releaseAwaitingConsentVoiceAndReturnIds userId_hash=${userId.hashCode()} count=${ids.size}")
-            BecalmResult.Success(ids)
-        } catch (e: Exception) {
-            logger.e(TAG, "releaseAwaitingConsentVoiceAndReturnIds failed", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "release failed"))
+            ids
         }
 
     override suspend fun parkAndCancelPendingVoice(userId: String): BecalmResult<List<String>> =
-        try {
+        logger.daoOp(TAG, "parkAndCancelPendingVoice failed") {
             // Atomic: SELECT ids + UPDATE WHERE id IN (:ids) run inside a single @Transaction.
             // Eliminates the race where a new 'pending' row inserted between the old two-call
             // SELECT/UPDATE would be parked but its ID never returned (finding #1 fix).
@@ -332,22 +298,16 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 now = System.currentTimeMillis(),
             )
             logger.d(TAG, "parkAndCancelPendingVoice userId_hash=${userId.hashCode()} count=${ids.size}")
-            BecalmResult.Success(ids)
-        } catch (e: Exception) {
-            logger.e(TAG, "parkAndCancelPendingVoice failed", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "park failed"))
+            ids
         }
 
     // ── Clear ─────────────────────────────────────────────────────────────────
 
     override suspend fun deleteAllForUser(userId: String): BecalmResult<Int> =
-        try {
+        logger.daoOp(TAG, "deleteAllForUser failed") {
             val count = dao.deleteAllForUser(userId)
             logger.d(TAG, "deleteAllForUser count=$count")
-            BecalmResult.Success(count)
-        } catch (e: Exception) {
-            logger.e(TAG, "deleteAllForUser failed", e)
-            BecalmResult.Failure(BecalmError.Io(e.message ?: "delete failed"))
+            count
         }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

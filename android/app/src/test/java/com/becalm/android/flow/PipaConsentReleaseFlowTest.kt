@@ -22,10 +22,11 @@ import org.robolectric.annotation.Config
 /**
  * Integration tests for the VOI-004 consent state machine:
  * awaiting_consent → pending transition driven by
- * [RawIngestionEventDao.releaseAwaitingConsentVoice].
+ * [RawIngestionEventDao.releaseAwaitingConsentVoiceAndReturnIds].
  *
- * All DAO methods required here ([findVoiceAwaitingConsent], [releaseAwaitingConsentVoice])
- * exist in the current codebase — no @Ignore annotations needed.
+ * All DAO methods required here ([findVoiceAwaitingConsent],
+ * [releaseAwaitingConsentVoiceAndReturnIds]) exist in the current codebase —
+ * no @Ignore annotations needed.
  *
  * Spec refs: VOI-004, data-model.yml § sync_status awaiting_consent.
  *
@@ -107,9 +108,9 @@ class PipaConsentReleaseFlowTest {
         val awaitingBefore = dao.findVoiceAwaitingConsent(testUserId)
         assertEquals(3, awaitingBefore.size)
 
-        // Step 2: Simulate consent toggle ON → ViewModel calls releaseAwaitingConsentVoice
-        val released = dao.releaseAwaitingConsentVoice(testUserId)
-        assertEquals(3, released)
+        // Step 2: Simulate consent toggle ON → ViewModel calls releaseAwaitingConsentVoiceAndReturnIds
+        val released = dao.releaseAwaitingConsentVoiceAndReturnIds(testUserId)
+        assertEquals(3, released.size)
 
         // Step 3: All 3 rows now have syncStatus="pending"
         val nowPending = dao.findPendingForUpload(testUserId, 10)
@@ -134,7 +135,7 @@ class PipaConsentReleaseFlowTest {
         // No release called (simulates consent=false or consent not toggled)
         val stillAwaiting = dao.findVoiceAwaitingConsent(testUserId)
         assertEquals(
-            "Rows should stay awaiting_consent without calling releaseAwaitingConsentVoice",
+            "Rows should stay awaiting_consent without calling releaseAwaitingConsentVoiceAndReturnIds",
             2,
             stillAwaiting.size,
         )
@@ -156,8 +157,8 @@ class PipaConsentReleaseFlowTest {
         dao.insert(makeVoiceEntity("voice-synced-001", syncStatus = "synced"))
 
         // Release only voice+awaiting_consent rows
-        val released = dao.releaseAwaitingConsentVoice(testUserId)
-        assertEquals(2, released)
+        val released = dao.releaseAwaitingConsentVoiceAndReturnIds(testUserId)
+        assertEquals(2, released.size)
 
         // voice-awaiting rows are now pending
         val voiceAwaiting = dao.findVoiceAwaitingConsent(testUserId)

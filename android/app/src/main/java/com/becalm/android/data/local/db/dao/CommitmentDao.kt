@@ -96,6 +96,35 @@ public interface CommitmentDao {
     public suspend fun markSynced(ids: List<String>)
 
     /**
+     * Sets [CommitmentEntity.syncStatus] to "pending" for the single row identified by [id].
+     *
+     * Called by [com.becalm.android.data.repository.CommitmentRepositoryImpl.updateActionState]
+     * when a Railway PATCH fails (5xx / IOException) so that the row is re-picked up by the
+     * next SP-29 UploadWorker batch flush (CMT-005..007 + commitment-management.spec.yml
+     * invariant 3).
+     *
+     * @param id UUID of the commitment to demote.
+     */
+    @Query("UPDATE commitments SET sync_status = 'pending' WHERE id = :id")
+    public suspend fun markPending(id: String)
+
+    /**
+     * Marks the row identified by [id] as `sync_status='failed'` (quarantine).
+     *
+     * Used by [com.becalm.android.data.repository.CommitmentRepositoryImpl.uploadBatch] when
+     * the server returns a non-retryable [com.becalm.android.data.remote.dto.FailedEventDto]
+     * entry so that the row is not re-uploaded indefinitely.
+     *
+     * Mirrors the [RawIngestionEventDao.markFailed] signature (note: commitments has no
+     * `retry_count` / `last_attempt_at` columns per data-model.yml, so only `sync_status`
+     * is written here).
+     *
+     * @param id UUID of the commitment to quarantine.
+     */
+    @Query("UPDATE commitments SET sync_status = 'failed' WHERE id = :id")
+    public suspend fun markFailed(id: String)
+
+    /**
      * Deletes all commitment rows belonging to [userId].
      *
      * Called on sign-out to purge local data. Returns the number of deleted rows.
@@ -111,24 +140,11 @@ public interface CommitmentDao {
     /**
      * Returns the commitment with the given [id], or null if no such row exists.
      *
-     * This is a suspend (one-shot) read. Use [observeById] for reactive updates.
-     *
      * @param id UUID of the commitment to fetch.
      * @return The matching [CommitmentEntity], or null.
      */
     @Query("SELECT * FROM commitments WHERE id = :id")
     public suspend fun findById(id: String): CommitmentEntity?
-
-    /**
-     * Emits the commitment with the given [id] and re-emits whenever the row changes.
-     *
-     * Emits null when no row matches, including immediately after deletion.
-     *
-     * @param id UUID of the commitment to observe.
-     * @return A [Flow] that emits [CommitmentEntity] or null.
-     */
-    @Query("SELECT * FROM commitments WHERE id = :id")
-    public fun observeById(id: String): Flow<CommitmentEntity?>
 
     // ─── List reads ────────────────────────────────────────────────────────────
 
@@ -151,27 +167,6 @@ public interface CommitmentDao {
         """
     )
     public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
-
-    /**
-     * Emits all commitments for [userId] with the given [actionState], ordered by
-     * due date ascending (nulls last) then creation timestamp descending.
-     *
-     * Used by CommitmentManagementScreen to display filtered lists per action state tab.
-     *
-     * @param userId Supabase auth.users UUID of the owning user.
-     * @param actionState Filter value. Valid values: "pending" | "reminded" |
-     *   "followed_up" | "completed".
-     * @return A [Flow] that emits a list and re-emits on every qualifying table write.
-     */
-    @Query(
-        """
-        SELECT * FROM commitments
-        WHERE user_id      = :userId
-          AND action_state = :actionState
-        ORDER BY due_date IS NULL ASC, due_date ASC, created_at DESC
-        """
-    )
-    public fun observeByActionState(userId: String, actionState: String): Flow<List<CommitmentEntity>>
 
     /**
      * Emits all pending commitments for [userId] that are either undated or due on/before
@@ -217,28 +212,6 @@ public interface CommitmentDao {
         """
     )
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
-
-    /**
-     * Emits the count of non-completed commitments for [userId] linked to [personRef].
-     *
-     * A commitment is considered open when its [CommitmentEntity.actionState] is any value
-     * other than "completed" ("pending", "reminded", or "followed_up").
-     *
-     * Used by the person list row chip to display an open-commitment badge count.
-     *
-     * @param userId Supabase auth.users UUID of the owning user.
-     * @param personRef Canonicalized counterparty identifier.
-     * @return A [Flow] that emits an [Int] count and re-emits on every qualifying table write.
-     */
-    @Query(
-        """
-        SELECT COUNT(*) FROM commitments
-        WHERE user_id      = :userId
-          AND person_ref   = :personRef
-          AND action_state != 'completed'
-        """
-    )
-    public fun observeOpenCountForPerson(userId: String, personRef: String): Flow<Int>
 
     // ─── Sync helpers ──────────────────────────────────────────────────────────
 

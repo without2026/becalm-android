@@ -37,7 +37,7 @@ public fun OutlookCalendarOAuthScreen(
             connectLabel = stringResource(R.string.action_connect),
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Outlook Calendar OAuth via MSAL
-                viewModel.onMarkStepStatus(OnboardingStep.CALENDAR_PERM, StepStatus.COMPLETE)
+                viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK_CALENDAR, StepStatus.COMPLETE)
                 navController.navigate(BecalmRoute.OnboardingBattery.path)
             },
             onSkip = {

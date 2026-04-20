@@ -72,16 +72,8 @@ public data class BecalmColors(
     val glassPanelFillElevated: Color,
     /** Elevated fill fallback for SDK 28–30. */
     val glassPanelFillElevatedLegacy: Color,
-    /** Muted fill for disabled / de-emphasised surfaces. */
-    val glassPanelFillMuted: Color,
-    /** Muted fill fallback for SDK 28–30. */
-    val glassPanelFillMutedLegacy: Color,
     /** Hairline border on all glass surfaces. */
     val glassBorder: Color,
-    /** Muted border for [glassPanelMuted] variant. */
-    val glassBorderMuted: Color,
-    /** Inset top-edge highlight (standard panels). */
-    val glassInset: Color,
     /** Inset highlight for elevated surfaces (slightly more opaque). */
     val glassInsetElevated: Color,
     /** Outer drop-shadow fill (standard). */
@@ -146,11 +138,7 @@ internal val BecalmDarkColors = BecalmColors(
     glassPanelFillSdkLegacy = Color(0x1AFFFFFF),
     glassPanelFillElevated = Color(0x0FFFFFFF),
     glassPanelFillElevatedLegacy = Color(0x26FFFFFF),
-    glassPanelFillMuted = Color(0x08FFFFFF),
-    glassPanelFillMutedLegacy = Color(0x14FFFFFF),
     glassBorder = Color(0x14FFFFFF),
-    glassBorderMuted = Color(0x0DFFFFFF),
-    glassInset = Color(0x0AFFFFFF),
     glassInsetElevated = Color(0x0DFFFFFF),
     glassOuterShadow = Color(0x4D000000),
     glassOuterShadowElevated = Color(0x66000000),
@@ -231,11 +219,7 @@ internal val BecalmLightColors = BecalmColors(
     glassPanelFillSdkLegacy = Color(0x1A000000),
     glassPanelFillElevated = Color(0x0F000000),
     glassPanelFillElevatedLegacy = Color(0x26000000),
-    glassPanelFillMuted = Color(0x08000000),
-    glassPanelFillMutedLegacy = Color(0x14000000),
     glassBorder = Color(0x14000000),
-    glassBorderMuted = Color(0x0D000000),
-    glassInset = Color(0x0A000000),
     glassInsetElevated = Color(0x0D000000),
     glassOuterShadow = Color(0x33000000),
     glassOuterShadowElevated = Color(0x4D000000),

@@ -1,0 +1,102 @@
+package com.becalm.android.worker
+
+import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.CommitmentDraftDto
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.commitment.CommitmentState
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.UUID
+
+// 파일 분리 시 sync_status 리터럴 문자열을 재사용하기 위해 mapper 파일로 이동.
+// 동작 변경 없음 — 기존과 동일하게 "pending" 리터럴을 사용한다.
+internal const val STATUS_PENDING: String = "pending"
+
+/**
+ * transcribe_extract 멀티파트 폼 필드 생성을 한 곳으로 통합한다.
+ * 각 필드의 값과 content type("text/plain") 을 원본 인라인 코드와 byte-identical 하게 보존한다.
+ */
+internal data class VoiceRequestParts(
+    val clientEventId: RequestBody,
+    val rawEventId: RequestBody,
+    val durationSeconds: RequestBody,
+    val timestamp: RequestBody,
+    val personRef: RequestBody?,
+    val eventTitle: RequestBody?,
+)
+
+internal fun RawIngestionEventEntity.toRequestParts(rawEventId: String): VoiceRequestParts =
+    VoiceRequestParts(
+        clientEventId = clientEventId.toPlainRequestBody(),
+        rawEventId = rawEventId.toPlainRequestBody(),
+        durationSeconds = (durationSeconds ?: 0).toString().toPlainRequestBody(),
+        timestamp = timestamp.toString().toPlainRequestBody(),
+        personRef = personRef?.toPlainRequestBody(),
+        eventTitle = eventTitle?.toPlainRequestBody(),
+    )
+
+/**
+ * Maps a [CommitmentDraftDto] received from Railway to a [CommitmentEntity] ready for
+ * Room insertion.
+ *
+ * The [CommitmentEntity.id] is a deterministic UUID v3 (name-based, MD5) keyed on
+ * `"commitment:<rawEventId>:<index>"`. This ensures that re-processing the same audio
+ * (e.g., a replayed 200 response) produces an upsert on the same primary key rather than
+ * inserting a duplicate row — CommitmentDao uses [androidx.room.OnConflictStrategy.REPLACE],
+ * so duplicate inserts become idempotent (finding #2 fix).
+ *
+ * @param rawEventId UUID of the originating [RawIngestionEventEntity] (used for deterministic ID).
+ * @param index 0-based position of this commitment in the response list (used for deterministic ID).
+ * @param userId Supabase auth.users UUID of the owning user.
+ * @param sourceRef Source reference from the originating [RawIngestionEventEntity].
+ * @param sourceEventTitle Event title from the originating [RawIngestionEventEntity].
+ * @param sourceEventOccurredAt Timestamp of the source event (not extraction time).
+ * @param now Wall-clock instant used for [CommitmentEntity.createdAt] and [CommitmentEntity.updatedAt].
+ */
+internal fun CommitmentDraftDto.toCommitmentEntity(
+    rawEventId: String,
+    index: Int,
+    userId: String,
+    sourceRef: String?,
+    sourceEventTitle: String?,
+    sourceEventOccurredAt: Instant,
+    now: Instant,
+): CommitmentEntity = CommitmentEntity(
+    // Deterministic UUID v3 (nameUUIDFromBytes uses MD5) keyed on rawEventId+index.
+    // Re-processing the same response yields the same ID → upsert, not duplicate.
+    id = UUID.nameUUIDFromBytes(
+        "commitment:$rawEventId:$index".toByteArray(Charsets.UTF_8),
+    ).toString(),
+    userId = userId,
+    direction = direction.lowercase(),
+    counterpartyRaw = null,
+    personRef = personRef,
+    title = text.take(500), // reasonable title truncation
+    description = null,
+    quote = quote,
+    sourceEventTitle = sourceEventTitle,
+    sourceEventOccurredAt = sourceEventOccurredAt,
+    dueDate = dueAt?.toLocalDate(),
+    actionState = "pending",
+    sourceType = SourceType.VOICE,
+    sourceRef = sourceRef,
+    confidence = confidence.toDouble(),
+    commitmentState = CommitmentState.DRAFT,
+    syncStatus = STATUS_PENDING,
+    createdAt = now,
+    updatedAt = now,
+)
+
+/** Converts an [Instant] to a [LocalDate] in the device's system time zone. */
+private fun Instant.toLocalDate(): LocalDate =
+    toLocalDateTime(TimeZone.currentSystemDefault()).date
+
+/** Convenience: creates a plain-text [RequestBody] from this String. */
+private fun String.toPlainRequestBody(): RequestBody =
+    toRequestBody("text/plain".toMediaTypeOrNull())

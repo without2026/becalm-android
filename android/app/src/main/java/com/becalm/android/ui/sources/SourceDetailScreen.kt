@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -37,6 +36,7 @@ import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.statusStringToSyncStatus
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -108,13 +108,7 @@ private fun SourceDetailContent(
     state: SourceDetailUiState,
     contentPadding: PaddingValues,
 ) {
-    val syncStatus = when (state.status.uppercase()) {
-        "CONNECTED" -> SourceSyncStatus.Ok
-        "SYNCING" -> SourceSyncStatus.Ok
-        "ERROR" -> SourceSyncStatus.Error
-        "NEVER_CONNECTED" -> SourceSyncStatus.Unknown
-        else -> SourceSyncStatus.Stale
-    }
+    val syncStatus = statusStringToSyncStatus(state.status)
     val statusLabel = when (syncStatus) {
         SourceSyncStatus.Ok -> stringResource(R.string.sources_status_ok)
         SourceSyncStatus.Stale -> stringResource(R.string.sources_status_stale)

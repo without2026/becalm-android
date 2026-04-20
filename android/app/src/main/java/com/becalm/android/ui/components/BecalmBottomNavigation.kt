@@ -37,6 +37,14 @@ public fun BecalmBottomNavigation(
         containerColor = becalmColors.glassPanelFill,
         tonalElevation = 0.dp,
     ) {
+        val itemColors = NavigationBarItemDefaults.colors(
+            indicatorColor = becalmColors.glassPanelFillElevated,
+            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         NavigationBarItem(
             selected = currentRoute == BecalmRoute.Today.path,
             onClick = { navController.navigateToTab(BecalmRoute.Today.path) },
@@ -47,13 +55,7 @@ public fun BecalmBottomNavigation(
                 )
             },
             label = { Text(stringResource(R.string.nav_today)) },
-            colors = NavigationBarItemDefaults.colors(
-                indicatorColor = becalmColors.glassPanelFillElevated,
-                selectedIconColor = MaterialTheme.colorScheme.onSurface,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+            colors = itemColors,
         )
 
         NavigationBarItem(
@@ -66,13 +68,7 @@ public fun BecalmBottomNavigation(
                 )
             },
             label = { Text(stringResource(R.string.nav_persons)) },
-            colors = NavigationBarItemDefaults.colors(
-                indicatorColor = becalmColors.glassPanelFillElevated,
-                selectedIconColor = MaterialTheme.colorScheme.onSurface,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+            colors = itemColors,
         )
 
         NavigationBarItem(
@@ -85,13 +81,7 @@ public fun BecalmBottomNavigation(
                 )
             },
             label = { Text(stringResource(R.string.nav_commitments)) },
-            colors = NavigationBarItemDefaults.colors(
-                indicatorColor = becalmColors.glassPanelFillElevated,
-                selectedIconColor = MaterialTheme.colorScheme.onSurface,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+            colors = itemColors,
         )
     }
 }

@@ -19,6 +19,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -79,6 +80,7 @@ class OutlookCalendarWorkerTest {
             syncCursorStore = syncCursorStore,
             authRepository = authRepository,
             logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
         )
         every { workerParams.runAttemptCount } returns 0
     }
