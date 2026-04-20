@@ -1,0 +1,92 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+#
+# 이 스펙은 PIPA(개인정보보호법) 제35~39조에 명시된 정보주체의 권리를 앱에서 실행 가능한 UI 경로로 codify한다:
+# (a) 열람(제35조), (b) 정정·삭제(제36조), (c) 처리정지(제37조), (d) 동의 철회(제39조).
+# 진입점은 SettingsScreen > '개인정보 관리' 하위 메뉴이며 MVP는 온디바이스 자동 실행을 원칙으로 한다 —
+# 서버 담당자 수작업 요청 없이 앱 자체에서 즉시 처리(단 계정 삭제는 Supabase Auth Admin API 호출 필요).
+#
+# 주의: 본 스펙은 **UI/UX 권리 실행 경로**를 codify하며 데이터 실제 삭제 규칙은
+# auth.spec.yml(AUTH-005/008) 및 data-model.yml retention 정책과 합쳐져 동작한다.
+
+module: pipa-rights
+platform: android
+version: 1
+
+behaviors:
+  - id: PIPA-001
+    type: ui_interaction
+    description: "SettingsScreen > '개인정보 관리' 하위 메뉴가 노출되며 4개 하위 항목: [내 데이터 다운로드] / [동의 철회] / [데이터 처리 일시중단] / [계정 삭제]가 표시된다. 각 항목은 PIPA 해당 조항 번호를 부제로 표기하여 사용자가 권리임을 인식할 수 있게 한다"
+    screen: "SettingsScreen | PrivacyManagementScreen"
+    interaction: "SettingsScreen '개인정보 관리' 행 탭"
+    precondition: "로그인 상태"
+    expected: "PrivacyManagementScreen 표시됨. 항목: [내 데이터 다운로드 — 열람권(제35조)] [동의 철회 — 동의철회권(제39조)] [데이터 처리 일시중단 — 처리정지권(제37조)] [계정 삭제 — 삭제권(제36조)]. 각 항목 하단에 보조 설명(예: '내 데이터 다운로드 — 이 앱에 저장된 본인 데이터를 ZIP으로 내보냅니다'). [정정]은 commitment-edit.spec.yml 경로로 연결 안내 문구로 처리"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-002
+    type: ui_interaction
+    description: "[내 데이터 다운로드] — 본인 Room 데이터베이스의 모든 레코드를 ZIP으로 묶어 SAF(Storage Access Framework) 경로로 저장한다. 포함: raw_ingestion_events.json, commitments.json, calendar_events.json, email_body.json, persons_enrichment.json, user_profile.json, DataStore dump(json). 비포함: access_token/refresh_token, Supabase user password hash(앱이 보유하지 않음). Railway/Supabase 서버 측 미러는 이 export에 포함되지 않음 (Room이 완전 캐시이므로 동일)"
+    screen: "PrivacyManagementScreen"
+    interaction: "[내 데이터 다운로드] 탭"
+    precondition: "로그인 상태, Room DB 접근 가능"
+    expected: "AlertDialog '데이터를 ZIP 파일로 저장하시겠습니까?' 확인 시 백그라운드 coroutine이 Room 각 테이블을 SELECT → JSON 직렬화 → ZIP 엔트리. 완료 후 ACTION_CREATE_DOCUMENT intent로 'becalm_export_{user_id_hash}_{yyyyMMdd_HHmm}.zip' 저장. ZIP 구조: /raw_ingestion_events.json, /commitments.json, /calendar_events.json, /email_body.json, /persons_enrichment.json, /user_profile.json, /datastore.json, /README.txt(PIPA 열람권 안내 + 각 파일 스키마 요약). 저장 실패 시 Snackbar 에러. 민감 비밀번호·토큰은 절대 포함 안 함. 대용량(이메일 bodies 등) 시 progress indicator 표시"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-003
+    type: ui_interaction
+    description: "[동의 철회] — 현재 활성화된 모든 동의(이용약관, PIPA 제3자 제공, 각 소스 OAuth 동의)를 사용자가 선택적으로 철회한다. 철회 화면은 각 동의 항목을 별개 Switch로 나열하며 각 철회의 영향(예: '음성 자동 처리 중단됨')을 사전 고지한다"
+    screen: "PrivacyManagementScreen | ConsentWithdrawScreen"
+    interaction: "[동의 철회] 탭"
+    precondition: "DataStore에 최소 1개 consent flag=true"
+    expected: "ConsentWithdrawScreen 표시됨. Switch 항목 및 off 시 영향: (1) PIPA 제3자 제공 동의 off → DataStore pipa_third_party_consent=false + 모든 voice raw event sync_status='awaiting_consent'로 즉시 전환(이미 synced된 것은 유지), VoiceUploadWorker 후속 호출 차단. (2) Gmail OAuth 연결 해제 → DataStore gmail_connected=false, token revoke(Google OAuth revocation endpoint 호출), 이후 Gmail 어댑터 실행 중단. (3) Outlook / IMAP / Calendar 동일 패턴. 이용약관 철회는 사실상 '계정 삭제'와 동등하므로 PIPA-005로 안내. 각 토글 off 시 해당 소스의 sync_status는 그대로 두되 새 업로드 차단 + UI 배너 '이 소스는 동의가 철회되어 동기화가 중단되었습니다'"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-004
+    type: ui_interaction
+    description: "[데이터 처리 일시중단] — 사용자가 일시적으로 모든 백그라운드 처리를 중단한다 (ex: 휴직·휴가 기간). DataStore processing_paused=true 설정 시 WorkManager의 모든 주기 worker가 건너뛰고 ContentObserver는 등록 유지하되 이벤트를 큐잉하지 않는다 (REGISTRATION만 유지). Railway로의 신규 업로드도 차단. 재개 토글 off 시 catch-up sync 자동 트리거"
+    screen: "PrivacyManagementScreen | ProcessingPauseScreen"
+    interaction: "[데이터 처리 일시중단] Switch 탭"
+    precondition: "로그인 상태, processing_paused=false (default)"
+    expected: "Switch on 시 AlertDialog '처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다. 재개까지 얼마나 걸릴지 추정치를 알려주세요(선택).' → 확인 시 DataStore processing_paused=true, pause_started_at=now(). 모든 주기 worker(VoiceUploadWorker·EmailPollingWorker·CalendarPollingWorker·OverdueSweepWorker·RetentionSweepWorker·CommitmentExtractionWorker)의 doWork() 진입부에서 processing_paused 체크 → Result.success() 즉시 반환. ContentObserver(RecordingFileObserver)는 등록 유지하되 onChange()에서 early return. SettingsScreen·TodayTimelineScreen 상단에 영구 배너 '처리 일시중단 중 — N일째'. off 시 DataStore processing_paused=false + ING-011 catch-up sync 즉시 트리거"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-005
+    type: ui_interaction
+    description: "[계정 삭제] — 사용자 계정 및 모든 연관 데이터를 영구 삭제한다. 2-step confirmation + 명시적 영향 고지(되돌릴 수 없음). 실행 순서: (1) Supabase Auth Admin API로 auth.users row 삭제(cascade로 관련 테이블 RLS 기반 DELETE), (2) 로컬 Room DB 파일 Context.deleteDatabase(becalm_<user_id_hash>.db), (3) DataStore 해당 user 네임스페이스 clear, (4) EncryptedSharedPreferences clear, (5) 앱을 LoginScreen으로 복귀하며 processStart 재초기화"
+    screen: "PrivacyManagementScreen | AccountDeletionScreen"
+    interaction: "[계정 삭제] 탭 → 2-step 확인"
+    precondition: "로그인 상태"
+    expected: "AccountDeletionScreen 표시됨. 상단 경고 카드: '이 작업은 되돌릴 수 없습니다. 삭제 후 동일 이메일로 재가입해도 이전 데이터는 복구되지 않습니다. 약속 N건·연락처 보강 N건·이메일 N건이 함께 삭제됩니다.' (N은 Room SELECT COUNT로 실시간 집계). 첫 확인: 이메일 주소 재입력(사용자 계정 이메일과 일치). 두 번째 확인: '삭제'를 타이핑. 모두 통과 시 진행 표시기 → Railway DELETE /v1/users/me(서버가 Supabase Auth Admin delete + cascade) → 응답 200 시 Context.deleteDatabase + DataStore.edit { clear() } + EncryptedSharedPreferences.clearAll + Intent FLAG_ACTIVITY_CLEAR_TASK로 LoginScreen 재시작. 서버 호출 실패 시 rollback 없이 재시도 유도 Snackbar. ONB-PIPA 동의 기록 등 글로벌 키도 cascade"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-006
+    type: lifecycle
+    description: "로그아웃은 삭제가 아니다 — AUTH-005에 따라 로컬 Room DB 파일과 DataStore user-scoped 키는 보존된다. 사용자가 권리 실행을 위해 '데이터 지우기'를 원하면 반드시 PIPA-005(계정 삭제)를 안내해야 한다. SettingsScreen 로그아웃 버튼 옆에 툴팁 '로그아웃은 데이터를 지우지 않습니다. 완전 삭제는 [개인정보 관리 > 계정 삭제]를 이용하세요'"
+    screen: "SettingsScreen"
+    interaction: "로그아웃 버튼 근접 표시 / 툴팁"
+    precondition: "로그인 상태, SettingsScreen 표시됨"
+    expected: "로그아웃 버튼 아래 작은 회색 텍스트 '로그아웃은 Room DB와 권한 설정을 지우지 않습니다. 완전 삭제는 [개인정보 관리 > 계정 삭제]를 이용하세요.' 표시. 사용자가 로그아웃 탭 시 AUTH-005 동작(Supabase 세션 종료 + 토큰 삭제) + Room 파일 유지 + DataStore 유지. 동일 계정 재로그인 시 기존 DB 파일 재오픈(AUTH-008)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: PIPA-007
+    type: lifecycle
+    description: "감사 로그 — 모든 PIPA 권리 실행(열람·동의 철회·처리정지·계정 삭제)은 DataStore의 pipa_action_log(JSON array, append-only)에 기록된다. 필드: {action, timestamp_iso, details}. 사용자가 본인 활동 내역을 열람할 수 있도록 SettingsScreen > '개인정보 관리' > [활동 내역] 항목으로 노출. 단 이 로그는 Railway/Supabase로 업로드되지 않음(로컬 only)"
+    trigger: "PIPA-002~005 실행 시점"
+    precondition: "권리 실행이 성공적으로 완료됨"
+    expected: "DataStore pipa_action_log append: {action: 'data_export'|'consent_withdraw'|'processing_pause'|'processing_resume'|'account_delete_initiated', timestamp_iso: '2026-04-18T14:30:00+09:00', details: {consent_type?: 'pipa_third_party', source?: 'gmail', ...}}. [활동 내역] 탭 시 ActivityLogScreen에 timestamp 역순 표시. 계정 삭제 시 action_log 자체도 함께 삭제됨(local only 성격상 서버 보존 없음). 이 로그는 법적 증빙보다 사용자 self-check 용도 — 법적 감사 필요 시 서버 측 Supabase audit log가 primary source"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "PIPA 권리 실행 진입점은 SettingsScreen > '개인정보 관리' 단일 경로로 통일된다 — 숨겨진 메뉴 금지"
+  - "[내 데이터 다운로드]는 access_token·refresh_token·password hash 등 인증 비밀을 절대 포함하지 않는다"
+  - "[동의 철회]는 각 동의 항목별 Switch로 세분화되어야 하며 일괄 off만 제공 금지 — 사용자가 선택적 철회할 권리 보장"
+  - "[데이터 처리 일시중단]은 hard stop이 아닌 worker-level skip이며 재개 시 catch-up sync가 자동 트리거된다"
+  - "[계정 삭제]는 2-step confirmation(이메일 재입력 + '삭제' 타이핑) 통과 후에만 실행되며 rollback 불가"
+  - "로그아웃은 삭제가 아니며 AUTH-005 보존 규칙을 따른다 — 사용자에게 이 구분이 명확히 고지되어야 한다(PIPA-006)"
+  - "모든 PIPA 권리 실행은 DataStore pipa_action_log에 감사 기록되며 이 로그는 서버로 업로드되지 않는다"
