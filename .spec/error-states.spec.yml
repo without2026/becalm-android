@@ -1,0 +1,106 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+#
+# 이 스펙은 sync/voice/email 파이프라인에서 발생하는 실패 모드의 **UX 표면**을 codify한다.
+# backend 동작 자체는 관련 모듈 spec(data-ingestion, voice-pipeline, backend-sync)이 소유하며
+# 이 파일은 '사용자가 보는 것'과 '복구 경로'를 정의한다.
+
+module: error-states
+platform: android
+version: 1
+
+behaviors:
+  - id: ERR-001
+    type: ui_interaction
+    description: "네트워크 미연결 상태에서 Today/Persons/Commitments 진입 시 상단 OfflineBadge('오프라인 — 마지막 동기화 HH:mm')가 표시된다. Room 캐시는 정상 렌더링되며 사용자는 로컬 데이터 조작(체크 완료/취소)은 가능하지만 Railway 호출은 대기열에 쌓여 재연결 시 flush"
+    screen: "TodayTimelineScreen | PersonsScreen | CommitmentManagementScreen"
+    interaction: "화면 진입"
+    precondition: "ConnectivityManager.activeNetwork == null, DataStore last_sync_at != null"
+    expected: "상단에 OfflineBadge 표시됨(텍스트: '오프라인 — 마지막 동기화 M/d HH:mm', 색: 경고 오렌지). 목록은 Room 캐시로 정상 렌더. action_state 변경 등 mutation은 optimistic Room UPDATE + sync_status='pending'으로 큐잉. 재연결 감지 시 OfflineBadge 사라지고 SYNC-006 즉시 업로드 트리거"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-002
+    type: ui_interaction
+    description: "소스 cursor 무효화(ING-013)가 발생한 소스는 SourceStatusStrip 칩이 error 상태(빨간 점 + 느낌표)로 전환되고 칩 아래 얇은 경고 바('Gmail 재동기화가 필요합니다 — 설정에서 확인')가 TodayTimelineScreen 상단에 표시된다. 탭 시 /settings/sources/{source_id}로 딥링크"
+    screen: "TodayTimelineScreen"
+    interaction: "화면 진입 / cursor 무효화 감지"
+    precondition: "ING-013이 실행되어 해당 어댑터의 cursor 재동기화가 진행 중이거나 실패한 상태"
+    expected: "SourceStatusStrip의 해당 칩이 빨간 점 + 느낌표로 전환. 상단 경고 바 표시됨. 탭 시 /settings/sources/{source_id}로 이동 — SourceDetailScreen에서 [재동기화] 버튼 + 마지막 오류 메시지 제공. 재동기화 진행 중에는 경고 바가 '재동기화 중...' 로 전환되며 성공 시 자동 dismiss"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-003
+    type: ui_interaction
+    description: "OAuth 토큰 만료·revoke로 소스가 disconnect된 경우 SourceStatusStrip 칩이 error 상태로 바뀌고 상단 배너 '[Gmail] 연결이 끊어졌습니다 — 재연결'이 표시된다. 탭 시 OAuth 재연결 플로우(소스별 OAuth 스크린으로 딥링크)"
+    screen: "TodayTimelineScreen | SettingsScreen"
+    interaction: "소스 disconnect 감지 (Gmail 401 invalid_grant / MS Graph 401 unauthorized_client / IMAP auth failure)"
+    precondition: "소스 어댑터가 AUTH-007 refresh에 실패 (refresh_token도 만료/revoke)"
+    expected: "DataStore의 해당 소스 connected=false로 UPDATE. SourceStatusStrip 칩 빨간색 + 배너 표시. 탭 시 해당 소스의 OAuth 재연결 스크린으로 이동. 재연결 성공 시 cursor는 유지(stale cursor는 ERR-002 경로로 다시 reset될 수 있음). 백그라운드 WorkManager 동기화는 재연결 전까지 skip"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-004
+    type: ui_interaction
+    description: "개별 raw event가 quarantine(sync_status='quarantined')된 경우 해당 row에 주황 배지 '업로드 실패 — 탭하여 세부정보'가 표시된다. 탭 시 quarantine 사유(ING-003의 reason enum) + [재시도] / [삭제] 버튼을 가진 바텀시트가 열린다"
+    screen: "UnassignedEventsScreen | PersonDetailScreen | TodayTimelineScreen"
+    interaction: "quarantined raw event 카드 탭"
+    precondition: "Room raw_ingestion_events.sync_status='quarantined' 레코드 존재"
+    expected: "카드에 주황 배지 표시. 탭 시 QuarantineDetailSheet 열림 — reason(schema_invalid | source_type_unknown | timestamp_parse_error | output_truncated | internal_error) + message + [재시도] 버튼(sync_status='pending'으로 재전환) + [삭제] 버튼(Room에서 DELETE, 사용자 확인 필요). [재시도]는 retryable=false이던 항목도 강제 재시도 허용 — 사용자가 서버 배포 후 복구를 시도하는 use case"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-005
+    type: ui_interaction
+    description: "Vertex AI output_truncated 오류(VOI-002 HTTP 502)로 voice raw event가 quarantine된 경우 일반 ERR-004 flow에 더해 안내 문구 '이 녹음은 파일이 너무 길어 처리하지 못했습니다. 향후 업데이트에서 자동 분할 처리 예정입니다'가 표시된다. 현재 버전에서는 사용자가 녹음 자체를 짧게 나눠 다시 진행해야 함"
+    screen: "QuarantineDetailSheet"
+    interaction: "voice/call_recording + reason='output_truncated' quarantine 탭"
+    precondition: "raw_ingestion_events(source_type IN ('voice','call_recording'), sync_status='quarantined', quarantine_reason='output_truncated')"
+    expected: "ERR-004의 바텀시트 상단에 빨간색 안내 카드 표시. [재시도] 버튼은 숨김(같은 결과 반복 — 유도하지 않음), [삭제] 버튼만 표시. Sentry 이벤트 'voice_output_truncated_shown' (raw_event_id, duration_seconds) 전송 — post-MVP overlap-chunk 설계 입력으로 활용"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-006
+    type: ui_interaction
+    description: "Railway 429 rate limit 수신 시 상단 transient Snackbar '요청이 너무 많습니다. 잠시 후 자동 재시도됩니다.'를 표시하고 Retry-After 헤더 값만큼 대기 후 재시도한다. 사용자 조작 불필요"
+    screen: "any"
+    interaction: "Railway API 호출이 HTTP 429 수신"
+    precondition: "Retry-After 헤더 존재(초 단위)"
+    expected: "Snackbar 3초 표시. UploadWorker/CommitmentExtractionWorker는 OneTimeWorkRequest에 initialDelay = Retry-After seconds로 재enqueue. 429가 5회 연속 발생하면 Sentry 'rate_limit_sustained' 이벤트 전송 + 배너 전환 '서버 혼잡 — 자동 동기화가 일시 중단되었습니다. 잠시 후 재시도' (사용자에게 pull-to-refresh 유도)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-007
+    type: ui_interaction
+    description: "Railway 5xx 또는 network timeout 장애가 5분 이상 지속되면 TodayTimelineScreen 상단에 '서버에 연결할 수 없습니다 — 로컬 데이터만 표시 중'이 표시된다. 로컬 Room 조회 기반 UI는 정상 동작 (ERR-001과 다른 점: 네트워크는 살아 있음)"
+    screen: "TodayTimelineScreen"
+    interaction: "화면 진입 / 지속적 5xx 감지"
+    precondition: "ConnectivityManager.activeNetwork != null, 최근 5분간 Railway 요청 ≥3회 모두 5xx 또는 timeout"
+    expected: "상단 배너 '서버에 연결할 수 없습니다 — 로컬 데이터만 표시 중' 표시. pull-to-refresh 시 재시도. 복구 시 배너 자동 dismiss. 업로드 큐는 expoential backoff로 계속 재시도 유지 (quarantine으로 전환하지 않음 — ING-003 policy)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-008
+    type: ui_interaction
+    description: "Supabase Auth refresh 최종 실패 시 LoginScreen으로 강제 이동 + Toast '세션이 만료되었습니다. 다시 로그인해주세요.' 표시. Room 데이터는 AUTH-005에 따라 보존되며 동일 계정 재로그인 시 복원"
+    screen: "LoginScreen"
+    interaction: "AUTH-007 재시도 후 401 지속"
+    precondition: "refresh_token 만료 또는 Supabase 측 revoke"
+    expected: "현재 화면과 무관하게 LoginScreen으로 이동(backStack clear). Toast '세션이 만료되었습니다. 다시 로그인해주세요.' 표시. DataStore의 pipa 동의·cursor는 보존. 재로그인 성공 시 AUTH-008 규칙으로 기존 DB 파일 재오픈"
+    source: phase2-acceptance
+    tests: []
+
+  - id: ERR-009
+    type: ui_interaction
+    description: "사용자가 필수 권한(READ_MEDIA_AUDIO / READ_CONTACTS 등)을 시스템 설정에서 revoke한 경우 관련 기능 진입 시 권한 회복 유도 배너를 표시한다. 배너 CTA 탭 시 Settings.ACTION_APPLICATION_DETAILS_SETTINGS로 직접 연결"
+    screen: "TodayTimelineScreen | PersonsScreen"
+    interaction: "권한 revoked 상태로 관련 기능 진입"
+    precondition: "이전에 부여된 권한이 시스템 설정에서 revoke됨 (ContextCompat.checkSelfPermission=PERMISSION_DENIED)"
+    expected: "상단 배너: READ_MEDIA_AUDIO revoke = '녹음 폴더 접근 권한이 해제되었습니다 — 설정에서 다시 허용' / READ_CONTACTS revoke = '연락처 권한이 해제되어 이름이 일반 이메일/전화번호로 표시됩니다 — 설정에서 다시 허용'. 탭 시 앱 상세 설정 화면으로 이동. 권한 미회복 상태에서는 해당 소스 ContentObserver·EnrichmentWorker 등록 해제"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "모든 실패 상태는 사용자가 **복구 경로를 볼 수 있어야** 한다 — 조용한 실패 금지 (quarantine은 배지로, disconnect은 배너로, offline은 badge로 노출)"
+  - "복구 불가능한 실패(output_truncated, 영구 OAuth revoke)는 Sentry로 수집되어 post-MVP에 대응"
+  - "로컬 Room 데이터는 모든 오류 상태에서 정상 렌더링되며 사용자는 읽기·체크 완료 등 read/action 경로를 계속 사용할 수 있다"
+  - "권한 revoke은 앱 강제 종료/로그아웃이 아닌 feature-level graceful degrade로 처리한다"

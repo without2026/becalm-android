@@ -1,0 +1,103 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+#
+# 이 스펙은 사용자가 CommitmentDetailSheet에서 이미 추출된 commitment를 수정·정정·폐기하는 경로를 codify한다.
+# 'action_state 전이'(commitment-management.spec.yml)와 다르게 **semantic 변경**(제목·마감·상대·방향·이의제기·삭제)을 다룬다.
+# quote는 법적 증거 성격(data-model.yml invariants)으로 **불변**이며 사용자는 이의제기 플래그만 set한다.
+#
+# 스키마 의존성: 이 스펙의 구현은 commitments 테이블에 last_edited_by, last_edited_at,
+# quote_disputed, deleted_at, supersedes_commitment_id 컬럼 추가가 필요하다.
+# 해당 DDL 마이그레이션은 후속 PR에서 data-model.yml에 반영된다 (PR2는 behavior only).
+
+module: commitment-edit
+platform: android
+version: 1
+
+behaviors:
+  - id: EDIT-001
+    type: ui_interaction
+    description: "CommitmentDetailSheet 하단에 [편집] 버튼이 표시되며 탭 시 CommitmentEditSheet가 열린다. 편집 가능 필드는 pre-fill된 상태로 표시되고 quote 필드는 읽기 전용(dimmed) + [이의 제기] 보조 버튼과 함께 표시된다. action_state='cancelled' 또는 deleted_at != null인 commitment는 [편집] 버튼 비활성(읽기 전용)"
+    screen: "CommitmentDetailSheet | CommitmentEditSheet"
+    interaction: "CommitmentDetailSheet [편집] 버튼 탭"
+    precondition: "CommitmentDetailSheet에 commitment 표시됨, action_state NOT IN ('cancelled'), deleted_at IS NULL"
+    expected: "CommitmentEditSheet 열림. 편집 필드(title, due_at, due_hint, due_is_approximate, person_ref, direction)가 현재 값으로 pre-fill. quote는 읽기 전용 회색 카드로 표시 + 우측 [이의 제기] 텍스트 버튼. 상단에 '출처: {source_event_title}' + source_event_occurred_at 표시. 하단에 [취소]/[저장] 버튼. cancelled 또는 soft-deleted commitment는 CommitmentDetailSheet에서 [편집] 버튼이 회색 비활성 상태"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-002
+    type: ui_interaction
+    description: "편집 가능 필드는 title(text), due_at(date+time picker), due_hint(text), due_is_approximate(toggle), person_ref(autocomplete — Room persons + enrichment names 제안), direction(give/take radio)이다. source_type·source_event_id·source_event_title·source_event_occurred_at·confidence·created_at은 읽기 전용. quote는 EDIT-005로만 변경(이의제기 플래그) — 문자열 자체는 절대 편집 불가"
+    screen: "CommitmentEditSheet"
+    interaction: "필드 입력/변경"
+    precondition: "CommitmentEditSheet 열림"
+    expected: "title: single-line TextField, max 200자. due_at: Material3 DatePicker + TimePicker(KST 기본, null 허용). due_hint: TextField(LLM 원문 보존용, 사용자도 수정 가능). due_is_approximate: Switch. person_ref: TextField + Room persons_enrichment에서 match 제안 드롭다운(정규화 후 전화번호·이메일·표시이름 prefix 검색). direction: RadioButton 2개(내가 한/상대가 한). source_* 필드는 별도 '출처 정보' 섹션에서 읽기 전용 표시. confidence 필드는 편집 UI에 노출하지 않음(사용자 이해 어려움)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-003
+    type: ui_interaction
+    description: "[저장] 탭 시 클라이언트 측 validation을 수행한 뒤 Room UPDATE + Railway PATCH /v1/commitments/{id}를 optimistic 순서로 실행한다. last_edited_by(user_id) + last_edited_at(now())가 자동 기록된다. 저장 성공 시 CommitmentEditSheet dismiss → CommitmentDetailSheet가 갱신된 값으로 재표시"
+    screen: "CommitmentEditSheet"
+    interaction: "[저장] 버튼 탭"
+    precondition: "최소 1개 편집 필드가 원본과 다름, validation 통과"
+    expected: "Room commitments UPDATE(title, due_at, due_hint, due_is_approximate, person_ref, direction, last_edited_by, last_edited_at) + sync_status='pending'. Railway PATCH /v1/commitments/{id} body에 변경된 필드 + last_edited_at 포함. 응답 200 시 sync_status='synced'. CommitmentEditSheet dismiss 후 CommitmentDetailSheet가 갱신 값 반영. direction이 변경된 경우 CommitmentCard의 give/take 배지도 즉시 갱신. PATCH 실패 시 Room의 낙관적 값은 유지되고 UploadWorker가 재시도"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-004
+    type: ui_interaction
+    description: "Validation 규칙 — title 공백 제거 후 길이 1~200. due_at이 입력된 경우 유효 ISO8601 KST(+09:00), 과거여도 허용(이미 지난 약속도 추후 기록 가능). person_ref는 공백 제거 후 lowercase 정규화(이메일은 lower, 전화번호는 E.164 정규화 시도). direction ∈ ('give','take'). 규칙 위반 시 해당 필드 하단에 빨간 헬퍼 텍스트 표시 + [저장] 비활성"
+    screen: "CommitmentEditSheet"
+    interaction: "[저장] 탭 or 필드 blur"
+    precondition: "사용자가 필드 수정 완료"
+    expected: "title 공백만: '제목을 입력해주세요'. title >200: '최대 200자까지 입력할 수 있습니다'. due_at parse 실패: '유효한 날짜와 시간을 선택해주세요'. direction 변경 없이 '내가 한'/'상대가 한' 중 하나 선택되어 있어야 함 — 둘 다 해제 불가능(RadioButton 특성). person_ref는 비워도 허용(Unassigned로 처리). 모든 필드 통과 시에만 [저장] 활성"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-005
+    type: ui_interaction
+    description: "quote 이의 제기 — [이의 제기] 탭 시 AlertDialog '이 인용문이 부정확하거나 오해를 유발한다고 표시하시겠습니까? 원문은 변경되지 않고 이의 제기 표시만 추가됩니다.' → 확인 시 commitments.quote_disputed=true로 UPDATE. quote 문자열 자체는 절대 수정되지 않음(법적 증거 성격)"
+    screen: "CommitmentEditSheet | CommitmentDetailSheet"
+    interaction: "quote 카드의 [이의 제기] 버튼 탭 → 확인"
+    precondition: "commitments.quote_disputed IS NULL 또는 false"
+    expected: "AlertDialog 표시. 확인 시 Room UPDATE quote_disputed=true + sync_status='pending'. PATCH /v1/commitments/{id} {quote_disputed: true}. CommitmentDetailSheet와 CommitmentCard에 '⚠️ 사용자 이의 제기됨' 배지 표시. quote 문자열은 원본 그대로 유지. 이의 제기 취소 버튼은 별도 [이의 제기 해제]로 제공 → quote_disputed=false UPDATE. 이의 제기는 commitment의 action_state 전이나 삭제에 영향 없음"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-006
+    type: ui_interaction
+    description: "commitment 삭제 — CommitmentEditSheet 하단 [삭제] 링크 탭 시 AlertDialog로 확인 후 deleted_at=now() soft delete. action_state='cancelled'(CMT-012)와 구분되는 의미: cancelled는 '약속이 무효화됨'(기록은 유지), deleted는 'LLM이 애초에 잘못 추출했거나 약속이 아님'(기록에서 제거). 삭제된 commitment는 모든 목록/타임라인에서 숨김"
+    screen: "CommitmentEditSheet"
+    interaction: "[삭제] 링크 탭 → 확인"
+    precondition: "CommitmentEditSheet 열림, deleted_at IS NULL"
+    expected: "AlertDialog '이 약속을 삭제하시겠습니까? LLM이 잘못 추출한 경우에만 사용하세요. 실수로 약속이 취소된 경우 [취소]를 사용하세요.' 확인 시 Room UPDATE deleted_at=now() + sync_status='pending'. PATCH /v1/commitments/{id} {deleted_at: ISO8601} (서버는 DELETE 대신 soft delete). CommitmentManagementScreen·TodayTimelineScreen·PersonDetailScreen·UnassignedEventsScreen 모든 쿼리에서 deleted_at IS NOT NULL 제외. CommitmentEditSheet dismiss → CommitmentManagementScreen으로 복귀. 복원 UI는 MVP에 없음(post-MVP '휴지통')"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-007
+    type: ui_interaction
+    description: "supersede(대체) — quote는 정확하지만 LLM이 commitment 경계를 잘못 잡아 '이건 실제로는 다른 약속이에요'라고 판단할 때 CommitmentEditSheet 상단 [이건 다른 약속입니다] 탭 시 새 commitment 작성 화면으로 이동한다. 저장 시 새 row INSERT + supersedes_commitment_id=old.id, old row는 deleted_at=now()로 soft delete된다. 원본 quote는 새 commitment에도 복사되어 출처 근거는 유지"
+    screen: "CommitmentEditSheet | CommitmentCreateSheet"
+    interaction: "[이건 다른 약속입니다] 탭 → 새 commitment 작성 → [저장]"
+    precondition: "CommitmentEditSheet 열림, 원본 commitment 존재"
+    expected: "CommitmentCreateSheet 열림 with quote pre-filled(읽기 전용) + source_event_* pre-filled(읽기 전용) + title/due_at/direction/person_ref는 빈 필드. [저장] 시 Room INSERT new commitments row(supersedes_commitment_id=old.id, quote=old.quote, source_event_*=old.*, confidence=1.0 manual override, last_edited_by=user_id) + Room UPDATE old.deleted_at=now() + sync_status='pending' for both. Railway POST /v1/commitments(new) + PATCH /v1/commitments/{old.id} {deleted_at}. PersonDetailScreen 과거 이력 조회 시 supersedes_commitment_id chain을 따라 '(수정됨 — 이전 버전 보기)' 링크로 역추적 가능(MVP는 DB만, UI는 post-MVP)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EDIT-008
+    type: ui_interaction
+    description: "편집 이력 표시 — CommitmentDetailSheet에 last_edited_at != null인 경우 '마지막 수정: {M/d HH:mm} (본인)' 보조 라벨이 표시된다. MVP는 본인 수정만 가능하므로 always '본인'; 다기기에서도 동일 user가 수정한 것임을 명시. quote_disputed=true인 경우 '⚠️ 이의 제기됨 — {disputed_at}' 함께 표시"
+    screen: "CommitmentDetailSheet"
+    interaction: "화면 진입"
+    precondition: "commitments.last_edited_at IS NOT NULL 또는 quote_disputed=true"
+    expected: "last_edited_at != null: '마지막 수정: 4/18 15:00 (본인)' 소제목 아래 작은 회색 텍스트로 표시. quote_disputed=true: '⚠️ 이의 제기됨' 빨간 배지 + 이의 제기 시각(disputed_at — commitments.last_edited_at reuse 또는 quote_disputed_at 신규 컬럼). supersedes_commitment_id != null: 상단에 '(수정됨 — 이전 버전 보기)' 링크 (MVP는 비활성 텍스트로만 표시, post-MVP에서 chain 조회 구현)"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "quote는 절대 편집되지 않는다 — EDIT-005 이의 제기만 허용(quote_disputed 플래그). 문자열 자체는 법적 증거로 보존"
+  - "모든 편집 operation은 Room UPDATE 즉시 + Railway PATCH 비동기 + last_edited_by/last_edited_at 자동 기록 순서를 따른다"
+  - "source_type·source_event_id·source_event_occurred_at·confidence·created_at은 사용자 편집 UI에 노출하지 않는다(읽기 전용)"
+  - "삭제(EDIT-006)는 hard DELETE가 아닌 deleted_at soft delete다 — 모든 클라이언트 쿼리는 `WHERE deleted_at IS NULL` 필터 포함"
+  - "[삭제](deleted_at)와 [취소](action_state='cancelled')는 의미 구분된다: 삭제=잘못 추출된 기록 제거, 취소=유효한 약속이 무효화됨. 사용자 UI도 별도 CTA로 분리"
+  - "supersede chain(EDIT-007)은 old.deleted_at + new.supersedes_commitment_id 쌍으로 표현되며 MVP는 DB 저장만, UI 역추적은 post-MVP"
+  - "action_state='cancelled' 또는 deleted_at != null인 commitment는 편집 불가(읽기 전용)"

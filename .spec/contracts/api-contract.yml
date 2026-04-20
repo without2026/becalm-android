@@ -246,3 +246,36 @@ endpoints:
       401: { error: string, message: string }
       404: { error: string, message: string }
     spec_refs: [SRC-002]
+
+  # ========== RAILWAY — USER PROFILE ==========
+
+  - method: GET
+    path: /v1/user_profile
+    auth: required
+    response:
+      200:
+        data:
+          user_id: uuid
+          display_name_override?: string
+          phone_e164_self?: string
+          timezone: string                  # default "Asia/Seoul"
+          preferred_locale: string          # default "ko"
+          created_at: datetime
+          updated_at: datetime
+      401: { error: string, message: string }
+      404: { error: string, message: string }   # 로그인 직후 첫 호출 시 — 클라이언트가 PATCH로 upsert
+    spec_refs: [PIPA-001, VOI-008]
+
+  - method: PATCH
+    path: /v1/user_profile
+    auth: required
+    body:
+      display_name_override?: string
+      phone_e164_self?: string             # E.164. 서버는 정규식 ^\+[1-9]\d{7,14}$ 로 검증
+      timezone?: string                    # IANA tz
+      preferred_locale?: string
+    response:
+      200: { data: UserProfile }
+      401: { error: string, message: string }
+      422: { error: string, message: string }  # phone_e164_self 포맷 오류 / timezone IANA 미등록
+    spec_refs: [PIPA-001, VOI-008]
