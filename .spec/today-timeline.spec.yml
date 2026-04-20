@@ -94,11 +94,11 @@ behaviors:
 
   - id: TDY-010
     type: ui_interaction
-    description: "최초 온보딩 완료 직후 cold sync 상태 전용 화면 — Room에 raw_ingestion_events + commitments + calendar_events가 모두 0건일 때만 표시된다. 비블로킹 전체화면 로더 '초기 데이터를 가져오는 중 (N/6 완료)' + 소스별 진행 목록 + [나중에 하기] 버튼. 이후 앱 재실행 시 절대 표시하지 않는다"
+    description: "최초 온보딩 완료 직후 cold sync 상태 전용 화면 — Room에 raw_ingestion_events + commitments + calendar_events가 모두 0건일 때만 표시된다. **구체적 단계 로직은 cold-sync.spec.yml(COLD-001..008)이 소유**하며 본 behavior는 ColdSyncScreen 진입 조건과 TodayTimelineScreen 전환 contract만 담당한다. Stage 1 완료(또는 [나중에 하기])로 TodayTimelineScreen 진입 가능 — 이후 앱 재실행 시 ColdSyncScreen은 절대 재표시되지 않는다"
     screen: "ColdSyncScreen"
     interaction: "화면 진입 (온보딩 완료 직후 자동)"
     precondition: "DataStore onboarding_completed=false(아직 미완료), Room의 raw_ingestion_events + commitments + calendar_events 모두 0건"
-    expected: "ColdSyncScreen 표시됨. 6개 소스별 진행 항목(완료 체크 / 진행 중 스피너) 표시됨. [나중에 하기] 탭 시 빈 TodayTimelineScreen으로 이동됨. cold sync 완료 또는 [나중에 하기] 후 DataStore onboarding_completed=true 저장됨"
+    expected: "ColdSyncScreen 표시됨. cold-sync.spec.yml COLD-001이 Stage 1 병렬 어댑터 실행을 시작하고 COLD-002가 진행 UI를 구성한다. COLD-003 Stage 1 완료 또는 COLD-006 [나중에 하기] 중 먼저 도래하는 시점에 onboarding_completed=true 저장 + TodayTimelineScreen으로 전환(COLD-008). Stage 2는 백그라운드로 이어지며 TodayTimelineScreen 상단 배너(COLD-005)로만 surfacing"
     source: phase2-acceptance
     tests: []
 
@@ -106,5 +106,5 @@ invariants:
   - "TodayTimelineScreen은 Room(로컬) 데이터를 primary source로 사용한다"
   - "Supabase REST에 직접 쿼리하지 않는다 — 모든 서버 조회는 Railway API를 통한다"
   - "SourceStatusStrip 칩은 탭 인터랙션이 없다 — 읽기 전용 진단 표시"
-  - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 TodayTimelineScreen"
+  - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 TodayTimelineScreen (cold-sync.spec.yml COLD-008이 onboarding_completed 전환 시점을 정의)"
   - "TodayTimelineScreen에는 사이드 드로어(HamburgerMenu)가 없다 — 설정 접근은 우상단 아이콘 탭"

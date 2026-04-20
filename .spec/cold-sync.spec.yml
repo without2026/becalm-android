@@ -1,0 +1,98 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+#
+# 이 스펙은 최초 온보딩 직후 Room이 빈 상태에서 수행되는 cold sync를 **2단계**로 분리하여 codify한다.
+# 기존 TDY-010의 단일 전체화면 대기 UX는 '현실적 30초 내 앱 진입'이 불가능한 병목(이메일 30일 백필·녹음 폴더 전체 스캔)을
+# 가지고 있어 사용자가 앱을 포기하는 이탈을 유발했다. 이를 해소하기 위해:
+#   Stage 1 = 'Today-usable' 최소 데이터 세트 (calendar 오늘/+7d + 이메일 7d + user_profile bootstrap) — 목표 <30초, 전체화면 블로킹
+#   Stage 2 = 'Full history' 백필 (이메일 30일 + 녹음 폴더 full scan + cursor 안정화) — 백그라운드, 비블로킹
+# TodayTimelineScreen 진입 가능 시점은 Stage 1 완료이며 onboarding_completed 플래그도 이 시점에 set된다.
+# Stage 2는 이후 SettingsScreen 상단 '초기 데이터 가져오는 중' 배너로 진행률만 surfacing.
+
+module: cold-sync
+platform: android
+version: 1
+
+behaviors:
+  - id: COLD-001
+    type: lifecycle
+    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — 6개 소스 어댑터 중 high-priority 서브셋(google_calendar ±7일, outlook_calendar ±7일, gmail 7일, outlook_mail 7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)을 병렬 코루틴으로 실행. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
+    trigger: "ColdSyncScreen 진입 (TDY-010 조건: Room에 raw_ingestion_events + commitments + calendar_events 0건)"
+    precondition: "인증 완료, DataStore onboarding_completed=false, 최소 1개 소스 연결됨"
+    expected: "Stage 1 코루틴 Scope 시작. 각 어댑터는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT. user_profile 어댑터: Railway GET /v1/user_profile 호출 → Room user_profile 테이블에 UPSERT(최초 빈 row 포함). 동시에 SYNC-006 즉시 업로드도 큐잉되어 calendar_events·raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-002
+    type: ui_interaction
+    description: "ColdSyncScreen 상단 progress indicator가 Stage 1 진행률을 '7개 소스 중 N개 완료'로 표시하며 하단에 각 소스별 진행 항목(완료 체크 / 진행 중 스피너 / 실패 느낌표)을 나열한다. [나중에 하기] 버튼은 Stage 1 시작 후 5초가 지나면 활성화(사용자가 즉시 포기할 수 있도록)"
+    screen: "ColdSyncScreen"
+    interaction: "화면 진입 후 자동 진행"
+    precondition: "COLD-001 실행 중"
+    expected: "Progress 표시 '초기 데이터를 가져오는 중 (N/7)'. 소스별 항목: [Google Calendar ✓ 완료] [Outlook Calendar ⏳ 진행 중] [Gmail ⏳ 진행 중] [Outlook Mail ⚠️ 실패 — 재시도] [Naver IMAP ⏳ 진행 중] [Daum IMAP ⏳ 진행 중] [내 프로필 ✓ 완료]. [나중에 하기] 버튼은 첫 5초 동안 비활성(dimmed), 이후 활성. 실패 항목 탭 시 해당 소스의 cursor 재시도(ING-013 트리거)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-003
+    type: lifecycle
+    description: "Stage 1 모든 소스가 완료(또는 failed로 최종 판정)된 시점에 ColdSyncScreen 자동 dismiss + TodayTimelineScreen으로 전환. DataStore onboarding_completed=true + cold_sync_stage1_completed_at=now() 저장. 이 시점부터 사용자는 앱 정상 사용 가능 — Stage 2는 백그라운드로 계속 실행"
+    trigger: "Stage 1 어댑터 모두 완료(success 또는 exhausted retry)"
+    precondition: "COLD-001 진행 중"
+    expected: "DataStore onboarding_completed=true, cold_sync_stage1_completed_at=ISO8601 저장. ColdSyncScreen finish() + TodayTimelineScreen으로 navigate(replace). Stage 2 Worker(ColdSyncStage2Worker) enqueueUniqueWork('cold-sync-stage2', REPLACE) 호출. Stage 2 Worker는 백그라운드 상수 제약(네트워크+배터리 충분)으로 실행되어 사용자 포그라운드 활동과 경쟁하지 않음. TodayTimelineScreen 상단에 '초기 데이터를 가져오는 중 (백그라운드)' 배너 표시됨 — Stage 2 완료 시 자동 dismiss"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-004
+    type: lifecycle
+    description: "Stage 2 백그라운드 실행 — ColdSyncStage2Worker가 (a) 이메일 30일 백필(Stage 1의 7일 범위에서 확장), (b) 녹음 폴더 전체 스캔(MediaStore에서 지난 30일 .m4a 파일 목록화 + raw_ingestion_events INSERT), (c) 각 소스의 cursor 안정화(첫 실전 cursor 값 DataStore 저장)를 순차 수행한다"
+    trigger: "COLD-003 완료 후 enqueueUniqueWork('cold-sync-stage2')"
+    precondition: "Stage 1 완료, 네트워크 unmetered, battery not low"
+    expected: "이메일 어댑터(gmail·outlook_mail·naver_imap·daum_imap 순차): since=now()-30d로 재호출하여 Room에 중복 제외 추가 INSERT(client_event_id 멱등성으로 Stage 1과 겹치는 7일분은 덮어쓰기 없음). 녹음 폴더: MediaStore.Audio.Media CONTENT_URI에서 RELATIVE_PATH LIKE 'Recordings/%'인 파일들을 DATE_MODIFIED 역순 스캔 → source_type='voice'|'call_recording' raw_ingestion_events INSERT(sync_status='awaiting_consent' if pipa_third_party_consent=false, else 'pending'). 각 소스의 최신 cursor(ING-012 정의)를 DataStore에 저장. 완료 후 DataStore cold_sync_stage2_completed_at=now() 저장"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-005
+    type: ui_interaction
+    description: "TodayTimelineScreen 및 SettingsScreen 상단에 Stage 2 진행 배너 — '초기 데이터를 가져오는 중 (N%)' 표시. 탭 시 ColdSyncProgressSheet 바텀시트 열림 — Stage 2 세부 진행(이메일 백필·녹음 스캔 각 단계별 퍼센트) + [취소하고 나중에] 옵션"
+    screen: "TodayTimelineScreen | SettingsScreen | ColdSyncProgressSheet"
+    interaction: "배너 탭"
+    precondition: "DataStore cold_sync_stage1_completed_at IS NOT NULL, cold_sync_stage2_completed_at IS NULL"
+    expected: "상단 배너(non-blocking, dismiss 불가): '초기 데이터를 가져오는 중 (45%)'. 탭 시 ColdSyncProgressSheet 바텀시트 — (1) 이메일 30일 백필: 'Gmail 3,241건 중 1,102건 처리됨' (2) 녹음 폴더 스캔: '412개 파일 중 188개 검색됨' (3) [취소하고 나중에] 버튼. 취소 탭 시 ColdSyncStage2Worker.cancel + DataStore cold_sync_stage2_deferred=true 저장. Settings의 [소스 관리]에서 수동 재개 가능. Stage 2 성공 완료 시 배너 자동 dismiss + Snackbar '초기 데이터 가져오기 완료' 3초 표시"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-006
+    type: ui_interaction
+    description: "[나중에 하기] — Stage 1 진행 중에 사용자가 [나중에 하기] 탭 시 Stage 1은 취소되지 않고 백그라운드로 전환 + TodayTimelineScreen 즉시 진입. 완료된 소스의 데이터는 그대로 사용 가능, 미완료 소스는 Stage 2 범위로 이월되어 전체 30d 백필에 포함된다"
+    screen: "ColdSyncScreen"
+    interaction: "[나중에 하기] 버튼 탭 (Stage 1 진행 중)"
+    precondition: "COLD-001 실행 중, [나중에 하기] 활성화됨(5초 경과 후)"
+    expected: "ColdSyncScreen finish() + TodayTimelineScreen으로 navigate. DataStore onboarding_completed=true, cold_sync_stage1_deferred=true, cold_sync_deferred_at=now() 저장. Stage 1 코루틴은 취소되지 않고 WorkManager OneTimeWorkRequest('cold-sync-stage1-deferred')로 래핑되어 백그라운드에서 완료될 때까지 계속 실행. 완료되면 Stage 2로 자동 진행. 사용자는 TodayTimelineScreen에서 이미 완료된 소스의 데이터를 즉시 볼 수 있음(예: Google Calendar만 완료된 상태에서도 오늘의 캘린더 이벤트는 표시)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-007
+    type: lifecycle
+    description: "Stage 1 또는 Stage 2 진행 중 앱 강제 종료·프로세스 kill 시 재시작 경로 — DataStore 상태로 판단한다. onboarding_completed=false이면 ColdSyncScreen 재진입, onboarding_completed=true이고 cold_sync_stage2_completed_at=null이면 TodayTimelineScreen + Stage 2 재개 배너. Stage 1 미완료 소스가 있을 경우 재시작 시 cursor가 없으므로 처음부터 7일 범위로 재실행(멱등)"
+    trigger: "앱 프로세스 재시작 (ON_START)"
+    precondition: "DataStore에 cold_sync_* 중간 상태 존재"
+    expected: "Scenario A — onboarding_completed=false, cold_sync_stage1_completed_at=null: ColdSyncScreen 재표시, Stage 1 처음부터 재실행(7일 fetch는 멱등 — 동일 client_event_id로 중복 제외). Scenario B — onboarding_completed=true, cold_sync_stage2_completed_at=null, cold_sync_stage2_deferred=false: TodayTimelineScreen 정상 진입 + ColdSyncStage2Worker 자동 재enqueue. Scenario C — cold_sync_stage2_deferred=true: TodayTimelineScreen 정상 진입, Stage 2 재시작 없음(사용자 수동 재개 필요). 어떤 시나리오에서도 데이터 손실 없음 — client_event_id 멱등성이 보장"
+    source: phase2-acceptance
+    tests: []
+
+  - id: COLD-008
+    type: lifecycle
+    description: "onboarding_completed 플래그 set 시점 정의 — Stage 1 완료(COLD-003) 또는 [나중에 하기](COLD-006) 중 **먼저 도래하는 쪽**. 종래 TDY-010은 '전체 cold sync 완료'를 기다렸으나 본 스펙에서는 Stage 1만 완료하면 충분한 것으로 간주한다. 이후 앱 재진입은 항상 TodayTimelineScreen으로 직행하며 ColdSyncScreen은 onboarding_completed=false인 경우에만 표시된다"
+    trigger: "COLD-003 또는 COLD-006 완료 시점"
+    precondition: "DataStore onboarding_completed=false"
+    expected: "DataStore onboarding_completed=true, cold_sync_stage1_completed_at=ISO8601 (deferred 경우 cold_sync_stage1_deferred=true 동반 기록). 이후 앱 재시작 시 MainActivity의 진입점 라우팅은 onboarding_completed=true를 보고 TodayTimelineScreen으로 직행. ColdSyncScreen은 영원히 다시 표시되지 않음. Stage 2가 완료되지 않았어도 이 flag는 유지 — Stage 2는 fully background concern"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "Stage 1은 7개 작업(calendar×2 + email×4 + user_profile) 병렬 실행이며 voice/call_recording은 포함되지 않는다 (녹음 폴더는 Stage 2로 이월)"
+  - "Stage 1 완료 시점 또는 [나중에 하기] 시점에 onboarding_completed=true가 기록된다 — 이후 ColdSyncScreen은 재표시되지 않는다"
+  - "Stage 2는 완전 백그라운드이며 사용자 포그라운드 경험을 차단하지 않는다 — TodayTimelineScreen 상단 배너로만 진행률 surfacing"
+  - "Stage 1·Stage 2 모두 client_event_id 멱등성을 기반으로 중복 없이 재실행 가능하다 — 앱 프로세스 kill 후 재시작에도 데이터 손실·중복 없음"
+  - "[나중에 하기]는 Stage 1 코루틴을 취소하지 않고 WorkManager로 전환하여 백그라운드에서 이어서 완료시킨다"
+  - "Stage 2 진행 중 이 배너는 dismiss 불가 — 사용자는 [취소하고 나중에]로만 중단할 수 있으며 이 경우 cold_sync_stage2_deferred=true로 기록되어 수동 재개 경로만 남는다"
+  - "Stage 1 개별 소스 실패는 전체 Stage 1 실패로 확대되지 않는다 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 ING-013 경로에서 복구"
