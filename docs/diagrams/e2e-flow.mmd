@@ -1,0 +1,38 @@
+flowchart LR
+    U[사용자 음성 녹음] -->|MediaStore scan| VWD[VoiceWatchDogWorker]
+    VWD -->|INSERT| REL[("Room<br/>raw_ingestion_events")]
+    REL -->|uploadBatch| RAWR[RawIngestionRepository]
+    RAWR -->|POST /v1/raw_ingestion_events:batch| RAILWAY{{Railway FastAPI}}
+    RAWR -.병렬.-> VOICE[VoiceUploadWorker]
+    VOICE -->|"POST /v1/voice/transcribe_extract<br/>multipart audio"| RAILWAY
+    RAILWAY -->|INSERT| SUPA[("Supabase<br/>raw + commitments")]
+    RAILWAY -->|"Vertex AI Gemini 2.5 Flash<br/>asia-northeast3 ZDR"| LLM[["CommitmentDraft array"]]
+    LLM --> RAILWAY
+    RAILWAY -->|response| VOICE
+    VOICE -->|"INSERT commitments<br/>UPDATE raw count"| CEL[("Room<br/>commitments")]
+
+    CEL -->|observeAllByActionState| CMTV[CommitmentRepository]
+    CMTV -->|Flow| CMV[CommitmentManagementViewModel]
+    CMV -->|StateFlow| CMS[/"CommitmentManagementScreen<br/>/commitments"/]
+
+    CEL -->|observeDueToday| TVM[TodayViewModel]
+    CAL[("Room<br/>calendar_events")] -->|observeTodayStatusConfirmed| TVM
+    TVM -->|StateFlow| TSC[/"TodayTimelineScreen<br/>/today"/]
+
+    CMS -->|"PATCH /v1/commitments/id<br/>action_state=completed"| RAILWAY
+    CMS -.PR-C.-> EDIT[/"CommitmentEditScreen ❌"/]
+    EDIT -->|"PATCH title/due_at/quote_disputed/deleted_at"| RAILWAY
+    CMS -.PR-C.-> MANUAL[/"ManualCommitmentScreen ❌"/]
+    MANUAL -->|POST /v1/commitments| RAILWAY
+
+    SYNC[SyncWorker 주기 15min] -->|POST /v1/calendar_events:sync| RAILWAY
+    RAILWAY -->|INSERT/UPDATE| SUPA
+    SYNC -->|GET /v1/calendar_events| RAILWAY
+    RAILWAY -->|response| SYNC
+    SYNC -->|UPSERT| CAL
+
+    ENR[EnrichmentWorker] -->|ContactsContract READ| ENRDB[("Room only<br/>persons_enrichment")]
+    ENRDB -->|observeAll| PVM[PersonsViewModel]
+    PVM -->|StateFlow| PS[/"PersonsScreen<br/>/persons"/]
+
+    OVERDUE[OverdueSweepWorker ❌] -.PR-D.-> CEL

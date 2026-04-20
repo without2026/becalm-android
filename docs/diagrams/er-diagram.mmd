@@ -1,0 +1,115 @@
+erDiagram
+    %% ======== Supabase-mirrored (Room <-> Railway <-> Postgres) ========
+    AUTH_USERS ||--o{ RAW_INGESTION_EVENTS : "1:N"
+    AUTH_USERS ||--o{ COMMITMENTS : "1:N"
+    AUTH_USERS ||--o{ CALENDAR_EVENTS : "1:N"
+    AUTH_USERS ||--|| USER_PROFILE : "1:1"
+    AUTH_USERS ||--o{ COMMITMENTS_EDITED : "last_edited_by SET NULL"
+    COMMITMENTS ||--o{ COMMITMENTS : "supersedes_commitment_id (chain)"
+
+    %% ======== Room-only (never uploaded) ========
+    RAW_INGESTION_EVENTS ||--o| EMAIL_BODY : "raw_event_id (Room only)"
+
+    AUTH_USERS {
+        uuid id PK
+        text email
+    }
+
+    RAW_INGESTION_EVENTS {
+        uuid id PK
+        uuid user_id FK
+        uuid client_event_id "idempotency"
+        text source_type "8 values"
+        text source_ref
+        text person_ref "phone|email|name"
+        text event_title
+        text event_snippet
+        int duration_seconds "voice only"
+        text location "calendar only"
+        int commitments_extracted_count
+        timestamptz timestamp
+        text sync_status "pending|synced|failed|awaiting_consent"
+        int retry_count
+        timestamptz last_attempt_at
+    }
+
+    COMMITMENTS {
+        uuid id PK
+        uuid user_id FK
+        text direction "give|take"
+        text counterparty_raw
+        text person_ref
+        text title
+        text description
+        text quote "LEGAL-evidentiary"
+        text source_event_title
+        timestamptz source_event_occurred_at
+        timestamptz due_at "KST +09:00"
+        text due_hint "원문"
+        bool due_is_approximate
+        text action_state "6 values"
+        text source_type "9 values inc. manual"
+        text source_ref
+        float confidence
+        text sync_status
+        timestamptz created_at
+        timestamptz updated_at
+        uuid last_edited_by FK
+        timestamptz last_edited_at
+        bool quote_disputed
+        timestamptz quote_disputed_at
+        timestamptz deleted_at "soft delete"
+        uuid supersedes_commitment_id FK
+    }
+
+    CALENDAR_EVENTS {
+        uuid id PK
+        uuid user_id FK
+        text source_type "google_cal|outlook_cal"
+        text source_ref
+        text title
+        timestamptz start_at
+        timestamptz end_at
+        text attendees_raw
+        text status "confirmed|cancelled"
+        text recurring_event_id
+        timestamptz original_start_at
+        text sync_status
+    }
+
+    USER_PROFILE {
+        uuid user_id PK_FK
+        text display_name_override
+        text phone_e164_self "E.164"
+        text timezone "Asia/Seoul"
+        text preferred_locale "ko"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EMAIL_BODY {
+        uuid id PK
+        uuid raw_event_id FK
+        text provider_message_id
+        text folder "INBOX|SENT"
+        text subject
+        text from_address
+        text to_addresses
+        text body_plain
+        text body_html
+        text attachments_meta
+        text raw_headers
+        bool parse_failed
+        bool group_email
+        timestamptz received_at
+    }
+
+    PERSONS_ENRICHMENT {
+        text person_ref PK
+        text display_name
+        text nickname
+        text company
+        text title
+        text source_contact_id
+        timestamptz last_synced_at
+    }
