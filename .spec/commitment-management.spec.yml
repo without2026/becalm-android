@@ -6,11 +6,11 @@ version: 1
 behaviors:
   - id: CMT-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 진입 시 전체 약속 목록이 표시된다. 기본 탭: '전체'. 각 약속 카드에 direction 배지(내가 한/상대가 한) + quote + title + person_ref 표시명 + due_date + action_state 표시됨"
+    description: "CommitmentManagementScreen 진입 시 전체 약속 목록이 표시된다. 기본 탭: '전체'. 각 약속 카드에 direction 배지(내가 한/상대가 한) + quote + title + person_ref 표시명 + due_at(KST 표시) + action_state 표시됨. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
     screen: "CommitmentManagementScreen"
     interaction: "하단 탭 '약속관리' 탭"
     precondition: "인증 완료, Room에 Commitment 3건(give 2건 + take 1건) 존재"
-    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/내가 한/상대가 한) 표시됨. 3건 모두 표시됨. 각 카드에 quote, title, person_ref 기반 표시명, due_date, action_state 표시됨"
+    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/내가 한/상대가 한) 표시됨. 3건 모두 표시됨. 각 카드에 quote, title, person_ref 기반 표시명, due_at(M/d HH:mm KST), due_is_approximate=true면 '~' prefix + due_hint 보조 라벨, action_state 표시됨"
     source: phase2-acceptance
     tests: []
 
@@ -36,21 +36,21 @@ behaviors:
 
   - id: CMT-004
     type: ui_interaction
-    description: "D-N 배지 — due_date까지 남은 일수를 CommitmentCard에 표시한다. D-0(오늘), D-1, D-2 등. 만료된 경우 빨간색으로 'D+N' 표시됨"
+    description: "D-N 배지 — due_at까지 남은 일수를 KST local date 기준으로 CommitmentCard에 표시한다. D-0(오늘), D-1, D-2 등. due_at이 경과(현재 시각 > due_at)한 pending/reminded/followed_up 상태에서는 빨간색 'D+N' 표시됨. due_is_approximate=true면 'D~N' 형식으로 물결표 prefix"
     screen: "CommitmentManagementScreen"
     interaction: "화면 진입"
-    precondition: "오늘 2026-04-16. Room에 Commitment 1건(due_date=2026-04-18), 1건(due_date=2026-04-16), 1건(due_date=2026-04-10)"
-    expected: "2026-04-18 카드: 'D-2' 표시됨. 2026-04-16 카드: 'D-0' 표시됨. 2026-04-10 카드: 'D+6' 빨간색 표시됨"
+    precondition: "오늘 2026-04-18 KST. Room에 Commitment 1건(due_at=2026-04-20T10:00+09:00), 1건(due_at=2026-04-18T15:00+09:00), 1건(due_at=2026-04-12T00:00+09:00, action_state='pending')"
+    expected: "2026-04-20 카드: 'D-2' 표시됨. 2026-04-18 카드: 'D-0' 표시됨. 2026-04-12 카드: 'D+6' 빨간색 표시됨. due_is_approximate=true 카드는 'D~N' 표기"
     source: phase2-acceptance
     tests: []
 
   - id: CMT-005
     type: ui_interaction
-    description: "[리마인드] 버튼 탭 시 상대방에게 알림을 설정한다. action_state를 'reminded'로 변경하고 Railway PATCH /v1/commitments/{id}를 호출한다"
+    description: "[리마인드] 버튼 탭 시 본인(사용자)에게 마감 1시간 전 local push 알림을 예약한다. action_state를 'reminded'로 변경하고 Railway PATCH /v1/commitments/{id}를 호출한다. AlarmManager는 due_at - 1h 시점에 알람을 등록한다 — 당일 오전 9시 일괄 발송이 아니라 마감 임박 시점 기반. 마감이 이미 지났거나 due_at이 null이면 AlarmManager 등록 없이 action_state만 변경"
     screen: "CommitmentDetailSheet"
     interaction: "[리마인드] 버튼 탭"
     precondition: "CommitmentDetailSheet에서 action_state='pending' Commitment 표시됨"
-    expected: "Room의 commitment action_state='reminded'로 UPDATE됨. PATCH /v1/commitments/{id} {action_state: 'reminded'} 호출됨. 버튼 상태 갱신됨. AlarmManager 알림 스케줄 등록됨(due_date 당일 오전 9시)"
+    expected: "Room의 commitment action_state='reminded'로 UPDATE됨. PATCH /v1/commitments/{id} {action_state: 'reminded'} 호출됨. 버튼 상태 갱신됨. due_at != null && due_at - 1h > now() 인 경우 AlarmManager에 setExactAndAllowWhileIdle(alarm_time = due_at - 1h, PendingIntent.FLAG_IMMUTABLE) 등록됨. due_at이 이미 과거거나 null이면 alarm 등록 생략"
     source: phase2-acceptance
     tests: []
 
@@ -76,10 +76,10 @@ behaviors:
 
   - id: CMT-008
     type: lifecycle
-    description: "AlarmManager 알림 — due_date 당일 오전 9시에 push notification을 발송한다. action_state='completed'인 약속은 알림 발송 생략"
-    trigger: "AlarmManager 스케줄된 알람 실행 (due_date 당일 09:00)"
-    precondition: "Room에 Commitment 1건(due_date=오늘, action_state='pending' 또는 'reminded')"
-    expected: "Push notification 발송됨. title: '오늘 마감 약속이 있습니다', body: commitment.title. 탭 시 CommitmentManagementScreen으로 딥링크됨. action_state='completed'인 약속은 알림 발송 없음"
+    description: "AlarmManager 알림 — CMT-005에서 예약된 alarm이 due_at - 1h 시점에 local push notification을 발송한다. action_state='completed'|'cancelled'인 약속은 사용자가 이미 처리/취소한 것이므로 알람 시각에 도달했더라도 notification 발송 없이 silent drop"
+    trigger: "AlarmManager 스케줄된 알람 실행 (alarm_time = due_at - 1h)"
+    precondition: "CMT-005에서 등록된 alarm이 alarm_time에 도달, Room에 해당 commitment 존재"
+    expected: "AlarmReceiver가 최신 action_state를 Room에서 재조회 → pending/reminded/followed_up 중 하나면 notification 발송, completed/cancelled면 silent drop. 발송 시 title: '곧 마감되는 약속 (1시간 뒤)', body: '[내가 한/상대가 한] {commitment.title}' — direction 배지는 실제 direction 값으로 치환. 탭 시 CommitmentDetailSheet(id={commitment.id})로 딥링크됨. Notification channel: 'commitment_due_soon' (IMPORTANCE_HIGH)"
     source: phase2-acceptance
     tests: []
 
@@ -103,9 +103,41 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: CMT-011
+    type: lifecycle
+    description: "시스템 자동 'overdue' 전이 — due_at 경과 후 24시간이 지나도 completed/cancelled로 전환되지 않은 pending/reminded/followed_up 약속은 주기적 워커가 action_state='overdue'로 자동 UPDATE한다. 24시간 grace period는 당일 마감 직후 사용자가 즉시 completed 처리할 시간을 보장하기 위함"
+    trigger: "WorkManager OverdueSweepWorker 실행 (6시간 주기, KEEP policy)"
+    precondition: "Room에 due_at IS NOT NULL AND due_at < now() - 24h AND action_state IN ('pending','reminded','followed_up') commitment 존재"
+    expected: "해당 commitments에 대해 Room UPDATE action_state='overdue'. Railway PATCH /v1/commitments/{id} {action_state:'overdue'} 배치 호출 (네트워크 가용 시). OverdueSweepWorker는 사용자 수동 action 없이 system-derived. UI는 'overdue'를 기존 D+N 빨간색 외에 '놓침' 배지로 구분. 사용자는 overdue 상태에서도 [팔로업]·[완료]·[취소] 가능 (재전이 경로)"
+    source: phase2-acceptance
+    tests: []
+
+  - id: CMT-012
+    type: ui_interaction
+    description: "[취소] 버튼 탭 시 action_state='cancelled'로 전이한다 — 약속 자체가 무효화됐거나 LLM 오추출이어서 사용자가 더 이상 추적할 필요가 없음을 의미. completed와 달리 '이행 완료'가 아닌 '폐기'로 별도 집계"
+    screen: "CommitmentDetailSheet"
+    interaction: "[취소] 버튼 탭"
+    precondition: "CommitmentDetailSheet에서 action_state IN ('pending','reminded','followed_up','overdue') Commitment 표시됨"
+    expected: "Room의 commitment action_state='cancelled'로 UPDATE됨. PATCH /v1/commitments/{id} {action_state:'cancelled'} 호출됨. 카드가 기본 목록에서 사라지고 '취소된 약속' 섹션(접힌 상태)으로 이동. CMT-005에서 등록된 AlarmManager alarm이 있으면 AlarmManager.cancel()로 해제. 사용자에게 CMT-013 undo Snackbar 표시"
+    source: phase2-acceptance
+    tests: []
+
+  - id: CMT-013
+    type: ui_interaction
+    description: "action_state 변경(completed 또는 cancelled) 후 5초 이내 Undo Snackbar 제공 — [실행 취소] 탭 시 직전 action_state로 복원한다. 다른 action_state 전이(reminded/followed_up/overdue)에는 Undo 없음 (reversible이지만 사용자 실수 가능성 낮음)"
+    screen: "CommitmentManagementScreen | CommitmentDetailSheet"
+    interaction: "[완료] 또는 [취소] 탭 직후 Snackbar 표시 → [실행 취소] 탭 (또는 5초 dismiss)"
+    precondition: "방금 completed 또는 cancelled로 전이한 commitment, Snackbar 표시 중, 5초 경과 전"
+    expected: "Snackbar: '완료로 변경되었습니다. [실행 취소]' (또는 '취소되었습니다. [실행 취소]'). [실행 취소] 탭 시 Room의 action_state가 직전 값(예: pending/reminded/followed_up/overdue)으로 UPDATE됨. PATCH /v1/commitments/{id} {action_state: 직전값} 호출됨. completed→undo 시 해제됐던 AlarmManager alarm은 재등록하지 않음(사용자가 다시 [리마인드] 필요). 5초 dismiss 시 Snackbar 사라지며 전이는 확정됨"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "CommitmentManagementScreen은 Room(로컬) 데이터를 primary source로 사용한다"
   - "action_state 변경은 Room 즉시 UPDATE + Railway PATCH /v1/commitments/{id} 비동기 호출 순서로 처리된다"
   - "PATCH /v1/commitments/{id} 실패 시 Room의 action_state는 낙관적 업데이트 상태를 유지하고 sync_status='pending'으로 재시도 큐에 등록된다"
-  - "AlarmManager 알림은 action_state='completed' 약속에 대해 발송하지 않는다"
+  - "AlarmManager 알림은 action_state IN ('completed','cancelled') 약속에 대해 발송하지 않는다 (AlarmReceiver가 최신 action_state 재조회 후 silent drop)"
   - "quote 필드는 원문 그대로 표시된다 — 요약 또는 편집 없음"
+  - "action_state 전이는 데이터 모델에 정의된 transition matrix를 따른다 — 불법 전이(예: completed→reminded)는 클라이언트·서버 양쪽에서 422로 거부"
+  - "overdue 전이는 시스템 자동(CMT-011)이며 사용자 수동으로 overdue 설정할 수 없다 — 사용자는 cancelled로만 명시적 폐기 가능"
+  - "Undo Snackbar(CMT-013)는 completed·cancelled 전이에만 제공되며 5초 window 내 1회 복원 가능"

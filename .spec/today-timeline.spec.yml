@@ -6,11 +6,11 @@ version: 1
 behaviors:
   - id: TDY-001
     type: ui_interaction
-    description: "TodayTimelineScreen 진입 시 오늘 캘린더 이벤트와 due_date=오늘인 commitment가 시간순으로 표시된다. commitment 카드에 counterparty 표시 시 person_ref 기반 표시명 사용"
+    description: "TodayTimelineScreen 진입 시 오늘 캘린더 이벤트(status='confirmed')와 due_at이 오늘 KST range에 속하는 commitment가 시간순으로 표시된다. 취소된 캘린더 이벤트(status='cancelled')는 strike-through + dim으로 함께 표시됨. commitment 카드에 counterparty 표시 시 person_ref 기반 표시명 사용"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "인증 완료, Room에 오늘 CalendarEvent 2건 + due_date=오늘 Commitment 1건(person_ref='lee@corp.com') 존재"
-    expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 + 'lee@corp.com' 표시됨"
+    precondition: "인증 완료, Room에 오늘 CalendarEvent 2건(status='confirmed') + due_at이 today KST range 내인 Commitment 1건(person_ref='lee@corp.com') 존재"
+    expected: "통합 타임라인에 3개 항목이 시간순으로 표시됨. CalendarEvent에는 캘린더 아이콘, Commitment에는 give/take 배지 + 'lee@corp.com' 표시됨. 같은 날 status='cancelled' 캘린더 이벤트가 있으면 strike-through + 회색으로 추가 표시"
     source: phase2-acceptance
     tests: []
 
@@ -19,7 +19,7 @@ behaviors:
     description: "오늘 항목이 없을 때 빈 상태 메시지를 표시한다"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "인증 완료, Room에 오늘 CalendarEvent 0건 + due_date=오늘 Commitment 0건"
+    precondition: "인증 완료, Room에 오늘 CalendarEvent 0건 + due_at이 today KST range 내인 Commitment 0건"
     expected: "'오늘 예정된 항목이 없습니다' 빈 상태 메시지 표시됨. 크래시 없음"
     source: phase2-acceptance
     tests: []

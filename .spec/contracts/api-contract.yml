@@ -29,7 +29,9 @@ types:
     text: string                # 요약 문구 (1~2 문장)
     quote: string               # 오디오에서 추출한 원문 발화 단편 — 법적 증거 기록, 앱이 요약·편집 금지
     person_ref?: string         # 정규화된 상대방 식별자 (정규화 우선순위: phone E.164 > email lowercase > display_name normalized). 식별 불가 시 null
-    due_at?: datetime           # ISO8601. 발화에 시점 언급이 없으면 null
+    due_at?: datetime           # ISO8601 with explicit +09:00 offset (KST). Android는 UTC로 저장·계산하되 payload는 KST로 전송한다. 발화에 시점 언급이 없으면 null
+    due_hint?: string           # 원문에서 추출한 시점 문구 원본 (예: "다음주", "월말까지", "이번달 안에", "내일 오전"). 상대적/모호 표현은 due_at으로 해석할 때 손실되므로 원문 보존
+    due_is_approximate: bool    # default false. true이면 due_at이 명시적 날짜·시각이 아닌 hint에서 LLM이 추론한 값 — UI는 "약" 마크(예: "~4/24")로 표기하여 사용자에게 보정 필요 여부를 알림
     confidence: float           # 0.0 ~ 1.0
 
 endpoints:
@@ -66,7 +68,7 @@ endpoints:
     body:
       events:
         - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
-          source_type: string         # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+          source_type: string         # voice | call_recording | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
           source_ref?: string
           person_ref?: string         # Canonicalized counterparty; null if unidentifiable
           event_title?: string        # voice: MediaStore title / email: subject / calendar: title
@@ -147,13 +149,14 @@ endpoints:
       since?: string          # ISO datetime — commitments updated after this time
       person_ref?: string     # Filter by person
       direction?: string      # give | take
-      action_state?: string   # pending | reminded | followed_up | completed
+      action_state?: string   # pending | reminded | followed_up | completed | overdue | cancelled
     response:
       200:
         data: "Commitment[]"
         # Commitment type includes: id, user_id, direction, counterparty_raw, person_ref,
         # title, description, quote, source_event_title, source_event_occurred_at,
-        # due_date, action_state, source_type, source_ref, confidence,
+        # due_at (ISO8601 KST), due_hint, due_is_approximate,
+        # action_state, source_type, source_ref, confidence,
         # sync_status, created_at, updated_at
         cursor: string
         has_more: boolean
@@ -173,13 +176,13 @@ endpoints:
     path: /v1/commitments/{id}
     auth: required
     body:
-      action_state: string    # pending | reminded | followed_up | completed
+      action_state: string    # pending | reminded | followed_up | completed | overdue | cancelled
     response:
       200: { data: Commitment }
       401: { error: string, message: string }
       404: { error: string, message: string }
-      422: { error: string, message: string }  # Invalid action_state value
-    spec_refs: [CMT-005, CMT-006, CMT-007]
+      422: { error: string, message: string }  # Invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
+    spec_refs: [CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, CMT-013]
 
   # ========== RAILWAY — CALENDAR EVENTS ==========
 
@@ -190,10 +193,12 @@ endpoints:
       cursor?: string
       since?: string          # ISO datetime
       limit?: int
+      status?: string         # confirmed | cancelled — optional filter. 기본(미지정) 시 양쪽 모두 반환하며 client가 status='cancelled'를 strike-through로 렌더링
     response:
       200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
+      # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), sync_status
       401: { error: string, message: string }
-    spec_refs: [TDY-005]
+    spec_refs: [TDY-005, ING-009, ING-010]
 
   - method: POST
     path: /v1/calendar_events:sync
