@@ -241,6 +241,108 @@ tables:
 
   # ---- Room-only table (never uploaded to Railway or Supabase) ----
 
+  - name: user_profile
+    # Supabase 미러 있음 — 단일 로그인 계정당 1행. phone_e164_self는 Gemini voice 프롬프트의 speaker 식별에 쓰여 서버 전송이 불가피하므로 Supabase에 저장.
+    columns:
+      - name: user_id
+        type: uuid
+        primary: true
+        nullable: false
+        fk: "auth.users.id"
+      - name: display_name_override
+        type: text
+        nullable: true
+        # 사용자가 직접 입력한 표시명. null이면 Supabase Auth email local-part 또는 Google OAuth display_name 사용
+      - name: phone_e164_self
+        type: text
+        nullable: true
+        # 사용자 본인 전화번호 (E.164). voice/call_recording 프롬프트에서 "화자 중 +8210xxxx가 사용자이고 나머지는 상대방" 컨텍스트 제공. 미등록 시 Gemini는 speaker diarization 없이 direction 추정 — 정확도 저하. 온보딩 12단계에 입력 단계 없음 — Settings > 내 프로필에서 사용자 직접 입력
+      - name: timezone
+        type: text
+        nullable: false
+        default: "'Asia/Seoul'"
+        # IANA tz. MVP는 Asia/Seoul 고정이지만 컬럼 보존 — 해외 출장 use case post-MVP
+      - name: preferred_locale
+        type: text
+        nullable: false
+        default: "'ko'"
+        # MVP는 'ko' 고정
+      - name: created_at
+        type: timestamptz
+        nullable: false
+        default: now()
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+        default: now()
+    indexes: []
+    rls: true
+
+  - name: email_body
+    room_only: true
+    # PIPA invariant: 이메일 원문은 온디바이스 전용. Railway/Supabase로 전송 절대 금지. 30일 retention sweep 대상.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: raw_event_id
+        type: uuid
+        nullable: false
+        # Room raw_ingestion_events.id FK (로컬 내 FK). Supabase 미러에는 존재하지 않음
+      - name: provider_message_id
+        type: text
+        nullable: false
+        # Gmail messageId / Microsoft Graph id / IMAP UIDVALIDITY+UID
+      - name: folder
+        type: text
+        nullable: false
+        # enum: INBOX | SENT. EMAIL-002의 person_ref 결정 및 EMAIL-001의 direction 힌트에 사용
+      - name: subject
+        type: text
+        nullable: true
+      - name: from_address
+        type: text
+        nullable: true
+        # lowercase normalized
+      - name: to_addresses
+        type: text
+        nullable: true
+        # JSON array of {email, name?} (전체 수신자 보존 — person_ref는 [0]만 사용)
+      - name: body_plain
+        type: text
+        nullable: true
+      - name: body_html
+        type: text
+        nullable: true
+      - name: attachments_meta
+        type: text
+        nullable: true
+        # JSON [{filename, mime, size_bytes}]. 바이트는 다운로드 안 함 (EMAIL-004)
+      - name: raw_headers
+        type: text
+        nullable: true
+        # In-Reply-To, References 등 thread 구성 헤더를 원형 보존 (EMAIL-005, post-MVP thread view 기반)
+      - name: parse_failed
+        type: boolean
+        nullable: false
+        default: "false"
+        # EMAIL-007: HTML 파싱 실패 시 true, body_plain=null + body_html=원본
+      - name: group_email
+        type: boolean
+        nullable: false
+        default: "false"
+        # EMAIL-002: To 수신자 10명 초과 그룹 발송. person_ref는 null로 raw event에 저장됨
+      - name: received_at
+        type: timestamptz
+        nullable: false
+    indexes:
+      - columns: [raw_event_id]
+        type: btree
+      - columns: [provider_message_id]
+        type: btree
+
   - name: persons_enrichment
     room_only: true
     # PIPA invariant: 연락처 데이터는 온디바이스 전용. Railway/Supabase로 전송 절대 금지.
@@ -294,6 +396,11 @@ relationships:
     type: many-to-one
     on_delete: cascade
 
+  - from: "user_profile.user_id"
+    to: "auth.users.id"
+    type: one-to-one
+    on_delete: cascade
+
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
   - "Room 전용 엔티티 (Supabase 없음): EmailBody, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. (Transcript는 voice-pipeline v2에서 제거됨 — 오디오 → commitments 직접 추출 구조, 중간 transcript는 어디에도 저장되지 않음)"
@@ -309,6 +416,7 @@ migration_notes:
   - "persons_enrichment: CONTACTS 권한 부여 시 EnrichmentWorker가 ContactsContract.Data에서 읽어 채움. person_ref PRIMARY KEY — 동일 person_ref의 최신 연락처 정보로 UPSERT. 로그아웃 시 전체 삭제"
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
   - "Room DB 파일 분리 정책: DB 파일명은 `becalm_<sha256(supabase_user_id)[:16]>.db` 형식으로 user 단위 격리 (AUTH-008). 동일 디바이스에서 계정 전환·공유 시 RLS와 무관하게 로컬 레벨에서 데이터가 섞이지 않는다. 로그아웃은 해당 user의 DB 연결을 close()할 뿐 파일 삭제는 하지 않음 — 동일 계정 재로그인 시 데이터 복원"
+  - "user_profile 테이블: 로그인 직후 빈 row가 Railway `POST /v1/user_profile:upsert`로 INSERT됨. phone_e164_self는 Settings > 내 프로필에서 사용자 직접 입력 — 미입력 시 voice 파이프라인 Gemini 프롬프트는 fallback 문구 '본인과 상대방을 구분해 direction을 추정하라'만 사용. display_name_override는 UI 상단 바 인사말 및 Gemini 프롬프트에서 활용. Supabase 미러 필수(다기기 post-MVP 대비 + PIPA 열람권 export 대상 포함)"
   - "Vertex AI 리전: asia-northeast3 (서울). ZDR(Zero Data Retention) 플래그 필수. voice-pipeline v2는 Railway `POST /v1/voice/transcribe_extract`에서 Vertex AI Gemini 2.5 Flash를 호출하며 오디오 바이트·transcript·Gemini 응답은 요청 lifetime 내 ephemeral. commitments만 Supabase에 INSERT됨"
   - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice source에 대한 Railway 업로드가 차단됨 (VOI-004, ONB-PIPA)"
   - "리텐션 정책 (MVP 확정): Room raw_ingestion_events 및 연관 EmailBody는 timestamp 기준 30일 rolling window로 자동 삭제된다. 일일 WorkManager RetentionSweepWorker가 `DELETE FROM raw_ingestion_events WHERE timestamp < now() - INTERVAL '30 days' AND sync_status='synced'`를 실행하며 synced되지 않은 레코드는 업로드 완료 전까지 보존된다. commitments 및 calendar_events는 action_state/status 기준 별도 lifecycle을 따르므로 30일 정책 적용 대상 아님. Supabase(서버 미러)는 동일 규칙을 서버 측 pg_cron으로 병렬 적용 — 단 MVP는 Supabase 서버 리텐션 60일(클라이언트 삭제 후에도 30일 버퍼 보관)로 완화하여 다기기·복구 use case에 대비 (post-MVP에 재검토). persons_enrichment는 CONTACTS 원본이 사용자 기기에 상존하는 한 삭제하지 않음 — 로그아웃/계정 삭제 시에만 일괄 삭제 (AUTH-005)"

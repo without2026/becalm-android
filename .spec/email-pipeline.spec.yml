@@ -1,0 +1,82 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+#
+# 이 스펙은 data-ingestion.spec.yml의 ING-006..008을 전제로 하며, 이메일 특유의 의미 처리 계층을 codify한다:
+# (a) INBOX vs SENT로부터 direction 추정, (b) person_ref 추출, (c) 본문·제목·첨부 처리,
+# (d) 회신 체인·여러 수신자·빈 본문 등 경계 케이스, (e) EmailBody 로컬 저장 invariant.
+# 폴더/라벨 스코프(INBOX+SENT only)는 data-ingestion.spec.yml의 invariants에서 관리한다.
+
+module: email-pipeline
+platform: android
+version: 1
+
+behaviors:
+  - id: EMAIL-001
+    type: lifecycle
+    description: "이메일을 voice/commitment 추출 파이프라인에 넘길 때 direction 사전 힌트를 source_type에 붙이지 않고 raw event 레벨 메타(folder)로 전달한다. LLM 프롬프트에 'inbox' | 'sent' 힌트를 주고 최종 direction은 LLM 추론에 맡김 — 단, 기본값은 inbox→take, sent→give 가정"
+    trigger: "ING-006..008 어댑터가 EmailBody + raw event INSERT 직후 CommitmentExtractionWorker 호출"
+    precondition: "EmailBody.folder IN ('INBOX','SENT'), raw_ingestion_events.sync_status='pending'"
+    expected: "CommitmentExtractionWorker가 Gemini 프롬프트에 'source: email, folder: INBOX|SENT, user.phone_e164_self=..., user.display_name_override=...'를 system context로 전달. LLM 출력 CommitmentDraft[]의 direction은 inbox→take, sent→give 기본 가정이지만 본문 증거가 반대일 경우 override 가능 (예: INBOX에 '제가 월요일에 보내드리겠습니다' = give). 최종 direction 결정 근거는 quote 필드에 보존"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-002
+    type: lifecycle
+    description: "person_ref 추출은 folder에 따라 다르게 지정한다. INBOX: From 헤더의 email_address를 lowercase 정규화. SENT: To 헤더 첫 번째 수신자(primary)를 lowercase 정규화 — 여러 수신자는 MVP에서 하나로 축약(primary만 person_ref). CC/BCC는 person_ref로 사용하지 않음. 그룹 발송(To에 10명 이상)은 quarantine — person_ref=null로 Unassigned 섹션에 쌓음"
+    trigger: "이메일 어댑터가 EmailBody INSERT 후 raw_ingestion_events.person_ref 결정"
+    precondition: "EmailBody에 From 또는 To 헤더 존재"
+    expected: "INBOX 메일 person_ref = lower(trim(From.email_address)). SENT 메일 person_ref = lower(trim(To[0].email_address)). To가 10명 초과면 person_ref=null(group_email=true 플래그는 EmailBody에만 저장). 추출된 commitment의 person_ref도 raw event의 person_ref를 상속하되 LLM이 본문에서 명시적으로 '김대리에게'처럼 다른 상대를 지목하면 LLM override 허용"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-003
+    type: lifecycle
+    description: "event_snippet은 body_plain 앞 200자(공백 정리 후)로 고정한다. HTML-only 메일은 Jsoup으로 stripping → plain 추출 → 200자 truncate. body_plain/body_html 모두 비어 있는 경우(제목-only 메일) event_snippet은 subject 앞 200자로 대체 — LLM 추출은 건너뛰고 raw event만 mirror (commitments_extracted_count=0)"
+    trigger: "EmailBody INSERT 직후 raw_ingestion_events.event_snippet 채움"
+    precondition: "EmailBody.body_plain 또는 body_html 또는 subject 중 최소 1개 존재"
+    expected: "body_plain이 있으면 사용. 없고 body_html만 있으면 Jsoup.parse(html).text() 결과 사용. 둘 다 비면 subject로 fallback 후 CommitmentExtractionWorker 호출 생략 — DataStore metric email_subject_only_skipped +=1로 모니터링. 모든 경우 앞 200자로 truncate + 연속 공백 1개로 정리"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-004
+    type: lifecycle
+    description: "첨부파일은 메타데이터만 보존하고 바이트는 다운로드하지 않는다 — EmailBody.attachments_meta에 [{filename, mime, size_bytes}] JSON으로 저장. PDF/DOCX OCR·내용 추출은 post-MVP. UI는 '📎 첨부 N건' 표시만"
+    trigger: "이메일 어댑터 fetch 시"
+    precondition: "메일에 attachment part 존재"
+    expected: "Gmail API: message.parts[].filename + mimeType + body.size만 수집. Microsoft Graph: attachments?$select=name,contentType,size. IMAP: BODYSTRUCTURE 파싱만, BODY[part] FETCH 안 함. 모든 경우 EmailBody.attachments_meta JSON에 저장되며 body_plain/body_html 파싱에는 영향 없음. 네트워크 대역·저장 공간 절약 + PIPA 리스크 최소화"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-005
+    type: lifecycle
+    description: "회신 체인(Reply/Re:/Fwd:) 처리 — MVP는 thread grouping 없이 각 메시지를 독립 raw event로 저장. source_ref에 message_id + in_reply_to 헤더 값을 함께 저장하여 post-MVP에서 thread view 구성 가능. quote extraction은 단일 메시지 내부 본문 안에서만 수행 — 회신 블록('> 아래는 원문:...')은 LLM 프롬프트에 'below is prior quoted text — ignore for commitment extraction'로 가이드"
+    trigger: "이메일 어댑터 fetch 시"
+    precondition: "메일이 In-Reply-To 또는 References 헤더 포함"
+    expected: "raw_ingestion_events.source_ref = JSON {message_id, in_reply_to?, references?}. body_plain의 quoted block(`^>`로 시작하는 라인 또는 'On ... wrote:' 이후)은 CommitmentExtractionWorker가 LLM 프롬프트에 'quoted_text' 섹션으로 분리 전달. LLM은 본 메시지 영역에서만 commitment 추출 — quoted 영역은 context 용도"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-006
+    type: privacy
+    description: "EmailBody는 Railway/Supabase에 절대 업로드되지 않는다 (data-ingestion invariants 중복 선언). Railway는 raw_ingestion_events.event_snippet(앞 200자)만 받음. 본문 전체는 Room에만 저장되고 30일 retention 정책(4-2)에 따라 synced 이후 자동 삭제"
+    trigger: "이메일 어댑터 fetch + EmailBody INSERT + Railway batch upload"
+    precondition: "EmailBody.body_plain 또는 body_html 존재, raw_ingestion_events upload 대상"
+    expected: "Railway payload에는 event_snippet(≤200자)만 포함. body_plain·body_html·attachments_meta·raw_headers는 절대 전송되지 않음. 30일 경과 + sync_status='synced' 조건 만족 시 RetentionSweepWorker가 EmailBody와 raw_ingestion_events를 함께 DELETE"
+    source: phase2-acceptance
+    tests: []
+
+  - id: EMAIL-007
+    type: resilience
+    description: "HTML 파싱 실패(잘못된 HTML / charset mismatch / Jsoup timeout)는 raw event를 quarantine으로 넘기지 않고 event_snippet=subject로 graceful degrade한다. Sentry에만 parse_failure 이벤트 기록"
+    trigger: "Jsoup.parse() 또는 charset decoding 실패"
+    precondition: "body_html만 존재 + 파싱 예외 발생"
+    expected: "raw_ingestion_events 정상 INSERT(event_snippet=subject 앞 200자), EmailBody.body_plain=null + body_html=원본 보존 + parse_failed=true 플래그. Sentry에 {error:'email_html_parse_failed', message_id, provider} 이벤트. 사용자는 원문보기 UI에서 body_html을 WebView로 렌더링 가능(post-MVP)"
+    source: phase2-acceptance
+    tests: []
+
+invariants:
+  - "INBOX→take, SENT→give는 direction 기본 가정이며 LLM이 본문 증거로 override 가능하다 — 최종 근거는 commitments.quote에 보존된다"
+  - "person_ref는 INBOX=From, SENT=To[0]로 결정되며 To가 10명 초과 group 메일은 person_ref=null (Unassigned)"
+  - "EmailBody.body_plain/body_html/attachments_meta는 Railway·Supabase로 업로드 금지 (로컬 only)"
+  - "첨부파일 바이트는 다운로드하지 않는다 — 메타데이터만 보존"
+  - "HTML 파싱 실패는 event를 quarantine하지 않고 subject fallback으로 graceful degrade"
+  - "회신 메일의 quoted block은 LLM 프롬프트에서 quoted_text context로 분리 — 인용 영역에서는 commitment 추출하지 않는다"
