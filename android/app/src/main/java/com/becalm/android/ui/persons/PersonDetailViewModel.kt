@@ -40,11 +40,15 @@ public sealed class InteractionRow {
      * @property source Source type string (e.g. "voice", "gmail").
      * @property summary Event title when available; null otherwise. The raw body snippet
      *   is intentionally excluded.
+     * @property commitmentsExtractedCount Mirror of
+     *   [RawIngestionEventEntity.commitmentsExtractedCount] — drives the
+     *   "약속 추출 N건" badge on [InteractionHistoryRow] per SRC-008.
      */
     public data class Event(
         val timestamp: Instant,
         val source: String,
         val summary: String?,
+        val commitmentsExtractedCount: Int = 0,
     ) : InteractionRow()
 
     /**
@@ -53,13 +57,17 @@ public sealed class InteractionRow {
      * @property timestamp When the source event occurred.
      * @property title Commitment title.
      * @property direction "give" or "take".
-     * @property commitmentState SP-36 lifecycle state name (e.g. "DRAFT", "DONE", "DISMISSED").
+     * @property actionState v5 follow-through state. Valid values per
+     *   [CommitmentEntity.actionState]: `"pending"`, `"reminded"`,
+     *   `"followed_up"`, `"completed"`. Partition into the "completed"
+     *   section happens on this column only — the legacy `commitment_state`
+     *   column is intentionally ignored.
      */
     public data class Commitment(
         val timestamp: Instant,
         val title: String,
         val direction: String,
-        val commitmentState: String,
+        val actionState: String,
     ) : InteractionRow()
 
     /**
@@ -105,6 +113,9 @@ private const val TAG = "PersonDetailViewModel"
 internal const val ARG_PERSON_REF = "person_id"
 private const val RAW_EVENTS_LIMIT = 100
 private const val CALENDAR_EVENTS_LIMIT = 50
+
+/** v5 `action_state` terminal value that places a commitment in the "완료" section. */
+internal const val ACTION_STATE_COMPLETED: String = "completed"
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -224,6 +235,7 @@ public class PersonDetailViewModel @Inject constructor(
                 timestamp = e.timestamp,
                 source = e.sourceType,
                 summary = e.eventTitle,
+                commitmentsExtractedCount = e.commitmentsExtractedCount,
             )
         }
         val commitmentRows: List<InteractionRow.Commitment> = commitments.map { c ->
@@ -231,7 +243,7 @@ public class PersonDetailViewModel @Inject constructor(
                 timestamp = c.sourceEventOccurredAt,
                 title = c.title,
                 direction = c.direction,
-                commitmentState = c.commitmentState.name,
+                actionState = c.actionState,
             )
         }
         val calendarRows: List<InteractionRow> = calendarEvents.map { m ->
@@ -240,9 +252,11 @@ public class PersonDetailViewModel @Inject constructor(
                 title = m.title,
             )
         }
+        // Partition on the v5 `action_state` column only — the legacy
+        // `commitment_state` column is retained for schema parity but drifts on
+        // the dispute/edit path (see CommitmentRepositoryImpl).
         val (completed, pending) = commitmentRows.partition { c ->
-            val s = c.commitmentState.uppercase()
-            s == "DONE" || s == "DISMISSED"
+            c.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true)
         }
         // history contains only Event + CalendarMeeting — commitmentRows are partitioned out
         // above. The Commitment branch is unreachable here; the else guards the invariant.
