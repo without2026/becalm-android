@@ -166,6 +166,10 @@
     <string name="person_header_job_only">%1$s</string>
     <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
 
+    <!-- Person 상세 섹션 (SRC-008) -->
+    <string name="person_detail_section_pending_fmt">미이행 약속 (%1$d)</string>
+    <string name="person_detail_section_completed_fmt">이행 완료 (%1$d)</string>
+
     <!-- Commitments -->
     <string name="commitments_title">약속 관리</string>
     <string name="commitments_filter_all">전체</string>

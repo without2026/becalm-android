@@ -30,10 +30,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
@@ -153,8 +157,21 @@ private fun PersonDetailList(
     padding: PaddingValues,
     onEventTap: OnEventTap,
 ) {
-    val commitmentsHeader = stringResource(R.string.person_detail_commitments_section)
+    // SRC-008 requires the "이행 완료" section to default to a collapsed state and
+    // expand on tap. `rememberSaveable` keeps the state across config changes and
+    // process death without leaking to the ViewModel.
+    var completedExpanded by rememberSaveable(state.personRef) { mutableStateOf(false) }
+
+    val pendingHeader = stringResource(
+        R.string.person_detail_section_pending_fmt,
+        state.pendingCommitments.size,
+    )
+    val completedHeader = stringResource(
+        R.string.person_detail_section_completed_fmt,
+        state.completedCommitments.size,
+    )
     val historyHeader = stringResource(R.string.person_detail_history_section)
+
     LazyColumn(
         contentPadding = padding,
         modifier = Modifier.fillMaxSize(),
@@ -167,56 +184,107 @@ private fun PersonDetailList(
                 personRef = state.personRef,
             )
         }
-        interactionSection(
-            header = commitmentsHeader,
-            headerKey = "header-pending",
+        pendingCommitmentsSection(
+            header = pendingHeader,
             rows = state.pendingCommitments,
-            itemKey = { row -> "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
             onEventTap = onEventTap,
         )
-        interactionSection(
-            header = commitmentsHeader,
-            headerKey = "header-completed",
+        completedCommitmentsSection(
+            header = completedHeader,
             rows = state.completedCommitments,
-            itemKey = { row -> "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+            expanded = completedExpanded,
+            onToggleExpanded = { completedExpanded = !completedExpanded },
             onEventTap = onEventTap,
         )
-        interactionSection(
+        historySection(
             header = historyHeader,
-            headerKey = "header-history",
             rows = state.interactionHistory,
-            itemKey = { row ->
-                when (row) {
-                    is InteractionRow.Event -> "e-${row.id}"
-                    is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                    is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                }
-            },
             onEventTap = onEventTap,
         )
     }
 }
 
+// ─── LazyListScope section builders ───────────────────────────────────────────
+
 /**
- * Emits a `SectionHeader` + list of [InteractionHistoryRow]s into this [LazyListScope].
- *
- * No-op when [rows] is empty. The generic bound `<T : InteractionRow>` lets callers pass
- * either a covariant list of a subtype or the polymorphic list without an explicit cast.
+ * Section 1 — pending commitments. Eagerly visible. No-op when empty.
  */
-private fun <T : InteractionRow> LazyListScope.interactionSection(
+private fun LazyListScope.pendingCommitmentsSection(
     header: String,
-    headerKey: String,
-    rows: List<T>,
-    itemKey: (T) -> String,
+    rows: List<InteractionRow.Commitment>,
     onEventTap: OnEventTap,
 ) {
     if (rows.isEmpty()) return
-    item(key = headerKey) {
-        SectionHeader(text = header)
-    }
+    item(key = "header-pending") { SectionHeader(text = header) }
     items(
         items = rows,
-        key = itemKey,
+        key = { row -> "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+    ) { row ->
+        InteractionHistoryRow(
+            row = row,
+            onEventTap = onEventTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * Section 2 — completed commitments. Rendered as [ExpandableSectionHeader] and
+ * default-collapsed per SRC-008 "접힌 상태 기본. 탭 시 … 펼쳐짐". No-op when empty.
+ */
+private fun LazyListScope.completedCommitmentsSection(
+    header: String,
+    rows: List<InteractionRow.Commitment>,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onEventTap: OnEventTap,
+) {
+    if (rows.isEmpty()) return
+    item(key = "header-completed") {
+        ExpandableSectionHeader(
+            title = header,
+            expanded = expanded,
+            onToggle = onToggleExpanded,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+    if (!expanded) return
+    items(
+        items = rows,
+        key = { row -> "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+    ) { row ->
+        InteractionHistoryRow(
+            row = row,
+            onEventTap = onEventTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * Section 3 — interaction history (raw events + calendar meetings, newest first).
+ * Always visible. No-op when empty.
+ */
+private fun LazyListScope.historySection(
+    header: String,
+    rows: List<InteractionRow>,
+    onEventTap: OnEventTap,
+) {
+    if (rows.isEmpty()) return
+    item(key = "header-history") { SectionHeader(text = header) }
+    items(
+        items = rows,
+        key = { row ->
+            when (row) {
+                is InteractionRow.Event -> "e-${row.id}"
+                is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+            }
+        },
     ) { row ->
         InteractionHistoryRow(
             row = row,

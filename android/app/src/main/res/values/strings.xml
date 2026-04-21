@@ -166,6 +166,10 @@
     <string name="person_header_job_only">%1$s</string>
     <string name="person_interaction_snippet_placeholder">(No preview)</string>
 
+    <!-- Person detail sections (SRC-008) -->
+    <string name="person_detail_section_pending_fmt">Pending commitments (%1$d)</string>
+    <string name="person_detail_section_completed_fmt">Completed (%1$d)</string>
+
     <!-- Commitments -->
     <string name="commitments_title">Commitments</string>
     <string name="commitments_filter_all">All</string>
