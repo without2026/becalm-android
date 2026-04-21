@@ -9,8 +9,8 @@ package com.becalm.android.worker
  * request.
  */
 public object UniqueWorkKeys {
-    /** One-shot and periodic SMS / call-log ingestion via [com.becalm.android.worker.ingestion.MediaStoreWorker]. */
-    public const val SMS_CALL: String = "ingest.sms_call"
+    /** One-shot and periodic MediaStore (voice) ingestion via [com.becalm.android.worker.ingestion.MediaStoreWorker]. */
+    public const val MEDIA_STORE: String = "ingest.media_store"
 
     /** One-shot and periodic Gmail ingestion via [com.becalm.android.worker.ingestion.GmailWorker]. */
     public const val GMAIL: String = "ingest.gmail"
@@ -56,4 +56,20 @@ public object UniqueWorkKeys {
      * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
      */
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
+
+    /**
+     * Deprecated legacy key — cancelled on every cold start for one release after Wave 0
+     * (#13 renamed MediaStore ingest from `ingest.sms_call` → [MEDIA_STORE]).
+     *
+     * Devices upgrading from the pre-#13 build still have WorkManager entries enqueued under
+     * this name; [WorkScheduler.cleanupLegacyWorkNames] sweeps them at app start so the new
+     * [MEDIA_STORE] scheduling does not run alongside the orphan.
+     *
+     * Intentionally NOT added to the live `ALL_KEYS` sweep in [WorkSchedulerImpl] — that list
+     * is for currently-enqueued work. This constant only exists to be cancelled.
+     *
+     * TODO(wave-N+2): Remove this constant and [WorkScheduler.cleanupLegacyWorkNames] once the
+     * install base has drained from pre-#13 builds (≥ two minor releases past Wave 0).
+     */
+    internal const val LEGACY_MEDIA_STORE_KEY: String = "ingest.sms_call"
 }

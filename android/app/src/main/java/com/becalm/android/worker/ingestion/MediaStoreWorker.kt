@@ -22,22 +22,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
 /**
- * Periodic CoroutineWorker that enumerates new SMS messages and voice recordings since
- * the last successful run, advancing per-source watermark cursors in [SyncCursorStore].
+ * Periodic CoroutineWorker that enumerates new voice recordings since the last
+ * successful run, advancing the per-source watermark cursor in [SyncCursorStore].
  *
- * The two ingestion paths are owned by dedicated probes ([SmsMediaStoreProbe] and
- * [VoiceMediaStoreProbe]); this worker only orchestrates permission checks, dispatches
- * to the probes, and surfaces the [androidx.work.ListenableWorker.Result].
+ * The voice ingestion path is owned by [VoiceMediaStoreProbe]; this worker only
+ * orchestrates the audio permission check, dispatches to the probe, and surfaces
+ * the [androidx.work.ListenableWorker.Result].
  *
- * The probes are constructed internally from the worker's existing collaborators so that
+ * The probe is constructed internally from the worker's existing collaborators so that
  * unit tests instantiating [MediaStoreWorker] directly do not need to know about the split.
- *
- * ## ING-002 — SMS capture ([SmsMediaStoreProbe])
- * Reads `Telephony.Sms.CONTENT_URI` (inbox + sent boxes). SMS is NOT a valid
- * [com.becalm.android.data.remote.dto.SourceType], so no [RawIngestionEventEntity]
- * rows are inserted. Instead the probe records a count observation and advances
- * the "sms" watermark via [SyncCursorStore.setMediaStoreLastSeen].
- * Source status is updated through [SourceStatusRepository.recordSyncSuccess].
  *
  * ## ING-003 — Voice recording capture (VOI-001, VOI-005, VOI-007) ([VoiceMediaStoreProbe])
  * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since the
@@ -57,25 +50,24 @@ import kotlinx.datetime.Clock
  * `ContentResolver.openInputStream` on that URI returns real audio bytes (VOI-007).
  *
  * ## Cursor unit convention
- * The voice watermark is stored in **epoch milliseconds** (matching the SMS cursor and
- * [SyncCursorStore] contract). `MediaStore.Audio.Media.DATE_ADDED` is epoch **seconds**,
- * so the stored cursor is divided by 1 000 before use in the `DATE_ADDED >= ?` predicate,
- * and the per-row `DATE_ADDED` value is multiplied by 1 000 before being compared/stored.
+ * The voice watermark is stored in **epoch milliseconds** (matching the [SyncCursorStore]
+ * contract). `MediaStore.Audio.Media.DATE_ADDED` is epoch **seconds**, so the stored
+ * cursor is divided by 1 000 before use in the `DATE_ADDED >= ?` predicate, and the
+ * per-row `DATE_ADDED` value is multiplied by 1 000 before being compared/stored.
  *
  * ## Permissions
- * - SMS path: `READ_SMS`
  * - Voice path: `READ_MEDIA_AUDIO` on API 33+ (TIRAMISU), `READ_EXTERNAL_STORAGE` on
  *   API 28–32. Missing permission causes [Result.retry] so WorkManager re-attempts once
  *   the onboarding flow (ONB-003) has granted it.
  *
  * ## PII
- * Raw phone numbers, addresses, and SMS body text are never logged.
  * Audio file display names are logged only as their `hashCode()` in 8-char hex.
  * Counts and hashes are the only identifiers written to logcat.
  *
  * ## Scheduled by
  * SP-32 WorkScheduler registers this class as a periodic job and as an expedited
- * one-shot triggered by [com.becalm.android.worker.ContentObserverBootstrap]'s SMS observer.
+ * one-shot triggered by [com.becalm.android.worker.ContentObserverBootstrap]'s voice
+ * observer (pending `refactor/worker/voice/ingestion-realign`).
  */
 @HiltWorker
 public class MediaStoreWorker @AssistedInject constructor(
@@ -90,13 +82,6 @@ public class MediaStoreWorker @AssistedInject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    private val smsMediaStoreProbe: SmsMediaStoreProbe = SmsMediaStoreProbe(
-        appContext = appContext,
-        syncCursorStore = syncCursorStore,
-        sourceStatusRepository = sourceStatusRepository,
-        logger = logger,
-    )
-
     private val voiceMediaStoreProbe: VoiceMediaStoreProbe = VoiceMediaStoreProbe(
         appContext = appContext,
         syncCursorStore = syncCursorStore,
@@ -110,8 +95,6 @@ public class MediaStoreWorker @AssistedInject constructor(
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
-        val smsMissing = isMissing(android.Manifest.permission.READ_SMS)
-
         // VOI-005: READ_MEDIA_AUDIO on API 33+; READ_EXTERNAL_STORAGE on API 28-32.
         val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             android.Manifest.permission.READ_MEDIA_AUDIO
@@ -120,19 +103,15 @@ public class MediaStoreWorker @AssistedInject constructor(
         }
         val audioMissing = isMissing(audioPermission)
 
-        if (smsMissing && audioMissing) {
-            logger.w(TAG, "both permissions missing — retrying")
+        if (audioMissing) {
+            logger.w(TAG, "audio permission missing — retrying")
             return@withContext Result.retry()
         }
 
         val now = Clock.System.now()
-        val smsResult = if (!smsMissing) smsMediaStoreProbe.ingestSms(now) else 0
-        val voiceResult = if (!audioMissing) voiceMediaStoreProbe.ingestVoiceRecordings(now) else 0
+        val voiceResult = voiceMediaStoreProbe.ingestVoiceRecordings(now)
 
-        logger.d(
-            TAG,
-            "doWork complete smsCount=$smsResult voiceInserted=${voiceResult}",
-        )
+        logger.d(TAG, "doWork complete voiceInserted=$voiceResult")
         Result.success()
     }
 
@@ -147,17 +126,8 @@ public class MediaStoreWorker @AssistedInject constructor(
         /** Maximum WorkManager attempts before permanently failing (R4-02). */
         public const val MAX_RETRIES: Int = 5
 
-        /** [SyncCursorStore] MediaStore kind key for SMS. */
-        public const val KIND_SMS: String = "sms"
-
         /** [SyncCursorStore] MediaStore kind key for voice recordings. */
         public const val KIND_VOICE: String = "voice"
-
-        /**
-         * Source identifier used with [SourceStatusRepository] for SMS/MMS.
-         * Not a [com.becalm.android.data.remote.dto.SourceType] wire value.
-         */
-        public const val SOURCE_SMS_MMS: String = "sms_mms"
 
         /**
          * Samsung Voice Recorder default relative folder name (ONB-002 spec reference).

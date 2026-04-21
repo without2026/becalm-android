@@ -41,6 +41,19 @@ class TodayOverallSyncTest {
     }
 
     @Test
+    fun `call_recording source is excluded from the aggregate (wave-0 carve-out)`() {
+        // CALL_RECORDING is in the schema-level ALL set but not in PRODUCT_SOURCES.
+        // Passing one in directly must not flip the banner to Synced/PartialFailure.
+        val sources = listOf(
+            status(SourceType.CALL_RECORDING, SourceConnectionStatus.ERROR, errorMessage = "ignore me"),
+            status(SourceType.GMAIL, SourceConnectionStatus.CONNECTED, lastSyncedAt = t0),
+        )
+        val result = deriveOverallState(sources)
+        // CALL_RECORDING filtered out → only GMAIL CONNECTED counts → Synced.
+        assertTrue("expected Synced but was $result", result is OverallSyncState.Synced)
+    }
+
+    @Test
     fun `any ERROR beats SYNCING and CONNECTED`() {
         val sources = listOf(
             status(SourceType.GMAIL, SourceConnectionStatus.CONNECTED, lastSyncedAt = t0),

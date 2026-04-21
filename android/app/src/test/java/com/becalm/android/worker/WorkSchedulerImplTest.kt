@@ -212,7 +212,7 @@ class WorkSchedulerImplTest {
         // Exercise keys added/kept in 6A.5b. Verifying each one individually catches a
         // regression where DAUM_IMAP is missing from the private ALL_KEYS list — the bug
         // we would have shipped before wiring SP-27b.
-        verify { workManager.cancelUniqueWork(UniqueWorkKeys.SMS_CALL) }
+        verify { workManager.cancelUniqueWork(UniqueWorkKeys.MEDIA_STORE) }
         verify { workManager.cancelUniqueWork(UniqueWorkKeys.GMAIL) }
         verify { workManager.cancelUniqueWork(UniqueWorkKeys.NAVER_IMAP) }
         verify { workManager.cancelUniqueWork(UniqueWorkKeys.DAUM_IMAP) }
@@ -229,5 +229,26 @@ class WorkSchedulerImplTest {
         // reached the summary log and didn't short-circuit somewhere inside a loop.
         val cancelLog = logger.entries.firstOrNull { it.message.startsWith("cancelAll") }
         assertNotNull("cancelAll must log a summary line on completion", cancelLog)
+    }
+
+    // ── T7: cleanupLegacyWorkNames cancels the pre-#13 ingest.sms_call unique-work ──
+
+    @Test
+    fun `cleanupLegacyWorkNames cancels legacy ingest_sms_call key`() {
+        scheduler.cleanupLegacyWorkNames()
+
+        // Contract: devices upgrading from the pre-#13 build have WorkManager unique-work
+        // enqueued under `ingest.sms_call`. Round-2 codex review caught that `cancelAll()`
+        // (which only runs on sign-out) is insufficient because the rename happens at app
+        // start, not sign-out. This cold-start sweep prevents duplicate MediaStore
+        // scheduling (old legacy + new `ingest.media_store`).
+        val legacyKey = UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY
+        assertEquals("legacy constant must match the pre-#13 wire name", "ingest.sms_call", legacyKey)
+        verify { workManager.cancelUniqueWork("ingest.sms_call") }
+
+        // Intentionally NOT in the live ALL_KEYS sweep — this method is the sole caller.
+        // If a future refactor adds it to ALL_KEYS we'd silently widen the hot path.
+        val cleanupLog = logger.entries.firstOrNull { it.message.startsWith("cleanupLegacyWorkNames") }
+        assertNotNull("cleanupLegacyWorkNames must log a summary line on completion", cleanupLog)
     }
 }

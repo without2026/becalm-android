@@ -4,10 +4,8 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.MatrixCursor
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.provider.Telephony
 import androidx.work.ListenableWorker.Result
 import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
@@ -23,6 +21,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -34,29 +33,27 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Unit tests for [MediaStoreWorker] (ING-002 SMS, ING-003 voice; VOI-001/005/007).
+ * Unit tests for [MediaStoreWorker] (ING-003 voice; VOI-001/005/007).
  *
- * The worker mixes two paths (SMS + voice) and is driven only by [doWork] — no internal
- * methods are exercised directly per the brief. To avoid mock fragility we use [MatrixCursor]
- * for ContentResolver returns rather than mocking the cursor itself, mirroring the pattern
- * used in EnrichmentWorkerTest.
+ * The worker is driven only by [doWork] — no internal methods are exercised directly per
+ * the brief. To avoid mock fragility we use [MatrixCursor] for ContentResolver returns
+ * rather than mocking the cursor itself, mirroring the pattern used in EnrichmentWorkerTest.
  *
  * FINDING: this worker uses [kotlinx.datetime.Clock.System.now] directly rather than the
  * injected [com.becalm.android.core.util.Clock]. As a result the [FakeClock] cannot drive
  * its time. We assert behaviour, not exact timestamps.
  *
  * Test cases:
- * 1. Both permissions missing → [Result.retry] (no work done).
- * 2. SMS-only (no audio perm) — query advances cursor to max DATE.
- * 3. Voice happy path — fresh insert produces deterministic clientEventId, advances cursor,
+ * 1. Audio permission missing → [Result.retry] (no work done).
+ * 2. Voice happy path — fresh insert produces deterministic clientEventId, advances cursor,
  *    enqueues [WorkScheduler.enqueueVoiceUpload].
- * 4. Voice no-userId — skip without advancing cursor.
- * 5. Voice DAO insert failure — cursor frozen so failed row is retried next run.
- * 6. Voice dedup — UNIQUE collision with existing pending row reuses entity id and enqueues
+ * 3. Voice no-userId — skip without advancing cursor.
+ * 4. Voice DAO insert failure — cursor frozen so failed row is retried next run.
+ * 5. Voice dedup — UNIQUE collision with existing pending row reuses entity id and enqueues
  *    upload with `wasFresh=false`.
- * 7. Voice DedupSkip — UNIQUE collision but existing row already has commitments → no enqueue.
+ * 6. Voice DedupSkip — UNIQUE collision but existing row already has commitments → no enqueue.
  *
- * Spec refs: ING-002, ING-003, VOI-001, VOI-005, VOI-007.
+ * Spec refs: ING-003, VOI-001, VOI-005, VOI-007.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [Build.VERSION_CODES.TIRAMISU])
@@ -93,14 +90,7 @@ class MediaStoreWorkerTest {
         every { workerParams.runAttemptCount } returns 0
         every { context.contentResolver } returns contentResolver
 
-        // Default: both permissions GRANTED via ContextCompat → context.checkPermission
-        every {
-            context.checkPermission(
-                android.Manifest.permission.READ_SMS,
-                any(),
-                any(),
-            )
-        } returns PackageManager.PERMISSION_GRANTED
+        // Default: audio permission GRANTED via ContextCompat → context.checkPermission
         every {
             context.checkPermission(
                 android.Manifest.permission.READ_MEDIA_AUDIO,
@@ -109,25 +99,16 @@ class MediaStoreWorkerTest {
             )
         } returns PackageManager.PERMISSION_GRANTED
 
-        // Default: stored watermarks are null (cold start)
-        every { syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_SMS) } returns
-            flowOf(null)
+        // Default: stored watermark is null (cold start)
         every { syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE) } returns
             flowOf(null)
 
         // Default: signed-in userId
         every { userPrefsStore.observeCurrentUserId() } returns flowOf(fakeUserId)
 
-        // Default: SMS query returns an empty cursor
-        every {
-            contentResolver.query(
-                Telephony.Sms.CONTENT_URI,
-                any(),
-                any(),
-                any(),
-                any(),
-            )
-        } returns smsEmptyCursor()
+        // Default: PIPA third-party provision consent GRANTED so existing happy-path tests
+        // continue to see syncStatus="pending". Consent-off scenarios override explicitly.
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
 
         // Default: voice query returns an empty cursor
         every {
@@ -140,9 +121,6 @@ class MediaStoreWorkerTest {
             )
         } returns voiceEmptyCursor()
     }
-
-    private fun smsEmptyCursor(): MatrixCursor =
-        MatrixCursor(arrayOf(Telephony.Sms._ID, Telephony.Sms.DATE, Telephony.Sms.ADDRESS))
 
     private fun voiceEmptyCursor(): MatrixCursor =
         MatrixCursor(
@@ -173,13 +151,10 @@ class MediaStoreWorkerTest {
         addRow(arrayOf<Any?>(mediaId, dateAddedSec, durationMs, displayName, relativePath))
     }
 
-    // ── T1: Both permissions missing → Result.retry ──────────────────────────
+    // ── T1: Audio permission missing → Result.retry ──────────────────────────
 
     @Test
-    fun `doWork returns retry when both SMS and audio permissions missing`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
+    fun `doWork returns retry when audio permission missing`() = runTest {
         every {
             context.checkPermission(android.Manifest.permission.READ_MEDIA_AUDIO, any(), any())
         } returns PackageManager.PERMISSION_DENIED
@@ -191,52 +166,10 @@ class MediaStoreWorkerTest {
         coVerify(exactly = 0) { rawIngestionEventDao.insert(any()) }
     }
 
-    // ── T2: SMS-only (audio perm denied) — cursor advances to max date ───────
-
-    @Test
-    fun `doWork advances SMS cursor to maximum DATE when audio permission missing`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_MEDIA_AUDIO, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
-
-        val smsCursor = MatrixCursor(
-            arrayOf(Telephony.Sms._ID, Telephony.Sms.DATE, Telephony.Sms.ADDRESS),
-        ).apply {
-            addRow(arrayOf<Any?>(1L, 1_700_000_001_000L, "+8210"))
-            addRow(arrayOf<Any?>(2L, 1_700_000_002_500L, "+8211"))
-            addRow(arrayOf<Any?>(3L, 1_700_000_001_500L, "+8212"))
-        }
-        every {
-            contentResolver.query(Telephony.Sms.CONTENT_URI, any(), any(), any(), any())
-        } returns smsCursor
-
-        val result = worker.doWork()
-
-        assertEquals(Result.success(), result)
-        coVerify {
-            syncCursorStore.setMediaStoreLastSeen(
-                MediaStoreWorker.KIND_SMS,
-                1_700_000_002_500L,
-            )
-        }
-        coVerify {
-            sourceStatusRepository.recordSyncSuccess(MediaStoreWorker.SOURCE_SMS_MMS, any())
-        }
-        // No voice query because audio perm is missing.
-        coVerify(exactly = 0) {
-            contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
-        }
-    }
-
-    // ── T3: Voice happy path — fresh insert + cursor + enqueueVoiceUpload ────
+    // ── T2: Voice happy path — fresh insert + cursor + enqueueVoiceUpload ────
 
     @Test
     fun `doWork inserts voice row and enqueues upload on fresh insert`() = runTest {
-        // Disable SMS path for clarity
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
-
         every {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
         } returns voiceCursorWith(mediaId = 42L, dateAddedSec = 1_700_000_000L)
@@ -266,13 +199,10 @@ class MediaStoreWorkerTest {
         }
     }
 
-    // ── T4: Voice — userId null → skip + cursor frozen ───────────────────────
+    // ── T3: Voice — userId null → skip + cursor frozen ───────────────────────
 
     @Test
     fun `doWork skips voice ingestion when no signed-in userId`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
         every { userPrefsStore.observeCurrentUserId() } returns flowOf(null)
 
         // Even if a row was discoverable, the userId guard fires first.
@@ -290,14 +220,10 @@ class MediaStoreWorkerTest {
         coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any()) }
     }
 
-    // ── T5: Voice DAO insert failure → cursor frozen, no enqueue ─────────────
+    // ── T4: Voice DAO insert failure → cursor frozen, no enqueue ─────────────
 
     @Test
     fun `doWork freezes voice cursor when DAO insert throws`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
-
         every {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
         } returns voiceCursorWith(mediaId = 7L, dateAddedSec = 1_700_000_007L)
@@ -316,14 +242,10 @@ class MediaStoreWorkerTest {
         coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any()) }
     }
 
-    // ── T6: Voice dedup — existing pending row → re-enqueue with wasFresh=false ─
+    // ── T5: Voice dedup — existing pending row → re-enqueue with wasFresh=false ─
 
     @Test
     fun `doWork enqueues upload for existing pending row on UNIQUE collision`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
-
         every {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
         } returns voiceCursorWith(mediaId = 200L, dateAddedSec = 1_700_000_200L)
@@ -360,14 +282,10 @@ class MediaStoreWorkerTest {
         }
     }
 
-    // ── T7: Voice DedupSkip — already-uploaded row, no re-enqueue ────────────
+    // ── T6: Voice DedupSkip — already-uploaded row, no re-enqueue ────────────
 
     @Test
     fun `doWork skips enqueue when existing row already has commitments`() = runTest {
-        every {
-            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
-        } returns PackageManager.PERMISSION_DENIED
-
         every {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
         } returns voiceCursorWith(mediaId = 300L, dateAddedSec = 1_700_000_300L)
@@ -398,5 +316,107 @@ class MediaStoreWorkerTest {
         coVerify(exactly = 0) {
             syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, any())
         }
+    }
+
+    // ── T8: PIPA consent=false → syncStatus='awaiting_consent' at insert time ──
+    //
+    // cold-sync.spec:49 requires sync_status='awaiting_consent' when
+    // pipa_third_party_consent=false at insertion time (VOI-004). This closes the
+    // race window between a "pending" insert and VoiceUploadWorker's 2nd gate.
+
+    @Test
+    fun `doWork inserts awaiting_consent when pipa consent is false`() = runTest {
+        every {
+            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
+        } returns PackageManager.PERMISSION_DENIED
+
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(false)
+
+        every {
+            contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
+        } returns voiceCursorWith(mediaId = 501L, dateAddedSec = 1_700_000_501L)
+
+        val capturedEntity = slot<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.insert(capture(capturedEntity)) } returns 1L
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        assertEquals("awaiting_consent", capturedEntity.captured.syncStatus)
+        assertEquals(SourceType.VOICE, capturedEntity.captured.sourceType)
+        // Enqueue still fires — VoiceUploadWorker owns the 2nd-defense gate and will
+        // skip awaiting_consent rows there. Insertion-time gate is the 1st defense.
+        coVerify {
+            workScheduler.enqueueVoiceUpload(capturedEntity.captured.id, capturedEntity.captured.sourceRef!!)
+        }
+    }
+
+    // ── T9: PIPA consent=true → syncStatus='pending' (existing default path) ───
+
+    @Test
+    fun `doWork inserts pending when pipa consent is true`() = runTest {
+        every {
+            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
+        } returns PackageManager.PERMISSION_DENIED
+
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+
+        every {
+            contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
+        } returns voiceCursorWith(mediaId = 502L, dateAddedSec = 1_700_000_502L)
+
+        val capturedEntity = slot<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.insert(capture(capturedEntity)) } returns 1L
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        assertEquals("pending", capturedEntity.captured.syncStatus)
+    }
+
+    // ── T10: Batch snapshots PIPA once — mid-batch toggle is ignored ───────────
+    //
+    // observeThirdPartyProvisionConsent() must be called EXACTLY ONCE per batch
+    // (via `.first()`), so multi-row batches apply a consistent status and are
+    // race-free against Settings toggles landing mid-scan.
+
+    @Test
+    fun `batch uses snapshot consent value across multiple rows`() = runTest {
+        every {
+            context.checkPermission(android.Manifest.permission.READ_SMS, any(), any())
+        } returns PackageManager.PERMISSION_DENIED
+
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(false)
+
+        // Two rows in a single cursor → single batch.
+        val twoRowCursor = MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+            ),
+        ).apply {
+            addRow(arrayOf<Any?>(601L, 1_700_000_601L, 30_000L, "a.m4a", "VoiceRecorder/"))
+            addRow(arrayOf<Any?>(602L, 1_700_000_602L, 30_000L, "b.m4a", "VoiceRecorder/"))
+        }
+        every {
+            contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())
+        } returns twoRowCursor
+
+        val captured = mutableListOf<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.insert(capture(captured)) } returns 1L
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        // Both rows saw the same snapshotted consent=false → both awaiting_consent.
+        assertEquals(2, captured.size)
+        assertEquals("awaiting_consent", captured[0].syncStatus)
+        assertEquals("awaiting_consent", captured[1].syncStatus)
+        // Flow read exactly once (the `.first()` snapshot). Settings toggles that
+        // might fire between row 1 and row 2 do not re-enter the Flow.
+        verify(exactly = 1) { userPrefsStore.observeThirdPartyProvisionConsent() }
     }
 }

@@ -21,14 +21,21 @@ import kotlinx.datetime.Instant
 import java.util.UUID
 
 /**
- * Voice-recording path of [MediaStoreWorker] (ING-003 / VOI-001 / VOI-005 / VOI-007).
+ * Voice-recording path of [MediaStoreWorker] (ING-003 / VOI-001 / VOI-004 / VOI-005 / VOI-007).
  *
  * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for newly-added recordings, inserts
- * deduped [RawIngestionEventEntity] rows (`source_type="voice"`, `sync_status="pending"`),
- * and enqueues per-row uploads via [WorkScheduler.enqueueVoiceUpload]. The cursor is
- * advanced only when every row in the batch succeeded, so failed rows are re-discovered
- * (the `>=` predicate combined with the deterministic `clientEventId` dedup absorbs the
- * one-second overlap).
+ * deduped [RawIngestionEventEntity] rows (`source_type="voice"`), and enqueues per-row uploads
+ * via [WorkScheduler.enqueueVoiceUpload]. The cursor is advanced only when every row in the
+ * batch succeeded, so failed rows are re-discovered (the `>=` predicate combined with the
+ * deterministic `clientEventId` dedup absorbs the one-second overlap).
+ *
+ * Per `.spec/cold-sync.spec.yml:49`, the inserted `sync_status` is gated by the user's PIPA
+ * third-party provision consent at insertion time: `"pending"` when consented, else
+ * `"awaiting_consent"`. The consent value is snapshotted once per batch via
+ * [UserPrefsStore.observeThirdPartyProvisionConsent] `.first()` so the batch is race-free
+ * against mid-batch Settings toggles; consent transitions are handled elsewhere by
+ * `RawIngestionEventDao.releaseAwaitingConsentToPending` (OFF→ON) and
+ * `RawIngestionRepository.parkVoicePendingAsAwaitingConsent` (ON→OFF).
  *
  * Behaviour is byte-identical with the original `MediaStoreWorker.ingestVoiceRecordings`
  * body and is exercised solely through [MediaStoreWorker.doWork] tests.
@@ -49,7 +56,10 @@ internal class VoiceMediaStoreProbe(
     /**
      * Queries `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since
      * the stored watermark. For each discovered file:
-     * - Inserts a [RawIngestionEventEntity] (source_type="voice", sync_status="pending").
+     * - Inserts a [RawIngestionEventEntity] (source_type="voice"). `sync_status` is
+     *   `"pending"` when the user has granted PIPA third-party provision consent, else
+     *   `"awaiting_consent"` (cold-sync.spec:49 / VOI-004). The consent is snapshotted
+     *   once per batch so mid-batch toggles do not split rows across states.
      *   `clientEventId = "mediastore:voice:<mediaId>"` is deterministic, so re-running on
      *   the same file is idempotent (the DB UNIQUE index on (user_id, client_event_id)
      *   drops duplicates via [androidx.room.OnConflictStrategy.IGNORE]).
@@ -68,6 +78,13 @@ internal class VoiceMediaStoreProbe(
             logger.w(TAG, "userId null — skipping voice ingestion this cycle")
             return 0
         }
+
+        // Snapshot PIPA third-party provision consent ONCE per batch. cold-sync.spec:49
+        // requires insertion-time gating: false → "awaiting_consent", true → "pending".
+        // Using .first() (single read) keeps the batch race-free against Settings toggles
+        // that may fire mid-scan; OFF→ON and ON→OFF transitions are handled by the DAO /
+        // Repository park & release paths outside this probe.
+        val pipaConsented = userPrefsStore.observeThirdPartyProvisionConsent().first()
 
         // Cursor stored in ms; DATE_ADDED is in seconds
         val lastSeenMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE).first() ?: 0L
@@ -132,7 +149,7 @@ internal class VoiceMediaStoreProbe(
                     "voice row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} dateAddedSec=${row.dateAddedSec}",
                 )
 
-                when (val insertResult = insertVoiceRow(row, userId)) {
+                when (val insertResult = insertVoiceRow(row, userId, pipaConsented)) {
                     VoiceInsertResult.Failed -> {
                         hasInsertFailure = true
                         // Per-row failure: continue so one bad row doesn't abort the batch.
@@ -289,8 +306,15 @@ internal class VoiceMediaStoreProbe(
      *
      * 에러 로그 문자열("DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}")은
      * 원본 ingestVoiceRecordings 구현과 완전히 동일하게 유지한다.
+     *
+     * [pipaConsented] 는 배치 전체에 대해 [ingestVoiceRecordings] 가 1회 스냅샷한 값이며,
+     * cold-sync.spec:49 에 따라 insertion 시점의 sync_status 를 결정한다.
      */
-    private suspend fun insertVoiceRow(row: VoiceRow, userId: String): VoiceInsertResult {
+    private suspend fun insertVoiceRow(
+        row: VoiceRow,
+        userId: String,
+        pipaConsented: Boolean,
+    ): VoiceInsertResult {
         val entity = RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
@@ -299,7 +323,7 @@ internal class VoiceMediaStoreProbe(
             sourceRef = row.audioUri,
             durationSeconds = row.durationSec,
             timestamp = Instant.fromEpochSeconds(row.dateAddedSec),
-            syncStatus = "pending",
+            syncStatus = if (pipaConsented) "pending" else "awaiting_consent",
         )
 
         val rowId = try {

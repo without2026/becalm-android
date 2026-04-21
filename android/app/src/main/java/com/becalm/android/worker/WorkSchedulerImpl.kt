@@ -103,23 +103,74 @@ public class WorkSchedulerImpl @Inject constructor(
     }
 
     override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) {
+        enqueueVoiceUploadInternal(
+            rawEventId = rawEventId,
+            audioUri = audioUri,
+            initialDelaySec = 0L,
+            rateLimitedAttempt = 0,
+        )
+    }
+
+    override fun enqueueVoiceUploadWithDelay(
+        rawEventId: String,
+        audioUri: String,
+        initialDelaySec: Long,
+        rateLimitedAttempt: Int,
+    ) {
+        enqueueVoiceUploadInternal(
+            rawEventId = rawEventId,
+            audioUri = audioUri,
+            initialDelaySec = initialDelaySec.coerceAtLeast(0L),
+            rateLimitedAttempt = rateLimitedAttempt.coerceAtLeast(0),
+        )
+    }
+
+    /**
+     * Shared body for [enqueueVoiceUpload] and [enqueueVoiceUploadWithDelay].
+     *
+     * When [initialDelaySec] is > 0 the request carries a
+     * [OneTimeWorkRequest.Builder.setInitialDelay] so that HTTP 429 `Retry-After` hints (parsed
+     * by [VoiceUploadWorker] and routed through [UploadBackoff.nextDelaySeconds]) govern the
+     * wait instead of WorkManager's static [BackoffPolicy.EXPONENTIAL]. Both paths share the
+     * same unique key and [ExistingWorkPolicy.REPLACE] so the delayed request supersedes any
+     * in-flight retry.
+     *
+     * [rateLimitedAttempt] is written into the request's [androidx.work.Data] so the 429
+     * quarantine guard in [VoiceUploadWorker.handleRateLimited] survives across delayed
+     * re-enqueues — each new request resets native `runAttemptCount` to 0, so without this
+     * persistent counter a sustained 429 loop could never trigger the MAX guard.
+     */
+    private fun enqueueVoiceUploadInternal(
+        rawEventId: String,
+        audioUri: String,
+        initialDelaySec: Long,
+        rateLimitedAttempt: Int,
+    ) {
         val voiceConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)
             .build()
-        val request = OneTimeWorkRequest.Builder(VoiceUploadWorker::class.java)
+        val builder = OneTimeWorkRequest.Builder(VoiceUploadWorker::class.java)
             .setConstraints(voiceConstraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
             .setInputData(
                 workDataOf(
                     VoiceUploadWorker.KEY_RAW_EVENT_ID to rawEventId,
                     VoiceUploadWorker.KEY_AUDIO_URI to audioUri,
+                    VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT to rateLimitedAttempt,
                 ),
             )
             .addTag(TAG_VOICE_UPLOAD)
-            .build()
+        if (initialDelaySec > 0L) {
+            builder.setInitialDelay(initialDelaySec, TimeUnit.SECONDS)
+        }
+        val request = builder.build()
         val workKey = UniqueWorkKeys.voiceUpload(rawEventId)
         workManager.enqueueUniqueWork(workKey, ExistingWorkPolicy.REPLACE, request)
-        logger.d(TAG, "enqueueVoiceUpload rawEventId_hash=${redact(rawEventId)} key=$workKey")
+        logger.d(
+            TAG,
+            "enqueueVoiceUpload rawEventId_hash=${redact(rawEventId)} key=$workKey " +
+                "delaySec=$initialDelaySec rateLimitedAttempt=$rateLimitedAttempt",
+        )
     }
 
     override fun cancelVoiceUpload(rawEventId: String) {
@@ -137,12 +188,21 @@ public class WorkSchedulerImpl @Inject constructor(
         logger.d(TAG, "cancelAll — cancelled ${ALL_KEYS.size} unique chains + voice uploads by tag")
     }
 
+    /**
+     * TODO(wave-N+2): Remove alongside [UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY] once the install
+     * base has drained from pre-#13 builds. See [WorkScheduler.cleanupLegacyWorkNames].
+     */
+    override fun cleanupLegacyWorkNames() {
+        workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY)
+        logger.d(TAG, "cleanupLegacyWorkNames — cancelled legacy key=${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}")
+    }
+
     // ── ForegroundWorkScheduler ──────────────────────────────────────────────
 
     override fun enqueueMediaStoreOneShotNow() {
         enqueueOneShotForKey(
             MediaStoreWorker::class.java,
-            UniqueWorkKeys.SMS_CALL,
+            UniqueWorkKeys.MEDIA_STORE,
             "enqueueMediaStoreOneShotNow",
         )
     }
@@ -206,7 +266,6 @@ public class WorkSchedulerImpl @Inject constructor(
      */
     private fun resolveSource(sourceKey: String): Pair<Class<out androidx.work.ListenableWorker>, String>? =
         when (sourceKey) {
-            SOURCE_SMS_CALL -> MediaStoreWorker::class.java to UniqueWorkKeys.SMS_CALL
             SourceType.GMAIL -> GmailWorker::class.java to UniqueWorkKeys.GMAIL
             SourceType.NAVER_IMAP -> ImapNaverWorker::class.java to UniqueWorkKeys.NAVER_IMAP
             SourceType.DAUM_IMAP -> ImapDaumWorker::class.java to UniqueWorkKeys.DAUM_IMAP
@@ -282,21 +341,12 @@ public class WorkSchedulerImpl @Inject constructor(
         private const val TAG_VOICE_UPLOAD: String = "voice_upload"
 
         /**
-         * SMS/call-log dispatch key. Unlike the other source keys, this is NOT a wire
-         * [com.becalm.android.data.remote.dto.SourceType] value — SMS ingestion has no
-         * server-side counterpart. The other source keys (gmail / naver_imap / outlook_mail /
-         * google_calendar / outlook_calendar) reference [SourceType] constants directly in
-         * [resolveSource] to stay in lock-step with the DTO wire format.
-         */
-        private const val SOURCE_SMS_CALL: String = "sms_call"
-
-        /**
          * Static work names — used by [cancelAll] to sweep the WorkManager queue.
          * Per-event voice upload keys are dynamic and covered by [TAG_VOICE_UPLOAD]
          * tag-based cancellation in [cancelAll].
          */
         private val ALL_KEYS: List<String> = listOf(
-            UniqueWorkKeys.SMS_CALL,
+            UniqueWorkKeys.MEDIA_STORE,
             UniqueWorkKeys.GMAIL,
             UniqueWorkKeys.NAVER_IMAP,
             UniqueWorkKeys.DAUM_IMAP,

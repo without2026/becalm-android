@@ -319,7 +319,9 @@ class UploadWorkerTest {
         quote = "q",
         sourceEventTitle = null,
         sourceEventOccurredAt = Instant.fromEpochMilliseconds(0),
-        dueDate = null,
+        dueAt = null,
+        dueHint = null,
+        dueIsApproximate = false,
         actionState = "pending",
         sourceType = "voice",
         sourceRef = null,
@@ -402,7 +404,7 @@ class UploadWorkerTest {
             ArrayDeque()
 
         override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> = emptyFlow()
-        override fun observePendingForToday(userId: String, todayIso: String): Flow<List<CommitmentEntity>> = emptyFlow()
+        override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> = emptyFlow()
         override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> = emptyFlow()
 
         override suspend fun refreshSince(

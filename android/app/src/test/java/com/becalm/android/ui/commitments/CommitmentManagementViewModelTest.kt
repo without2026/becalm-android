@@ -42,6 +42,7 @@ class CommitmentManagementViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
+    private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -54,7 +55,9 @@ class CommitmentManagementViewModelTest {
         direction: String = "give",
         commitmentState: CommitmentState = CommitmentState.DRAFT,
         actionState: String = "pending",
-        dueDate: kotlinx.datetime.LocalDate? = null,
+        dueAt: Instant? = null,
+        dueHint: String? = null,
+        dueIsApproximate: Boolean = false,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
@@ -66,7 +69,9 @@ class CommitmentManagementViewModelTest {
         quote = "quote",
         sourceEventTitle = null,
         sourceEventOccurredAt = Instant.DISTANT_PAST,
-        dueDate = dueDate,
+        dueAt = dueAt,
+        dueHint = dueHint,
+        dueIsApproximate = dueIsApproximate,
         actionState = actionState,
         sourceType = "voice",
         sourceRef = null,
@@ -86,6 +91,9 @@ class CommitmentManagementViewModelTest {
 
         // Default: observeAllForUser returns empty list.
         every { commitmentRepository.observeAllForUser(any()) } returns flowOf(emptyList())
+
+        // Default: enrichment map is empty (no personRef resolution).
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
     }
 
     @After
@@ -95,6 +103,7 @@ class CommitmentManagementViewModelTest {
 
     private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(
         commitmentRepository = commitmentRepository,
+        personEnrichmentRepository = personEnrichmentRepository,
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
         logger = logger,
@@ -126,13 +135,13 @@ class CommitmentManagementViewModelTest {
             viewModel.onFilterChange(CommitmentFilter.GIVE)
             val giveFiltered = awaitItem()
             assertEquals(CommitmentFilter.GIVE, giveFiltered.filter)
-            assertTrue(giveFiltered.items.all { it.entity.direction == "give" })
+            assertTrue(giveFiltered.items.all { it.direction == "give" })
             assertEquals(1, giveFiltered.items.size)
 
             viewModel.onFilterChange(CommitmentFilter.TAKE)
             val takeFiltered = awaitItem()
             assertEquals(CommitmentFilter.TAKE, takeFiltered.filter)
-            assertTrue(takeFiltered.items.all { it.entity.direction == "take" })
+            assertTrue(takeFiltered.items.all { it.direction == "take" })
             assertEquals(1, takeFiltered.items.size)
 
             cancelAndIgnoreRemainingEvents()
@@ -163,6 +172,47 @@ class CommitmentManagementViewModelTest {
             assertEquals(false, settled.loading)
             assertEquals(CommitmentFilter.ALL, settled.filter)
             assertEquals(3, settled.items.size)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Test 2b: dueHint threaded through projection ──────────────────────────
+
+    /**
+     * The approximate-due hint verbatim expression must reach the UI layer so
+     * users can understand inferred deadlines. Regression guard for R3-F1 —
+     * commitment-management.spec.yml:9,13.
+     */
+    @Test
+    fun `dueHint is threaded from entity to CommitmentRow`() = runTest {
+        val approxEntity = makeEntity(
+            id = "approx-1",
+            dueAt = Instant.parse("2026-04-30T00:00:00Z"),
+            dueHint = "월말",
+            dueIsApproximate = true,
+        )
+        val exactEntity = makeEntity(
+            id = "exact-1",
+            dueAt = Instant.parse("2026-04-20T00:00:00Z"),
+            dueHint = null,
+            dueIsApproximate = false,
+        )
+        every { commitmentRepository.observeAllForUser("user-1") } returns
+            flowOf(listOf(approxEntity, exactEntity))
+
+        viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem() // loading
+            val settled = awaitItem()
+
+            val approxRow = settled.items.single { it.id == "approx-1" }
+            val exactRow = settled.items.single { it.id == "exact-1" }
+
+            assertEquals("월말", approxRow.dueHint)
+            assertTrue(approxRow.dueIsApproximate)
+            assertNull(exactRow.dueHint)
 
             cancelAndIgnoreRemainingEvents()
         }

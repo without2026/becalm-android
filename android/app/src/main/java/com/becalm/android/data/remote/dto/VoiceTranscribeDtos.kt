@@ -1,5 +1,6 @@
 package com.becalm.android.data.remote.dto
 
+import com.becalm.android.core.util.KstInstant
 import com.becalm.android.domain.voice.CommitmentDraft
 import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Json
@@ -79,6 +80,12 @@ public data class TranscribeExtractResponse(
  * @property quote Verbatim audio fragment used as evidentiary source. Never edited.
  * @property personRef Canonicalized counterparty identifier or null.
  * @property dueAt ISO-8601 due date/time or null when not mentioned.
+ * @property dueHint Verbatim due-date expression as surfaced by the LLM (e.g. "다음주",
+ *   "월말"). Preserved even when [dueAt] is non-null. Null when the LLM did not output a
+ *   hint. See data-model.yml:132-144 and VOI-003.
+ * @property dueIsApproximate True when [dueAt] was inferred from a fuzzy hint rather than
+ *   an explicit calendar reference. Defaults to false for backward compatibility with
+ *   older Railway responses that omit the field.
  * @property confidence LLM confidence score in [0.0, 1.0].
  *
  * Spec refs: VOI-003.
@@ -104,8 +111,29 @@ public data class CommitmentDraftDto(
      */
     @field:Json(name = "person_ref") val personRef: String?,
 
-    /** ISO-8601 due instant, or null when no deadline was mentioned. */
-    @field:Json(name = "due_at") val dueAt: Instant?,
+    /**
+     * ISO-8601 due instant, or null when no deadline was mentioned.
+     *
+     * Inbound from Railway `/v1/voice/transcribe_extract`. Wire format per
+     * api-contract.yml:32 is ISO-8601 with `+09:00` KST offset. The
+     * [KstInstant] qualifier's parser is tolerant and accepts both `+09:00`
+     * and `Z` forms, so historical responses that still emit UTC round-trip
+     * cleanly. Storage remains UTC.
+     */
+    @field:KstInstant @field:Json(name = "due_at") val dueAt: Instant?,
+
+    /**
+     * Verbatim due-date expression as surfaced by the LLM (e.g. "다음주", "월말").
+     * Preserved regardless of whether [dueAt] could be resolved. Default null for backward
+     * compatibility with older Railway responses.
+     */
+    @field:Json(name = "due_hint") val dueHint: String? = null,
+
+    /**
+     * True when [dueAt] was inferred from a fuzzy hint rather than an explicit calendar
+     * reference. Default false for backward compatibility.
+     */
+    @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean = false,
 
     /** LLM confidence score in [0.0, 1.0]. */
     @field:Json(name = "confidence") val confidence: Float,
@@ -126,6 +154,8 @@ public data class CommitmentDraftDto(
         quote = quote,
         personRef = personRef,
         dueAt = dueAt,
+        dueHint = dueHint,
+        dueIsApproximate = dueIsApproximate,
         confidence = confidence,
     )
 }

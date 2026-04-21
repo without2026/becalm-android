@@ -1,9 +1,9 @@
 package com.becalm.android.data.remote.dto
 
+import com.becalm.android.core.util.KstInstant
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Json
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
 
 /**
  * Represents a single commitment as returned by Railway.
@@ -73,10 +73,27 @@ public data class CommitmentDto(
     @field:Json(name = "source_event_occurred_at") val sourceEventOccurredAt: Instant,
 
     /**
-     * Optional deadline date. LocalDate (date only, no time component).
-     * Null when no due date was extracted or set.
+     * Optional deadline timestamp (ISO-8601 timestamptz). Null when no due date was
+     * extracted or set. Replaces the pre-v4 `due_date` field; see data-model.yml:132-144.
+     *
+     * Wire format: ISO-8601 with explicit `+09:00` KST offset per
+     * api-contract.yml:32. Storage is UTC; the [KstInstant] qualifier only
+     * affects Moshi serialization. Parsing is tolerant (accepts `Z` or
+     * `+09:00`) so server echoes in either form round-trip correctly.
      */
-    @field:Json(name = "due_date") val dueDate: LocalDate? = null,
+    @field:KstInstant @field:Json(name = "due_at") val dueAt: Instant? = null,
+
+    /**
+     * Optional verbatim due-date expression surfaced by the LLM (e.g. "다음주"). Null
+     * when absent. See VOI-003.
+     */
+    @field:Json(name = "due_hint") val dueHint: String? = null,
+
+    /**
+     * True when [dueAt] was inferred from a fuzzy hint rather than an explicit calendar
+     * reference. Default false.
+     */
+    @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean = false,
 
     /**
      * User's follow-through action state. Updated via PATCH /v1/commitments/{id}.

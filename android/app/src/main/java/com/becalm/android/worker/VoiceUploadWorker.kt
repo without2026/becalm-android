@@ -66,7 +66,12 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
  *    - HTTP 403/413/422: retryable=false, mark "failed", [Result.success].
  *    - HTTP 502: parse error envelope. `output_truncated`/`schema_violation` → mark "failed"
  *      (non-retryable). `vertex_upstream_error` or parse failure → [handleFailure] (transient retry).
- *    - HTTP 429/500/503 or IOException: quarantine when the current execution is already the
+ *    - HTTP 429: parse the server-supplied `Retry-After` header (seconds) and honor it via
+ *      re-enqueue with initial delay through [WorkScheduler.enqueueVoiceUploadWithDelay] +
+ *      [UploadBackoff.nextDelaySeconds] (api-contract.yml 429; VOI-006). Quarantine when the
+ *      current execution is already the [MAX_ATTEMPTS]th; else return [Result.success] (the
+ *      delayed re-enqueue replaces the in-flight unique work via ExistingWorkPolicy.REPLACE).
+ *    - HTTP 500/503 or IOException: quarantine when the current execution is already the
  *      [MAX_ATTEMPTS]th (runAttemptCount ≥ [MAX_ATTEMPTS] - 1) — mark "failed", [Result.success];
  *      else return [Result.retry] (WorkManager's runAttemptCount is the single retry counter;
  *      the DB retry_count column is only bumped on terminal failure to avoid double-counting).
@@ -86,6 +91,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val voiceApi: VoiceApi,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val workScheduler: WorkScheduler,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -239,7 +245,18 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 handleVoice502(response.errorBody()?.string(), entity, rawEventId)
             }
 
-            429, 500, 503 -> {
+            429 -> {
+                val retryAfterSec = response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull()
+                val rateLimitedAttempt = inputData.getInt(KEY_RATE_LIMITED_ATTEMPT, 0)
+                logger.w(
+                    TAG,
+                    "HTTP 429 id=${redact(rawEventId)} retryAfter=${retryAfterSec}s " +
+                        "rateLimitedAttempt=$rateLimitedAttempt",
+                )
+                handleRateLimited(entity, rawEventId, audioUriString, retryAfterSec, rateLimitedAttempt)
+            }
+
+            500, 503 -> {
                 logger.w(TAG, "HTTP ${response.code()} transient id=${redact(rawEventId)} attempt=$runAttemptCount")
                 handleFailure(entity)
             }
@@ -361,6 +378,70 @@ public class VoiceUploadWorker @AssistedInject constructor(
     }
 
     /**
+     * Handles an HTTP 429 by honoring the server-supplied `Retry-After` seconds hint.
+     *
+     * When retries remain, re-enqueues a [VoiceUploadWorker] with the delay computed by
+     * [UploadBackoff.nextDelaySeconds] (Retry-After wins; otherwise exponential-with-jitter)
+     * via [WorkScheduler.enqueueVoiceUploadWithDelay]. The current run returns
+     * [Result.success] so WorkManager does not also schedule its static
+     * [androidx.work.BackoffPolicy.EXPONENTIAL] retry — the new delayed request supersedes
+     * the in-flight unique work through [androidx.work.ExistingWorkPolicy.REPLACE].
+     *
+     * ## Persistent 429 counter (finding — codex round 1)
+     *
+     * Every successful 429 re-enqueue creates a brand-new [androidx.work.OneTimeWorkRequest]
+     * whose native `runAttemptCount` is 0 for its first execution. Relying on
+     * `runAttemptCount` alone would therefore let a persistent 429 loop forever because
+     * the quarantine guard never trips. Instead we pass a logical counter through
+     * [androidx.work.Data] via [KEY_RATE_LIMITED_ATTEMPT]: each re-enqueue increments the
+     * value it read from [inputData] and threads the new value into the next request. When
+     * the incremented value would reach [MAX_RATE_LIMITED_ATTEMPTS], we quarantine instead
+     * of re-enqueuing.
+     *
+     * 500/503 and network IOException paths intentionally keep using `runAttemptCount`
+     * because those returns produce [Result.retry] (same WorkRequest, counter persists).
+     *
+     * Spec refs: api-contract.yml 429 (Retry-After 존중), VOI-006.
+     */
+    private suspend fun handleRateLimited(
+        entity: RawIngestionEventEntity,
+        rawEventId: String,
+        audioUri: String,
+        retryAfterSec: Long?,
+        rateLimitedAttempt: Int,
+    ): Result {
+        // Quarantine when the *next* re-enqueue would push the counter past the budget,
+        // i.e. the current execution is already the MAX_RATE_LIMITED_ATTEMPTSth.
+        val nextAttempt = rateLimitedAttempt + 1
+        return if (nextAttempt >= MAX_RATE_LIMITED_ATTEMPTS) {
+            logger.w(
+                TAG,
+                "exhausted 429 budget id=${redact(rawEventId)} " +
+                    "rateLimitedAttempt=$rateLimitedAttempt — marking failed",
+            )
+            markFailed(entity)
+            Result.success()
+        } else {
+            val delaySec = UploadBackoff.nextDelaySeconds(
+                attempt = nextAttempt,
+                retryAfterSec = retryAfterSec,
+            )
+            logger.d(
+                TAG,
+                "429 re-enqueue id=${redact(rawEventId)} delaySec=$delaySec " +
+                    "rateLimitedAttempt=$rateLimitedAttempt → nextAttempt=$nextAttempt",
+            )
+            workScheduler.enqueueVoiceUploadWithDelay(
+                rawEventId = rawEventId,
+                audioUri = audioUri,
+                initialDelaySec = delaySec,
+                rateLimitedAttempt = nextAttempt,
+            )
+            Result.success()
+        }
+    }
+
+    /**
      * Permanently quarantines the entity by setting [RawIngestionEventEntity.syncStatus] to
      * "failed" via the existing [RawIngestionEventDao.markFailed] query.
      *
@@ -380,13 +461,39 @@ public class VoiceUploadWorker @AssistedInject constructor(
         private const val SNIPPET_MAX_CHARS = 200
         private const val MAX_ATTEMPTS = 3
 
+        /**
+         * Maximum number of 429 (rate-limited) re-enqueues before a row is quarantined.
+         *
+         * Counted separately from [MAX_ATTEMPTS] because each 429 response produces a brand
+         * new [androidx.work.OneTimeWorkRequest] whose native `runAttemptCount` resets to 0,
+         * making [MAX_ATTEMPTS] ineffective for this path. The counter is threaded through
+         * [androidx.work.Data] via [KEY_RATE_LIMITED_ATTEMPT] across re-enqueues.
+         *
+         * Set equal to [MAX_ATTEMPTS] so a sustained 429 gets the same end-to-end budget as
+         * a sustained 500/503.
+         */
+        private const val MAX_RATE_LIMITED_ATTEMPTS = MAX_ATTEMPTS
+
         /** Streaming buffer size — 64 KiB chunks per VOI-007. */
         private const val STREAM_BUFFER_BYTES = 65536
+
+        /**
+         * HTTP header carrying a server-supplied retry hint in seconds on 429 responses.
+         * Spec refs: api-contract.yml § /v1/voice/transcribe_extract 429; VOI-006.
+         */
+        private const val HEADER_RETRY_AFTER: String = "Retry-After"
 
         /** WorkManager input [androidx.work.Data] key: UUID of the owning [RawIngestionEventEntity]. */
         public const val KEY_RAW_EVENT_ID: String = "raw_event_id"
 
         /** WorkManager input [androidx.work.Data] key: content URI string of the audio file. */
         public const val KEY_AUDIO_URI: String = "audio_uri"
+
+        /**
+         * WorkManager input [androidx.work.Data] key: logical 429 retry counter threaded
+         * across re-enqueues to drive the [MAX_RATE_LIMITED_ATTEMPTS] quarantine guard.
+         * Defaults to 0 on the first execution.
+         */
+        public const val KEY_RATE_LIMITED_ATTEMPT: String = "rate_limited_attempt"
     }
 }

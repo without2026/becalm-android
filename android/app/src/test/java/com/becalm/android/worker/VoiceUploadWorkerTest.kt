@@ -28,9 +28,11 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,6 +68,7 @@ class VoiceUploadWorkerTest {
     private val voiceApi: VoiceApi = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     private lateinit var worker: VoiceUploadWorker
@@ -116,6 +119,7 @@ class VoiceUploadWorkerTest {
             voiceApi = voiceApi,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
+            workScheduler = workScheduler,
             moshi = Moshi.Builder().build(),
             logger = logger,
             ioDispatcher = UnconfinedTestDispatcher(),
@@ -132,6 +136,7 @@ class VoiceUploadWorkerTest {
         // Default: inputs present
         every { workerParams.inputData.getString(VoiceUploadWorker.KEY_RAW_EVENT_ID) } returns fakeEntity.id
         every { workerParams.inputData.getString(VoiceUploadWorker.KEY_AUDIO_URI) } returns fakeAudioUri
+        every { workerParams.inputData.getInt(VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT, 0) } returns 0
         every { workerParams.runAttemptCount } returns 0
 
         // Default: current user session present
@@ -289,5 +294,197 @@ class VoiceUploadWorkerTest {
 
         assertEquals(Result.success(), result)
         assertEquals("failed", updatedEntity.captured.syncStatus)
+    }
+
+    // ── T7: HTTP 429 with Retry-After=60 → re-enqueue with delay ≥ 60s ───────
+
+    @Test
+    fun `doWork honors Retry-After on HTTP 429 and re-enqueues via WorkScheduler`() = runTest {
+        every { workerParams.runAttemptCount } returns 0
+        every { workerParams.inputData.getInt(VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT, 0) } returns 0
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns error429(retryAfter = "60")
+
+        val delaySlot = slot<Long>()
+        val attemptSlot = slot<Int>()
+        every {
+            workScheduler.enqueueVoiceUploadWithDelay(
+                eq(fakeEntity.id),
+                eq(fakeAudioUri),
+                capture(delaySlot),
+                capture(attemptSlot),
+            )
+        } just Runs
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        // Retry-After wins in UploadBackoff.nextDelaySeconds(..., retryAfterSec=60) → exactly 60s.
+        assertEquals(60L, delaySlot.captured)
+        // First 429: counter was 0, re-enqueue carries 1.
+        assertEquals(1, attemptSlot.captured)
+        coVerify(exactly = 0) { rawIngestionEventDao.update(any()) }
+    }
+
+    // ── T8: HTTP 429 without Retry-After → exponential fallback ──────────────
+
+    @Test
+    fun `doWork falls back to UploadBackoff exponential on HTTP 429 without Retry-After`() = runTest {
+        every { workerParams.runAttemptCount } returns 0
+        every { workerParams.inputData.getInt(VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT, 0) } returns 0
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns error429(retryAfter = null)
+
+        val delaySlot = slot<Long>()
+        val attemptSlot = slot<Int>()
+        every {
+            workScheduler.enqueueVoiceUploadWithDelay(
+                eq(fakeEntity.id),
+                eq(fakeAudioUri),
+                capture(delaySlot),
+                capture(attemptSlot),
+            )
+        } just Runs
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        // UploadBackoff: base 30s × 2^(attempt-1) with ±20% jitter, attempt=1 ⇒ 24..36s.
+        val d = delaySlot.captured
+        assertTrue("delay out of jitter range: $d", d in 24L..36L)
+        assertEquals(1, attemptSlot.captured)
+    }
+
+    // ── T9: HTTP 429 persistent-counter quarantine — third 429 marks failed ──
+
+    @Test
+    fun `429 retry budget survives across re-enqueues — quarantines after MAX_RATE_LIMITED_ATTEMPTS`() = runTest {
+        // Each 429 re-enqueue produces a brand-new WorkRequest, so runAttemptCount always
+        // starts at 0. The persistent counter (KEY_RATE_LIMITED_ATTEMPT) is what enforces
+        // the quarantine. Simulate the *third* execution: prior re-enqueues threaded values
+        // 0→1 (first 429), then 1→2 (second 429). On the third execution the input reads
+        // 2; nextAttempt=3 ≥ MAX_RATE_LIMITED_ATTEMPTS=3 ⇒ quarantine.
+        every { workerParams.runAttemptCount } returns 0
+        every { workerParams.inputData.getInt(VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT, 0) } returns 2
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns error429(retryAfter = "60")
+
+        val updatedEntity = slot<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.update(capture(updatedEntity)) } returns 1
+        coEvery {
+            rawIngestionEventDao.markFailed(id = any(), retryIncrement = any(), now = any())
+        } just Runs
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        coVerify {
+            rawIngestionEventDao.markFailed(
+                id = eq(fakeEntity.id),
+                retryIncrement = eq(1),
+                now = any(),
+            )
+        }
+        coVerify(exactly = 0) {
+            workScheduler.enqueueVoiceUploadWithDelay(any(), any(), any(), any())
+        }
+    }
+
+    // ── T9b: 2nd 429 (counter=1) still re-enqueues with counter=2 ────────────
+
+    @Test
+    fun `second 429 re-enqueues with incremented persistent counter`() = runTest {
+        every { workerParams.runAttemptCount } returns 0
+        every { workerParams.inputData.getInt(VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT, 0) } returns 1
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns error429(retryAfter = "60")
+
+        val attemptSlot = slot<Int>()
+        every {
+            workScheduler.enqueueVoiceUploadWithDelay(
+                eq(fakeEntity.id),
+                eq(fakeAudioUri),
+                any(),
+                capture(attemptSlot),
+            )
+        } just Runs
+
+        val result = worker.doWork()
+
+        assertEquals(Result.success(), result)
+        assertEquals(2, attemptSlot.captured)
+        coVerify(exactly = 0) { rawIngestionEventDao.markFailed(any(), any(), any()) }
+    }
+
+    // ── T10: HTTP 500 unchanged — Result.retry via handleFailure (regression) ─
+
+    @Test
+    fun `doWork returns retry on HTTP 500 regression guard`() = runTest {
+        every { workerParams.runAttemptCount } returns 1
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(
+            500,
+            """{"error":"internal"}"""
+                .toResponseBody("application/json".toMediaTypeOrNull()),
+        )
+
+        val result = worker.doWork()
+
+        assertEquals(Result.retry(), result)
+        coVerify(exactly = 0) {
+            workScheduler.enqueueVoiceUploadWithDelay(any(), any(), any(), any())
+        }
+    }
+
+    // ── T11: HTTP 503 unchanged — Result.retry via handleFailure (regression) ─
+
+    @Test
+    fun `doWork still returns retry on HTTP 503 regression guard`() = runTest {
+        every { workerParams.runAttemptCount } returns 0
+
+        coEvery {
+            voiceApi.transcribeExtract(any(), any(), any(), any(), any(), any(), any())
+        } returns Response.error(
+            503,
+            """{"error":"service_unavailable"}"""
+                .toResponseBody("application/json".toMediaTypeOrNull()),
+        )
+
+        val result = worker.doWork()
+
+        assertEquals(Result.retry(), result)
+        coVerify(exactly = 0) {
+            workScheduler.enqueueVoiceUploadWithDelay(any(), any(), any(), any())
+        }
+    }
+
+    /**
+     * Builds a retrofit2 [Response] wrapping an okhttp3 [okhttp3.Response] that carries a 429
+     * status code and an optional `Retry-After` header. Retrofit's `Response.error(code, body)`
+     * overload does not preserve headers, so we construct the raw response directly.
+     */
+    private fun error429(retryAfter: String?): Response<TranscribeExtractResponse> {
+        val headers = if (retryAfter == null) Headers.headersOf() else Headers.headersOf("Retry-After", retryAfter)
+        val errorBody = """{"error":"rate_limited"}"""
+            .toResponseBody("application/json".toMediaTypeOrNull())
+        val raw = okhttp3.Response.Builder()
+            .request(okhttp3.Request.Builder().url("http://localhost/").build())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(429)
+            .message("Too Many Requests")
+            .headers(headers)
+            .body(errorBody)
+            .build()
+        return Response.error(errorBody, raw)
     }
 }

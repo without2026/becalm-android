@@ -6,7 +6,6 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
 
 /**
  * Room entity mirroring the `commitments` Supabase table (data-model.yml).
@@ -44,8 +43,16 @@ import kotlinx.datetime.LocalDate
  *   event had no title.
  * @property sourceEventOccurredAt Timestamp of the source event (not extraction time).
  *   Required for attribution display.
- * @property dueDate Optional deadline date (date only, no time component). Null when
- *   no due date was extracted or set.
+ * @property dueAt Optional deadline timestamp (UTC epoch milliseconds via Room
+ *   converter; ISO-8601 timestamptz on the wire). Null when no due date was extracted
+ *   or set. Replaces the pre-v4 `due_date` column per data-model.yml:132-144 and
+ *   data-model.yml:471 (v3→v4 migration). Render in Asia/Seoul at the UI layer.
+ * @property dueHint Optional verbatim due-date expression captured from the source
+ *   (e.g. "다음주", "월말"). Preserved regardless of whether [dueAt] could be resolved
+ *   to an absolute instant — see VOI-003. Null when the LLM did not surface a hint.
+ * @property dueIsApproximate True when [dueAt] was inferred from a fuzzy hint rather
+ *   than an explicit calendar reference. UI renders a `~` prefix on the D-N badge in
+ *   this case. Default: false (not approximate).
  * @property actionState User's follow-through action state.
  *   Valid values: "pending" | "reminded" | "followed_up" | "completed".
  *   Default: "pending".
@@ -70,11 +77,11 @@ import kotlinx.datetime.LocalDate
     tableName = "commitments",
     indices = [
         // idx_commitments_user_action_due — supports CommitmentManagementScreen queries
-        Index(value = ["user_id", "action_state", "due_date"], name = "idx_commitments_user_action_due"),
+        Index(value = ["user_id", "action_state", "due_at"], name = "idx_commitments_user_action_due"),
         // Supports SyncWorker pending-sync batch reads
         Index(value = ["user_id", "sync_status"]),
         // idx_commitments_user_person_due — supports PersonDetailScreen and /v1/persons/{id}/commitments
-        Index(value = ["user_id", "person_ref", "due_date"], name = "idx_commitments_user_person_due"),
+        Index(value = ["user_id", "person_ref", "due_at"], name = "idx_commitments_user_person_due"),
     ],
 )
 public data class CommitmentEntity(
@@ -110,8 +117,14 @@ public data class CommitmentEntity(
     @ColumnInfo(name = "source_event_occurred_at")
     val sourceEventOccurredAt: Instant,
 
-    @ColumnInfo(name = "due_date")
-    val dueDate: LocalDate?,
+    @ColumnInfo(name = "due_at")
+    val dueAt: Instant?,
+
+    @ColumnInfo(name = "due_hint")
+    val dueHint: String?,
+
+    @ColumnInfo(name = "due_is_approximate", defaultValue = "0")
+    val dueIsApproximate: Boolean = false,
 
     @ColumnInfo(name = "action_state", defaultValue = "pending")
     val actionState: String = "pending",

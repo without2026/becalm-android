@@ -34,7 +34,7 @@ import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
-import kotlinx.datetime.LocalDate
+import kotlinx.datetime.Instant
 
 /**
  * Commitment management screen — full list with filter tabs.
@@ -105,8 +105,10 @@ public fun CommitmentManagementScreen(
                                 title = row.title,
                                 direction = row.direction,
                                 derivedStatus = row.derivedStatus,
-                                dueDate = row.dueDate,
+                                dueAt = row.dueAt,
                                 counterpartyDisplayName = row.counterpartyDisplayName,
+                                dueIsApproximate = row.dueIsApproximate,
+                                dueHint = row.dueHint,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
@@ -180,7 +182,7 @@ private fun PreviewCommitmentManagementScreenPopulated() {
                             title = title,
                             direction = dir,
                             derivedStatus = status,
-                            dueDate = LocalDate(2026, 4, 20),
+                            dueAt = Instant.parse("2026-04-20T00:00:00+09:00"),
                             counterpartyDisplayName = "Alice Kim",
                             modifier = Modifier
                                 .fillMaxWidth()

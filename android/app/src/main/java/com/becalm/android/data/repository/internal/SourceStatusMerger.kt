@@ -37,6 +37,9 @@ internal suspend fun mergeServerState(
 ) {
     userPrefs.edit { prefs ->
         for (item in items) {
+            // Schema validation — the server is allowed to emit any data-model.yml enum
+            // value, so we check against the full ALL set (includes VOICE and
+            // CALL_RECORDING) rather than the product-UI PRODUCT_SOURCES subset.
             if (item.sourceType !in SourceType.ALL) {
                 logger.w(TAG, "refreshFromServer skipped unknown source_type='${item.sourceType}'")
                 continue

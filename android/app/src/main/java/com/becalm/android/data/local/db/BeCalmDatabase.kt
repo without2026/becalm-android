@@ -66,11 +66,20 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         CalendarEventEntity::class,
         PersonEnrichmentEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 public abstract class BeCalmDatabase : RoomDatabase() {
+    init {
+        // Fail-loudly guard: the @Database(version = …) literal above must stay in lockstep
+        // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
+        // annotation site (ksp#2439), so both sites must be bumped together on every schema
+        // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
+        require(DATABASE_VERSION == 4) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 4) literal"
+        }
+    }
 
     /** Returns the DAO for the `raw_ingestion_events` table (SP-09). */
     public abstract fun rawIngestionEventDao(): RawIngestionEventDao
@@ -93,7 +102,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 3
+        public const val DATABASE_VERSION: Int = 4
 
         /**
          * Creates and opens the [BeCalmDatabase] using the standard Room builder.

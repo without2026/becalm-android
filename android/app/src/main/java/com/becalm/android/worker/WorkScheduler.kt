@@ -69,6 +69,35 @@ public interface WorkScheduler {
     public fun enqueueVoiceUpload(rawEventId: String, audioUri: String)
 
     /**
+     * Enqueues a one-shot [VoiceUploadWorker] that waits at least [initialDelaySec] seconds
+     * before its first run.
+     *
+     * Used by [VoiceUploadWorker] itself on HTTP 429 to honor a server-supplied `Retry-After`
+     * hint — the worker returns [androidx.work.ListenableWorker.Result.success] for the
+     * current run and re-enqueues via this method so that [UploadBackoff.nextDelaySeconds]
+     * (not WorkManager's static [androidx.work.BackoffPolicy.EXPONENTIAL]) governs the wait.
+     *
+     * The same unique key as [enqueueVoiceUpload] is used with
+     * [androidx.work.ExistingWorkPolicy.REPLACE], so the new delayed request atomically
+     * supersedes the completed in-flight attempt and avoids a double-retry.
+     *
+     * @param rateLimitedAttempt Logical 429 retry counter threaded through [androidx.work.Data]
+     *   so the [VoiceUploadWorker.handleRateLimited] quarantine guard survives across
+     *   delayed re-enqueues. Each 429 response produces a brand-new [androidx.work.OneTimeWorkRequest]
+     *   whose native `runAttemptCount` resets to 0, so without this persistent counter a
+     *   persistent 429 would loop forever. Callers outside the worker (fresh enqueues from
+     *   user action) should pass `0`.
+     *
+     * Spec refs: VOI-006, api-contract.yml 429 (Retry-After 존중).
+     */
+    public fun enqueueVoiceUploadWithDelay(
+        rawEventId: String,
+        audioUri: String,
+        initialDelaySec: Long,
+        rateLimitedAttempt: Int = 0,
+    )
+
+    /**
      * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued
      * or running.
      *
@@ -89,4 +118,18 @@ public interface WorkScheduler {
      * Call on user sign-out to prevent orphaned workers from running against a stale session.
      */
     public fun cancelAll()
+
+    /**
+     * One-release compat shim — cancels WorkManager unique-work entries enqueued under names
+     * that are no longer live. Currently sweeps the pre-#13 MediaStore key
+     * ([UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY]) so that devices upgrading from the prior
+     * `origin/main` build do not run duplicate MediaStore scans (old legacy key + new
+     * [UniqueWorkKeys.MEDIA_STORE]).
+     *
+     * Must be called once per cold start (see [BecalmApplication.onCreate]). Cancelling a
+     * non-existent unique-work name is a no-op, so repeated invocation is safe.
+     *
+     * TODO: Remove after Wave N+2 once the upgrade base has drained.
+     */
+    public fun cleanupLegacyWorkNames()
 }

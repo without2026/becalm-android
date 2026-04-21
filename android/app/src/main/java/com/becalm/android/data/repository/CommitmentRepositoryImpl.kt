@@ -37,6 +37,13 @@ private const val CURSOR_KEY = "commitments_cursor"
 private const val PAGE_LIMIT = 50
 private const val TAG = "CommitmentRepository"
 
+/**
+ * HTTP header carrying a server-supplied retry hint in seconds on 429 responses
+ * (api-contract.yml § rate-limiting). Shared by [toBecalmResult] and
+ * [toBatchBecalmResult] so the literal lives in exactly one place.
+ */
+private const val HEADER_RETRY_AFTER: String = "Retry-After"
+
 /** Legal action_state values per data-model.yml:134-139 / commitment-management.spec.yml CMT-005..007. */
 private val ALLOWED_ACTION_STATES = setOf("pending", "reminded", "followed_up", "completed")
 
@@ -57,8 +64,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForUser(userId)
 
-    override fun observePendingForToday(userId: String, todayIso: String): Flow<List<CommitmentEntity>> =
-        dao.observePendingForToday(userId, todayIso)
+    override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> =
+        dao.observePendingForToday(userId, endOfTodayEpochMs)
 
     override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForPerson(userId, personRef)
@@ -351,7 +358,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
             404 -> BecalmResult.Failure(BecalmError.NotFound("commitment"))
             422 -> BecalmResult.Failure(BecalmError.Validation(null, "unprocessable entity (HTTP 422)"))
             429 -> {
-                val retryAfter = headers()["Retry-After"]?.toLongOrNull()
+                val retryAfter = headers()[HEADER_RETRY_AFTER]?.toLongOrNull()
                 BecalmResult.Failure(BecalmError.RateLimited(retryAfter))
             }
             in 500..599 -> BecalmResult.Failure(BecalmError.ServerError(code, errorBody()?.string()))
@@ -385,7 +392,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
                 BecalmResult.Failure(BecalmError.Validation(field = null, message = msg))
             }
             429 -> {
-                val retryAfter = headers()["Retry-After"]?.toLongOrNull()
+                val retryAfter = headers()[HEADER_RETRY_AFTER]?.toLongOrNull()
                 BecalmResult.Failure(BecalmError.RateLimited(retryAfter))
             }
             in 500..599 -> BecalmResult.Failure(BecalmError.ServerError(code, errorBody()?.string()))

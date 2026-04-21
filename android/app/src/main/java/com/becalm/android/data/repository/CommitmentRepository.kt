@@ -35,11 +35,12 @@ public interface CommitmentRepository {
     public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
 
     /**
-     * Emits pending commitments for [userId] that are undated or due on/before [todayIso].
+     * Emits pending commitments for [userId] that are undated or due on/before end-of-today.
      *
-     * @param todayIso ISO-8601 date string, e.g. "2026-04-16".
+     * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch milliseconds; callers
+     *   compute it as Asia/Seoul 23:59:59.999 converted to UTC epoch ms.
      */
-    public fun observePendingForToday(userId: String, todayIso: String): Flow<List<CommitmentEntity>>
+    public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
 
     /** Emits all commitments for [userId] linked to [personRef], re-emits on change. */
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
