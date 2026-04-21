@@ -356,6 +356,28 @@ class CommitmentManagementViewModelTest {
         verify(exactly = 1) { reminderScheduler.cancel("x-1") }
     }
 
+    @Test
+    fun `onCancel from overdue state is a legal transition`() = runTest {
+        // CMT-012 — Cancel is legal from PENDING / REMINDED / FOLLOWED_UP / OVERDUE.
+        // This pins the OVERDUE → CANCELLED edge explicitly so any future state-machine
+        // narrowing is caught here instead of shipping a broken user flow.
+        val overdueEntity = makeEntity(id = "x-over", actionState = "overdue")
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(overdueEntity))
+        coEvery {
+            commitmentRepository.transitionState("x-over", CommitmentEvent.Cancel)
+        } returns BecalmResult.Success(overdueEntity.copy(actionState = "cancelled"))
+        every { reminderScheduler.cancel(any()) } just runs
+
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCancel("x-over")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.cancel("x-over") }
+    }
+
     // ── Test 8: onErrorDismissed clears error (R8/H-5) ────────────────────────
 
     @Test

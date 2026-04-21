@@ -1,7 +1,7 @@
 # UI / Commitment / Cancel Action — CMT-012
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C7
+**Status**: IMPLEMENTED — Wave 4 commit C7.
 **E2E Stage**: 5 — Commitment Management
 **Severity**: Medium
 **Type**: Gap
