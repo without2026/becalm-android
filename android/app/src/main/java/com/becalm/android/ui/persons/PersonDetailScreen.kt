@@ -39,6 +39,14 @@ import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 
 /**
+ * Navigates from the person detail screen to a raw event drill-down. Scoped to
+ * this file so the per-branch plumbing through `interactionSection` stays
+ * readable; passed in as a parameter rather than closed-over so the recomposition
+ * key is stable.
+ */
+private typealias OnEventTap = (eventId: String) -> Unit
+
+/**
  * Person detail screen — renders a [PersonHeader] plus a 3-section body
  * (pending commitments / completed commitments / interaction history) per
  * `.spec/contracts/ui-map.yml:106-111`.
@@ -66,6 +74,12 @@ public fun PersonDetailScreen(
                 viewModel.onErrorDismissed()
             }
         }
+    }
+
+    val onEventTap: OnEventTap = { eventId ->
+        navController.navigate(
+            BecalmRoute.RawEventDetail(personId = personId, eventId = eventId).path,
+        )
     }
 
     BecalmScaffold(
@@ -102,7 +116,11 @@ public fun PersonDetailScreen(
                 )
             }
             !hasAnyInteractions -> PersonDetailEmpty(state = state, padding = padding)
-            else -> PersonDetailList(state = state, padding = padding)
+            else -> PersonDetailList(
+                state = state,
+                padding = padding,
+                onEventTap = onEventTap,
+            )
         }
     }
 }
@@ -130,7 +148,11 @@ private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues
 }
 
 @Composable
-private fun PersonDetailList(state: PersonDetailUiState, padding: PaddingValues) {
+private fun PersonDetailList(
+    state: PersonDetailUiState,
+    padding: PaddingValues,
+    onEventTap: OnEventTap,
+) {
     val commitmentsHeader = stringResource(R.string.person_detail_commitments_section)
     val historyHeader = stringResource(R.string.person_detail_history_section)
     LazyColumn(
@@ -150,12 +172,14 @@ private fun PersonDetailList(state: PersonDetailUiState, padding: PaddingValues)
             headerKey = "header-pending",
             rows = state.pendingCommitments,
             itemKey = { row -> "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+            onEventTap = onEventTap,
         )
         interactionSection(
             header = commitmentsHeader,
             headerKey = "header-completed",
             rows = state.completedCommitments,
             itemKey = { row -> "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+            onEventTap = onEventTap,
         )
         interactionSection(
             header = historyHeader,
@@ -163,11 +187,12 @@ private fun PersonDetailList(state: PersonDetailUiState, padding: PaddingValues)
             rows = state.interactionHistory,
             itemKey = { row ->
                 when (row) {
-                    is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
+                    is InteractionRow.Event -> "e-${row.id}"
                     is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
                     is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
                 }
             },
+            onEventTap = onEventTap,
         )
     }
 }
@@ -183,6 +208,7 @@ private fun <T : InteractionRow> LazyListScope.interactionSection(
     headerKey: String,
     rows: List<T>,
     itemKey: (T) -> String,
+    onEventTap: OnEventTap,
 ) {
     if (rows.isEmpty()) return
     item(key = headerKey) {
@@ -194,6 +220,7 @@ private fun <T : InteractionRow> LazyListScope.interactionSection(
     ) { row ->
         InteractionHistoryRow(
             row = row,
+            onEventTap = onEventTap,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -254,6 +281,7 @@ private fun PreviewPersonDetailScreenWithHistory() {
                 ) { row ->
                     InteractionHistoryRow(
                         row = row,
+                        onEventTap = {},
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),

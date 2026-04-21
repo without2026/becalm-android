@@ -36,18 +36,25 @@ public sealed class InteractionRow {
     /**
      * A raw ingestion event (voice, email, etc.) linked to this person.
      *
+     * @property id Primary-key of the raw ingestion event. Required so the row can
+     *   navigate to [com.becalm.android.ui.navigation.BecalmRoute.RawEventDetail]
+     *   on tap (SRC-004).
      * @property timestamp When the event was recorded.
      * @property source Source type string (e.g. "voice", "gmail").
-     * @property summary Event title when available; null otherwise. The raw body snippet
-     *   is intentionally excluded.
+     * @property summary Event title when available; null otherwise.
+     * @property snippet Truncated body preview from
+     *   [RawIngestionEventEntity.eventSnippet] — rendered as secondary text on
+     *   [InteractionHistoryRow] per `.spec/contracts/ui-map.yml:206-210`.
      * @property commitmentsExtractedCount Mirror of
      *   [RawIngestionEventEntity.commitmentsExtractedCount] — drives the
      *   "약속 추출 N건" badge on [InteractionHistoryRow] per SRC-008.
      */
     public data class Event(
+        val id: String,
         val timestamp: Instant,
         val source: String,
         val summary: String?,
+        val snippet: String?,
         val commitmentsExtractedCount: Int = 0,
     ) : InteractionRow()
 
@@ -116,6 +123,14 @@ private const val CALENDAR_EVENTS_LIMIT = 50
 
 /** v5 `action_state` terminal value that places a commitment in the "완료" section. */
 internal const val ACTION_STATE_COMPLETED: String = "completed"
+
+/**
+ * Character budget for the truncated snippet rendered on [InteractionHistoryRow]
+ * per `.spec/contracts/ui-map.yml:206-210`. Chosen to match
+ * `RawEventDetailUiState.snippet` (SRC-004) so the timeline and drill-down share a
+ * consistent "at-a-glance" preview length.
+ */
+private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -259,9 +274,11 @@ public class PersonDetailViewModel @Inject constructor(
 
     private fun toEventRow(e: RawIngestionEventEntity): InteractionRow.Event =
         InteractionRow.Event(
+            id = e.id,
             timestamp = e.timestamp,
             source = e.sourceType,
             summary = e.eventTitle,
+            snippet = e.eventSnippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
             commitmentsExtractedCount = e.commitmentsExtractedCount,
         )
 
