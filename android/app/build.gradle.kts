@@ -3,7 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
@@ -32,7 +32,7 @@ fun localProp(key: String): String {
 
 android {
     namespace = "com.becalm.android"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.becalm.android"
@@ -63,10 +63,6 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = libs.versions.compose.compiler.get()
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -76,7 +72,14 @@ android {
         jvmTarget = "17"
         freeCompilerArgs += listOf(
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=kotlin.RequiresOptIn"
+            "-opt-in=kotlin.RequiresOptIn",
+            // Align bytecode with kotlinx-serialization 1.8.0+ `all-compatibility` jvm-default mode.
+            // Kotlin 2.2+ flips the default to `-jvm-default=enable`, but on 2.1.x we must opt in
+            // explicitly or generated `$$serializer` classes throw AbstractMethodError when they
+            // invoke interface-default methods like GeneratedSerializer.typeParametersSerializers().
+            // See kotlinx.serialization CHANGELOG 1.8.0-RC (all-compatibility adoption) +
+            // Kotlin compatibility-guide-22 (jvm-default default change).
+            "-Xjvm-default=all-compatibility"
         )
     }
 
@@ -102,6 +105,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material)
+    implementation(libs.google.android.material)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.activity.compose)
@@ -115,11 +119,14 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     // ─── Hilt ────────────────────────────────────────────────────────────────
+    // Compiler runs via KSP (not KAPT) — KAPT can't read Kotlin 2.1 metadata (mv={2,1,0})
+    // and throws "Unable to read Kotlin metadata due to unsupported metadata kind: null"
+    // on @HiltWorker classes. Dagger Hilt supports KSP from 2.54+; Dagger #4303 closed.
     implementation(libs.hilt.android)
-    kapt(libs.hilt.compiler)
+    ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.hilt.work)
-    kapt(libs.hilt.work.compiler)
+    ksp(libs.hilt.work.compiler)
 
     // ─── Room ────────────────────────────────────────────────────────────────
     implementation(libs.androidx.room.runtime)
@@ -153,6 +160,10 @@ dependencies {
 
     // ─── Ktor (Supabase transport) ────────────────────────────────────────────
     implementation(libs.ktor.client.okhttp)
+
+    // ─── Jakarta Mail / Angus Mail (IMAPS fetch in ImapClient) ────────────────
+    implementation(libs.jakarta.mail)
+    implementation(libs.angus.mail)
 
     // ─── Timber ──────────────────────────────────────────────────────────────
     implementation(libs.timber)

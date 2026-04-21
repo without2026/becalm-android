@@ -15,7 +15,7 @@ import kotlinx.datetime.Instant
  * - idx_raw_events_user_sync        (user_id, sync_status)            → sync_status 필터링 쿼리 전반
  * - idx_raw_events_user_time        (user_id, timestamp)              → timestamp 정렬/범위 쿼리
  * - idx_raw_events_user_person_time (user_id, person_ref, timestamp)  → person_ref 타임라인
- * - @Transaction 메서드(release*/park*AndReturnIds)는 select-then-update
+ * - @Transaction 메서드(release / park*AndReturnIds)는 select-then-update
  *   레이스(두 문장 사이에 새 행이 삽입되어 ID 반환에서 누락되는 경우)를 막기 위한 불변식 보장용이다.
  */
 
@@ -212,7 +212,7 @@ public interface RawIngestionEventDao {
             "AND source_type = 'voice' " +
             "AND sync_status = 'awaiting_consent'",
     )
-    internal suspend fun findVoiceAwaitingConsent(userId: String): List<RawIngestionEventEntity>
+    public suspend fun findVoiceAwaitingConsent(userId: String): List<RawIngestionEventEntity>
 
     /**
      * Returns only the IDs (not full entities) of voice events for [userId] that are currently

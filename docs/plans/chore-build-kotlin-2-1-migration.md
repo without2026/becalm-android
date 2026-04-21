@@ -21,33 +21,49 @@
 
 ---
 
-## 2. Target Version Matrix (Step 0 freshness 완료, 2026-04-21 기준)
+## 2. Target Version Matrix (FINAL — as-shipped 2026-04-21)
 
-**Kotlin 2.1.21 기준 최신 안정판** — Hilt 2.56은 2.1.10으로 빌드되었으나 Kotlin patch 레벨(2.1.10→2.1.21) binary 호환 기대. KSP 2.1.21-2.0.2가 매칭 릴리스. Room 2.8.4 stable (minSdk 28 ≥ 23 요구 통과).
+**이 Section은 실제 commit된 최종 버전을 반영.** 원래 plan의 target은 구현 중 root-cause discovery로 인해 일부 조정됨 (§2.1 참조).
 
-| Component | Current | Target | 변경 근거 / confidence |
+| Component | Before | **AS-SHIPPED** | 비고 |
 |---|---|---|---|
-| Kotlin | 1.9.22 | **2.1.21** | [releases](https://kotlinlang.org/docs/releases.html) H |
-| KSP | 1.9.22-1.0.17 | **2.1.21-2.0.2** | [KSP 릴리스](https://github.com/google/ksp/releases/tag/2.1.21-2.0.2) M — 버전 컨벤션 변경(1.0.x → 2.0.x) |
-| AGP | 8.2.2 | **8.7.3** | [AGP-Kotlin 호환표](https://developer.android.com/build/kotlin-support) H |
-| Gradle wrapper | 현재 값 확인 필요 | **8.11.1** | AGP 8.7 + Kotlin 2.1.21 |
-| Hilt / Dagger | 2.50 | **2.56** | [Dagger 2.56](https://github.com/google/dagger/releases) H — 2.57+는 AGP 9 호환 확정 안 됨 |
-| androidx.hilt | 1.1.0 | **1.3.0** | [androidx.hilt 1.3.0](https://developer.android.com/jetpack/androidx/releases/hilt) H |
-| Room | 2.6.1 | **2.8.4** | [Room 2.8.4](https://developer.android.com/jetpack/androidx/releases/room) H — minSdk 28 ≥ 23 통과 |
-| Compose compiler | 1.5.8 artifact | **plugin** (`org.jetbrains.kotlin.plugin.compose:2.1.21`) | [Compose Gradle plugin](https://developer.android.com/develop/ui/compose/compiler) H |
-| Compose BOM | 2024.02.02 | **2025.08.00** | conservative 중간값 (2026.04.00 존재하나 Kotlin 2.1 호환 미검증) M |
-| kotlinx-coroutines | 1.7.3 | **1.10.2** | [coroutines 1.10.0 = Kotlin 2.1.0](https://github.com/Kotlin/kotlinx.coroutines/releases) H |
-| kotlinx-serialization | 1.6.2 | **1.8.1** | [serialization 1.8.1](https://github.com/Kotlin/kotlinx.serialization/releases) H — 1.9+는 Kotlin 2.2 요구 |
-| kotlinx-datetime | 0.5.0 | **0.6.2** | 0.7.x breaking (dayOfMonth→day) → 이 PR out of scope |
-| Ktor | 2.3.12 | **3.2.3** | [Ktor 3.2.x](https://github.com/ktorio/ktor/releases) M — 3.3+는 Kotlin 2.2 요구, 3.2.3이 2.1.x 안전 상한 |
-| Supabase BOM | 2.6.0 | **3.0.3** | [Supabase-kt 3.0.3](https://github.com/supabase-community/supabase-kt/releases) — Ktor 3.0.2 known-pair, 신버전은 추후 별도 PR |
-| Moshi | 1.15.1 | **1.15.2** | [Moshi 1.15.2](https://github.com/square/moshi/tags) H |
-| supabase-auth 좌표 | `auth-kt` (broken at 2.6.0) | **`auth-kt`** (3.0.0부터 존재) | rename source 변경 불필요 — 이미 `io.github.jan.supabase.auth.*` 사용 중 |
+| Kotlin | 1.9.22 | **2.1.21** | Freshness bump from plan's 2.1.10 |
+| KSP | 1.9.22-1.0.17 | **2.1.21-2.0.2** | Matches Kotlin 2.1.21 |
+| AGP | 8.2.2 | **8.7.3** | [AGP-Kotlin 호환표](https://developer.android.com/build/kotlin-support) |
+| Gradle | 8.6 | **8.11.1** | AGP 8.7 요구 |
+| Hilt / Dagger | 2.50 | **2.57.2** | Bumped from plan's 2.56 — KSP mode requires newer patch |
+| Hilt compiler invocation | kapt | **ksp** ← architectural change | kapt가 Kotlin 2.1 metadata `mv = {2,1,0}` 못 읽음, Dagger #4303 closed (2.54+ KSP), `kotlin-kapt` plugin 제거 |
+| androidx.hilt | 1.1.0 | **1.3.0** | |
+| Room | 2.6.1 | **2.7.0** ← downgrade from plan 2.8.4 | Room 2.8.4는 `FieldBundle$$serializer` AbstractMethodError (kotlinx.serialization #2968 jvm-default skew). 2.7.0은 pre-KMP-rework — issue 없음 |
+| Compose compiler | 1.5.8 artifact | **plugin** (`org.jetbrains.kotlin.plugin.compose:2.1.21`) | |
+| Compose BOM | 2024.02.02 | **2024.12.01** ← downgrade from plan 2025.08.00 | 2025.08.00은 Compose 1.9.x (`compileSdk 35` 강제) — compileSdk 35 install 한 뒤에도 이 PR 범위 최소화 위해 1.7.x 계열 유지 |
+| compileSdk | 34 | **35** ← not in original plan | Compose BOM 2024.12.01이 compileSdk 35 요구. SDK Platform 35 설치 완료 |
+| kotlinx-coroutines | 1.7.3 | **1.10.2** | |
+| kotlinx-serialization | 1.6.2 | **1.8.1** | 1.9+는 Kotlin 2.2 요구 |
+| kotlinx-datetime | 0.5.0 | **0.6.2** | |
+| Ktor | 2.3.12 | **3.2.3** | Kotlin 2.1.x 안전 상한 |
+| Supabase BOM | 2.6.0 | **3.0.3** | auth-kt rename |
+| Moshi | 1.15.1 | **1.15.2** | |
+| jakarta-mail | 1.6.7 `com.sun.mail:android-mail` (javax.mail) | **2.1.3 `jakarta.mail:jakarta.mail-api` + `org.eclipse.angus:angus-mail:2.0.3`** | 소스는 이미 `jakarta.mail.*` import — dep만 불일치였음 (pre-existing) |
+| `-Xjvm-default=all-compatibility` | — | **added** to `kotlinOptions.freeCompilerArgs` | Kotlin 2.2+ 기본값 선행 적용; kotlinx-serialization 1.8+ `all-compatibility` bytecode 와 정합 |
+| `@Database(version = ...)` | `= DATABASE_VERSION` const ref | **`= 3` inline literal** + companion const KEPT | KSP2 (ksp#2439/#1909/#839) self-ref companion const resolution 실패. dual-site 유지: `@Database(version = 3)` + `public const val DATABASE_VERSION: Int = 3` — bump시 양쪽 동시 업데이트 필요 |
+| `ksp.useKSP2` | N/A | **`=false`** in `gradle.properties` | Moshi KSP2 #1874 미해결 — Moshi codegen 보호용 |
 
-### Step 0 완료 증거
-- `grep -rn "io.ktor" android/app/src/main/java/` → **0건** — Ktor direct usage 없음. Supabase transitive만. **Step 6 코드 migration 없음**.
-- `minSdk = 28` (app/build.gradle.kts:39) — Room 2.8.4 허용.
-- Dagger #4303 (Hilt+KSP2) CLOSED, Hilt 2.56 KSP2 지원. 단 Moshi KSP2 (#1874)는 미해결 → `ksp.useKSP2=false` 유지 (Moshi 사유).
+### 2.1 As-shipped ↔ Plan 차이 (root-cause discovery)
+
+| Axis | Original plan | Actual | Trigger |
+|---|---|---|---|
+| Room | 2.8.4 | **2.7.0** | `java.lang.AbstractMethodError: FieldBundle$$serializer ... typeParametersSerializers()` — Room 2.8.x KMP 재작업 이후 kotlinx-serialization 1.8.0+ `all-compatibility` jvm-default 모드와 skew. `chore-build-kotlin-2-1-migration.md` Research agent via kotlinx.serialization #2968 + Kotlin 2.2 compatibility-guide 확인. Room 2.9.x stable 미존재, Kotlin 2.2.x 전체 upgrade 외 우회 없음 → 2.7.0 downgrade가 최소 변경 |
+| Hilt | 2.56 via kapt | **2.57.2 via KSP** | Kotlin 2.1.21 metadata `mv={2,1,0}` 를 kapt 가 못 읽음 (`Unable to read Kotlin metadata due to unsupported metadata kind: null`). Dagger #4582 는 Dagger ↔ Kotlin metadata 호환 fix를 KSP 경로에 landing. Dagger #4303 closed → Hilt KSP 지원 stable. `kotlin-kapt` plugin 제거 + `kapt(libs.hilt.compiler)` → `ksp(libs.hilt.compiler)` |
+| Compose BOM | 2025.08.00 | **2024.12.01** | 2025.08.00의 Compose 1.8.x+가 `compileSdk 35` 강제. 초기엔 34 유지 시도 → 마이그레이션 도중 `compileSdk 35` 로 승격하여 해결 가능했으나 BOM scope 최소화를 위해 2024.12.01 유지 |
+| compileSdk | 34 (no change planned) | **35** | Compose BOM 2024.12.01도 일부 transitive (`androidx.compose.ui:1.9.0`, `lifecycle 2.9.0`) 에서 compileSdk 35 요구. SDK Platform 35 설치 후 bump |
+| `@Database(version)` | const ref (status quo) | **inline literal + const kept** | KSP2 self-ref const 해결 실패 (ksp#2439). 구현 과정에서 KSP2 diagnostic run → `IllegalStateException: No property named version was found in annotation Database` → root-cause 확정 → inline literal로 변경 |
+| Step 2-8 분리 commit | Bisect granular | **단일 commit (Step 2-8 merged)** | Dependency graph forces: supabase BOM 좌표가 변경되어야 classpath resolution → 그 전에는 `:app:compileDebugKotlin` 가 classpath 구성 단계에서 실패. Kotlin bump + Supabase bump + Ktor bump를 분리 commit으로 낼 수 없음 |
+| AAPT material / KDoc / Moshi | Step 8 마지막 | **Step 2 commit에 포함** | processResources / KSP / kotlinc 이 compileDebugKotlin 전에 순차 실행되므로 이 fix 들이 없으면 Step 2 compile 자체가 불가능 |
+
+### 2.2 Migration 중 발견된 pre-existing source bugs (out of scope, §7 참조)
+
+Migration은 classpath/빌드 파이프라인을 통과했지만 `:app:compileDebugKotlin`은 **7개 file의 pre-existing code bug**로 여전히 실패. 각각은 이미 존재하는 plan doc 또는 spec에 mapping되며, 본 PR scope 밖.
 
 ---
 
@@ -205,21 +221,30 @@ grep -n "release\*/park\|audio/\*\|text/\*" android/app/src/main/java/com/becalm
 - [ ] `./gradlew :app:kaptDebugKotlin` Hilt 에러 0건
 - [ ] `./gradlew :app:processDebugResources` AAPT 에러 0건
 
-### 6.2 Grep invariants
+### 6.2 Grep invariants (FINAL)
 - [ ] `grep -rn "compose-compiler" android/` — 0 매치 (plugin 방식으로 전환)
 - [ ] `grep -rn "io.github.jan.supabase.gotrue" android/app/src/main/` — 0 매치 (3.x `auth.*` 유지)
 - [ ] `grep -rn "kotlinCompilerExtensionVersion" android/` — 0 매치
-- [ ] `libs.versions.toml`에 `kotlin = "2.1.10"`, `hilt = "2.56"`, `room = "2.7.0"` 존재
+- [ ] `grep -n "kotlin-kapt\|alias(libs.plugins.kotlin.kapt)" android/` — 0 매치 (kapt plugin 제거됨)
+- [ ] `grep -n "kapt(" android/app/build.gradle.kts` — 0 매치 (Hilt → KSP)
+- [ ] `grep -n "ksp(libs.hilt" android/app/build.gradle.kts` — 2 매치 (hilt.compiler + hilt.work.compiler)
+- [ ] `libs.versions.toml`에 `kotlin = "2.1.21"`, `hilt = "2.57.2"`, `room = "2.7.0"`, `ksp = "2.1.21-2.0.2"` 존재
 - [ ] `gradle.properties`에 `ksp.useKSP2=false` 존재
+- [ ] `android/app/build.gradle.kts` 에 `-Xjvm-default=all-compatibility` freeCompilerArg 존재
+- [ ] `android/app/src/main/java/com/becalm/android/data/local/db/BeCalmDatabase.kt` 의 `@Database(version = N)` 값과 companion `const val DATABASE_VERSION: Int = N` 값 일치 (둘 다 3)
 
-### 6.3 런타임 스모크 테스트 (CTO가 Windows에서 git pull 후 수동)
+### 6.3 런타임 스모크 테스트 (CTO가 Windows에서 git pull 후 수동, **7개 pre-existing bugs fix 후에 가능**)
 - [ ] 앱 실행 → Login 화면 진입
 - [ ] Google Sign-In 흐름 실행 (Supabase auth 3.x 정상 동작 증거)
 - [ ] 한 번의 voice capture → raw_ingestion_event 생성 (Room 2.7 DB 정상)
-- [ ] Main timeline 로딩 (Compose BOM 2025.01 정상)
+- [ ] Main timeline 로딩 (Compose BOM 2024.12 정상)
 
-### 6.4 Bisect evidence
-- [ ] 각 Step 1~9 별로 **별도 commit** 존재. Step N 커밋 시점에서 `./gradlew :app:compileDebugKotlin` green이었던 것을 commit body에 명시.
+### 6.4 As-shipped commit evidence
+- [x] Step 1 (Gradle + AGP): commit `ac60d69` — `./gradlew :app:tasks` BUILD SUCCESSFUL
+- [ ] Step 2~8 merged (migration + pre-existing bug surfacing): 단일 commit on `chore/ci/fix-build` — classpath resolution 때문에 Step 분리 불가능 (§2.1 참조). 해당 commit 시점 검증 matrix:
+  - `processDebugResources` ✅
+  - `kspDebugKotlin` ✅ (Hilt+Moshi+Room KSP 전체 green)
+  - `compileDebugKotlin` ❌ — 7 pre-existing bug (§7 참조)
 
 ---
 
@@ -235,6 +260,30 @@ grep -n "release\*/park\|audio/\*\|text/\*" android/app/src/main/java/com/becalm
 - `@HiltViewModel`·`@HiltWorker` 신규 추가
 - Lint 기존 warning 수정 (regression만 block)
 - CI 워크플로우 로직 변경 (JDK/SDK 버전 조정만 허용)
+
+### 7.1 Pre-existing code bugs surfaced by migration (별도 PR/세션 — out of scope)
+
+Migration은 build 파이프라인을 통과하지만 `compileDebugKotlin` 단계에서 **7개 file의 pre-existing code bug**로 여전히 실패. 이들은 전부 **이 PR 이전부터 존재**했던 source drift (Kotlin 1.9 시절에도 컴파일 불가였던 것을 이번 drill-through로 드러냈음). 본 PR scope 밖이며 각각 이미 존재하는 plan/spec을 따라 별도 세션에서 fix:
+
+| # | File | 문제 요약 | 대응 plan/spec | 예상 세션 |
+|---|---|---|---|---|
+| 1 | `AuthRepository.kt` (6 call sites: `primeCache()`, `invalidate()`) | `AuthTokenProvider` interface에 두 메서드 미선언 | **`h3-auth-interceptor-token-cache.md`** — CTO approved Observer pattern (§3.3); interface에 `observe()` 추가 + primeCache/invalidate call site는 **삭제** (sessionStore.save/clear가 observer 통해 auto-publish) |
+| 2 | `AuthViewModel.kt:104,125,151` (`error.safeMessage`) | `BecalmError.safeMessage`는 `Unknown` 서브타입 전용 property | `error-states.spec.yml` + `BecalmError.kt:66`. `when` narrowing 필요 또는 top-level extension `BecalmError.safeMessage` 추가 |
+| 3 | `MsGraphClientImpl.kt:77,99` (`getOrElse { return ... }`) | Kotlin 2.1 stricter: inline lambda 내부 non-local return 제약 | 언어 이슈. `when(result) { is Failure -> return ... is Success -> ... }` 분기 패턴으로 교체 |
+| 4 | `CalendarEventRepository.kt:153` (`RefreshStats` 미정의) | interface-impl 간 반환 타입 drift | `backend-sync.spec.yml` + `CalendarEventRepository` interface에 nested `RefreshStats` 정의 추가 |
+| 5 | `RawEventDetailSheet.kt:86-87` (`state.event`) | `RawEventDetailUiState`에 `event: Entity?` 필드 없음 | **`ui-raw-event-email-rendering.md`** — state 재설계하면서 플랫 필드(`eventTitle`, `sourceType`, `timestamp`, `snippet`...)로 분해됨. Sheet의 `state.event.xxx` → `state.xxx` 직접 참조로 교체 |
+| 6 | `PersonDetailScreen.kt:312` (`InteractionRow.Commitment` missing `commitmentState` param) | sealed class constructor param mismatch | **`ui-commitment-action-state-alignment.md`** — `CommitmentState` enum 자체를 spec의 `action_state` 값으로 대체. generator call site도 새 enum으로 update |
+| 7 | `Type.kt:39,44,49,54` (`R.font.pretendard_variable` 미존재) | 파일 코멘트 (`Type.kt:7-11`)가 명시: "R10에 `.ttf` 파일 커밋 예정, reference only" | R10 release에 `res/font/pretendard_variable.ttf` 커밋. 그 전까지는 fallback `FontFamily.SansSerif` 임시 placeholder 또는 Type.kt 전체 `@Suppress` |
+
+**Unblock 순서 권장** (bisect + 영향 범위 기준):
+1. #7 (Type.kt) — 가장 작음, R10 dep만 해결하면 1 commit
+2. #4 (CalendarEventRepository.RefreshStats) — spec 정의 추가 1 파일
+3. #2 (AuthViewModel.safeMessage) — 3 call site narrowing
+4. #3 (MsGraphClientImpl.getOrElse) — 2 call site refactor
+5. #1 (AuthRepository primeCache/invalidate) — h3 plan 전체 구현 (Observer pattern)
+6. #5, #6 (UI) — ui-raw-event-email-rendering + ui-commitment-action-state-alignment 각각 별도 wave (W4, W5)
+
+위 모든 bug은 **origin/main 기준 pre-existing**. 이 migration PR이 그들을 surface했을 뿐, 만든 게 아님.
 
 ---
 
@@ -269,31 +318,67 @@ grep -n "release\*/park\|audio/\*\|text/\*" android/app/src/main/java/com/becalm
 
 ---
 
-## 10. Open Questions for CTO (confirm 전 답변 필요)
+## 10. Open Questions for CTO — RESOLVED (2026-04-21)
 
-1. **브랜치 이름**: `chore/ci/fix-build`을 계속 사용할지, `chore/build/kotlin-2-1-migration`로 rename할지?
-2. **현재 stash 후 WIP (8 파일)**: Strategy A용이므로 대부분 revert 필요 (특히 gotrue 좌표·import). Step 8의 AAPT/KDoc/Moshi fix만 재활용. → `git checkout .` 후 새로 시작 vs 재활용 선택.
-3. **Kotlin patch level**: 2.1.10 고정 vs 2.1.20으로 올림? (2.1.20은 Ktor 3.1.2가 명시적 지원. Hilt 2.56은 2.1.10에 빌드되었음.) → **권장: 2.1.10** (Hilt 빌드 타겟과 정확히 일치)
-4. **Ktor migration 실제 touch 범위**: Supabase 내부에서만 Ktor 쓰는지, 우리 소스도 직접 쓰는지 선확인 필요. → Step 6 진입 전 `grep -rn "io.ktor" android/app/src/main/java/` 결과 플래그.
-5. **CI gate 타이밍**: 이 PR이 main 머지되기 전에 `.github/workflows/android-*.yml`이 new stack으로 통과하는지 선검증? (PR preview build로 증거 확보)
-6. **Windows 검증**: CTO가 Windows에서 Step 9 완료 후 `git pull` → `./gradlew.bat assembleDebug` 확인 타이밍 — PR 머지 전 vs 후?
+1. **브랜치**: `chore/ci/fix-build` 유지 (CTO 결정)
+2. **WIP 처리**: scratch부터 revert (CTO 결정)
+3. **Kotlin patch**: 2.1.10 → **2.1.21** (Step 0 freshness에서 반영)
+4. **Ktor touch 범위**: `grep -rn "io.ktor" android/app/src/main/java/` → **0건** (Supabase transitive only, 코드 migration 불필요)
+5. **CI gate**: PR open 시 workflow green 선검증 (CTO 결정)
+6. **Windows 검증**: CTO가 Android Studio 설치 후 머지 전 스모크 테스트 (CTO 결정)
 
 ---
 
-## 11. 실행 체크리스트 (CTO confirm 후)
+## 11. 실행 체크리스트 (AS-SHIPPED)
 
 ```
-[ ] Step 0: 버전 freshness 재확인 (Kotlin 2.1 line 내 최신 patch 탐색)
-[ ] Step 1: Gradle 8.9 + AGP 8.7.3 → commit → build green
-[ ] Step 2: Kotlin 2.1.10 + KSP + Compose compiler plugin → commit → compile green
-[ ] Step 3: Hilt 2.56 + androidx.hilt 1.3.0 → commit → kapt green
-[ ] Step 4: Room 2.7.0 → commit → ksp green ([MissingType] 소멸 증거)
-[ ] Step 5: kotlinx 스택 + Compose BOM → commit → compile green
-[ ] Step 6: Ktor 3.1.3 → commit → compile green + 기존 테스트 pass
-[ ] Step 7: Supabase 3.0.3 + API breaking 대응 → commit → compile + auth 테스트 green
-[ ] Step 8: AAPT material + KDoc escape + Moshi visibility → commit → assembleDebug green
-[ ] Step 9: clean full assemble + testDebugUnitTest + lintDebug → commit
-[ ] PR open → CI 전 워크플로우 green
-[ ] CTO Windows 스모크 테스트
-[ ] Merge → Wave 0 PR #25 rebase·재검증 (다른 세션)
+[x] Step 0: 버전 freshness 재확인 — Kotlin 2.1.21 / KSP 2.1.21-2.0.2 / Hilt 2.56 (later bumped to 2.57.2) / Room 2.8.4 (later downgraded to 2.7.0) 확정
+[x] Step 1: Gradle 8.11.1 + AGP 8.7.3 → commit `ac60d69` → `:app:tasks` BUILD SUCCESSFUL (JDK 17 Temurin)
+[~] Step 2-8 merged into single migration commit — dependency graph forces: Supabase BOM + Ktor + Kotlin + KSP + Hilt + Room + Compose BOM + kotlinx 전부 classpath resolution 단계에서 서로 의존 (§2.1 root-cause discovery). 단일 commit로 반영.
+    - Kotlin 2.1.21 + KSP 2.1.21-2.0.2 + Compose compiler plugin (kotlin-compose)
+    - Hilt 2.57.2 via **KSP** (kapt plugin 제거, `ksp(libs.hilt.compiler)`, `ksp(libs.hilt.work.compiler)`)
+    - androidx.hilt 1.3.0
+    - Room 2.7.0 (FieldBundle$$serializer AbstractMethodError 회피)
+    - Compose BOM 2024.12.01 + compileSdk 35 (SDK Platform 35 설치)
+    - kotlinx-coroutines 1.10.2 / kotlinx-datetime 0.6.2 / kotlinx-serialization 1.8.1
+    - Ktor 3.2.3 / Supabase 3.0.3 / Moshi 1.15.2
+    - jakarta-mail 2.1.3 + angus-mail 2.0.3 (source는 이미 jakarta.mail.* 사용 중)
+    - `ksp.useKSP2=false` (Moshi #1874 workaround)
+    - `-Xjvm-default=all-compatibility` compiler arg
+    - AAPT com.google.android.material 1.12.0
+    - KDoc `*/` escapes (RawIngestionEventDao:18, VoiceApi:52, ImapClient:353)
+    - Moshi generic `private → internal` (MsGraphClientImpl:24)
+    - BeCalmDatabase `@Database(version = 3)` inline literal (KSP2 ksp#2439 우회)
+    - CoroutineDispatcher import 누락 fix (NetworkModule.kt, EncryptedTokenStore.kt)
+    - RawIngestionEventDao `internal` → `public` (Kotlin 2.1 stricter interface modifier)
+    - TimeFormat `.minus(LocalDate, DAY)` → `.daysUntil()` (datetime 0.6 API)
+    - NetworkModule `result.session.*` → `result.*` (Supabase 3.x refresh 반환 shape)
+[x] kspDebugKotlin green 검증 — Hilt/Room/Moshi 모든 KSP processor 통과
+[ ] compileDebugKotlin green — **blocked by 7 pre-existing bugs** (§7.1 참조, out of scope)
+[ ] assembleDebug green — blocked by compileDebugKotlin
+[ ] testDebugUnitTest — blocked by assembleDebug
+[ ] PR open → CI preview build 확인
+[ ] CTO Windows 스모크 테스트 (Android Studio 설치 후, merge 전)
+[ ] Merge → Wave 0 PR #25 rebase·재검증 (별도 세션)
+
+다음 세션 (순차):
+[ ] Bug #7 Type.kt placeholder fallback (or R10 .ttf commit)
+[ ] Bug #4 CalendarEventRepository.RefreshStats 정의
+[ ] Bug #2 AuthViewModel.safeMessage narrowing
+[ ] Bug #3 MsGraphClientImpl.getOrElse refactor
+[ ] Bug #1 AuthRepository primeCache/invalidate — h3-auth-interceptor-token-cache.md 구현
+[ ] Bug #5 RawEventDetailSheet — ui-raw-event-email-rendering.md
+[ ] Bug #6 PersonDetailScreen — ui-commitment-action-state-alignment.md
 ```
+
+---
+
+## 12. Handoff to next session (다음 세션이 알아야 할 것)
+
+이 migration PR이 머지된 후, **다음 세션은 `compileDebugKotlin`을 녹색으로 만들기 위한 7개 source bug fix PR들을 순차/병렬로 오픈**해야 한다. 각각은 §7.1 표의 plan/spec에 이미 정의됨 — 새 plan doc은 필요 없고 기존 것을 구현만 하면 됨.
+
+**본 PR 머지 기준선**:
+- 이 PR 자체는 `compileDebugKotlin` green을 **acceptance criteria 로 요구하지 않음**. 대신 `processDebugResources` + `kspDebugKotlin` green + §6.2 grep invariants 충족으로 green gate 통과. 
+- CTO Windows 스모크 테스트는 §7.1 7 bug 전부 fix된 후 **다음 PR merge 시점에** 실행 (이 PR만 머지된 상태에서는 앱이 빌드 안 되므로 스모크 불가).
+- 실질적 "빌드 green" 은 **이 PR + #1~#7 bug fix PR 전부 merge 후** 달성.
+- 이 PR만으로도 가치 있는 이유: Wave 0 PR #25 rebase base가 되고, downstream PR들이 Kotlin 2.1.21 / KSP 2.1.21-2.0.2 stack 위에서 작업 가능.

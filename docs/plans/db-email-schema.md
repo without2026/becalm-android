@@ -149,7 +149,7 @@ grep -rn "MIGRATION_3_4" android/app/src/main/java/   # → 0
 | FK `raw_event_id` | `raw_ingestion_events.id` 로컬 FK, onDelete 암시 (EMAIL-006 co-delete) | 부재 | `@ForeignKey(onDelete=CASCADE)` |
 | `raw_ingestion_events.folder` | email source 에 INBOX\|SENT 힌트 | 부재 | 컬럼 추가 (NULL 허용, app-level NOT NULL for email) |
 | `RawIngestionEventDto.folder` | email upload 시 Railway 로 힌트 전파 | 부재 | DTO 필드 추가 |
-| Room DATABASE_VERSION | ≥ 4 | 3 | bump |
+| Room DATABASE_VERSION | ≥ 4 | 3 | bump (both const AND `@Database(version=...)` inline literal — KSP2 ksp#2439) |
 | MIGRATION_3_4 | CREATE TABLE email_body + 2 CREATE INDEX + ALTER raw_ingestion_events ADD folder | 부재 | 신규 Migration 객체 |
 | KSP schema snapshot | `app/schemas/.../4.json` | 디렉토리 자체 부재 | 빌드 후 커밋 |
 | FK co-delete | EMAIL-006 "EmailBody와 raw_ingestion_events를 함께 DELETE" | N/A (테이블 없음) | CASCADE 로 선제 보장 |
@@ -163,7 +163,7 @@ grep -rn "MIGRATION_3_4" android/app/src/main/java/   # → 0
 1. **`android/app/src/main/java/com/becalm/android/data/local/db/BeCalmDatabase.kt`**
    - `@Database.entities` 에 `EmailBodyEntity::class` 추가
    - `abstract fun emailBodyDao(): EmailBodyDao` 추가
-   - `DATABASE_VERSION: Int = 3` → `4`
+   - `DATABASE_VERSION: Int = 3` → `4` **AND** the `@Database(..., version = 3, ...)` inline literal → `4` (⚠ Kotlin 2.1.21 + KSP2 cannot resolve self-ref companion const at annotation site — ksp#2439. Both must be bumped in lockstep.)
    - import 문 2개 추가 (`EmailBodyEntity`, `EmailBodyDao`)
    - KDoc 테이블 표에 `EmailBodyEntity` row 추가
 

@@ -49,7 +49,7 @@ public interface VoiceApi {
      * - HTTP 429/500/502/503: transient; caller retries with exponential backoff (VOI-006).
      *
      * @param audio          Audio file as a multipart binary part (name="audio").
-     *                       Content type should be "audio/m4a" or "audio/*".
+     *                       Content type should be "audio/m4a" or "audio/&#42;".
      * @param clientEventId  UUID v4 idempotency key matching the raw_ingestion_event row.
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
      * @param durationSeconds Duration of the audio file in seconds (integer, voice only).

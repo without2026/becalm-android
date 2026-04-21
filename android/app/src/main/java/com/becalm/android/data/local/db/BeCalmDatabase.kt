@@ -55,6 +55,10 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  * Use [build] inside a Hilt [com.becalm.android.core.di.DatabaseModule] provider.
  * Never call [build] directly from application code — always inject the database via Hilt.
  */
+// `version` is an inline literal because KSP2 (and indirectly KSP1 via Room's annotation
+// proxy) cannot resolve a companion-object `const val` reference at this annotation site —
+// see google/ksp#2439, #1909, #839. Keep [DATABASE_VERSION] for non-annotation use sites
+// (migrations, build-time assertions); it must stay in sync with the literal below.
 @Database(
     entities = [
         RawIngestionEventEntity::class,
@@ -62,7 +66,7 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         CalendarEventEntity::class,
         PersonEnrichmentEntity::class,
     ],
-    version = DATABASE_VERSION,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

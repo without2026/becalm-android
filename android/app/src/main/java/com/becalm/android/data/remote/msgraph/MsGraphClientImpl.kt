@@ -17,11 +17,11 @@ import okhttp3.Response
 import java.io.IOException
 import kotlin.time.Duration.Companion.days
 
-// ─── Moshi JSON DTOs (private; not exposed outside this file) ─────────────────
+// ─── Moshi JSON DTOs (internal for Moshi codegen — generic classes can't be private) ─────────
 
 /** Top-level Graph list/delta response envelope. */
 @JsonClass(generateAdapter = true)
-private data class GraphListDto<T>(
+internal data class GraphListDto<T>(
     @Json(name = "value") val value: List<T>,
     @Json(name = "@odata.nextLink") val nextLink: String?,
     @Json(name = "@odata.deltaLink") val deltaLink: String?,

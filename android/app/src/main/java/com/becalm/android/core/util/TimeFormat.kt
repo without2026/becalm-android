@@ -1,10 +1,9 @@
 package com.becalm.android.core.util
 
-import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.minus
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -54,7 +53,7 @@ public fun formatRelativeKorean(
     tz: TimeZone = TimeZone.currentSystemDefault(),
 ): String {
     val ldt = instant.toLocalDateTime(tz)
-    val dayDiff = now.toLocalDateTime(tz).date.minus(ldt.date, DateTimeUnit.DAY)
+    val dayDiff = ldt.date.daysUntil(now.toLocalDateTime(tz).date)
     val prefix = when (dayDiff) {
         0 -> "오늘"
         1 -> "어제"
@@ -71,7 +70,7 @@ public fun formatRelativeKorean(
  * - `"D+2"` — due date was 2 days ago (overdue).
  */
 public fun formatDueDayBadge(today: LocalDate, due: LocalDate): String {
-    val diff = today.minus(due, DateTimeUnit.DAY) // positive = overdue
+    val diff = due.daysUntil(today) // positive = overdue
     return when {
         diff < 0 -> "D${diff}" // e.g. diff=-3 → "D-3"
         diff == 0 -> "D-0"

@@ -6,6 +6,9 @@
 **Severity**: High (사용자에게 잘못된 D-N 숫자가 표시됨 — UTC 자정 기준으로 KST 날짜가 하루 전/후로 roll over)
 **Type**: Drift (스펙 "KST local date 기준" vs 코드 `ZoneOffset.UTC`)
 
+> **⚠ Migration Impact (2026-04-21, `chore/ci/fix-build`)**
+> `kotlinx-datetime` upgraded **0.5.0 → 0.6.2**. The existing `CommitmentCard.kt:124` pattern `it.monthNumber, it.dayOfMonth` (where `it: kotlinx.datetime.LocalDate`) still compiles under 0.6.2 via **deprecation aliases** — but those APIs are renamed to `it.month.number` and `it.day` in the canonical 0.6 API and are scheduled for removal in 0.7.x. When implementing this plan, prefer the new names (or use `.toJavaLocalDate()` to interop with `java.time.LocalDate`) to future-proof the change. This is additive — the core fix (UTC → `Asia/Seoul`) is unchanged.
+
 ---
 
 ## 1. Finding

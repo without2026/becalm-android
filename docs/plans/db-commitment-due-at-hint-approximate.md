@@ -6,6 +6,10 @@
 **Severity**: High (VOI-003 구조적 출력 스펙 미충족 — LLM이 추출한 `due_hint`를 저장할 컬럼이 아예 없음)
 **Type**: Drift (스펙 확장과 Room/DTO 실제 스키마 불일치, 대형 ripple)
 
+> **⚠ Migration Impact (2026-04-21, `chore/ci/fix-build`)**
+> Kotlin 2.1.21 + KSP2 (Analysis API) can NOT resolve `@Database(version = CONST_REF)` when the const is a self-reference to the containing class's companion object (ksp#2439 / #1909 / #839). `BeCalmDatabase.kt` now uses an **inline integer literal**: `@Database(version = 3, ...)`. The `DATABASE_VERSION: Int = 3` const in the companion object is KEPT for non-annotation use sites (migration chain, Room.databaseBuilder).
+> **When bumping version in this PR: update BOTH sites in lockstep — (1) companion `const val DATABASE_VERSION: Int = 3 → 4` AND (2) the `@Database(..., version = 3, ...)` inline literal → `4`.** A grep `grep -n "version = [0-9]*" android/app/src/main/java/com/becalm/android/data/local/db/BeCalmDatabase.kt` MUST return the same integer as the const. Fail-loudly guard: keep a `require(DATABASE_VERSION == 4)` assertion next to the annotation.
+
 ---
 
 ## 1. Finding
@@ -143,7 +147,7 @@ public const val DATABASE_VERSION: Int = 3
    - KDoc 갱신
 
 2. **`android/app/src/main/java/com/becalm/android/data/local/db/BeCalmDatabase.kt`**
-   - `DATABASE_VERSION: Int = 3` → `4`
+   - `DATABASE_VERSION: Int = 3` → `4` **AND** the `@Database(..., version = 3, ...)` inline literal → `4` (both sites in same file, KSP2 cannot resolve the const reference — see Migration Impact callout above)
 
 3. **`android/app/src/main/java/com/becalm/android/data/local/db/migration/Migrations.kt`**
    - 신규 `MIGRATION_3_4` 추가 — spec DDL 그대로:

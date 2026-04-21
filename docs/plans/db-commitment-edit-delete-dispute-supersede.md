@@ -163,7 +163,8 @@ grep -rn "EDIT-00\|quote_disputed\|supersedes_commitment" android/app/src/main/
    ```
 
 2. **`android/app/src/main/java/com/becalm/android/data/local/db/BeCalmDatabase.kt`**
-   - `DATABASE_VERSION: Int = 4` → `5`
+   - `DATABASE_VERSION: Int = 4` → `5` **AND** the `@Database(..., version = 4, ...)` inline literal → `5`
+   - ⚠ Migration Impact (Kotlin 2.1.21 + KSP2, ksp#2439): `@Database(version = DATABASE_VERSION)` fails — KSP2 cannot resolve self-referential companion const refs at annotation sites. Both sites must be bumped together. See `chore-build-kotlin-2-1-migration.md` Migration Impact section for rationale.
 
 3. **`android/app/src/main/java/com/becalm/android/data/local/db/migration/Migrations.kt`**
    - 신규 `MIGRATION_4_5` — spec DDL 그대로:
