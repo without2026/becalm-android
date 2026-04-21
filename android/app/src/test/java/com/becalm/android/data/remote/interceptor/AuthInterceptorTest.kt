@@ -8,6 +8,7 @@ import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.datetime.Instant
@@ -59,9 +60,22 @@ class AuthInterceptorTest {
 
     private class FakeSessionStore(initial: SupabaseSession?) : SupabaseSessionStore {
         @Volatile private var current: SupabaseSession? = initial
-        override suspend fun save(session: SupabaseSession) { current = session }
+        private val changes = kotlinx.coroutines.flow.MutableSharedFlow<SupabaseSession?>(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        )
+        override suspend fun save(session: SupabaseSession) {
+            current = session
+            changes.tryEmit(session)
+        }
         override suspend fun load(): SupabaseSession? = current
-        override suspend fun clear() { current = null }
+        override suspend fun clear() {
+            current = null
+            changes.tryEmit(null)
+        }
+        override fun observe(): kotlinx.coroutines.flow.SharedFlow<SupabaseSession?> =
+            changes.asSharedFlow()
     }
 
     private class CountingAuthClient(

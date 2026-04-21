@@ -225,7 +225,8 @@ class VoiceUploadWorkerIntegrationTest {
     @Test
     fun `VOI-005 Robolectric denyPermissions makes READ_MEDIA_AUDIO return DENIED`() {
         val context: Application = RuntimeEnvironment.getApplication()
-        val shadow = shadowOf(context.packageManager)
+        // denyPermissions lives on ShadowContextWrapper (not ShadowPackageManager in Robolectric 4.11).
+        val shadow = shadowOf(context as Context as android.content.ContextWrapper)
         shadow.denyPermissions(android.Manifest.permission.READ_MEDIA_AUDIO)
 
         assertEquals(

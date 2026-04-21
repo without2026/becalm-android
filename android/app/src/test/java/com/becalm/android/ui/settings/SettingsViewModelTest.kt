@@ -7,6 +7,8 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -36,6 +38,8 @@ class SettingsViewModelTest {
 
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
+    private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     private lateinit var viewModel: SettingsViewModel
@@ -68,6 +72,8 @@ class SettingsViewModelTest {
     private fun buildViewModel(): SettingsViewModel = SettingsViewModel(
         userPrefsStore = userPrefsStore,
         authRepository = authRepository,
+        rawIngestionRepository = rawIngestionRepository,
+        workScheduler = workScheduler,
         logger = logger,
     )
 

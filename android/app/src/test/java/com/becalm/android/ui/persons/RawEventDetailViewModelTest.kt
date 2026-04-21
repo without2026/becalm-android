@@ -82,8 +82,11 @@ class RawEventDetailViewModelTest {
                 var state = awaitItem()
                 while (state.loading) state = awaitItem()
 
-                assertNotNull(state.event)
-                assertEquals(entity, state.event)
+                // VM flattens entity fields into state — assert field-by-field.
+                assertEquals(entity.id, state.eventId)
+                assertEquals(entity.sourceType, state.sourceType)
+                assertEquals(entity.eventTitle, state.eventTitle)
+                assertEquals(entity.timestamp, state.timestamp)
                 assertEquals(false, state.loading)
                 assertNull(state.error)
 
@@ -106,7 +109,9 @@ class RawEventDetailViewModelTest {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
 
-            assertNull(state.event)
+            // Not-found: entity fields default to empty/null; error is set.
+            assertEquals("", state.eventId)
+            assertNull(state.eventTitle)
             assertEquals(false, state.loading)
             assertNotNull(state.error)
             assertEquals("Event not found", state.error)

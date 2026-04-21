@@ -55,6 +55,7 @@ class OutlookCalendarWorkerTest {
 
     private val fakeSession = SupabaseSession(
         userId = "user-123",
+        email = "user@example.com",
         accessToken = "access-token",
         refreshToken = "refresh-token",
         expiresAt = Instant.fromEpochMilliseconds(Long.MAX_VALUE),

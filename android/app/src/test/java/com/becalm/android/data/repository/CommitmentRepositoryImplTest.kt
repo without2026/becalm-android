@@ -546,6 +546,9 @@ class CommitmentRepositoryImplTest {
             return uploadBatchResponder(request)
         }
 
+        override suspend fun getSourceStatus(): Response<com.becalm.android.data.remote.dto.SourceStatusResponseDto> =
+            notImplemented()
+
         override suspend fun getCalendarEvents(
             cursor: String?,
             since: String?,
@@ -591,5 +594,7 @@ class CommitmentRepositoryImplTest {
         override suspend fun setImapState(mailbox: String, state: com.becalm.android.data.local.datastore.ImapCursorState?) {}
         override fun observeMediaStoreLastSeen(kind: String): Flow<Long?> = emptyFlow()
         override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) {}
+        override suspend fun runOutlookMailCursorMigrationV2() {}
+        override suspend fun runImapCursorMigrationV2() {}
     }
 }

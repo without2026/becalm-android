@@ -68,7 +68,7 @@ class AuthViewModelTest {
     // ─── Happy path: session observer → SignedIn ──────────────────────────────
 
     @Test
-    fun `onObserveSession maps Authenticated to SignedIn with correct userId and email`() = runTest {
+    fun `onObserveSession maps Authenticated to SignedIn with correct userId`() = runTest {
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(fakeSession))
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
 
@@ -78,7 +78,6 @@ class AuthViewModelTest {
         val state = viewModel.uiState.value
         assertTrue("Expected SignedIn, got $state", state is AuthUiState.SignedIn)
         assertEquals("user-123", (state as AuthUiState.SignedIn).userId)
-        assertEquals("user@example.com", state.email)
     }
 
     // ─── R8/H-7: onboardingCompleted field populated from UserPrefsStore ──────

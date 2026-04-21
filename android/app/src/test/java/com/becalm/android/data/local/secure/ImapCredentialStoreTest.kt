@@ -3,6 +3,7 @@ package com.becalm.android.data.local.secure
 import android.app.Application
 import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -218,10 +219,10 @@ class ImapCredentialStoreTest {
             val results = mutableMapOf<String, ImapCredentials?>()
             kotlinx.coroutines.coroutineScope {
                 repeat(20) {
-                    kotlinx.coroutines.launch {
+                    launch {
                         results[SourceType.NAVER_IMAP] = store.load(SourceType.NAVER_IMAP)
                     }
-                    kotlinx.coroutines.launch {
+                    launch {
                         results[SourceType.DAUM_IMAP] = store.load(SourceType.DAUM_IMAP)
                     }
                 }

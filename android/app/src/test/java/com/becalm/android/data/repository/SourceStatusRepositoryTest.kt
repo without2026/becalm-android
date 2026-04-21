@@ -333,5 +333,7 @@ class SourceStatusRepositoryTest {
         override suspend fun setImapState(mailbox: String, state: ImapCursorState?) {}
         override fun observeMediaStoreLastSeen(kind: String): Flow<Long?> = emptyFlow()
         override suspend fun setMediaStoreLastSeen(kind: String, epochMs: Long?) {}
+        override suspend fun runOutlookMailCursorMigrationV2() {}
+        override suspend fun runImapCursorMigrationV2() {}
     }
 }
