@@ -49,6 +49,7 @@ import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
@@ -149,11 +150,7 @@ public fun CommitmentCard(
     // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
     // here.
     val daysUntil: Int? = remember(dueAt) {
-        dueAt?.let {
-            val today = Clock.System.now().toLocalDateTime(KST).date
-            val dueKst = it.toLocalDateTime(KST).date
-            today.daysUntil(dueKst)
-        }
+        daysUntilInKst(dueAt = dueAt, now = Clock.System.now(), zone = KST)
     }
     val badge: Pair<String, BecalmStateColors>? = daysUntil?.let { days ->
         val stateColors = when {
@@ -335,6 +332,26 @@ internal fun formatDayBadgeLabel(days: Int, approximate: Boolean): String = when
  */
 internal fun shouldShowDueHint(dueIsApproximate: Boolean, dueHint: String?): Boolean =
     dueIsApproximate && !dueHint.isNullOrBlank()
+
+/**
+ * Pure KST-boundary calculation for the D-N badge. Returns signed day-delta of
+ * [dueAt] against the calendar date of [now], both interpreted in the business
+ * timezone [zone] (KST for BeCalm — commitment-management.spec.yml:40).
+ *
+ * Extracted so the boundary contract (KST midnight roll-over, not UTC) can be
+ * pinned by pure unit tests without a Compose host: fixing [now] at
+ * 2026-04-17T23:30+09:00 and [dueAt] at 2026-04-18T00:00+09:00 MUST return `1`
+ * (D-1 tomorrow), whereas the same instants under a UTC zone would misreport
+ * `0` (D-0 today).
+ *
+ * @return `null` iff [dueAt] is `null`; otherwise the integer day-delta.
+ */
+internal fun daysUntilInKst(dueAt: Instant?, now: Instant, zone: TimeZone): Int? =
+    dueAt?.let {
+        val today = now.toLocalDateTime(zone).date
+        val dueKst = it.toLocalDateTime(zone).date
+        today.daysUntil(dueKst)
+    }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 

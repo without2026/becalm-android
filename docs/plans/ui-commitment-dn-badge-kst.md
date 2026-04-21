@@ -1,7 +1,7 @@
 # UI / Commitment / dn-badge-kst — CommitmentCard D-N 배지가 KST 대신 UTC 로 계산
 
 **Branch**: `feat/ui/commitment`
-**Status**: PLAN ONLY — 구현은 별도 세션. 이 plan doc 이외의 코드 커밋 금지.
+**Status**: IMPLEMENTED — Wave 4 commit C1 (KST boundary migration + boundary unit tests).
 **E2E Stage**: 5 — CommitmentManagement 화면 렌더
 **Severity**: High (사용자에게 잘못된 D-N 숫자가 표시됨 — UTC 자정 기준으로 KST 날짜가 하루 전/후로 roll over)
 **Type**: Drift (스펙 "KST local date 기준" vs 코드 `ZoneOffset.UTC`)
