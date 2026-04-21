@@ -128,6 +128,45 @@ public data class CommitmentDto(
 
     /** Server-assigned last-update timestamp. */
     @field:Json(name = "updated_at") val updatedAt: Instant,
+
+    /**
+     * Supabase auth.users UUID of the user who most recently edited this commitment's
+     * mutable fields. Null until the row is first user-edited. See data-model.yml:188-210
+     * and EDIT-003 / MAN-006.
+     */
+    @field:Json(name = "last_edited_by") val lastEditedBy: String? = null,
+
+    /**
+     * Timestamp of the most recent user edit. Paired with [lastEditedBy]: both are null
+     * for untouched rows, both are non-null after the first edit.
+     */
+    @field:Json(name = "last_edited_at") val lastEditedAt: Instant? = null,
+
+    /**
+     * True when the owning user has flagged [quote] as misquoted (EDIT-005 dispute flow).
+     * Default false for every row including legacy backfills (data-model.yml:197).
+     */
+    @field:Json(name = "quote_disputed") val quoteDisputed: Boolean = false,
+
+    /**
+     * Timestamp at which the dispute was first raised. Null while [quoteDisputed] is
+     * false; non-null once the flag flips. Never reset once set (append-only per EDIT-005).
+     */
+    @field:Json(name = "quote_disputed_at") val quoteDisputedAt: Instant? = null,
+
+    /**
+     * Soft-delete marker (EDIT-006). Non-null means the row has been deleted and MUST be
+     * hidden from all user-facing reads. Hard delete is reserved for sign-out purge.
+     * See data-model.yml:204-205.
+     */
+    @field:Json(name = "deleted_at") val deletedAt: Instant? = null,
+
+    /**
+     * When non-null, references the UUID of the prior commitment this row replaced via
+     * the EDIT-007 supersede flow. Self-referential link preserved for audit trail; FK
+     * enforcement (`ON DELETE SET NULL`) lives at the Postgres layer.
+     */
+    @field:Json(name = "supersedes_commitment_id") val supersedesCommitmentId: String? = null,
 )
 
 /**

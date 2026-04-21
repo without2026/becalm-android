@@ -57,8 +57,11 @@ import kotlinx.datetime.Instant
  *   Valid values: "pending" | "reminded" | "followed_up" | "completed".
  *   Default: "pending".
  * @property sourceType Source type of the originating raw ingestion event.
- *   Valid values: "voice" | "gmail" | "outlook_mail" | "naver_imap" | "daum_imap" |
- *   "google_calendar" | "outlook_calendar".
+ *   Valid values: "voice" | "call_recording" | "gmail" | "outlook_mail" | "naver_imap" |
+ *   "daum_imap" | "google_calendar" | "outlook_calendar" | "manual".
+ *   Inherited verbatim from [RawIngestionEventEntity.sourceType] per VOI-001
+ *   (voice-pipeline.spec.yml:18); "manual" is reserved for user-created commitments
+ *   via CommitmentCreateSheet (MAN-001..006) which have no raw ingestion row.
  * @property sourceRef Source-system reference linking back to the originating raw event.
  *   Null when no stable external reference exists.
  * @property confidence LLM confidence score for this extraction, in [0.0, 1.0].
@@ -72,6 +75,45 @@ import kotlinx.datetime.Instant
  * @property createdAt Server-assigned creation timestamp. Set by Railway on first insert.
  * @property updatedAt Server-assigned last-update timestamp. Refreshed on every Railway
  *   PATCH and mirrored locally by [CommitmentDao.updateActionState].
+ * @property lastEditedBy Supabase auth.users UUID of the user who most recently edited
+ *   this commitment's mutable fields (title / description / due_at / person_ref /
+ *   direction). Null when the row has never been user-edited — i.e. values are
+ *   exactly as the LLM extractor or manual-create flow first produced them. Populated
+ *   by the Stage-5 edit UI (EDIT-001..008) and by MAN-001..006 manual-create flows.
+ *   Mirrors `.spec/contracts/data-model.yml:188-210` last_edited_by column. The Room
+ *   converter maps nullable TEXT ↔ String?.
+ * @property lastEditedAt Timestamp of the most recent user edit. Paired with
+ *   [lastEditedBy]: both are null together for untouched rows, both are non-null
+ *   together after the first edit. Stored as UTC epoch milliseconds via the Room
+ *   [Instant] converter; rendered in Asia/Seoul at the UI layer. Context: EDIT-003
+ *   edit-history banner and MAN-006 audit trail.
+ * @property quoteDisputed True when the owning user has flagged [quote] as misquoted
+ *   (EDIT-005 dispute flow). Defaults to `false` for every row including legacy
+ *   backfills — the v4→v5 migration sets `DEFAULT 0`. Once true, the UI surfaces a
+ *   visible "disputed" marker on CommitmentCard and the upload path tags the payload
+ *   so Railway analytics can track false-positive extractions.
+ * @property quoteDisputedAt Timestamp at which the dispute was first raised. Null
+ *   while [quoteDisputed] is false; non-null once the flag flips. Never reset once
+ *   set (dispute history is append-only per EDIT-005 spec). Stored as UTC epoch
+ *   milliseconds via the Room [Instant] converter.
+ * @property deletedAt Soft-delete marker timestamp (EDIT-006). **Every SELECT query
+ *   in [CommitmentDao] MUST include `AND deleted_at IS NULL`** — this is a MUST-level
+ *   invariant from `.spec/contracts/data-model.yml:204-205` that protects the
+ *   user-confirmed promise "deleted commitments stay deleted". Hard deletes are
+ *   reserved for `DELETE FROM commitments WHERE user_id = :userId` sign-out purge
+ *   (which has no deleted_at filter because the intent is total wipe). Null means
+ *   the row is live.
+ * @property supersedesCommitmentId When non-null, points at the UUID of the prior
+ *   commitment row that this row replaced via the EDIT-007 supersede flow
+ *   ("I actually meant this other thing"). Both rows stay in the table — the
+ *   superseded row is soft-deleted via [deletedAt], and this field preserves the
+ *   lineage link for the audit trail. Self-referential foreign key to
+ *   [CommitmentEntity.id]; intentionally **not declared as a Room `@ForeignKey`**
+ *   (see plan appendix: Room's validator emits a circular-reference warning on
+ *   self-references, and the enforcement lives at the Railway/Supabase layer
+ *   with `ON DELETE SET NULL`). Application-level invariant: when writing this
+ *   field, callers must confirm the referenced row exists and belongs to the
+ *   same user_id. See `.spec/contracts/data-model.yml:188-210`.
  */
 @Entity(
     tableName = "commitments",
@@ -82,6 +124,14 @@ import kotlinx.datetime.Instant
         Index(value = ["user_id", "sync_status"]),
         // idx_commitments_user_person_due — supports PersonDetailScreen and /v1/persons/{id}/commitments
         Index(value = ["user_id", "person_ref", "due_at"], name = "idx_commitments_user_person_due"),
+        // idx_commitments_user_deleted — backs the `AND deleted_at IS NULL` filter applied to
+        // every per-user SELECT query. Covers the common "live rows for this user" scan so the
+        // planner avoids a full-table sweep on large histories. Spec: data-model.yml:219-225.
+        Index(value = ["user_id", "deleted_at"], name = "idx_commitments_user_deleted"),
+        // idx_commitments_supersedes — supports reverse-lookup queries ("what rows supersede X?")
+        // and the EDIT-007 audit-trail render. Rarely written, but the index is cheap given
+        // how sparse the column will be (most rows are null). Spec: data-model.yml:219-225.
+        Index(value = ["supersedes_commitment_id"], name = "idx_commitments_supersedes"),
     ],
 )
 public data class CommitmentEntity(
@@ -149,4 +199,22 @@ public data class CommitmentEntity(
 
     @ColumnInfo(name = "updated_at")
     val updatedAt: Instant,
+
+    @ColumnInfo(name = "last_edited_by")
+    val lastEditedBy: String? = null,
+
+    @ColumnInfo(name = "last_edited_at")
+    val lastEditedAt: Instant? = null,
+
+    @ColumnInfo(name = "quote_disputed", defaultValue = "0")
+    val quoteDisputed: Boolean = false,
+
+    @ColumnInfo(name = "quote_disputed_at")
+    val quoteDisputedAt: Instant? = null,
+
+    @ColumnInfo(name = "deleted_at")
+    val deletedAt: Instant? = null,
+
+    @ColumnInfo(name = "supersedes_commitment_id")
+    val supersedesCommitmentId: String? = null,
 )

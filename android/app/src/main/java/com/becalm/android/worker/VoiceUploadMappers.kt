@@ -3,7 +3,6 @@ package com.becalm.android.worker
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -52,6 +51,10 @@ internal fun RawIngestionEventEntity.toRequestParts(rawEventId: String): VoiceRe
  * @param index 0-based position of this commitment in the response list (used for deterministic ID).
  * @param userId Supabase auth.users UUID of the owning user.
  * @param sourceRef Source reference from the originating [RawIngestionEventEntity].
+ * @param sourceType Source type of the originating [RawIngestionEventEntity]. MUST be inherited
+ *   verbatim per VOI-001 (voice-pipeline.spec.yml:18) — the extracted commitment is NEVER
+ *   re-tagged as a different source even though it flows through the voice Gemini pipeline.
+ *   Accepts both "voice" and "call_recording" (data-model.yml:32).
  * @param sourceEventTitle Event title from the originating [RawIngestionEventEntity].
  * @param sourceEventOccurredAt Timestamp of the source event (not extraction time).
  * @param now Wall-clock instant used for [CommitmentEntity.createdAt] and [CommitmentEntity.updatedAt].
@@ -61,6 +64,7 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     index: Int,
     userId: String,
     sourceRef: String?,
+    sourceType: String,
     sourceEventTitle: String?,
     sourceEventOccurredAt: Instant,
     now: Instant,
@@ -83,7 +87,7 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     dueHint = dueHint,
     dueIsApproximate = dueIsApproximate,
     actionState = "pending",
-    sourceType = SourceType.VOICE,
+    sourceType = sourceType,
     sourceRef = sourceRef,
     confidence = confidence.toDouble(),
     commitmentState = CommitmentState.DRAFT,

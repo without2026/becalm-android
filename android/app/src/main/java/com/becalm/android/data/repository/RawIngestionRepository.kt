@@ -331,6 +331,10 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             eventSnippet = eventSnippet,
             durationSeconds = durationSeconds,
             location = location,
+            // EMAIL-001 direction hint (`.spec/email-pipeline.spec.yml:15-18`) — INBOX|SENT for
+            // email source_types, null elsewhere. Must be propagated so Railway can drive the
+            // server-side person_ref derivation from the same raw-event metadata the client saw.
+            folder = folder,
             commitmentsExtractedCount = commitmentsExtractedCount,
             timestamp = timestamp,
         )

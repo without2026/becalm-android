@@ -190,4 +190,173 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-public val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+// ─── Migration 4 → 5 (commitments: edit / dispute / soft-delete / supersede) ──
+//
+// Adds the six user-facing lifecycle columns from `.spec/contracts/data-model.yml:188-210`
+// plus the two supporting indices from `.spec/contracts/data-model.yml:219-225`. Unlocks
+// Stage-5 flows EDIT-001..008 and MAN-001..006. The SQL mirrors
+// `.spec/contracts/data-model.yml:484` 1:1 so Android (Room) ↔ Postgres (Supabase) drift
+// is trivially diff-checkable.
+//
+// Why ALTER TABLE instead of a 3→4-style table rebuild: every delta is additive, so SQLite
+// executes it in place. The self-referential `supersedes_commitment_id` column is declared
+// as plain TEXT without a `REFERENCES` clause — Room warns on circular FKs and the real
+// enforcement lives at the Postgres layer (`ON DELETE SET NULL`); the future EDIT-007
+// writer is responsible for keeping the link consistent.
+//
+// Index rationale:
+//   * idx_commitments_user_deleted — every per-user SELECT in CommitmentDao now appends
+//     `AND deleted_at IS NULL` (data-model.yml:204-205 MUST-invariant). Covering
+//     `(user_id, deleted_at)` keeps the live-rows scan index-only on large histories.
+//   * idx_commitments_supersedes — backs the EDIT-007 "what rows supersede X?" audit render.
+//     The column is intentionally sparse (most rows null), so the index stays cheap.
+//
+// Idempotency: ALTER TABLE ADD COLUMN is NOT re-runnable in SQLite. Matching MIGRATION_3_4's
+// fail-loud posture, we do not wrap in try/catch — a double-application in tests should
+// surface the bug rather than hide it.
+private val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // 1. Edit-tracking columns (EDIT-003 banner, MAN-006 audit trail).
+        db.execSQL("ALTER TABLE `commitments` ADD COLUMN `last_edited_by` TEXT")
+        db.execSQL("ALTER TABLE `commitments` ADD COLUMN `last_edited_at` INTEGER")
+
+        // 2. Dispute columns (EDIT-005 "this quote is wrong" flow). NOT NULL DEFAULT 0 so
+        //    every backfilled row is "not disputed" — matches data-model.yml:197's
+        //    nullable:false + default:"false" contract.
+        db.execSQL(
+            "ALTER TABLE `commitments` ADD COLUMN `quote_disputed` INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execSQL("ALTER TABLE `commitments` ADD COLUMN `quote_disputed_at` INTEGER")
+
+        // 3. Soft-delete marker (EDIT-006). Nullable — null means live. Every read path
+        //    in CommitmentDao filters `AND deleted_at IS NULL`.
+        db.execSQL("ALTER TABLE `commitments` ADD COLUMN `deleted_at` INTEGER")
+
+        // 4. Supersede lineage (EDIT-007). Self-referential but declared as plain TEXT —
+        //    no inline `REFERENCES` to avoid Room's circular-FK warning; enforcement is
+        //    Postgres-side (`ON DELETE SET NULL`) per data-model.yml:209.
+        db.execSQL("ALTER TABLE `commitments` ADD COLUMN `supersedes_commitment_id` TEXT")
+
+        // 5. Supporting indices (data-model.yml:219-225). Names match CommitmentEntity's
+        //    @Index(name = ...) declarations so MigrationTestHelper accepts them.
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_deleted` " +
+                "ON `commitments` (`user_id`, `deleted_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_supersedes` " +
+                "ON `commitments` (`supersedes_commitment_id`)",
+        )
+    }
+}
+
+// ─── Migration 5 → 6 (email_body table + raw_ingestion_events.folder) ───────
+//
+// Introduces the `email_body` room-only table (14 columns, 2 indices, FK CASCADE to
+// raw_ingestion_events) and adds the `folder` TEXT column to `raw_ingestion_events`.
+// Unlocks EMAIL-001..007 (`.spec/email-pipeline.spec.yml`) and ING-006..008. Mirrors
+// `.spec/contracts/data-model.yml:327-390 § email_body` 1:1.
+//
+// `email_body` is **room_only: true** per EMAIL-006 — no Supabase migration accompanies
+// this PR because the table does not exist upstream. body_plain / body_html /
+// attachments_meta / raw_headers are user email content that MUST NEVER cross the
+// device boundary; any upload worker that includes these columns in a DTO is a
+// production-blocking privacy regression.
+//
+// Column list (14 — order matches EmailBodyEntity field order so reviewers can
+// diff side-by-side. Any drift here causes MigrationTestHelper.runMigrationsAndValidate
+// to reject with a schema mismatch at test time — intended fail-loudly behaviour):
+//   1. id                    TEXT PK                      (UUID v4)
+//   2. raw_event_id          TEXT NOT NULL                (FK → raw_ingestion_events.id)
+//   3. provider_message_id   TEXT NOT NULL                (Gmail msgId / Graph id / IMAP UIDVALIDITY+UID)
+//   4. folder                TEXT NOT NULL                (INBOX | SENT)
+//   5. subject               TEXT
+//   6. from_address          TEXT                         (lowercase normalized)
+//   7. to_addresses          TEXT                         (JSON array, Moshi-serialized)
+//   8. body_plain            TEXT                         (200-char snippet per EMAIL-003)
+//   9. body_html             TEXT
+//  10. attachments_meta      TEXT                         (JSON array, EMAIL-004)
+//  11. raw_headers           TEXT                         (EMAIL-005 — In-Reply-To, References)
+//  12. parse_failed          INTEGER NOT NULL DEFAULT 0   (EMAIL-007)
+//  13. group_email           INTEGER NOT NULL DEFAULT 0   (>10 recipients)
+//  14. received_at           INTEGER NOT NULL             (epoch ms via Instant converter)
+//
+// FK CASCADE rationale: `ON DELETE CASCADE` on `raw_event_id` provides a structural
+// co-delete aligned with EMAIL-006 (`.spec/email-pipeline.spec.yml:58-64`):
+// > "EmailBody와 raw_ingestion_events를 함께 DELETE"
+// The authoritative retention driver is the timestamp-based RetentionSweepWorker
+// (future `feat/worker/retention`), but CASCADE also protects against orphans left
+// behind by sign-out purge or ad-hoc deletes.
+//
+// Idempotency: `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` make table
+// and index creation re-runnable. `ALTER TABLE ... ADD COLUMN` is NOT idempotent in
+// SQLite — we allow this migration to fail loudly on a double-run rather than
+// swallowing the duplicate-column SQLiteException (matches MIGRATION_3_4 / MIGRATION_4_5).
+//
+// Index naming: both indices use Room's default template `index_<table>_<column>`.
+// Matching Room's KSP-emitted names in `6.json` is critical — MigrationTestHelper
+// compares this SQL against the snapshot and rejects any name divergence as drift.
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // 1. Create the `email_body` table with a CASCADE FK back to raw_ingestion_events.
+        //    Column list order + affinity + NOT NULL match [EmailBodyEntity] exactly;
+        //    Room's schema validator rejects startup otherwise.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `email_body` (
+                `id` TEXT NOT NULL,
+                `raw_event_id` TEXT NOT NULL,
+                `provider_message_id` TEXT NOT NULL,
+                `folder` TEXT NOT NULL,
+                `subject` TEXT,
+                `from_address` TEXT,
+                `to_addresses` TEXT,
+                `body_plain` TEXT,
+                `body_html` TEXT,
+                `attachments_meta` TEXT,
+                `raw_headers` TEXT,
+                `parse_failed` INTEGER NOT NULL DEFAULT 0,
+                `group_email` INTEGER NOT NULL DEFAULT 0,
+                `received_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`),
+                FOREIGN KEY(`raw_event_id`) REFERENCES `raw_ingestion_events`(`id`)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent(),
+        )
+
+        // 2. Indices use Room's default `index_<table>_<column>` template so KSP's 6.json
+        //    snapshot and this hand-written SQL agree — MigrationTestHelper will reject
+        //    any other name as schema drift.
+        //
+        //    `raw_event_id` is UNIQUE: the 1:1 relationship (one body per raw event)
+        //    turns [EmailBodyDao.insert] with OnConflictStrategy.REPLACE into a genuine
+        //    re-poll-safe upsert. Without UNIQUE, a second insert with a different random
+        //    primary-key UUID but the same raw_event_id would silently create a duplicate
+        //    row and [EmailBodyDao.getByRawEventId] would return an arbitrary copy.
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `index_email_body_raw_event_id` " +
+                "ON `email_body` (`raw_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_email_body_provider_message_id` " +
+                "ON `email_body` (`provider_message_id`)",
+        )
+
+        // 3. EMAIL-001 direction hint column on raw_ingestion_events. Nullable because
+        //    (a) SQLite `ALTER TABLE ADD COLUMN` forbids NOT NULL without a DEFAULT and
+        //    the valid values INBOX | SENT have no sensible default for non-email sources,
+        //    and (b) only the four email workers (gmail / outlook_mail / naver_imap /
+        //    daum_imap) populate this column. Application-layer invariant: email workers
+        //    MUST populate; all other workers MUST leave null.
+        db.execSQL("ALTER TABLE `raw_ingestion_events` ADD COLUMN `folder` TEXT")
+    }
+}
+
+public val MIGRATIONS: Array<Migration> = arrayOf(
+    MIGRATION_1_2,
+    MIGRATION_2_3,
+    MIGRATION_3_4,
+    MIGRATION_4_5,
+    MIGRATION_5_6,
+)

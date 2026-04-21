@@ -177,6 +177,16 @@ public class OutlookMailWorker @AssistedInject constructor(
             personRef = fromEmail,   // canonical counterparty reference (email address)
             eventTitle = subject,
             eventSnippet = bodyPreview?.take(200),
+            // EMAIL-001 direction hint (`.spec/email-pipeline.spec.yml:15-18`) is left
+            // null here because the Graph `/me/messages/delta` query used by this worker
+            // is mailbox-wide, and the response payload does not carry a well-known
+            // folder name — resolving `parentFolderId` to INBOX / SENT requires either a
+            // per-mailbox folder-list cache or a split into per-folder delta endpoints.
+            // That architectural choice is out of Wave 1 scope and is captured in the
+            // follow-up plan `docs/plans/worker-outlook-folder-hint-resolution.md`.
+            // Until then `folder = null` forces Railway's server-side EMAIL-001
+            // fallback, which is the same behaviour the client had before Wave 1 for
+            // every email source — this is not a regression.
             timestamp = receivedDateTime,
         )
 

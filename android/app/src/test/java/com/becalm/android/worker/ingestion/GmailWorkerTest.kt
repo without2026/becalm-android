@@ -11,6 +11,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.gmail.GmailClient
 import com.becalm.android.data.remote.gmail.GmailHistoryPage
+import com.becalm.android.data.remote.gmail.GmailLabel
 import com.becalm.android.data.remote.gmail.GmailMessage
 import com.becalm.android.data.remote.gmail.GmailMessagePage
 import com.becalm.android.data.remote.supabase.SupabaseSession
@@ -80,6 +81,7 @@ class GmailWorkerTest {
         messageId = "abc-1",
         subject = "Hello",
         from = "Bob Builder <bob@example.com>",
+        to = null,
         snippet = "snippet 1",
         internalDate = 1_700_000_000_000L,
     )
@@ -88,6 +90,7 @@ class GmailWorkerTest {
         messageId = "abc-2",
         subject = null,
         from = "carol@example.com",
+        to = null,
         snippet = null,
         internalDate = 1_700_000_060_000L,
     )
@@ -126,7 +129,7 @@ class GmailWorkerTest {
 
         assertEquals(Result.failure(), result)
         coVerify(exactly = 0) { gmailClient.listHistory(any()) }
-        coVerify(exactly = 0) { gmailClient.listMessagesFullSync(any()) }
+        coVerify(exactly = 0) { gmailClient.listMessagesFullSync(any(), any()) }
         coVerify {
             sourceStatusRepository.recordSyncError(SourceType.GMAIL, "unauthorized", any())
         }
@@ -173,18 +176,23 @@ class GmailWorkerTest {
 
     @Test
     fun `doWork full-sync paginates via nextPageToken and seeds historyId after`() = runTest {
-        // Cold start: cursor null → full sync path.
-        coEvery { gmailClient.listMessagesFullSync(null) } returns BecalmResult.Success(
-            GmailMessagePage(
-                messageIds = listOf(msg1.messageId),
-                nextPageToken = "page2",
-            ),
+        // Cold start: cursor null → full sync path. EMAIL-001 backfill pulls both
+        // INBOX and SENT labels; the two paginated passes below cover them.
+        coEvery {
+            gmailClient.listMessagesFullSync(GmailLabel.INBOX, null)
+        } returns BecalmResult.Success(
+            GmailMessagePage(messageIds = listOf(msg1.messageId), nextPageToken = "page2"),
         )
-        coEvery { gmailClient.listMessagesFullSync("page2") } returns BecalmResult.Success(
-            GmailMessagePage(
-                messageIds = listOf(msg2.messageId),
-                nextPageToken = null,
-            ),
+        coEvery {
+            gmailClient.listMessagesFullSync(GmailLabel.INBOX, "page2")
+        } returns BecalmResult.Success(
+            GmailMessagePage(messageIds = listOf(msg2.messageId), nextPageToken = null),
+        )
+        // Empty SENT pass keeps the fixture focused on pagination behaviour.
+        coEvery {
+            gmailClient.listMessagesFullSync(GmailLabel.SENT, null)
+        } returns BecalmResult.Success(
+            GmailMessagePage(messageIds = emptyList(), nextPageToken = null),
         )
         coEvery { gmailClient.getMessage(msg1.messageId) } returns BecalmResult.Success(msg1)
         coEvery { gmailClient.getMessage(msg2.messageId) } returns BecalmResult.Success(msg2)
@@ -202,8 +210,9 @@ class GmailWorkerTest {
 
         assertEquals(Result.success(), result)
         coVerifyOrder {
-            gmailClient.listMessagesFullSync(null)
-            gmailClient.listMessagesFullSync("page2")
+            gmailClient.listMessagesFullSync(GmailLabel.INBOX, null)
+            gmailClient.listMessagesFullSync(GmailLabel.INBOX, "page2")
+            gmailClient.listMessagesFullSync(GmailLabel.SENT, null)
             gmailClient.listHistory("1")
         }
         // Seeded cursor must equal the bootstrap historyId.
@@ -220,8 +229,15 @@ class GmailWorkerTest {
         coEvery { gmailClient.listHistory("99") } returns
             BecalmResult.Failure(BecalmError.NotFound("expired"))
 
-        // Fallback full-sync returns one empty page
-        coEvery { gmailClient.listMessagesFullSync(null) } returns BecalmResult.Success(
+        // Fallback full-sync returns empty pages for both labels.
+        coEvery {
+            gmailClient.listMessagesFullSync(GmailLabel.INBOX, null)
+        } returns BecalmResult.Success(
+            GmailMessagePage(messageIds = emptyList(), nextPageToken = null),
+        )
+        coEvery {
+            gmailClient.listMessagesFullSync(GmailLabel.SENT, null)
+        } returns BecalmResult.Success(
             GmailMessagePage(messageIds = emptyList(), nextPageToken = null),
         )
         coEvery { gmailClient.listHistory("1") } returns BecalmResult.Success(
@@ -233,8 +249,9 @@ class GmailWorkerTest {
         assertEquals(Result.success(), result)
         // The stored historyId must be cleared (set to null) before fallback runs.
         coVerify { cursorStore.setGmailHistoryId(null) }
-        // Fallback full-sync must have been issued.
-        coVerify { gmailClient.listMessagesFullSync(null) }
+        // Fallback full-sync must fire for BOTH labels.
+        coVerify { gmailClient.listMessagesFullSync(GmailLabel.INBOX, null) }
+        coVerify { gmailClient.listMessagesFullSync(GmailLabel.SENT, null) }
     }
 
     // ── T5: Unauthorized → Result.failure + recordSyncError ──────────────────

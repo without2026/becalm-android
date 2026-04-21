@@ -138,7 +138,7 @@ class MediaStoreWorkerTest {
         dateAddedSec: Long,
         durationMs: Long = 30_000L,
         displayName: String = "rec.m4a",
-        relativePath: String = "VoiceRecorder/",
+        relativePath: String = "Voice Recorder/",
     ): MatrixCursor = MatrixCursor(
         arrayOf(
             MediaStore.Audio.Media._ID,
@@ -398,8 +398,8 @@ class MediaStoreWorkerTest {
                 MediaStore.Audio.Media.RELATIVE_PATH,
             ),
         ).apply {
-            addRow(arrayOf<Any?>(601L, 1_700_000_601L, 30_000L, "a.m4a", "VoiceRecorder/"))
-            addRow(arrayOf<Any?>(602L, 1_700_000_602L, 30_000L, "b.m4a", "VoiceRecorder/"))
+            addRow(arrayOf<Any?>(601L, 1_700_000_601L, 30_000L, "a.m4a", "Voice Recorder/"))
+            addRow(arrayOf<Any?>(602L, 1_700_000_602L, 30_000L, "b.m4a", "Voice Recorder/"))
         }
         every {
             contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, any(), any(), any(), any())

@@ -107,6 +107,36 @@ public data class CommitmentBatchPayloadDto(
 
     /** Server-assigned last-update timestamp. Included for audit — server may override. */
     @field:Json(name = "updated_at") val updatedAt: Instant,
+
+    // ── v5 lifecycle fields (EDIT-001..008 / MAN-001..006) ──────────────────────
+    //
+    // These mirror the six new `commitments` columns added by Room 4→5 / Supabase
+    // migration 011 (`.spec/contracts/data-model.yml:188-210`). They are sent on upload
+    // so that local user state (edits, disputes, soft-deletes, supersede links) round-
+    // trips to the server. `= null` / `= false` defaults keep older clients forward-
+    // compatible on the response side; on the request side the server's Pydantic model
+    // is expected to accept these fields and default-tolerate them until the full
+    // server-side lifecycle endpoint lands.
+    //
+    // Plan: docs/plans/db-commitment-edit-delete-dispute-supersede.md §5.1 (6).
+
+    /** Supabase auth.users UUID of the most recent editor. Null for unedited rows. */
+    @field:Json(name = "last_edited_by") val lastEditedBy: String? = null,
+
+    /** Timestamp of the most recent edit. Paired with [lastEditedBy]. */
+    @field:Json(name = "last_edited_at") val lastEditedAt: Instant? = null,
+
+    /** True when the user has flagged [quote] as misquoted (EDIT-005). */
+    @field:Json(name = "quote_disputed") val quoteDisputed: Boolean = false,
+
+    /** Timestamp when the dispute was first raised. Null until [quoteDisputed] flips. */
+    @field:Json(name = "quote_disputed_at") val quoteDisputedAt: Instant? = null,
+
+    /** Soft-delete marker (EDIT-006). Null = live row. Non-null = tombstoned. */
+    @field:Json(name = "deleted_at") val deletedAt: Instant? = null,
+
+    /** Supersede lineage FK (EDIT-007). Points at the prior commitment this row replaces. */
+    @field:Json(name = "supersedes_commitment_id") val supersedesCommitmentId: String? = null,
 )
 
 /**

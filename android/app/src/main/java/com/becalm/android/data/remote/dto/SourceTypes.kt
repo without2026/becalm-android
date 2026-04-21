@@ -37,14 +37,29 @@ public object SourceType {
     public const val OUTLOOK_CALENDAR: String = "outlook_calendar"
 
     /**
-     * **Schema enum set** — every `source_type` value declared in data-model.yml:28-32.
+     * User-created commitment via CommitmentCreateSheet. No associated raw_ingestion_events row.
+     * See manual-commitment.spec.yml MAN-001..006.
      *
-     * Use this set when validating DTOs coming off the wire (e.g. server `source_status`
-     * items, raw ingestion rows from Room that may have been written before a carve-out
-     * took effect). Includes [VOICE] and [CALL_RECORDING] even though neither has a
-     * product-UI tile yet, because the server is allowed to emit them.
+     * Valid ONLY on [CommitmentEntity.sourceType] — raw_ingestion_events never uses "manual"
+     * (MAN-003 invariant). Out-of-wire-scope for POST /v1/raw_ingestion_events:batch.
+     */
+    public const val MANUAL: String = "manual"
+
+    /**
+     * **Raw-ingestion source set** — every `source_type` value that can appear on a
+     * [RawIngestionEventDto] / [CalendarEventDto] coming off the wire or being cached
+     * from Room. Intentionally EXCLUDES [MANUAL] because manual-created commitments
+     * have no backing `raw_ingestion_events` row (MAN-003 invariant at
+     * `.spec/manual-commitment.spec.yml`); allowing `manual` here would cause
+     * deep-link routes like `/sources/manual` to render a bogus source-detail screen
+     * and any server-emitted `manual` status item to be cached as if it were a
+     * syncable source. A future `COMMITMENT_SOURCES` superset (which would add
+     * [MANUAL]) will land with the Stage-5 CommitmentDto validator that first needs
+     * it; deliberately not shipped here to satisfy DEADCODE-02.
      *
-     * Do **not** use for UI rendering or aggregate banner math — see [PRODUCT_SOURCES].
+     * Includes [VOICE] and [CALL_RECORDING] even though neither has a product-UI tile
+     * yet — the server is allowed to emit them on raw-ingestion rows. For the narrower
+     * "connectable-account" set used by the Sources screen, see [PRODUCT_SOURCES].
      *
      * Spec ref: data-model.yml:28-32.
      */
