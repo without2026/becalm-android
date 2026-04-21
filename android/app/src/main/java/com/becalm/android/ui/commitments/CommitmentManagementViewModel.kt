@@ -10,6 +10,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,15 +48,16 @@ public enum class CommitmentFilter {
 
 /**
  * Display-safe projection of a [CommitmentEntity] with a human-readable [derivedStatus] string
- * computed from [CommitmentEntity.commitmentState] and [CommitmentEntity.actionState] at
- * observation time.
+ * computed from [CommitmentEntity.actionState] at observation time.
  *
  * Only fields required by the UI are exposed; raw PII such as quote, personRef, and the full
  * counterpartyRef are kept inside the ViewModel and are never handed to the composable layer.
  * [counterpartyDisplayName] is already truncated to the UI display length.
  *
- * The status string is intentionally a raw label ("DRAFT", "CONFIRMED", etc.) so that the
- * composable layer can localize it independently. No Android resources are imported here.
+ * The status string is intentionally an uppercase-safe key ("PENDING", "REMINDED",
+ * "FOLLOWED_UP", "COMPLETED", "OVERDUE", "CANCELLED") so the composable layer can
+ * localize it independently. [actionState] exposes the same value as a typed enum for
+ * callers that need exhaustive `when` handling. No Android resources are imported here.
  */
 // spec: CMT-001
 public data class CommitmentRow(
@@ -63,6 +65,7 @@ public data class CommitmentRow(
     val title: String,
     val direction: String,
     val derivedStatus: String,
+    val actionState: CommitmentState,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
     val counterpartyDisplayName: String?,
@@ -227,69 +230,81 @@ public class CommitmentManagementViewModel @Inject constructor(
     }
 
     /**
-     * Confirms a commitment, transitioning it from DRAFT to CONFIRMED.
+     * Records that the user pressed [리마인드] on the commitment (CMT-005).
      *
-     * On failure, surfaces the error string via [CommitmentUiState.error].
+     * Transitions PENDING → REMINDED via the state machine and, on success, asks
+     * [ReminderScheduler] to (re)arm the alarm using the commitment's own `dueAt`.
+     * When `dueAt` is null we skip the scheduler call — the reminder-time calculation
+     * gate lands in C5 (`docs/plans/ui-commitment-reminder-due-gate.md`). Until then,
+     * rows without a due date simply do not fire a new alarm.
+     *
+     * On failure surfaces the error string via [CommitmentUiState.error].
      */
     // spec: CMT-005
-    public fun onConfirm(id: String) {
-        launchAction("onConfirm", id) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Confirm)
-        }
-    }
-
-    /**
-     * Schedules a commitment and registers an exact-alarm reminder at [at].
-     *
-     * Transitions CONFIRMED → SCHEDULED via the state machine, then calls
-     * [ReminderScheduler.schedule] only on success.
-     *
-     * @param id Commitment UUID.
-     * @param at Absolute instant at which the alarm should fire.
-     */
-    // spec: CMT-006
-    public fun onSchedule(id: String, at: Instant) {
+    public fun onRemind(id: String) {
         launchAction(
-            name = "onSchedule",
+            name = "onRemind",
             id = id,
             effect = {
-                reminderScheduler.schedule(id, at)
+                // TODO(C5 — ui-commitment-reminder-due-gate.md): compute the actual
+                // reminder trigger (e.g. due_at - 1h) inside ReminderScheduler rather
+                // than passing dueAt through verbatim. For now, skip the scheduler
+                // call entirely when dueAt is null because ReminderScheduler.schedule
+                // requires a non-null Instant.
+                val dueAt: Instant? = allEntities.value.firstOrNull { it.id == id }?.dueAt
+                if (dueAt != null) {
+                    reminderScheduler.schedule(id, dueAt)
+                }
             },
         ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))
+            commitmentRepository.transitionState(id, CommitmentEvent.Remind)
         }
     }
 
     /**
-     * Marks a commitment as done and cancels any pending reminder.
+     * Records that the user pressed [팔로업] on the commitment (CMT-006).
      *
-     * Transitions CONFIRMED or SCHEDULED → DONE, then calls [ReminderScheduler.cancel].
+     * Transitions PENDING or REMINDED → FOLLOWED_UP. No scheduler side effect —
+     * follow-up does not change the alarm configuration per spec.
+     */
+    // spec: CMT-006
+    public fun onFollowUp(id: String) {
+        launchAction("onFollowUp", id) {
+            commitmentRepository.transitionState(id, CommitmentEvent.FollowUp)
+        }
+    }
+
+    /**
+     * Records that the user pressed [완료] on the commitment (CMT-007).
+     *
+     * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → COMPLETED and cancels
+     * any pending reminder.
      */
     // spec: CMT-007
-    public fun onMarkDone(id: String) {
+    public fun onComplete(id: String) {
         launchAction(
-            name = "onMarkDone",
+            name = "onComplete",
             id = id,
             effect = { reminderScheduler.cancel(id) },
         ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)
+            commitmentRepository.transitionState(id, CommitmentEvent.Complete)
         }
     }
 
     /**
-     * Dismisses a commitment and cancels any pending reminder.
+     * Records that the user pressed [취소] on the commitment (CMT-012).
      *
-     * Transitions DRAFT, CONFIRMED, or SCHEDULED → DISMISSED, then calls
-     * [ReminderScheduler.cancel].
+     * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → CANCELLED and cancels
+     * any pending reminder.
      */
-    // spec: CMT-008
-    public fun onDismiss(id: String) {
+    // spec: CMT-012
+    public fun onCancel(id: String) {
         launchAction(
-            name = "onDismiss",
+            name = "onCancel",
             id = id,
             effect = { reminderScheduler.cancel(id) },
         ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)
+            commitmentRepository.transitionState(id, CommitmentEvent.Cancel)
         }
     }
 
@@ -343,11 +358,13 @@ public class CommitmentManagementViewModel @Inject constructor(
             CommitmentFilter.TAKE -> entities.filter { it.direction == "take" }
         }
         return filtered.map { entity ->
+            val state = CommitmentState.fromWire(entity.actionState)
             CommitmentRow(
                 id = entity.id,
                 title = entity.title,
                 direction = entity.direction,
-                derivedStatus = entity.commitmentState.name,
+                derivedStatus = state.name,
+                actionState = state,
                 dueAt = entity.dueAt,
                 dueIsApproximate = entity.dueIsApproximate,
                 counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),

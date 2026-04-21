@@ -19,12 +19,14 @@ import com.becalm.android.data.repository.internal.toBatchItemDto
 import com.becalm.android.data.repository.internal.toDomain
 import com.becalm.android.data.repository.internal.toEntity
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
 import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
@@ -44,8 +46,9 @@ private const val TAG = "CommitmentRepository"
  */
 private const val HEADER_RETRY_AFTER: String = "Retry-After"
 
-/** Legal action_state values per data-model.yml:134-139 / commitment-management.spec.yml CMT-005..007. */
-private val ALLOWED_ACTION_STATES = setOf("pending", "reminded", "followed_up", "completed")
+/** Legal action_state values per data-model.yml:199-208 / commitment-management.spec.yml CMT-005..012. */
+private val ALLOWED_ACTION_STATES: Set<String> =
+    CommitmentState.entries.map { it.wireValue }.toSet()
 
 /**
  * Production implementation of [CommitmentRepository].
@@ -147,10 +150,15 @@ public class CommitmentRepositoryImpl @Inject constructor(
         val entity = dao.findById(id)
             ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
 
-        when (val result = CommitmentStateMachine.transition(entity.commitmentState, event)) {
+        val current = CommitmentState.fromWire(entity.actionState)
+        when (val result = CommitmentStateMachine.transition(current, event)) {
             is TransitionResult.Err -> BecalmResult.Failure(result.error.toBecalmError())
             is TransitionResult.Ok -> {
-                val updated = entity.copy(commitmentState = result.state)
+                val updated = entity.copy(
+                    actionState = result.state.wireValue,
+                    updatedAt = Clock.System.now(),
+                    syncStatus = "pending",
+                )
                 dao.update(updated)
                 BecalmResult.Success(updated)
             }
@@ -162,10 +170,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
         newState: String,
         updatedAt: Instant,
     ): BecalmResult<Unit> {
-        // R3-01: All state transitions must go through CommitmentStateMachine.
-        // Validate the action_state enum value, then (for transitions that imply a
-        // lifecycle event — namely "completed" → MarkDone) run it through the state
-        // machine so illegal lifecycle transitions are rejected before touching the DB.
+        // Validate the wire value against the spec enum. The spec-aligned lifecycle
+        // now lives on the action_state column directly; transitionState() is the
+        // canonical entry point for user actions, so we no longer bridge into the
+        // legacy commitment_state column here (see CommitmentEntity.commitmentState
+        // KDoc — it is a dead column as of Wave 4).
         if (newState !in ALLOWED_ACTION_STATES) {
             return BecalmResult.Failure(
                 BecalmError.Validation(
@@ -177,32 +186,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
         val entity = dao.findById(id)
             ?: return BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
-
-        val lifecycleEvent = actionStateToLifecycleEvent(newState)
-        val nextLifecycleState = if (lifecycleEvent != null) {
-            when (val result = CommitmentStateMachine.transition(entity.commitmentState, lifecycleEvent)) {
-                is TransitionResult.Err -> return BecalmResult.Failure(
-                    when (result.error) {
-                        is TransitionError.IllegalTransition -> BecalmError.Validation(
-                            field = "commitmentState",
-                            message = "Illegal transition: ${result.error.from} + ${result.error.event::class.simpleName} (action_state='$newState')",
-                        )
-                        TransitionError.MissingSchedule -> BecalmError.Validation(
-                            field = "at",
-                            message = "Schedule event requires a non-null future instant",
-                        )
-                    }
-                )
-                is TransitionResult.Ok -> result.state
-            }
-        } else {
-            entity.commitmentState
-        }
+        // Retained lookup guards against a caller racing updateActionState against a
+        // local deletion — we fail loudly rather than silently no-op the DAO update.
+        @Suppress("UNUSED_VARIABLE") val guard = entity
 
         dao.updateActionState(id, newState, updatedAt)
-        if (nextLifecycleState != entity.commitmentState) {
-            dao.update(entity.copy(commitmentState = nextLifecycleState, updatedAt = updatedAt))
-        }
 
         // Optimistic local write has landed. If the PATCH fails (IOException or non-2xx),
         // demote sync_status='pending' so UploadWorker.flushCommitments picks this row up
@@ -225,22 +213,6 @@ public class CommitmentRepositoryImpl @Inject constructor(
         }
         return mapped
     }
-
-    /**
-     * Maps an action_state target to the [CommitmentEvent] that should drive the
-     * SP-36 lifecycle, or null when the action_state change has no lifecycle effect
-     * (e.g. pending → reminded tracks follow-up intensity without changing lifecycle).
-     *
-     * Mapping (derived from commitment-management.spec.yml CMT-005/6/7):
-     * - "completed" → [CommitmentEvent.MarkDone]
-     * - "pending" / "reminded" / "followed_up" → no lifecycle change
-     *   (DONE is terminal per CMT-007; reopen is not a supported transition.)
-     */
-    private fun actionStateToLifecycleEvent(actionState: String): CommitmentEvent? =
-        when (actionState) {
-            "completed" -> CommitmentEvent.MarkDone
-            else        -> null
-        }
 
     // ── Sync helpers ──────────────────────────────────────────────────────────
 
@@ -332,12 +304,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
      */
     private fun TransitionError.toBecalmError(): BecalmError = when (this) {
         is TransitionError.IllegalTransition -> BecalmError.Validation(
-            field = "commitmentState",
+            field = "actionState",
             message = "Illegal transition: $from + ${event::class.simpleName}",
-        )
-        TransitionError.MissingSchedule -> BecalmError.Validation(
-            field = "at",
-            message = "Schedule event requires a non-null future instant",
         )
     }
 

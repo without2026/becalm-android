@@ -16,7 +16,7 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
@@ -326,7 +326,7 @@ class UploadWorkerTest {
         sourceType = "voice",
         sourceRef = null,
         confidence = 0.0,
-        commitmentState = CommitmentState.DRAFT,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "pending",
         createdAt = Instant.fromEpochMilliseconds(0),
         updatedAt = Instant.fromEpochMilliseconds(0),

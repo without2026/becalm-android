@@ -137,6 +137,14 @@
     <string name="commitments_empty_title">No commitments</string>
     <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
 
+    <!-- Commitment action_state labels (CMT-005..012) -->
+    <string name="commitment_state_pending">미확인</string>
+    <string name="commitment_state_reminded">리마인드됨</string>
+    <string name="commitment_state_followed_up">팔로업됨</string>
+    <string name="commitment_state_completed">완료</string>
+    <string name="commitment_state_overdue">놓침</string>
+    <string name="commitment_state_cancelled">취소됨</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_account_section">Account</string>

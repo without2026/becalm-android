@@ -6,11 +6,11 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
-import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import io.mockk.coEvery
 import io.mockk.every
@@ -22,10 +22,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -53,7 +53,6 @@ class CommitmentManagementViewModelTest {
     private fun makeEntity(
         id: String = "id-${System.nanoTime()}",
         direction: String = "give",
-        commitmentState: CommitmentState = CommitmentState.DRAFT,
         actionState: String = "pending",
         dueAt: Instant? = null,
         dueHint: String? = null,
@@ -76,7 +75,7 @@ class CommitmentManagementViewModelTest {
         sourceType = "voice",
         sourceRef = null,
         confidence = 0.9,
-        commitmentState = commitmentState,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "synced",
         createdAt = Instant.DISTANT_PAST,
         updatedAt = Instant.DISTANT_PAST,
@@ -93,7 +92,7 @@ class CommitmentManagementViewModelTest {
         every { commitmentRepository.observeAllForUser(any()) } returns flowOf(emptyList())
 
         // Default: enrichment map is empty (no personRef resolution).
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap<String, PersonEnrichmentEntity>())
     }
 
     @After
@@ -111,10 +110,6 @@ class CommitmentManagementViewModelTest {
 
     // ── Test 1: list + filter ─────────────────────────────────────────────────
 
-    /**
-     * Given commitments of different directions, filter changes to GIVE then TAKE
-     * should contain only matching entities. Covers CMT-001..003.
-     */
     @Test
     fun `list emits all items and filter reduces to matching direction`() = runTest {
         val giveEntity = makeEntity(id = "give-1", direction = "give")
@@ -148,18 +143,14 @@ class CommitmentManagementViewModelTest {
         }
     }
 
-    // ── Test 2: observeAllForUser drives the list (not per-state observers) ───
+    // ── Test 2: list pass-through ─────────────────────────────────────────────
 
-    /**
-     * When observeAllForUser emits, all items pass through applyFilter(ALL).
-     * Covers the R6 refactor: single Room subscription.
-     */
     @Test
     fun `observeAllForUser emits all items pass through applyFilter ALL`() = runTest {
         val entities = listOf(
-            makeEntity(id = "e-1", commitmentState = CommitmentState.DRAFT),
-            makeEntity(id = "e-2", commitmentState = CommitmentState.CONFIRMED),
-            makeEntity(id = "e-3", commitmentState = CommitmentState.DONE),
+            makeEntity(id = "e-1", actionState = "pending"),
+            makeEntity(id = "e-2", actionState = "reminded"),
+            makeEntity(id = "e-3", actionState = "completed"),
         )
         every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(entities)
 
@@ -172,6 +163,10 @@ class CommitmentManagementViewModelTest {
             assertEquals(false, settled.loading)
             assertEquals(CommitmentFilter.ALL, settled.filter)
             assertEquals(3, settled.items.size)
+            // derivedStatus is driven by the spec-aligned action_state, uppercased.
+            assertEquals("PENDING", settled.items.single { it.id == "e-1" }.derivedStatus)
+            assertEquals("REMINDED", settled.items.single { it.id == "e-2" }.derivedStatus)
+            assertEquals("COMPLETED", settled.items.single { it.id == "e-3" }.derivedStatus)
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -179,11 +174,6 @@ class CommitmentManagementViewModelTest {
 
     // ── Test 2b: dueHint threaded through projection ──────────────────────────
 
-    /**
-     * The approximate-due hint verbatim expression must reach the UI layer so
-     * users can understand inferred deadlines. Regression guard for R3-F1 —
-     * commitment-management.spec.yml:9,13.
-     */
     @Test
     fun `dueHint is threaded from entity to CommitmentRow`() = runTest {
         val approxEntity = makeEntity(
@@ -237,124 +227,148 @@ class CommitmentManagementViewModelTest {
         }
     }
 
-    // ── Test 4: onConfirm ─────────────────────────────────────────────────────
+    // ── Test 4: onRemind ─ [리마인드] button (CMT-005) ────────────────────────
 
-    /**
-     * When onConfirm succeeds, error is cleared. When it fails, error is set.
-     * Covers CMT-005.
-     */
     @Test
-    fun `onConfirm surfaces success and failure via uiState`() = runTest {
-        viewModel = buildViewModel()
+    fun `onRemind succeeds and schedules reminder when dueAt present`() = runTest {
+        val dueAt = Instant.parse("2026-04-30T00:00:00Z")
+        val entity = makeEntity(id = "r-1", actionState = "pending", dueAt = dueAt)
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(entity))
 
-        val updatedEntity = makeEntity(id = "c-1", commitmentState = CommitmentState.CONFIRMED)
-
+        val updatedEntity = entity.copy(actionState = "reminded")
         coEvery {
-            commitmentRepository.transitionState("c-1", CommitmentEvent.Confirm)
+            commitmentRepository.transitionState("r-1", CommitmentEvent.Remind)
         } returns BecalmResult.Success(updatedEntity)
-
-        viewModel.uiState.test {
-            awaitItem() // initial loading
-            skipItems(1) // settled after collection
-
-            viewModel.onConfirm("c-1")
-            val afterSuccess = awaitItem()
-            assertNull(afterSuccess.error)
-
-            coEvery {
-                commitmentRepository.transitionState("c-1", CommitmentEvent.Confirm)
-            } returns BecalmResult.Failure(BecalmError.Validation("commitmentState", "Illegal transition"))
-
-            viewModel.onConfirm("c-1")
-            val afterFailure = awaitItem()
-            assertNotNull(afterFailure.error)
-
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    // ── Test 5: onSchedule triggers reminder ──────────────────────────────────
-
-    /**
-     * When onSchedule succeeds, ReminderScheduler.schedule is called with the
-     * commitment id and the kotlinx Instant forwarded unchanged. Covers CMT-006.
-     */
-    @Test
-    fun `onSchedule calls reminderScheduler on success`() = runTest {
-        viewModel = buildViewModel()
-
-        val at: Instant = Clock.System.now() + 1.hours
-        val updatedEntity = makeEntity(id = "s-1", commitmentState = CommitmentState.SCHEDULED)
-
-        coEvery {
-            commitmentRepository.transitionState("s-1", CommitmentEvent.Schedule(at))
-        } returns BecalmResult.Success(updatedEntity)
-
         every { reminderScheduler.schedule(any(), any()) } just runs
 
-        viewModel.uiState.test {
-            awaitItem()
-            skipItems(1)
+        viewModel = buildViewModel()
+        advanceUntilIdle() // let observeCommitments settle the list + populate allEntities
 
-            viewModel.onSchedule("s-1", at)
-            val afterSchedule = awaitItem()
-            assertNull(afterSchedule.error)
+        viewModel.onRemind("r-1")
+        advanceUntilIdle()
 
-            verify(exactly = 1) {
-                reminderScheduler.schedule("s-1", at)
-            }
-
-            cancelAndIgnoreRemainingEvents()
-        }
+        // Success path keeps error = null, which is the same as the initial value, so a
+        // StateFlow emission is deduplicated. Assert directly on the final value instead
+        // of awaiting a second emission.
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.schedule("r-1", dueAt) }
     }
 
-    // ── Test 6: onMarkDone cancels reminder ───────────────────────────────────
-
-    /**
-     * When onMarkDone succeeds, ReminderScheduler.cancel is called and error is cleared.
-     * Covers CMT-007.
-     */
     @Test
-    fun `onMarkDone cancels reminder on success`() = runTest {
-        viewModel = buildViewModel()
-
-        val doneEntity = makeEntity(id = "d-1", commitmentState = CommitmentState.DONE)
+    fun `onRemind skips scheduler when dueAt is null`() = runTest {
+        val entity = makeEntity(id = "r-2", actionState = "pending", dueAt = null)
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(entity))
 
         coEvery {
-            commitmentRepository.transitionState("d-1", CommitmentEvent.MarkDone)
-        } returns BecalmResult.Success(doneEntity)
+            commitmentRepository.transitionState("r-2", CommitmentEvent.Remind)
+        } returns BecalmResult.Success(entity.copy(actionState = "reminded"))
 
-        every { reminderScheduler.cancel(any()) } just runs
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onRemind("r-2")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        // ReminderScheduler must NOT be called when dueAt is null — C5 gate.
+        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+    }
+
+    @Test
+    fun `onRemind surfaces failure via uiState`() = runTest {
+        viewModel = buildViewModel()
+
+        coEvery {
+            commitmentRepository.transitionState("r-3", CommitmentEvent.Remind)
+        } returns BecalmResult.Failure(BecalmError.Validation("actionState", "illegal"))
 
         viewModel.uiState.test {
             awaitItem()
             skipItems(1)
 
-            viewModel.onMarkDone("d-1")
-            val afterDone = awaitItem()
-            assertNull(afterDone.error)
-
-            verify(exactly = 1) { reminderScheduler.cancel("d-1") }
+            viewModel.onRemind("r-3")
+            val after = awaitItem()
+            assertNotNull(after.error)
 
             cancelAndIgnoreRemainingEvents()
         }
     }
 
-    // ── Test 7: onErrorDismissed clears error (R8/H-5) ────────────────────────
+    // ── Test 5: onFollowUp ─ [팔로업] button (CMT-006) ─────────────────────────
+
+    @Test
+    fun `onFollowUp succeeds and does not touch the reminder`() = runTest {
+        val updatedEntity = makeEntity(id = "f-1", actionState = "followed_up")
+        coEvery {
+            commitmentRepository.transitionState("f-1", CommitmentEvent.FollowUp)
+        } returns BecalmResult.Success(updatedEntity)
+
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onFollowUp("f-1")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        verify(exactly = 0) { reminderScheduler.cancel(any()) }
+    }
+
+    // ── Test 6: onComplete ─ [완료] button (CMT-007) ──────────────────────────
+
+    @Test
+    fun `onComplete cancels reminder on success`() = runTest {
+        val doneEntity = makeEntity(id = "c-1", actionState = "completed")
+        coEvery {
+            commitmentRepository.transitionState("c-1", CommitmentEvent.Complete)
+        } returns BecalmResult.Success(doneEntity)
+        every { reminderScheduler.cancel(any()) } just runs
+
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onComplete("c-1")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.cancel("c-1") }
+    }
+
+    // ── Test 7: onCancel ─ [취소] button (CMT-012) ────────────────────────────
+
+    @Test
+    fun `onCancel cancels reminder on success`() = runTest {
+        val cancelledEntity = makeEntity(id = "x-1", actionState = "cancelled")
+        coEvery {
+            commitmentRepository.transitionState("x-1", CommitmentEvent.Cancel)
+        } returns BecalmResult.Success(cancelledEntity)
+        every { reminderScheduler.cancel(any()) } just runs
+
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCancel("x-1")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.cancel("x-1") }
+    }
+
+    // ── Test 8: onErrorDismissed clears error (R8/H-5) ────────────────────────
 
     @Test
     fun `onErrorDismissed clears error`() = runTest {
         viewModel = buildViewModel()
 
         coEvery {
-            commitmentRepository.transitionState(any(), CommitmentEvent.Confirm)
-        } returns BecalmResult.Failure(BecalmError.Validation("state", "bad transition"))
+            commitmentRepository.transitionState(any(), CommitmentEvent.Complete)
+        } returns BecalmResult.Failure(BecalmError.Validation("actionState", "bad transition"))
 
         viewModel.uiState.test {
-            awaitItem() // loading
-            skipItems(1) // settled
+            awaitItem()
+            skipItems(1)
 
-            viewModel.onConfirm("any-id")
+            viewModel.onComplete("any-id")
             val withError = awaitItem()
             assertNotNull(withError.error)
 
@@ -365,4 +379,9 @@ class CommitmentManagementViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    // Unused imports guard — keep `hours` referenced to avoid lint noise if a future
+    // test re-introduces a duration literal.
+    @Suppress("unused")
+    private val _keepHoursReferenced = 1.hours
 }

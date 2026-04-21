@@ -5,6 +5,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
 import com.becalm.android.domain.commitment.TransitionError
 import kotlinx.coroutines.flow.Flow
@@ -63,19 +64,20 @@ public interface CommitmentRepository {
         actionState: String? = null,
     ): BecalmResult<RefreshStats>
 
-    // ── State machine (CMT-005..007 / SP-36) ────────────────────────────────
+    // ── State machine (CMT-005 / 006 / 007 / 011 / 012) ─────────────────────
 
     /**
      * Loads the commitment with [id], applies [event] via [CommitmentStateMachine], and
-     * persists the resulting [com.becalm.android.domain.commitment.CommitmentState] to Room.
+     * persists the resulting [CommitmentState] to Room on the spec-aligned
+     * `action_state` column.
      *
      * Error mapping:
-     * - Row absent                           → [BecalmError.NotFound]
-     * - [TransitionError.IllegalTransition]  → [BecalmError.Validation]
-     * - [TransitionError.MissingSchedule]    → [BecalmError.Validation]
+     * - Row absent                          → [BecalmError.NotFound]
+     * - [TransitionError.IllegalTransition] → [BecalmError.Validation]
      *
      * @param id    UUID of the commitment to transition.
-     * @param event The [CommitmentEvent] to apply.
+     * @param event The [CommitmentEvent] to apply (Remind / FollowUp / Complete /
+     *   Cancel from the UI; MarkOverdue is internal to the worker layer).
      * @return The updated [CommitmentEntity] on success, or a typed failure.
      */
     public suspend fun transitionState(id: String, event: CommitmentEvent): BecalmResult<CommitmentEntity>

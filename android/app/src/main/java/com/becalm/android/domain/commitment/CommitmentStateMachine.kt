@@ -1,37 +1,51 @@
 package com.becalm.android.domain.commitment
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-
 /**
- * Pure, stateless state machine for commitment lifecycle transitions.
+ * Pure, stateless state machine for the spec-aligned commitment lifecycle.
  *
  * All logic is expressed as a single [transition] function with no side effects.
  * Callers are responsible for persisting the resulting state.
  *
- * ## Legal edges
+ * ## Legal edges (spec CMT-005/006/007/011/012)
  * ```
- * DRAFT      + Confirm       → CONFIRMED
- * DRAFT      + Dismiss       → DISMISSED
- * CONFIRMED  + Schedule      → SCHEDULED
- * CONFIRMED  + MarkDone      → DONE
- * CONFIRMED  + Dismiss       → DISMISSED
- * SCHEDULED  + MarkDone      → DONE
- * SCHEDULED  + Dismiss       → DISMISSED
- * DONE       + (any)         → [TransitionError.IllegalTransition]  (terminal)
- * DISMISSED  + (any)         → [TransitionError.IllegalTransition]  (terminal)
+ * PENDING     + Remind       → REMINDED
+ * PENDING     + FollowUp     → FOLLOWED_UP
+ * PENDING     + Complete     → COMPLETED
+ * PENDING     + Cancel       → CANCELLED
+ * PENDING     + MarkOverdue  → OVERDUE                (internal-only event)
+ *
+ * REMINDED    + FollowUp     → FOLLOWED_UP
+ * REMINDED    + Complete     → COMPLETED
+ * REMINDED    + Cancel       → CANCELLED
+ * REMINDED    + MarkOverdue  → OVERDUE                (internal-only event)
+ *
+ * FOLLOWED_UP + Complete     → COMPLETED
+ * FOLLOWED_UP + Cancel       → CANCELLED
+ * FOLLOWED_UP + MarkOverdue  → OVERDUE                (internal-only event)
+ *
+ * OVERDUE     + Complete     → COMPLETED
+ * OVERDUE     + Cancel       → CANCELLED
+ *
+ * COMPLETED   + (any)        → IllegalTransition      (terminal)
+ * CANCELLED   + (any)        → IllegalTransition      (terminal)
  * ```
  * All other combinations return [TransitionError.IllegalTransition].
  *
- * Per spec CMT-007, `DONE` is a terminal state: once a commitment is completed
- * it cannot be reopened. Callers that need to resurrect a completed commitment
- * must create a new one.
+ * Per spec CMT-007, COMPLETED is terminal; per CMT-012, CANCELLED is terminal. Once a
+ * commitment reaches either state it cannot be reopened by further events (the
+ * forthcoming Undo Snackbar path, CMT-013, is out of scope here and will be added via
+ * a dedicated plan).
+ *
+ * Per spec CMT-011, the OVERDUE state is only reachable via the internal
+ * [CommitmentEvent.MarkOverdue] event raised by the overdue-sweep worker — the user
+ * can never transition *into* OVERDUE manually. From OVERDUE the user may still
+ * [완료] or [취소] (CMT-007 / CMT-012) to close out the row.
  */
 public object CommitmentStateMachine {
 
     /**
-     * Applies [event] to [current] and returns the resulting state, or a [TransitionError]
-     * when the transition is illegal or a precondition fails.
+     * Applies [event] to [current] and returns the resulting state, or a
+     * [TransitionError.IllegalTransition] when the transition is not a legal edge.
      *
      * @param current The present lifecycle state of the commitment.
      * @param event   The event to apply.
@@ -41,42 +55,49 @@ public object CommitmentStateMachine {
     public fun transition(
         current: CommitmentState,
         event: CommitmentEvent,
-    ): TransitionResult = when (current) {
-        CommitmentState.DRAFT -> when (event) {
-            CommitmentEvent.Confirm  -> TransitionResult.Ok(CommitmentState.CONFIRMED)
-            CommitmentEvent.Dismiss  -> TransitionResult.Ok(CommitmentState.DISMISSED)
-            else                     -> TransitionResult.Err(TransitionError.IllegalTransition(current, event))
-        }
-
-        CommitmentState.CONFIRMED -> when (event) {
-            is CommitmentEvent.Schedule -> {
-                if (isPastOrPresent(event.at)) {
-                    TransitionResult.Err(TransitionError.MissingSchedule)
-                } else {
-                    TransitionResult.Ok(CommitmentState.SCHEDULED)
-                }
+    ): TransitionResult {
+        val next: CommitmentState? = when (current) {
+            CommitmentState.PENDING -> when (event) {
+                CommitmentEvent.Remind -> CommitmentState.REMINDED
+                CommitmentEvent.FollowUp -> CommitmentState.FOLLOWED_UP
+                CommitmentEvent.Complete -> CommitmentState.COMPLETED
+                CommitmentEvent.Cancel -> CommitmentState.CANCELLED
+                CommitmentEvent.MarkOverdue -> CommitmentState.OVERDUE
             }
-            CommitmentEvent.MarkDone    -> TransitionResult.Ok(CommitmentState.DONE)
-            CommitmentEvent.Dismiss     -> TransitionResult.Ok(CommitmentState.DISMISSED)
-            else                        -> TransitionResult.Err(TransitionError.IllegalTransition(current, event))
+
+            CommitmentState.REMINDED -> when (event) {
+                CommitmentEvent.FollowUp -> CommitmentState.FOLLOWED_UP
+                CommitmentEvent.Complete -> CommitmentState.COMPLETED
+                CommitmentEvent.Cancel -> CommitmentState.CANCELLED
+                CommitmentEvent.MarkOverdue -> CommitmentState.OVERDUE
+                CommitmentEvent.Remind -> null
+            }
+
+            CommitmentState.FOLLOWED_UP -> when (event) {
+                CommitmentEvent.Complete -> CommitmentState.COMPLETED
+                CommitmentEvent.Cancel -> CommitmentState.CANCELLED
+                CommitmentEvent.MarkOverdue -> CommitmentState.OVERDUE
+                CommitmentEvent.Remind, CommitmentEvent.FollowUp -> null
+            }
+
+            CommitmentState.OVERDUE -> when (event) {
+                CommitmentEvent.Complete -> CommitmentState.COMPLETED
+                CommitmentEvent.Cancel -> CommitmentState.CANCELLED
+                CommitmentEvent.Remind,
+                CommitmentEvent.FollowUp,
+                CommitmentEvent.MarkOverdue,
+                -> null
+            }
+
+            // Terminal — every event is illegal.
+            CommitmentState.COMPLETED, CommitmentState.CANCELLED -> null
         }
-
-        CommitmentState.SCHEDULED -> when (event) {
-            CommitmentEvent.MarkDone -> TransitionResult.Ok(CommitmentState.DONE)
-            CommitmentEvent.Dismiss  -> TransitionResult.Ok(CommitmentState.DISMISSED)
-            else                     -> TransitionResult.Err(TransitionError.IllegalTransition(current, event))
+        return if (next != null) {
+            TransitionResult.Ok(next)
+        } else {
+            TransitionResult.Err(TransitionError.IllegalTransition(current, event))
         }
-
-        CommitmentState.DONE ->
-            TransitionResult.Err(TransitionError.IllegalTransition(current, event))
-
-        CommitmentState.DISMISSED ->
-            TransitionResult.Err(TransitionError.IllegalTransition(current, event))
     }
-
-    /** Returns true when [instant] is not strictly in the future relative to the system clock. */
-    private fun isPastOrPresent(instant: Instant): Boolean =
-        instant <= Clock.System.now()
 }
 
 /**

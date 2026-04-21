@@ -3,7 +3,7 @@ package com.becalm.android.worker
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
@@ -90,7 +90,7 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     sourceType = sourceType,
     sourceRef = sourceRef,
     confidence = confidence.toDouble(),
-    commitmentState = CommitmentState.DRAFT,
+    commitmentState = CommitmentLifecycleLegacy.DRAFT,
     syncStatus = STATUS_PENDING,
     createdAt = now,
     updatedAt = now,

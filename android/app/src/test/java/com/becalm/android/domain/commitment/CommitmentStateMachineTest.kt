@@ -1,28 +1,30 @@
 package com.becalm.android.domain.commitment
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.seconds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Exhaustive coverage for [CommitmentStateMachine].
+ * Exhaustive coverage for the spec-aligned [CommitmentStateMachine].
  *
  * Tests are organised as:
- *  1. Valid transitions from each non-terminal state.
- *  2. Rejection of every other event from each state (including both terminal states
- *     rejecting every event).
- *  3. Schedule guard — past/present instants surface [TransitionError.MissingSchedule].
- *
- * Spec alignment: commitment-management.spec.yml CMT-005/6/7 and R5-01
- * (DONE is terminal; no DONE → CONFIRMED edge).
+ *  1. Every legal edge listed in the state-machine KDoc / spec table
+ *     (commitment-management.spec.yml CMT-005 / 006 / 007 / 011 / 012).
+ *  2. Rejection of representative illegal transitions from terminal states and from
+ *     non-terminal states that do not accept a given event.
+ *  3. [CommitmentEvent.MarkOverdue] is the internal system-only event — it is legal
+ *     from non-terminal non-overdue states and illegal from OVERDUE itself and from
+ *     both terminal states.
  */
 class CommitmentStateMachineTest {
 
-    private fun futureInstant(): Instant = Clock.System.now() + 1.hours
+    private fun assertOk(
+        expected: CommitmentState,
+        result: TransitionResult,
+    ) {
+        assertTrue("expected Ok but was $result", result is TransitionResult.Ok)
+        assertEquals(expected, (result as TransitionResult.Ok).state)
+    }
 
     private fun assertIllegal(
         from: CommitmentState,
@@ -38,179 +40,289 @@ class CommitmentStateMachineTest {
             "Expected IllegalTransition for $from + $event, was $error",
             error is TransitionError.IllegalTransition,
         )
-        assertEquals(from, (error as TransitionError.IllegalTransition).from)
+        val illegal = error as TransitionError.IllegalTransition
+        assertEquals(from, illegal.from)
+        assertEquals(event, illegal.event)
     }
 
-    // ── Valid transitions from DRAFT ─────────────────────────────────────────
+    // ── PENDING: every user + system event legal ─────────────────────────────
 
     @Test
-    fun `DRAFT + Confirm transitions to CONFIRMED`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DRAFT, CommitmentEvent.Confirm)
-        assertEquals(TransitionResult.Ok(CommitmentState.CONFIRMED), result)
-    }
-
-    @Test
-    fun `DRAFT + Dismiss transitions to DISMISSED`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DRAFT, CommitmentEvent.Dismiss)
-        assertEquals(TransitionResult.Ok(CommitmentState.DISMISSED), result)
-    }
-
-    // ── Valid transitions from CONFIRMED ─────────────────────────────────────
-
-    @Test
-    fun `CONFIRMED + Schedule transitions to SCHEDULED`() {
-        val result = CommitmentStateMachine.transition(
-            CommitmentState.CONFIRMED,
-            CommitmentEvent.Schedule(at = futureInstant()),
+    fun `PENDING + Remind transitions to REMINDED`() {
+        assertOk(
+            CommitmentState.REMINDED,
+            CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.Remind),
         )
-        assertEquals(TransitionResult.Ok(CommitmentState.SCHEDULED), result)
     }
 
     @Test
-    fun `CONFIRMED + MarkDone transitions directly to DONE`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.CONFIRMED, CommitmentEvent.MarkDone)
-        assertEquals(TransitionResult.Ok(CommitmentState.DONE), result)
-    }
-
-    @Test
-    fun `CONFIRMED + Dismiss transitions to DISMISSED`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.CONFIRMED, CommitmentEvent.Dismiss)
-        assertEquals(TransitionResult.Ok(CommitmentState.DISMISSED), result)
-    }
-
-    // ── Valid transitions from SCHEDULED ─────────────────────────────────────
-
-    @Test
-    fun `SCHEDULED + MarkDone transitions to DONE`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.SCHEDULED, CommitmentEvent.MarkDone)
-        assertEquals(TransitionResult.Ok(CommitmentState.DONE), result)
-    }
-
-    @Test
-    fun `SCHEDULED + Dismiss transitions to DISMISSED`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.SCHEDULED, CommitmentEvent.Dismiss)
-        assertEquals(TransitionResult.Ok(CommitmentState.DISMISSED), result)
-    }
-
-    // ── Full happy path ──────────────────────────────────────────────────────
-
-    @Test
-    fun `full DRAFT to DONE happy path via CONFIRMED and SCHEDULED`() {
-        val s1 = CommitmentStateMachine.transition(CommitmentState.DRAFT, CommitmentEvent.Confirm)
-        assertEquals(TransitionResult.Ok(CommitmentState.CONFIRMED), s1)
-
-        val s2 = CommitmentStateMachine.transition(
-            CommitmentState.CONFIRMED,
-            CommitmentEvent.Schedule(at = futureInstant()),
+    fun `PENDING + FollowUp transitions to FOLLOWED_UP`() {
+        assertOk(
+            CommitmentState.FOLLOWED_UP,
+            CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.FollowUp),
         )
-        assertEquals(TransitionResult.Ok(CommitmentState.SCHEDULED), s2)
-
-        val s3 = CommitmentStateMachine.transition(CommitmentState.SCHEDULED, CommitmentEvent.MarkDone)
-        assertEquals(TransitionResult.Ok(CommitmentState.DONE), s3)
-    }
-
-    // ── Illegal transitions from DRAFT ───────────────────────────────────────
-
-    @Test
-    fun `DRAFT + Schedule returns IllegalTransition`() {
-        val event = CommitmentEvent.Schedule(at = futureInstant())
-        val result = CommitmentStateMachine.transition(CommitmentState.DRAFT, event)
-        assertIllegal(CommitmentState.DRAFT, event, result)
     }
 
     @Test
-    fun `DRAFT + MarkDone returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DRAFT, CommitmentEvent.MarkDone)
-        assertIllegal(CommitmentState.DRAFT, CommitmentEvent.MarkDone, result)
-    }
-
-    // ── Illegal transitions from CONFIRMED ───────────────────────────────────
-
-    @Test
-    fun `CONFIRMED + Confirm returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.CONFIRMED, CommitmentEvent.Confirm)
-        assertIllegal(CommitmentState.CONFIRMED, CommitmentEvent.Confirm, result)
-    }
-
-    // ── Illegal transitions from SCHEDULED ───────────────────────────────────
-
-    @Test
-    fun `SCHEDULED + Confirm returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.SCHEDULED, CommitmentEvent.Confirm)
-        assertIllegal(CommitmentState.SCHEDULED, CommitmentEvent.Confirm, result)
-    }
-
-    @Test
-    fun `SCHEDULED + Schedule returns IllegalTransition`() {
-        val event = CommitmentEvent.Schedule(at = futureInstant())
-        val result = CommitmentStateMachine.transition(CommitmentState.SCHEDULED, event)
-        assertIllegal(CommitmentState.SCHEDULED, event, result)
-    }
-
-    // ── DONE is terminal (R5-01 / spec CMT-007) ──────────────────────────────
-
-    @Test
-    fun `DONE + Confirm returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DONE, CommitmentEvent.Confirm)
-        assertIllegal(CommitmentState.DONE, CommitmentEvent.Confirm, result)
-    }
-
-    @Test
-    fun `DONE + Schedule returns IllegalTransition`() {
-        val event = CommitmentEvent.Schedule(at = futureInstant())
-        val result = CommitmentStateMachine.transition(CommitmentState.DONE, event)
-        assertIllegal(CommitmentState.DONE, event, result)
-    }
-
-    @Test
-    fun `DONE + MarkDone returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DONE, CommitmentEvent.MarkDone)
-        assertIllegal(CommitmentState.DONE, CommitmentEvent.MarkDone, result)
-    }
-
-    @Test
-    fun `DONE + Dismiss returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DONE, CommitmentEvent.Dismiss)
-        assertIllegal(CommitmentState.DONE, CommitmentEvent.Dismiss, result)
-    }
-
-    // ── DISMISSED is terminal ────────────────────────────────────────────────
-
-    @Test
-    fun `DISMISSED + Confirm returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DISMISSED, CommitmentEvent.Confirm)
-        assertIllegal(CommitmentState.DISMISSED, CommitmentEvent.Confirm, result)
-    }
-
-    @Test
-    fun `DISMISSED + Schedule returns IllegalTransition`() {
-        val event = CommitmentEvent.Schedule(at = futureInstant())
-        val result = CommitmentStateMachine.transition(CommitmentState.DISMISSED, event)
-        assertIllegal(CommitmentState.DISMISSED, event, result)
-    }
-
-    @Test
-    fun `DISMISSED + MarkDone returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DISMISSED, CommitmentEvent.MarkDone)
-        assertIllegal(CommitmentState.DISMISSED, CommitmentEvent.MarkDone, result)
-    }
-
-    @Test
-    fun `DISMISSED + Dismiss returns IllegalTransition`() {
-        val result = CommitmentStateMachine.transition(CommitmentState.DISMISSED, CommitmentEvent.Dismiss)
-        assertIllegal(CommitmentState.DISMISSED, CommitmentEvent.Dismiss, result)
-    }
-
-    // ── Schedule guard ───────────────────────────────────────────────────────
-
-    @Test
-    fun `CONFIRMED + Schedule with past instant returns MissingSchedule`() {
-        val pastInstant = Clock.System.now() - 1.seconds
-        val result = CommitmentStateMachine.transition(
-            CommitmentState.CONFIRMED,
-            CommitmentEvent.Schedule(at = pastInstant),
+    fun `PENDING + Complete transitions to COMPLETED`() {
+        assertOk(
+            CommitmentState.COMPLETED,
+            CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.Complete),
         )
-        assertTrue("Expected MissingSchedule for past instant", result is TransitionResult.Err)
-        assertEquals(TransitionError.MissingSchedule, (result as TransitionResult.Err).error)
+    }
+
+    @Test
+    fun `PENDING + Cancel transitions to CANCELLED`() {
+        assertOk(
+            CommitmentState.CANCELLED,
+            CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.Cancel),
+        )
+    }
+
+    @Test
+    fun `PENDING + MarkOverdue transitions to OVERDUE`() {
+        assertOk(
+            CommitmentState.OVERDUE,
+            CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.MarkOverdue),
+        )
+    }
+
+    // ── REMINDED: FollowUp / Complete / Cancel / MarkOverdue legal ───────────
+
+    @Test
+    fun `REMINDED + FollowUp transitions to FOLLOWED_UP`() {
+        assertOk(
+            CommitmentState.FOLLOWED_UP,
+            CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.FollowUp),
+        )
+    }
+
+    @Test
+    fun `REMINDED + Complete transitions to COMPLETED`() {
+        assertOk(
+            CommitmentState.COMPLETED,
+            CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.Complete),
+        )
+    }
+
+    @Test
+    fun `REMINDED + Cancel transitions to CANCELLED`() {
+        assertOk(
+            CommitmentState.CANCELLED,
+            CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.Cancel),
+        )
+    }
+
+    @Test
+    fun `REMINDED + MarkOverdue transitions to OVERDUE`() {
+        assertOk(
+            CommitmentState.OVERDUE,
+            CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.MarkOverdue),
+        )
+    }
+
+    @Test
+    fun `REMINDED + Remind is illegal (no self-loop)`() {
+        assertIllegal(
+            CommitmentState.REMINDED,
+            CommitmentEvent.Remind,
+            CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.Remind),
+        )
+    }
+
+    // ── FOLLOWED_UP: Complete / Cancel / MarkOverdue legal ───────────────────
+
+    @Test
+    fun `FOLLOWED_UP + Complete transitions to COMPLETED`() {
+        assertOk(
+            CommitmentState.COMPLETED,
+            CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.Complete),
+        )
+    }
+
+    @Test
+    fun `FOLLOWED_UP + Cancel transitions to CANCELLED`() {
+        assertOk(
+            CommitmentState.CANCELLED,
+            CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.Cancel),
+        )
+    }
+
+    @Test
+    fun `FOLLOWED_UP + MarkOverdue transitions to OVERDUE`() {
+        assertOk(
+            CommitmentState.OVERDUE,
+            CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.MarkOverdue),
+        )
+    }
+
+    @Test
+    fun `FOLLOWED_UP + Remind is illegal`() {
+        assertIllegal(
+            CommitmentState.FOLLOWED_UP,
+            CommitmentEvent.Remind,
+            CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.Remind),
+        )
+    }
+
+    @Test
+    fun `FOLLOWED_UP + FollowUp is illegal (no self-loop)`() {
+        assertIllegal(
+            CommitmentState.FOLLOWED_UP,
+            CommitmentEvent.FollowUp,
+            CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.FollowUp),
+        )
+    }
+
+    // ── OVERDUE: Complete / Cancel legal; other events illegal ───────────────
+
+    @Test
+    fun `OVERDUE + Complete transitions to COMPLETED`() {
+        assertOk(
+            CommitmentState.COMPLETED,
+            CommitmentStateMachine.transition(CommitmentState.OVERDUE, CommitmentEvent.Complete),
+        )
+    }
+
+    @Test
+    fun `OVERDUE + Cancel transitions to CANCELLED`() {
+        assertOk(
+            CommitmentState.CANCELLED,
+            CommitmentStateMachine.transition(CommitmentState.OVERDUE, CommitmentEvent.Cancel),
+        )
+    }
+
+    @Test
+    fun `OVERDUE + Remind is illegal`() {
+        assertIllegal(
+            CommitmentState.OVERDUE,
+            CommitmentEvent.Remind,
+            CommitmentStateMachine.transition(CommitmentState.OVERDUE, CommitmentEvent.Remind),
+        )
+    }
+
+    @Test
+    fun `OVERDUE + FollowUp is illegal`() {
+        assertIllegal(
+            CommitmentState.OVERDUE,
+            CommitmentEvent.FollowUp,
+            CommitmentStateMachine.transition(CommitmentState.OVERDUE, CommitmentEvent.FollowUp),
+        )
+    }
+
+    @Test
+    fun `OVERDUE + MarkOverdue is illegal (no self-loop)`() {
+        assertIllegal(
+            CommitmentState.OVERDUE,
+            CommitmentEvent.MarkOverdue,
+            CommitmentStateMachine.transition(CommitmentState.OVERDUE, CommitmentEvent.MarkOverdue),
+        )
+    }
+
+    // ── COMPLETED: terminal — every event illegal ────────────────────────────
+
+    @Test
+    fun `COMPLETED + Remind is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.COMPLETED,
+            CommitmentEvent.Remind,
+            CommitmentStateMachine.transition(CommitmentState.COMPLETED, CommitmentEvent.Remind),
+        )
+    }
+
+    @Test
+    fun `COMPLETED + FollowUp is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.COMPLETED,
+            CommitmentEvent.FollowUp,
+            CommitmentStateMachine.transition(CommitmentState.COMPLETED, CommitmentEvent.FollowUp),
+        )
+    }
+
+    @Test
+    fun `COMPLETED + Complete is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.COMPLETED,
+            CommitmentEvent.Complete,
+            CommitmentStateMachine.transition(CommitmentState.COMPLETED, CommitmentEvent.Complete),
+        )
+    }
+
+    @Test
+    fun `COMPLETED + Cancel is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.COMPLETED,
+            CommitmentEvent.Cancel,
+            CommitmentStateMachine.transition(CommitmentState.COMPLETED, CommitmentEvent.Cancel),
+        )
+    }
+
+    @Test
+    fun `COMPLETED + MarkOverdue is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.COMPLETED,
+            CommitmentEvent.MarkOverdue,
+            CommitmentStateMachine.transition(CommitmentState.COMPLETED, CommitmentEvent.MarkOverdue),
+        )
+    }
+
+    // ── CANCELLED: terminal — every event illegal ────────────────────────────
+
+    @Test
+    fun `CANCELLED + Remind is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.CANCELLED,
+            CommitmentEvent.Remind,
+            CommitmentStateMachine.transition(CommitmentState.CANCELLED, CommitmentEvent.Remind),
+        )
+    }
+
+    @Test
+    fun `CANCELLED + Complete is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.CANCELLED,
+            CommitmentEvent.Complete,
+            CommitmentStateMachine.transition(CommitmentState.CANCELLED, CommitmentEvent.Complete),
+        )
+    }
+
+    @Test
+    fun `CANCELLED + Cancel is illegal (terminal)`() {
+        assertIllegal(
+            CommitmentState.CANCELLED,
+            CommitmentEvent.Cancel,
+            CommitmentStateMachine.transition(CommitmentState.CANCELLED, CommitmentEvent.Cancel),
+        )
+    }
+
+    // ── Round-trip happy path: PENDING → REMINDED → FOLLOWED_UP → COMPLETED ──
+
+    @Test
+    fun `full happy path PENDING REMINDED FOLLOWED_UP COMPLETED`() {
+        val step1 = CommitmentStateMachine.transition(CommitmentState.PENDING, CommitmentEvent.Remind)
+        assertOk(CommitmentState.REMINDED, step1)
+        val step2 = CommitmentStateMachine.transition(CommitmentState.REMINDED, CommitmentEvent.FollowUp)
+        assertOk(CommitmentState.FOLLOWED_UP, step2)
+        val step3 = CommitmentStateMachine.transition(CommitmentState.FOLLOWED_UP, CommitmentEvent.Complete)
+        assertOk(CommitmentState.COMPLETED, step3)
+    }
+
+    // ── CommitmentState.fromWire safety ──────────────────────────────────────
+
+    @Test
+    fun `fromWire maps known wire values to spec enum`() {
+        assertEquals(CommitmentState.PENDING, CommitmentState.fromWire("pending"))
+        assertEquals(CommitmentState.REMINDED, CommitmentState.fromWire("reminded"))
+        assertEquals(CommitmentState.FOLLOWED_UP, CommitmentState.fromWire("followed_up"))
+        assertEquals(CommitmentState.COMPLETED, CommitmentState.fromWire("completed"))
+        assertEquals(CommitmentState.OVERDUE, CommitmentState.fromWire("overdue"))
+        assertEquals(CommitmentState.CANCELLED, CommitmentState.fromWire("cancelled"))
+    }
+
+    @Test
+    fun `fromWire falls back to PENDING for unknown values`() {
+        assertEquals(CommitmentState.PENDING, CommitmentState.fromWire(""))
+        assertEquals(CommitmentState.PENDING, CommitmentState.fromWire("confirmed"))
+        assertEquals(CommitmentState.PENDING, CommitmentState.fromWire("SOMETHING_NEW"))
     }
 }

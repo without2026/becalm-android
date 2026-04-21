@@ -112,7 +112,10 @@ public fun CommitmentManagementScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp),
-                                onMarkDone = { viewModel.onMarkDone(row.id) },
+                                // onMarkDone wiring is intentionally absent in Wave 4 —
+                                // card taps will surface CommitmentDetailSheet (C4) where
+                                // [리마인드]/[팔로업]/[완료]/[취소] live. Until that sheet lands,
+                                // users trigger transitions programmatically via the VM.
                                 onClick = {},
                             )
                         }
@@ -173,8 +176,8 @@ private fun PreviewCommitmentManagementScreenPopulated() {
                 ) {
                     items(
                         listOf(
-                            "give" to "Send contract draft" to "CONFIRMED",
-                            "take" to "Review budget proposal" to "SCHEDULED",
+                            "give" to "Send contract draft" to "REMINDED",
+                            "take" to "Review budget proposal" to "FOLLOWED_UP",
                         ),
                     ) { (dirTitlePair, status) ->
                         val (dir, title) = dirTitlePair

@@ -72,8 +72,9 @@ import kotlinx.datetime.toLocalDateTime
  *                      `"take"` renders cool slate cast; any other value falls back
  *                      to `colorScheme.outline`.
  * @param derivedStatus Status string driving the chip and card alpha. Accepted values:
- *                      `"DRAFT"`, `"CONFIRMED"`, `"SCHEDULED"`, `"DONE"`, `"DISMISSED"`.
- *                      Unknown values map to pending styling.
+ *                      `"PENDING"`, `"REMINDED"`, `"FOLLOWED_UP"`, `"COMPLETED"`,
+ *                      `"OVERDUE"`, `"CANCELLED"` (spec-aligned action_state keys,
+ *                      uppercased). Unknown values map to pending styling.
  * @param dueAt         Optional due instant (UTC epoch via kotlinx.datetime.Instant) for
  *                      the D-N badge. `null` = no badge shown. Converted to an
  *                      Asia/Seoul calendar date before diffing against today-in-KST
@@ -103,8 +104,8 @@ import kotlinx.datetime.toLocalDateTime
  * @param modifier      Optional [Modifier] applied to the card root.
  * @param onClick       Optional click handler; when non-null the card is tappable.
  * @param onMarkDone    Optional callback for the inline check icon button. The button
- *                      is only rendered when non-null AND [derivedStatus] is neither
- *                      `"DONE"` nor `"DISMISSED"`.
+ *                      is only rendered when non-null AND [derivedStatus] is not
+ *                      `"COMPLETED"` or `"CANCELLED"` (terminal states).
  */
 @Composable
 public fun CommitmentCard(
@@ -129,12 +130,16 @@ public fun CommitmentCard(
         else -> colorScheme.outline
     }
 
-    // Status → alpha; chip visibility
+    // Status → alpha; chip visibility. COMPLETED and CANCELLED both dim per spec
+    // CMT-009 — the user has closed the row one way or the other. OVERDUE stays at
+    // full alpha so it keeps pulling the user's attention (they still need to act).
     val normalized = derivedStatus.uppercase()
-    val isDismissed = normalized == "DISMISSED"
-    val isDone = normalized == "DONE"
-    val cardAlpha = if (isDismissed || isDone) 0.55f else 1.0f
-    val showChip = !isDismissed
+    val isCompleted = normalized == "COMPLETED"
+    val isCancelled = normalized == "CANCELLED"
+    val isTerminal = isCompleted || isCancelled
+    val cardAlpha = if (isTerminal) 0.6f else 1.0f
+    // Chip is always shown so the terminal-state reason is visible even when dimmed.
+    val showChip = true
 
     // D-N badge — single computation memoised on dueAt. Convert dueAt to an Asia/Seoul
     // calendar date, diff against today-in-KST, and render per
@@ -164,7 +169,7 @@ public fun CommitmentCard(
     }
 
     val semanticsDesc = "$direction $title"
-    val showMarkDone = onMarkDone != null && !isDone && !isDismissed
+    val showMarkDone = onMarkDone != null && !isTerminal
 
     Box(
         modifier = modifier
@@ -261,12 +266,19 @@ public fun CommitmentCard(
                     )
                 }
 
-                // Status chip — stateColors computed only when chip is drawn
+                // Status chip — stateColors computed only when chip is drawn. Maps the
+                // six spec-aligned action_state keys onto BecalmStateColors tokens. No
+                // new theme tokens are introduced in this commit: CANCELLED re-uses the
+                // pending tone and relies on the dimmed cardAlpha to read as "closed",
+                // and OVERDUE falls back to the shared `dayBadgeOverdue` token.
                 if (showChip) {
                     val stateColors: BecalmStateColors = when (normalized) {
-                        "DRAFT", "CONFIRMED" -> colors.actionStatePending
-                        "SCHEDULED" -> colors.actionStateReminded
-                        "DONE" -> colors.actionStateCompleted
+                        "PENDING" -> colors.actionStatePending
+                        "REMINDED" -> colors.actionStateReminded
+                        "FOLLOWED_UP" -> colors.actionStateFollowedUp
+                        "COMPLETED" -> colors.actionStateCompleted
+                        "OVERDUE" -> colors.dayBadgeOverdue
+                        "CANCELLED" -> colors.actionStatePending
                         else -> colors.actionStatePending
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -411,7 +423,7 @@ private fun PreviewCommitmentCardGivePendingD2() {
         CommitmentCard(
             title = "Send contract draft",
             direction = "give",
-            derivedStatus = "CONFIRMED",
+            derivedStatus = "REMINDED",
             dueAt = Instant.parse("2026-04-18T00:00:00+09:00"),
             counterpartyDisplayName = "Alice Kim",
             onClick = {},
@@ -427,7 +439,7 @@ private fun PreviewCommitmentCardTakeCompleted() {
         CommitmentCard(
             title = "Review budget proposal",
             direction = "take",
-            derivedStatus = "DONE",
+            derivedStatus = "COMPLETED",
             dueAt = null,
             counterpartyDisplayName = "Bob Lee",
         )
@@ -441,7 +453,7 @@ private fun PreviewCommitmentCardOverdueReminded() {
         CommitmentCard(
             title = "Submit expense report",
             direction = "give",
-            derivedStatus = "SCHEDULED",
+            derivedStatus = "OVERDUE",
             dueAt = Instant.parse("2026-04-10T00:00:00+09:00"),
             counterpartyDisplayName = null,
             dueIsApproximate = true,
@@ -458,7 +470,7 @@ private fun PreviewCommitmentCardNoDueDate() {
         CommitmentCard(
             title = "Follow up on proposal",
             direction = "take",
-            derivedStatus = "DRAFT",
+            derivedStatus = "PENDING",
             dueAt = null,
             counterpartyDisplayName = "Carol Park",
         )

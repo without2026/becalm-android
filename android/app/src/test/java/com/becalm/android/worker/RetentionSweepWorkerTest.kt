@@ -13,7 +13,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.FOLDER_INBOX
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -312,7 +312,7 @@ class RetentionSweepWorkerTest {
         sourceType = "gmail",
         sourceRef = null,
         confidence = 0.9,
-        commitmentState = CommitmentState.DRAFT,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "synced",
         createdAt = occurredAt,
         updatedAt = occurredAt,

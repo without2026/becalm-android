@@ -1,31 +1,45 @@
 package com.becalm.android.domain.commitment
 
-import kotlinx.datetime.Instant
-
 /**
  * Events that drive the [CommitmentStateMachine].
  *
- * Each subtype represents a user or system action that may trigger a state transition.
- * Illegal event/state combinations are rejected by [CommitmentStateMachine.transition]
- * and surface as [TransitionError.IllegalTransition].
+ * Each subtype represents a user action (or, for [MarkOverdue], a system-internal
+ * sweep) that may trigger a state transition. Illegal event/state combinations are
+ * rejected by [CommitmentStateMachine.transition] and surface as
+ * [TransitionError.IllegalTransition].
+ *
+ * Spec alignment: `.spec/commitment-management.spec.yml` CMT-005 / CMT-006 / CMT-007 /
+ * CMT-011 / CMT-012.
  */
 public sealed interface CommitmentEvent {
 
-    /** The user has acknowledged and confirmed the commitment. Transitions DRAFT → CONFIRMED. */
-    public data object Confirm : CommitmentEvent
+    /** User pressed [리마인드]. Transitions PENDING → REMINDED. (CMT-005) */
+    public data object Remind : CommitmentEvent
+
+    /** User pressed [팔로업]. Transitions PENDING or REMINDED → FOLLOWED_UP. (CMT-006) */
+    public data object FollowUp : CommitmentEvent
 
     /**
-     * A follow-up time has been assigned to the commitment.
-     *
-     * @property at The absolute instant at which the follow-up is scheduled.
-     *   Must be in the future relative to the caller's clock;
-     *   violations surface as [TransitionError.MissingSchedule].
+     * User pressed [완료]. Transitions PENDING, REMINDED, FOLLOWED_UP, or OVERDUE →
+     * COMPLETED. COMPLETED is terminal. (CMT-007)
      */
-    public data class Schedule(val at: Instant) : CommitmentEvent
+    public data object Complete : CommitmentEvent
 
-    /** The commitment has been fulfilled. Transitions CONFIRMED or SCHEDULED → DONE. */
-    public data object MarkDone : CommitmentEvent
+    /**
+     * User pressed [취소]. Transitions PENDING, REMINDED, FOLLOWED_UP, or OVERDUE →
+     * CANCELLED. CANCELLED is terminal. (CMT-012)
+     */
+    public data object Cancel : CommitmentEvent
 
-    /** The commitment has been discarded. Transitions DRAFT, CONFIRMED, or SCHEDULED → DISMISSED. */
-    public data object Dismiss : CommitmentEvent
+    /**
+     * System auto-sweep event — the commitment is past its due_at window.
+     * Transitions PENDING, REMINDED, or FOLLOWED_UP → OVERDUE.
+     *
+     * CMT-011 invariant: overdue is **system-only**. This event must be raised only by
+     * domain/worker code (e.g. `OverdueSweepWorker`); the user-facing ViewModel layer
+     * must never trigger it. Enforced by convention + code review; Kotlin does not allow
+     * `internal` modifier on nested members of a sealed interface, so visibility alone
+     * cannot enforce this.
+     */
+    public data object MarkOverdue : CommitmentEvent
 }

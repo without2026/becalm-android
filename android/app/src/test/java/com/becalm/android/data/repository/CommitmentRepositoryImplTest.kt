@@ -20,7 +20,7 @@ import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -396,7 +396,7 @@ class CommitmentRepositoryImplTest {
         sourceType = "voice",
         sourceRef = null,
         confidence = 0.5,
-        commitmentState = CommitmentState.DRAFT,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = syncStatus,
         createdAt = Instant.fromEpochMilliseconds(0),
         updatedAt = Instant.fromEpochMilliseconds(0),

@@ -3,8 +3,8 @@ package com.becalm.android.domain.commitment
 /**
  * Errors that can be returned by [CommitmentStateMachine.transition].
  *
- * - [IllegalTransition] — the requested [CommitmentEvent] is not a legal edge from [from].
- * - [MissingSchedule]   — a [CommitmentEvent.Schedule] event carried a past [at] value.
+ * Only [IllegalTransition] is modelled in the Wave-4 spec-aligned state machine —
+ * there are no event payloads that can fail their own preconditions.
  */
 public sealed interface TransitionError {
 
@@ -18,10 +18,4 @@ public sealed interface TransitionError {
         val from: CommitmentState,
         val event: CommitmentEvent,
     ) : TransitionError
-
-    /**
-     * A [CommitmentEvent.Schedule] event was applied but the [CommitmentEvent.Schedule.at]
-     * instant refers to a past moment.
-     */
-    public data object MissingSchedule : TransitionError
 }

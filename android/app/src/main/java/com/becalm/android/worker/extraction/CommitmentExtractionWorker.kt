@@ -17,7 +17,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.email.EmailPromptBuilder
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.QuotedBlockSplitter
@@ -292,7 +292,7 @@ internal fun CommitmentDraftDto.toEmailCommitmentEntity(
     sourceType = sourceType,
     sourceRef = sourceRef,
     confidence = confidence.toDouble(),
-    commitmentState = CommitmentState.DRAFT,
+    commitmentState = CommitmentLifecycleLegacy.DRAFT,
     syncStatus = "pending",
     createdAt = now,
     updatedAt = now,

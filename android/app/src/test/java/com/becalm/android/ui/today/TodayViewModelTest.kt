@@ -16,7 +16,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -668,7 +668,7 @@ class TodayViewModelTest {
         sourceType = SourceType.VOICE,
         sourceRef = null,
         confidence = 0.9,
-        commitmentState = CommitmentState.CONFIRMED,
+        commitmentState = CommitmentLifecycleLegacy.CONFIRMED,
         syncStatus = "synced",
         createdAt = occurredAt,
         updatedAt = occurredAt,
