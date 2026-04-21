@@ -4,6 +4,7 @@ import android.util.Log
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.result.getOrElse
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
@@ -16,6 +17,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import kotlin.time.Duration.Companion.days
+import javax.inject.Inject
 
 // ─── Moshi JSON DTOs (internal for Moshi codegen — generic classes can't be private) ─────────
 
@@ -31,13 +33,42 @@ internal data class GraphListDto<T>(
 
 private const val TAG = "MsGraphClient"
 
-private const val INITIAL_MESSAGES_URL =
-    "https://graph.microsoft.com/v1.0/me/messages/delta" +
-        "?\$select=id,internetMessageId,subject,from,bodyPreview,receivedDateTime"
+/**
+ * `$select` field list shared by INBOX / SENT initial delta calls. Plan §5.1 /
+ * §5 Appendix require: `id,internetMessageId,conversationId,parentFolderId,subject,
+ * from,toRecipients,ccRecipients,bccRecipients,body,hasAttachments,
+ * internetMessageHeaders,receivedDateTime`. Kept here as a single constant so both
+ * folder endpoints emit the identical projection — Graph invalidates the delta token
+ * if the `$select` value differs across the batch.
+ */
+private const val MESSAGES_DELTA_SELECT =
+    "id,internetMessageId,conversationId,parentFolderId,subject,from," +
+        "toRecipients,ccRecipients,bccRecipients,body,hasAttachments," +
+        "internetMessageHeaders,receivedDateTime"
 
 private const val INITIAL_CALENDAR_VIEW_DELTA_URL =
     "https://graph.microsoft.com/v1.0/me/calendarView/delta" +
         "?\$select=id,subject,start,end,attendees"
+
+/**
+ * How far back the initial delta sync reaches on a cold start (ING-013 bound).
+ * Applied via `$filter=receivedDateTime ge <now-30d>Z` on the cursor == null call
+ * only — Graph invalidates delta tokens if filters mutate on subsequent pages.
+ */
+private const val DELTA_INITIAL_LOOKBACK_DAYS: Int = 30
+
+/**
+ * Builds the initial `/me/mailFolders/{folder}/messages/delta` URL.
+ * Factored out so both [MsGraphClientImpl.messagesDelta] (deprecated, INBOX-only
+ * backward-compat path) and [MsGraphClientImpl.messagesDeltaForFolder] share one
+ * URL template and `$select` projection.
+ */
+private fun initialMessagesUrl(folder: OutlookMailFolder): String {
+    val lookbackStart = (Clock.System.now() - DELTA_INITIAL_LOOKBACK_DAYS.days).toString()
+    return "https://graph.microsoft.com/v1.0/me/mailFolders/${folder.endpointPath}/messages/delta" +
+        "?\$select=$MESSAGES_DELTA_SELECT" +
+        "&\$filter=receivedDateTime ge $lookbackStart"
+}
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
@@ -58,7 +89,7 @@ private const val INITIAL_CALENDAR_VIEW_DELTA_URL =
  * @param moshi Shared Moshi instance with BeCalm adapters registered.
  * @param tokenProvider Microsoft Graph token source (stub until Round 6 MSAL lands).
  */
-public class MsGraphClientImpl(
+public class MsGraphClientImpl @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val moshi: Moshi,
     private val tokenProvider: MsGraphTokenProvider,
@@ -70,21 +101,68 @@ public class MsGraphClientImpl(
         moshi.adapter(GraphListDto::class.java)
     }
 
+    @Suppress("DEPRECATION")
+    @Deprecated(
+        message = "Use messagesDeltaForFolder(OutlookMailFolder, cursor). Global /me/messages/delta" +
+            " violates ING-007 folder scoping.",
+        replaceWith = ReplaceWith(
+            expression = "messagesDeltaForFolder(OutlookMailFolder.INBOX, deltaOrNextLink)",
+        ),
+    )
     override suspend fun messagesDelta(
         deltaOrNextLink: String?,
+    ): BecalmResult<GraphDeltaResponse<GraphMessage>> =
+        // Backward-compat shim: all new call sites use messagesDeltaForFolder directly. The
+        // INBOX delegate preserves the prior behaviour for any external caller that still
+        // references this symbol; it was never Sent-aware, so narrowing to INBOX is a
+        // strict subset of the historical semantics (Drafts/Junk/Deleted are excluded
+        // rather than included, which is the desired direction per ING-007).
+        messagesDeltaForFolder(OutlookMailFolder.INBOX, deltaOrNextLink)
+
+    override suspend fun messagesDeltaForFolder(
+        folder: OutlookMailFolder,
+        deltaOrNextLink: String?,
     ): BecalmResult<GraphDeltaResponse<GraphMessage>> {
-        val url = resolveDeltaUrl(deltaOrNextLink) { INITIAL_MESSAGES_URL }
+        val url = resolveDeltaUrl(deltaOrNextLink) { initialMessagesUrl(folder) }
         val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
-        return parseDeltaDto(rawJson, "messages delta") { dto ->
+        val folderLabel = folder.name // "INBOX" | "SENT" — mirrors FOLDER_INBOX/FOLDER_SENT
+        return parseDeltaDto(rawJson, "messages delta (${folder.name})") { dto ->
             BecalmResult.Success(
                 GraphDeltaResponse(
-                    value = dto.value.map { parseMessageMap(it) },
+                    value = dto.value.map { parseMessageMap(it, folderLabel) },
                     nextLink = dto.nextLink,
                     deltaLink = dto.deltaLink,
                 ),
             )
         }
     }
+
+    override suspend fun messageAttachments(
+        messageId: String,
+    ): BecalmResult<List<GraphAttachmentMeta>> =
+        fetchAttachments(attachmentsBaseUrl + attachmentsPath(messageId))
+
+    /**
+     * Test seam — the production call path [messageAttachments] assembles the URL from
+     * [attachmentsBaseUrl]; tests that use MockWebServer invoke this directly with a
+     * localhost URL so the parsing + HTTP status mapping can be asserted without
+     * network access.
+     */
+    internal suspend fun fetchAttachments(url: String): BecalmResult<List<GraphAttachmentMeta>> {
+        val rawJson = fetchRaw(url).getOrElse { return BecalmResult.Failure(it) }
+        return parseDeltaDto(rawJson, "message attachments") { dto ->
+            BecalmResult.Success(dto.value.map { parseAttachmentMap(it) })
+        }
+    }
+
+    /**
+     * Base URL for the Graph attachments endpoint. `internal` + `var` so tests can
+     * redirect to a MockWebServer port; production code never mutates this.
+     */
+    internal var attachmentsBaseUrl: String = "https://graph.microsoft.com/v1.0"
+
+    private fun attachmentsPath(messageId: String): String =
+        "/me/messages/$messageId/attachments?\$select=name,contentType,size"
 
     override suspend fun calendarViewDelta(
         cursor: String?,
@@ -196,20 +274,125 @@ public class MsGraphClientImpl(
 
     /**
      * Converts a raw deserialized map (Moshi's untyped `Any` path) into a [GraphMessage].
-     * All fields except `id` and `receivedDateTime` are treated as optional.
+     * All fields except `id` and `receivedDateTime` are treated as optional so a single
+     * malformed response key does not poison the whole page.
+     *
+     * Folder scope is injected by the caller because Graph does not embed it in the
+     * message payload — the `/me/mailFolders/{folder}/messages/delta` endpoint *is* the
+     * folder signal per ING-007.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun parseMessageMap(raw: Map<String, Any?>): GraphMessage {
+    private fun parseMessageMap(raw: Map<String, Any?>, folder: String): GraphMessage {
         val fromObj = raw["from"] as? Map<String, Any?>
         val emailObj = fromObj?.get("emailAddress") as? Map<String, Any?>
+
+        // ── Recipients ────────────────────────────────────────────────────────
+        val toList = extractRecipientAddresses(raw["toRecipients"])
+        val ccList = extractRecipientAddresses(raw["ccRecipients"])
+        val bccList = extractRecipientAddresses(raw["bccRecipients"])
+
+        // ── Body split by contentType ─────────────────────────────────────────
+        val bodyObj = raw["body"] as? Map<String, Any?>
+        val bodyContentType = (bodyObj?.get("contentType") as? String)?.lowercase()
+        val bodyContent = bodyObj?.get("content") as? String
+        val bodyHtml = if (bodyContentType == "html") bodyContent else null
+        val bodyPlain = if (bodyContentType == "text") bodyContent else null
+
+        // ── Headers: extract In-Reply-To / References + preserve raw JSON ─────
+        val headersRaw = raw["internetMessageHeaders"] as? List<Map<String, Any?>>
+        val inReplyTo = findHeader(headersRaw, "In-Reply-To")
+        val references = findHeader(headersRaw, "References")
+        val rawHeadersJson = serializeHeadersJson(headersRaw)
+
         return GraphMessage(
             id = raw["id"] as? String ?: "",
             internetMessageId = raw["internetMessageId"] as? String,
             subject = raw["subject"] as? String,
             fromEmail = emailObj?.get("address") as? String,
             fromName = emailObj?.get("name") as? String,
+            // Historical field — kept for callers that still read the short preview
+            // (e.g., Wave 1 OutlookMailWorker before the EmailSnippetBuilder migration).
             bodyPreview = raw["bodyPreview"] as? String,
             receivedDateTime = parseInstantField(raw["receivedDateTime"]),
+            folder = folder,
+            toRecipients = toList,
+            ccRecipients = ccList,
+            bccRecipients = bccList,
+            bodyHtml = bodyHtml,
+            bodyPlain = bodyPlain,
+            // Attachment metadata is never inlined in the delta payload — the worker issues
+            // a follow-up `/me/messages/{id}/attachments` call, gated on hasAttachments.
+            attachmentsMeta = emptyList(),
+            inReplyTo = inReplyTo,
+            references = references,
+            rawHeadersJson = rawHeadersJson,
+            hasAttachments = raw["hasAttachments"] as? Boolean == true,
+            conversationId = raw["conversationId"] as? String,
+        )
+    }
+
+    /**
+     * Extracts `emailAddress.address` strings from a Graph recipient array.
+     *
+     * Graph returns recipients as `[{ emailAddress: { address: "...", name: "..." } }, ...]`;
+     * malformed entries (missing `emailAddress` nested map or a non-string `address`) are
+     * silently dropped rather than aborting the whole page.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun extractRecipientAddresses(rawRecipients: Any?): List<String> {
+        val list = rawRecipients as? List<Map<String, Any?>> ?: return emptyList()
+        return list.mapNotNull { entry ->
+            val email = entry["emailAddress"] as? Map<String, Any?>
+            email?.get("address") as? String
+        }
+    }
+
+    /**
+     * Case-insensitive lookup of a single `internetMessageHeaders` entry by name.
+     * Returns the first non-null `value`, or null when the header is absent / blank.
+     */
+    private fun findHeader(headers: List<Map<String, Any?>>?, name: String): String? {
+        if (headers == null) return null
+        val lower = name.lowercase()
+        return headers.firstOrNull { entry ->
+            (entry["name"] as? String)?.lowercase() == lower
+        }?.get("value") as? String
+    }
+
+    /**
+     * Serialises the raw `internetMessageHeaders` array back to JSON for verbatim storage
+     * in [com.becalm.android.data.local.db.entity.EmailBodyEntity.rawHeaders]. Falls back
+     * to `"[]"` on any serialisation error — the empty JSON array is a well-formed default
+     * that downstream parsers can tolerate.
+     */
+    private fun serializeHeadersJson(headers: List<Map<String, Any?>>?): String =
+        try {
+            if (headers.isNullOrEmpty()) {
+                "[]"
+            } else {
+                moshi.adapter(Any::class.java).toJson(headers)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "serializeHeadersJson failed", e)
+            "[]"
+        }
+
+    /**
+     * Converts a single `/me/messages/{id}/attachments` entry into a [GraphAttachmentMeta].
+     * `size` is decoded as a [Long] to accommodate attachments over 2 GiB. Missing fields
+     * fall back to empty string / zero — Graph's `$select=name,contentType,size` projection
+     * always populates all three in practice.
+     */
+    private fun parseAttachmentMap(raw: Map<String, Any?>): GraphAttachmentMeta {
+        val size = when (val rawSize = raw["size"]) {
+            is Number -> rawSize.toLong()
+            is String -> rawSize.toLongOrNull() ?: 0L
+            else -> 0L
+        }
+        return GraphAttachmentMeta(
+            name = raw["name"] as? String ?: "",
+            contentType = raw["contentType"] as? String ?: "",
+            sizeBytes = size,
         )
     }
 

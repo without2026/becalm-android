@@ -11,6 +11,10 @@ import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.gmail.GmailClient
 import com.becalm.android.data.remote.gmail.GmailClientImpl
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider
+import com.becalm.android.data.remote.imap.ImapClient
+import com.becalm.android.data.remote.imap.ImapClientImpl
+import com.becalm.android.data.remote.msgraph.MsGraphClient
+import com.becalm.android.data.remote.msgraph.MsGraphClientImpl
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.DefaultIdempotencyKeyProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
@@ -90,6 +94,24 @@ public abstract class NetworkModule {
     @Binds
     @Singleton
     public abstract fun bindIdempotencyKeyProvider(impl: DefaultIdempotencyKeyProvider): IdempotencyKeyProvider
+
+    /**
+     * Binds [ImapClientImpl] as the singleton [ImapClient] consumed by
+     * [com.becalm.android.worker.ingestion.ImapNaverWorker] and
+     * [com.becalm.android.worker.ingestion.ImapDaumWorker]. Spec: ING-008.
+     */
+    @Binds
+    @Singleton
+    public abstract fun bindImapClient(impl: ImapClientImpl): ImapClient
+
+    /**
+     * Binds [MsGraphClientImpl] as the singleton [MsGraphClient] consumed by
+     * [com.becalm.android.worker.ingestion.OutlookMailWorker] and
+     * [com.becalm.android.worker.ingestion.OutlookCalendarWorker]. Spec: ING-007.
+     */
+    @Binds
+    @Singleton
+    public abstract fun bindMsGraphClient(impl: MsGraphClientImpl): MsGraphClient
 
     // ─── Provides ────────────────────────────────────────────────────────────────
 

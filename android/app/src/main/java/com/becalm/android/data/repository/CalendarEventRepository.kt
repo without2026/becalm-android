@@ -150,7 +150,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
     override suspend fun refreshSince(
         userId: String,
         since: Instant?,
-    ): BecalmResult<RefreshStats> = safeApi(
+    ): BecalmResult<CalendarEventRepository.RefreshStats> = safeApi(
         ioLogMessage = "refreshSince network error",
         unexpectedLogMessage = "refreshSince unexpected error",
     ) {

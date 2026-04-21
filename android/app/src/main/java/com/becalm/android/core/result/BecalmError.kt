@@ -13,6 +13,11 @@ package com.becalm.android.core.result
  * - [Permission] — Android runtime permission not granted.
  * - [NotFound] — 404 or missing local resource.
  * - [Cancelled] — coroutine or user-initiated cancellation; typically not shown to user.
+ * - [ExtractorUnavailable] — on-device LLM (Gemini Nano / AICore) could not run
+ *   the extraction request. [reason] is a short machine-readable tag — `AICORE_NOT_AVAILABLE`
+ *   (device unsupported — caller should skip, no retry), `LLM_JSON_PARSE_FAILED`
+ *   (model returned malformed output — quarantine), `AICORE_ERROR` (generic SDK error —
+ *   transient retry). Spec refs: EMAIL-001 / EMAIL-008, KTR-GEMINI-NANO.
  * - [Unknown] — catch-all wrapping an unexpected [Throwable].
  */
 public sealed class BecalmError {
@@ -54,6 +59,30 @@ public sealed class BecalmError {
     public data object Cancelled : BecalmError()
 
     /**
+     * On-device LLM extraction could not complete.
+     *
+     * Thrown by [com.becalm.android.domain.extractor.GeminiNanoExtractor.extract] when the
+     * AICore SDK path fails for any of three reasons tracked via [reason]:
+     *
+     * - `AICORE_NOT_AVAILABLE` — SDK reports the device does not support Gemini Nano. Caller
+     *   (the [com.becalm.android.worker.extraction.CommitmentExtractionWorker]) should treat
+     *   this as permanent and return [androidx.work.ListenableWorker.Result.success] without
+     *   retry: no amount of WorkManager backoff will make an unsupported device work.
+     * - `LLM_JSON_PARSE_FAILED` — model produced output that Moshi could not parse as the
+     *   expected JSON array. Deterministic per prompt+model, so caller quarantines instead
+     *   of retrying.
+     * - `AICORE_ERROR` — any other SDK exception. Typically transient (service crashed,
+     *   model still downloading, etc.) so caller returns
+     *   [androidx.work.ListenableWorker.Result.retry].
+     *
+     * Spec refs: EMAIL-001, EMAIL-008, KTR-GEMINI-NANO.
+     */
+    public data class ExtractorUnavailable(
+        val reason: String,
+        val cause: Throwable? = null,
+    ) : BecalmError()
+
+    /**
      * Unexpected exception with no specific mapping.
      *
      * The raw [throwable] is retained for internal callers that need programmatic access
@@ -67,3 +96,29 @@ public sealed class BecalmError {
             get() = throwable::class.simpleName ?: "Unknown"
     }
 }
+
+/**
+ * Returns a non-PII, display-safe short message for any [BecalmError] variant.
+ *
+ * Used by UI layers (e.g. [com.becalm.android.ui.auth.AuthViewModel]) to surface
+ * an error to the user without leaking backend messages, stack traces, or credential
+ * substrings. Each branch emits only the error *kind* plus opaque metadata (HTTP code,
+ * field name, resource name) — never the raw server body or throwable message.
+ *
+ * The [BecalmError.Unknown.safeMessage] property is reused for the Unknown arm so
+ * existing consumers see byte-identical strings.
+ */
+public val BecalmError.safeMessage: String
+    get() = when (this) {
+        is BecalmError.Network -> "Network error ($code)"
+        is BecalmError.Unauthorized -> "Unauthorized"
+        is BecalmError.RateLimited -> "Rate limited"
+        is BecalmError.ServerError -> "Server error ($code)"
+        is BecalmError.Validation -> field?.let { "Validation: $it" } ?: "Validation error"
+        is BecalmError.Io -> "Local I/O error"
+        is BecalmError.Permission -> "Permission not granted: $permission"
+        is BecalmError.NotFound -> "Not found: $resource"
+        is BecalmError.Cancelled -> "Cancelled"
+        is BecalmError.ExtractorUnavailable -> "Extractor unavailable: $reason"
+        is BecalmError.Unknown -> safeMessage
+    }

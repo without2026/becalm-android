@@ -58,6 +58,50 @@ public object UniqueWorkKeys {
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
 
     /**
+     * On-device commitment extraction via
+     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker].
+     *
+     * Each enqueue uses a per-event suffix so multiple raw ingestion events can be extracted
+     * concurrently — one email's LLM inference must not block another's. Use
+     * [commitmentExtractionKey] to generate the full unique-work name.
+     *
+     * Spec refs: EMAIL-001, EMAIL-008.
+     */
+    public const val COMMITMENT_EXTRACTION_PREFIX: String = "commitment-extraction-"
+
+    /**
+     * Returns the unique work name for a
+     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker] processing the raw
+     * event identified by [rawEventId].
+     *
+     * Per-event stability means re-enqueueing with the same [rawEventId] collapses onto the
+     * same unique-work name, and [androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE] in
+     * [WorkSchedulerImpl.enqueueCommitmentExtraction] ensures either the in-flight job
+     * completes or the new request replaces it — never two parallel extractors for the same
+     * email.
+     *
+     * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
+     */
+    public fun commitmentExtractionKey(rawEventId: String): String =
+        COMMITMENT_EXTRACTION_PREFIX + rawEventId
+
+    /**
+     * Daily retention sweep via [com.becalm.android.worker.RetentionSweepWorker].
+     *
+     * Drives the 30-day rolling-window pruning contract mandated by EMAIL-006
+     * (`.spec/email-pipeline.spec.yml:58-64`) and the cross-module invariant at
+     * `.spec/data-ingestion.spec.yml:160` — "Room raw_ingestion_events와 EmailBody는
+     * timestamp 기준 30일 rolling window로 자동 삭제된다 — 단 sync_status='synced' 조건을
+     * 만족할 때만". FK CASCADE between the two tables is only a per-row safety net; the
+     * timestamp-based sweep itself must be scheduled by this worker, hence a dedicated
+     * stable unique-work name enrolled in [WorkSchedulerImpl.ALL_KEYS] so sign-out
+     * `cancelAll` tears it down together with every other chain.
+     *
+     * Spec refs: EMAIL-006, data-ingestion invariant line 160.
+     */
+    public const val RETENTION_SWEEP: String = "retention.sweep"
+
+    /**
      * Deprecated legacy key — cancelled on every cold start for one release after Wave 0
      * (#13 renamed MediaStore ingest from `ingest.sms_call` → [MEDIA_STORE]).
      *

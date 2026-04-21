@@ -3,6 +3,7 @@ package com.becalm.android
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.worker.WorkScheduler
@@ -61,6 +62,16 @@ public class BecalmApplication : Application(), Configuration.Provider {
      */
     @Inject
     public lateinit var googleAuthTokenProvider: GoogleAuthTokenProviderImpl
+
+    /**
+     * [SyncCursorStore] — hosts the one-shot Outlook mail cursor v2 migration that
+     * promotes the pre-Wave-3 single-cursor key ("outlook_mail_delta") into the
+     * folder-scoped INBOX key ("outlook_mail_inbox_delta"). Idempotent: the store
+     * writes a `outlook_mail_migration_v2_done` flag so subsequent cold starts skip
+     * the read/write after a single pass.
+     */
+    @Inject
+    public lateinit var syncCursorStore: SyncCursorStore
 
     /**
      * Unstructured scope for startup fire-and-forget work that must outlive individual
@@ -126,5 +137,35 @@ public class BecalmApplication : Application(), Configuration.Provider {
             runCatching { googleAuthTokenProvider.warmUp() }
                 .onFailure { Timber.e(it, "BecalmApplication: Gmail OAuth warmUp launch failed") }
         }
+
+        // Promote the Wave 1 single Outlook mail cursor ("outlook_mail_delta") into
+        // the folder-scoped INBOX key ("outlook_mail_inbox_delta"). Gated by a
+        // `outlook_mail_migration_v2_done` flag inside the store so repeat cold
+        // starts bail out after the first DataStore read. runCatching mirrors the
+        // other startup migrations — a rare DataStore corruption must not crash
+        // the process before the UI is reachable; the next launch retries.
+        applicationScope.launch {
+            runCatching { syncCursorStore.runOutlookMailCursorMigrationV2() }
+                .onFailure { Timber.e(it, "BecalmApplication: Outlook mail cursor v2 migration failed") }
+        }
+
+        // Promote the Wave 1 single-INBOX IMAP cursors ("naver" / "daum") into the
+        // folder-scoped successors ("naver_inbox" / "daum_inbox"). Gated by an
+        // `imap_cursor_migration_v2_done` flag inside the store so repeat cold
+        // starts bail out after the first DataStore read. The "_sent" cursors stay
+        // null so the first Wave 3 run performs a bounded 30-day cold sync for Sent.
+        // runCatching mirrors the other startup migrations — a DataStore corruption
+        // must not crash the process before the UI is reachable.
+        applicationScope.launch {
+            runCatching { syncCursorStore.runImapCursorMigrationV2() }
+                .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
+        }
+
+        // Enroll the daily 30-day retention sweep (EMAIL-006,
+        // `.spec/data-ingestion.spec.yml:160`). `enqueueUniquePeriodicWork` with
+        // `ExistingPeriodicWorkPolicy.KEEP` is idempotent: repeated cold-start calls
+        // never reset the period timer, so invoking it unconditionally here is the
+        // simplest single-entry-point guarantee that the sweep stays scheduled.
+        workScheduler.scheduleRetentionSweep()
     }
 }

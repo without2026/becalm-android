@@ -316,4 +316,35 @@ public interface RawIngestionEventDao {
     )
     public suspend fun parkVoiceByIds(ids: List<String>, now: Long)
 
+    /**
+     * Deletes every `raw_ingestion_events` row whose `timestamp < :cutoffMillis` AND
+     * whose `sync_status = 'synced'` — the two-condition gate mandated by
+     * `.spec/data-ingestion.spec.yml:160`:
+     *
+     * > "Room raw_ingestion_events와 EmailBody는 timestamp 기준 30일 rolling window로
+     * >  자동 삭제된다 — 단 sync_status='synced' 조건을 만족할 때만."
+     *
+     * Pending / failed / awaiting_consent rows are never pruned because the Railway
+     * ack contract (`.spec/data-ingestion.spec.yml:151`) forbids local deletion before
+     * the server has confirmed receipt. Commitments and calendar events have separate
+     * lifecycles and are out of scope for this sweep.
+     *
+     * Invoked by [com.becalm.android.worker.RetentionSweepWorker] inside a single
+     * Room transaction together with
+     * [EmailBodyDao.deleteOlderThanForSynced], sharing the same `cutoffMillis` so the
+     * two tables are pruned atomically against a consistent clock snapshot.
+     *
+     * @param cutoffMillis Exclusive upper bound as UTC epoch milliseconds — rows with
+     *   `timestamp < :cutoffMillis` are eligible. Callers compute this as
+     *   `now - 30.days` via [kotlinx.datetime.Clock.System].
+     * @return The number of `raw_ingestion_events` rows deleted. Suitable for
+     *   observability logging through [androidx.work.ListenableWorker.Result.success]
+     *   output [androidx.work.Data].
+     */
+    @Query(
+        "DELETE FROM raw_ingestion_events " +
+            "WHERE sync_status = 'synced' AND timestamp < :cutoffMillis",
+    )
+    public suspend fun deleteSyncedOlderThan(cutoffMillis: Long): Int
+
 }

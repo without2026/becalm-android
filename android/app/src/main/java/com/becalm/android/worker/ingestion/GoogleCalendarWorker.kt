@@ -175,5 +175,9 @@ private fun BecalmError.toMessage(): String = when (this) {
     is BecalmError.Permission -> "Permission denied: $permission"
     is BecalmError.NotFound -> "Not found: $resource"
     is BecalmError.Cancelled -> "Cancelled"
+    // Calendar workers never invoke the on-device Gemini Nano extractor that produces this
+    // error — EMAIL-001 / EMAIL-008 confines ExtractorUnavailable to email source types.
+    // The branch exists for sealed-class exhaustiveness only; the log string is diagnostic.
+    is BecalmError.ExtractorUnavailable -> "Extractor unavailable: reason=$reason"
     is BecalmError.Unknown -> "Unknown: ${throwable.message}"
 }

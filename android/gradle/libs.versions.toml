@@ -26,6 +26,9 @@ google-api-client = "2.4.0"
 google-auth-library = "1.23.0"
 microsoft-graph = "5.77.0"
 azure-identity = "1.11.3"
+# MSAL Android (Microsoft Authentication Library) — single-account mode OAuth flow
+# for MS Graph (repo-auth-msgraph-oauth-provider). AndroidX + targetSdk 34 compatible.
+msal = "5.6.0"
 jakarta-mail = "2.1.3"
 angus-mail = "2.0.3"
 jsoup = "1.17.2"
@@ -156,6 +159,11 @@ google-calendar-api = { group = "com.google.apis", name = "google-api-services-c
 microsoft-graph = { group = "com.microsoft.graph", name = "microsoft-graph", version.ref = "microsoft-graph" }
 azure-identity = { group = "com.azure", name = "azure-identity", version.ref = "azure-identity" }
 
+# ─── MSAL (Microsoft Authentication Library, Android) ───────────────────────
+# Drives the Outlook / MS Graph OAuth flow in MsGraphTokenProviderImpl
+# (repo-auth-msgraph-oauth-provider). Single-account mode.
+msal = { group = "com.microsoft.identity.client", name = "msal", version.ref = "msal" }
+
 # ─── Jakarta Mail API + Angus Mail (IMAPS provider) ──────────────────────────
 # Source ImapClient.kt explicitly uses jakarta.mail.* (file header calls this out).
 # com.sun.mail:android-mail:1.6.7 shipped javax.mail.* and is NOT compatible.
@@ -174,7 +182,7 @@ googleid = { group = "com.google.android.libraries.identity.googleid", name = "g
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "play-services-auth" }
 
 # ─── libphonenumber (E.164 normalization — worker-voice-call-recording) ──────
-libphonenumber = { group = "com.google.i18n.phonenumbers", name = "libphonenumber", version.ref = "libphonenumber" }
+libphonenumber = { group = "com.googlecode.libphonenumber", name = "libphonenumber", version.ref = "libphonenumber" }
 
 # ─── Gemini Nano / AICore ─────────────────────────────────────────────────────
 gemini-nano-aicore = { group = "com.google.ai.edge.aicore", name = "aicore", version.ref = "gemini-nano-aicore" }

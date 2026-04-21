@@ -9,18 +9,30 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
+import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.FOLDER_SENT
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.email.SourceRefEnvelope
+import com.becalm.android.data.remote.gmail.GmailAttachmentMeta
 import com.becalm.android.data.remote.gmail.GmailClient
-import com.becalm.android.data.remote.gmail.GmailLabel
+import com.becalm.android.data.remote.gmail.GmailLabelScope
 import com.becalm.android.data.remote.gmail.GmailMessage
 import com.becalm.android.data.remote.gmail.GmailMessagePage
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.EmailSnippetBuilder
+import com.becalm.android.domain.email.SourceKind
+import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.JsonAdapter
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -31,28 +43,46 @@ import kotlinx.datetime.Instant
 import java.util.UUID
 
 /**
- * WorkManager [CoroutineWorker] that incrementally syncs Gmail messages and stores
- * each one as a [RawIngestionEventEntity] (sourceType = "gmail").
+ * WorkManager [CoroutineWorker] that syncs Gmail messages into Room as
+ * [RawIngestionEventEntity] (`source_type = "gmail"`) plus a companion
+ * [EmailBodyEntity] carrying `body_plain` / `body_html` / `attachments_meta` /
+ * `raw_headers` for on-device commitment extraction.
  *
- * ## Sync strategy (ING-006, ING-012, ING-013)
+ * ## Sync strategy (ING-006, ING-012, ING-013, EMAIL-001)
  *
- * **Incremental** — when [SyncCursorStore.observeGmailHistoryId] returns a non-null value,
- * [GmailClient.listHistory] is called with that historyId as the starting point. Each page
- * of newly-added message IDs is fetched and converted. The cursor is advanced per page so
- * that a mid-sync crash resumes from the last durably written page rather than re-fetching
- * from scratch.
+ * **Full-sync (cold start)** — two sequential passes via
+ * [GmailClient.listMessagesFullSyncForLabel]: [GmailLabelScope.INBOX] first
+ * (marketing categories excluded) then [GmailLabelScope.SENT] (drafts/trash
+ * excluded). Both pages are paginated via `nextPageToken`. The historyId cursor
+ * is seeded via the conventional `listHistory("1")` bootstrap only after both
+ * passes complete so partial backfills can resume cleanly.
  *
- * **Full-sync fallback** — triggered on first run (null cursor) or when [GmailClient.listHistory]
- * returns [BecalmError.NotFound] (HTTP 404/410 = historyId expired). The cursor is cleared
- * before the full-sync so that a crash during full-sync re-enters this branch on the next run.
+ * **Incremental** — when [SyncCursorStore.observeGmailHistoryId] returns a
+ * non-null value, [GmailClient.listHistory] is called with that historyId.
+ * Each newly-added message is routed by inspecting its `labelIds`: `INBOX`
+ * present and none of CATEGORY_PROMOTIONS/SOCIAL/UPDATES/FORUMS →
+ * `folder=INBOX`; `SENT` present → `folder=SENT`; otherwise skipped with a log.
  *
- * **Deduplication** — Room's UNIQUE index on `(user_id, client_event_id)` is the source of
- * truth. If a message was already ingested the `insertLocal` read-before-write guard returns
- * the existing ID without a duplicate write (ING-015 idempotency).
+ * **Deduplication** — Room's UNIQUE index on `(user_id, client_event_id)` is
+ * the source of truth; `insertLocal`'s read-before-write guard dedupes replays
+ * (ING-013 / ING-015).
+ *
+ * ## EmailBody insert handoff (EMAIL-006)
+ * After each successful raw event insert the worker also insert-or-replaces an
+ * [EmailBodyEntity] through [EmailBodyRepository.insert]. The repository
+ * never crosses the device boundary — body text is room-only per
+ * `.spec/email-pipeline.spec.yml:58-64`.
+ *
+ * ## Commitment extraction handoff (EMAIL-008)
+ * After the body insert, a one-shot
+ * [com.becalm.android.worker.extraction.CommitmentExtractionWorker] is enqueued
+ * via [WorkScheduler.enqueueCommitmentExtraction] **unless** the snippet source
+ * is [SourceKind.SUBJECT_FALLBACK] (subject-only emails cannot drive a
+ * meaningful LLM extraction — we instead bump the metrics counter).
  *
  * ## PII / logging
- * Subject, snippet, and email addresses are NEVER written to logcat. Only message counts,
- * hashed `sourceRef` surrogates, and cursor values are logged.
+ * Subject, snippet, and email addresses are NEVER written to logcat. Only
+ * message counts, hashed `sourceRef` surrogates, and cursor values are logged.
  *
  * ## Return semantics
  * - [Result.success] — happy path; all pages stored.
@@ -66,12 +96,28 @@ public class GmailWorker @AssistedInject constructor(
     private val gmailClient: GmailClient,
     private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val emailBodyRepository: EmailBodyRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val cursorStore: SyncCursorStore,
+    private val metricsStore: MetricsStore,
+    private val workScheduler: WorkScheduler,
     private val authRepository: AuthRepository,
+    private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
+
+    private val sourceRefAdapter: JsonAdapter<SourceRefEnvelope> by lazy {
+        // serializeNulls(false)-equivalent: serializeNulls default is false in Moshi,
+        // so null in_reply_to / references are automatically omitted per EMAIL-005.
+        moshi.adapter(SourceRefEnvelope::class.java)
+    }
+    private val attachmentListAdapter: JsonAdapter<List<GmailAttachmentMeta>> by lazy {
+        moshi.adapter(Types.newParameterizedType(List::class.java, GmailAttachmentMeta::class.java))
+    }
+    private val stringListAdapter: JsonAdapter<List<String>> by lazy {
+        moshi.adapter(Types.newParameterizedType(List::class.java, String::class.java))
+    }
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         logger.d(TAG, "doWork start")
@@ -85,19 +131,13 @@ public class GmailWorker @AssistedInject constructor(
 
         // Step 2. If the cached token is absent or aged into the 60s safety window (or
         // was ever emitted into a null hole by a previous hot-path CAS), attempt a
-        // silent refresh from the background. `refreshSilently` takes a Context — the
-        // application context is fine — and issues a fresh Gmail access token when the
-        // device-side grant still covers the readonly scope. If it does not, state
-        // flips to ReauthRequired and the worker returns Result.failure below so the
-        // UI can drive the interactive reauth via `startSignIn(activity)`.
+        // silent refresh from the background.
         if (googleAuthTokenProvider.currentToken() == null) {
             val refreshed = googleAuthTokenProvider.refreshSilently(appContext)
             logger.d(TAG, "doWork silent refresh attempted ok=$refreshed")
         }
 
-        // Every ingested row must be tagged with the authenticated user's UUID. Without a
-        // session the row would become invisible to UploadWorker (its WHERE user_id=? query
-        // would never match) and silently accumulate on-device. Fail closed.
+        // Every ingested row must be tagged with the authenticated user's UUID. Fail closed.
         val userId = authRepository.currentSession()?.userId
         if (userId.isNullOrBlank()) {
             logger.e(TAG, "doWork no authenticated session — refusing to ingest")
@@ -119,7 +159,6 @@ public class GmailWorker @AssistedInject constructor(
 
         return@withContext when (syncResult) {
             is SyncOutcome.HistoryExpired -> {
-                // historyId expired (404/410) — clear cursor then full-sync
                 logger.d(TAG, "doWork historyId expired, falling back to full-sync")
                 cursorStore.setGmailHistoryId(null)
                 runFullSync(userId).toWorkerResult(" fallback-full-sync")
@@ -128,13 +167,6 @@ public class GmailWorker @AssistedInject constructor(
         }
     }
 
-    /**
-     * 외부 `doWork`의 `when(syncResult)`와 HistoryExpired 내부의 `when(fallbackOutcome)`가
-     * Success/Unauthorized/Retryable 세 분기에서 동일한 Result 매핑을 중복하던 것을
-     * 한 함수로 통합해 두 호출 사이트에서 바이트 단위로 동일한 결과를 보장한다.
-     * HistoryExpired는 의도적으로 제외되며, fallback 분기 자체의 시맨틱(커서 클리어 →
-     * 전체 동기화)은 변경하지 않는다. [phase]는 로그 메시지에 삽입되는 접두 문자열이다.
-     */
     private suspend fun SyncOutcome.toWorkerResult(phase: String): Result = when (this) {
         is SyncOutcome.Success -> {
             sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, Clock.System.now())
@@ -160,7 +192,6 @@ public class GmailWorker @AssistedInject constructor(
             Result.retry()
         }
         is SyncOutcome.HistoryExpired -> {
-            // Handled at each call site (outer: fallback branch; inner: guarded retry).
             Result.retry()
         }
     }
@@ -168,17 +199,10 @@ public class GmailWorker @AssistedInject constructor(
     // ── Incremental sync ──────────────────────────────────────────────────────
 
     /**
-     * Fetches all pages of history since [startHistoryId], inserting each new message
-     * into Room and advancing the cursor per page.
-     *
-     * Gmail's `history.list` paginates via `nextPageToken`. Because the public
-     * [GmailClient.listHistory] interface only accepts `startHistoryId`, pagination is
-     * handled here by stopping after the first page and relying on the per-page cursor
-     * advance: the next WorkManager run resumes from the updated `historyId`, which
-     * naturally returns the next slice. This keeps the [GmailClient] interface minimal.
-     *
-     * Returns [SyncOutcome.HistoryExpired] on HTTP 404/410 so the caller can
-     * discard the stale cursor and fall back to a full-sync.
+     * Fetches all pages of history since [startHistoryId] and routes each newly-
+     * added message by its `labelIds`. EMAIL-001 discards messages that are
+     * neither INBOX (non-category) nor SENT — drafts, spam, trash, and marketing
+     * categories are skipped with a log but not treated as an error.
      */
     private suspend fun runIncrementalSync(userId: String, startHistoryId: String): SyncOutcome {
         val result = gmailClient.listHistory(startHistoryId)
@@ -186,11 +210,8 @@ public class GmailWorker @AssistedInject constructor(
             is BecalmResult.Failure -> result.error.toSyncOutcome()
             is BecalmResult.Success -> {
                 val page = result.value
-                val insertedCount = insertMessages(userId, page.messageIds)
+                val insertedCount = insertIncrementalMessages(userId, page.messageIds)
 
-                // Advance cursor per-page after durable Room write (ING-012 pattern).
-                // If there are more pages, the updated historyId will be used on the
-                // next WorkManager run to fetch the subsequent slice.
                 val newHistoryId = page.historyId?.toLongOrNull()
                 if (newHistoryId != null) {
                     cursorStore.setGmailHistoryId(newHistoryId)
@@ -202,32 +223,67 @@ public class GmailWorker @AssistedInject constructor(
         }
     }
 
-    // ── Full sync ─────────────────────────────────────────────────────────────
+    /**
+     * Incremental-sync per-message pipeline: fetch the full message, route it
+     * based on `labelIds`, and insert under the resolved folder. Messages that
+     * resolve to `null` folder (drafts / spam / marketing categories) are
+     * skipped.
+     */
+    private suspend fun insertIncrementalMessages(userId: String, messageIds: List<String>): Int {
+        var count = 0
+        for (messageId in messageIds) {
+            val msgResult = gmailClient.getMessage(messageId)
+            if (msgResult is BecalmResult.Failure) {
+                logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
+                continue
+            }
+            val msg = (msgResult as BecalmResult.Success).value
+            val folder = routeByLabelIds(msg.labelIds)
+            if (folder == null) {
+                logger.d(
+                    TAG,
+                    "incremental skip id_hash=${redact(messageId)} labels=${msg.labelIds.size}",
+                )
+                continue
+            }
+            if (insertOne(userId, msg, folder)) count++
+        }
+        return count
+    }
 
     /**
-     * Fetches all inbox message IDs via [GmailClient.listMessagesFullSync], paginating
-     * until there is no next page token. The historyId cursor is not available from
-     * `messages.list`; it will be established on the first subsequent incremental sync
-     * run after the user triggers a `history.list` response that includes a `historyId`.
-     *
-     * To obtain an initial historyId after a full sync, [GmailClient.listHistory] is called
-     * with startHistoryId="1" — this is the conventional way to get the current historyId
-     * without needing to know it in advance.
+     * Maps a Gmail label set to the EMAIL-001 folder direction hint. Returns
+     * null when the message belongs to neither pipeline (drafts / spam / pure
+     * marketing categories). SENT takes precedence over INBOX because a thread-
+     * shared message tagged with both is authoritatively the sender-side view
+     * for EMAIL-002 person_ref derivation.
      */
+    private fun routeByLabelIds(labelIds: List<String>): String? {
+        if (labelIds.contains("SENT")) return FOLDER_SENT
+        if (!labelIds.contains("INBOX")) return null
+        val excluded = setOf(
+            "CATEGORY_PROMOTIONS",
+            "CATEGORY_SOCIAL",
+            "CATEGORY_UPDATES",
+            "CATEGORY_FORUMS",
+            "SPAM",
+            "TRASH",
+            "DRAFT",
+        )
+        if (labelIds.any { it in excluded }) return null
+        return FOLDER_INBOX
+    }
+
+    // ── Full sync ─────────────────────────────────────────────────────────────
+
     private suspend fun runFullSync(userId: String): SyncOutcome {
         var totalFetched = 0
 
-        // EMAIL-001 (`.spec/email-pipeline.spec.yml:15-18`) requires both inbound and
-        // sent mail to reach ingestion so the `folder` direction hint covers every row
-        // in the mailbox. Fetch the two labels sequentially; the per-message GET then
-        // exposes Gmail's label set and [GmailMessage.toEntity] picks the right
-        // `folder` / `personRef` pair per row.
-        for (label in GmailLabel.entries) {
+        // EMAIL-001: INBOX pass first then SENT so both direction hints reach
+        // ingestion during cold start.
+        for (label in GmailLabelScope.entries) {
             when (val outcome = runFullSyncForLabel(userId, label)) {
                 is SyncOutcome.Success -> totalFetched += outcome.fetchedCount
-                // Any non-success outcome short-circuits the backfill and surfaces to
-                // the worker entry point, preserving the pre-W1 behaviour of aborting
-                // on the first failure / auth / history issue.
                 SyncOutcome.HistoryExpired,
                 SyncOutcome.Unauthorized,
                 is SyncOutcome.Retryable,
@@ -240,31 +296,25 @@ public class GmailWorker @AssistedInject constructor(
         return SyncOutcome.Success(totalFetched)
     }
 
-    /**
-     * Paginates `messages.list` scoped to a single [label] and inserts every
-     * discovered message through the shared [insertMessages] pipeline.
-     *
-     * Extracted so [runFullSync] can compose inbound + sent passes without
-     * duplicating the pagination loop or failure-mapping.
-     */
     private suspend fun runFullSyncForLabel(
         userId: String,
-        label: GmailLabel,
+        label: GmailLabelScope,
     ): SyncOutcome {
         var pageToken: String? = null
         var inserted = 0
+        val folder = if (label == GmailLabelScope.SENT) FOLDER_SENT else FOLDER_INBOX
         while (true) {
             val result: BecalmResult<GmailMessagePage> =
-                gmailClient.listMessagesFullSync(label, pageToken)
+                gmailClient.listMessagesFullSyncForLabel(label, pageToken)
             when (result) {
                 is BecalmResult.Failure -> return result.error.toSyncOutcome()
                 is BecalmResult.Success -> {
                     val page = result.value
-                    val insertedThisPage = insertMessages(userId, page.messageIds)
+                    val insertedThisPage = insertFullSyncPage(userId, page.messageIds, folder)
                     inserted += insertedThisPage
                     logger.d(
                         TAG,
-                        "full-sync page label=$label inserted=$insertedThisPage running=$inserted",
+                        "full-sync page folder=$folder inserted=$insertedThisPage running=$inserted",
                     )
                     pageToken = page.nextPageToken ?: return SyncOutcome.Success(inserted)
                 }
@@ -274,16 +324,8 @@ public class GmailWorker @AssistedInject constructor(
 
     /**
      * Full-sync 직후 다음 run에서 incremental-sync를 쓸 수 있도록 historyId 커서를 1회 심는다.
-     * `history.list("1")`은 관례적인 부트스트랩 호출이며 실패해도 치명적이지 않다 — 다음 run에서
-     * storedHistoryId 가 null이면 full-sync가 다시 실행된다.
-     *
-     * 원본 인라인 로직과 byte-identical: `BecalmResult.Success` 분기에서만 커서 갱신이 일어나고,
-     * 로그 문구(`"full-sync seeded historyId=$bootstrapHistoryId"`)와 `toLongOrNull` 가드도 그대로다.
      */
     private suspend fun seedHistoryIdCursor() {
-        // Seed the historyId cursor by calling history.list with the earliest valid value.
-        // Gmail requires a real historyId; we use "1" as the conventional bootstrap value
-        // to retrieve the current mailbox historyId without processing history records.
         val historyBootstrap = gmailClient.listHistory("1")
         if (historyBootstrap is BecalmResult.Success) {
             val bootstrapHistoryId = historyBootstrap.value.historyId?.toLongOrNull()
@@ -292,93 +334,161 @@ public class GmailWorker @AssistedInject constructor(
                 logger.d(TAG, "full-sync seeded historyId=$bootstrapHistoryId")
             }
         }
-        // A failure to seed the historyId is non-fatal: the next run will full-sync again.
     }
 
     // ── Message insertion ─────────────────────────────────────────────────────
 
-    /**
-     * Fetches each message in [messageIds], converts it to a [RawIngestionEventEntity],
-     * and calls [RawIngestionRepository.insertLocal]. Failures on individual messages
-     * are logged and skipped — one bad message must not abort the whole page.
-     *
-     * @return Number of messages successfully inserted (or deduped-skipped) in this batch.
-     */
-    private suspend fun insertMessages(userId: String, messageIds: List<String>): Int {
+    private suspend fun insertFullSyncPage(
+        userId: String,
+        messageIds: List<String>,
+        folder: String,
+    ): Int {
         var count = 0
         for (messageId in messageIds) {
-            if (fetchAndInsert(userId, messageId)) count++
+            val msgResult = gmailClient.getMessage(messageId)
+            if (msgResult is BecalmResult.Failure) {
+                logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
+                continue
+            }
+            val msg = (msgResult as BecalmResult.Success).value
+            if (insertOne(userId, msg, folder)) count++
         }
         return count
     }
 
     /**
-     * 단일 메시지에 대한 `getMessage → toEntity → insertLocal` 파이프라인을 4-level 중첩
-     * when 밖으로 평탄화한다. 각 실패 분기의 로그 레벨(`w`/`e`)과 문자열은 원본과 byte-identical.
-     * 성공 시에만 `true`를 반환해 [insertMessages]의 count 증가 시맨틱을 그대로 보존한다.
+     * Executes the per-message `raw_event + email_body + extraction handoff`
+     * pipeline. Returns true when the raw event was successfully inserted
+     * (regardless of whether extraction was enqueued — subject-only emails are
+     * a successful skip, not a failure).
      */
-    private suspend fun fetchAndInsert(userId: String, messageId: String): Boolean {
-        val msgResult = gmailClient.getMessage(messageId)
-        if (msgResult is BecalmResult.Failure) {
-            logger.w(TAG, "getMessage failed id_hash=${redact(messageId)} err=${msgResult.error}")
-            return false
-        }
-        val entity = (msgResult as BecalmResult.Success).value.toEntity(userId)
-        val insertResult = rawIngestionRepository.insertLocal(entity)
+    private suspend fun insertOne(userId: String, msg: GmailMessage, folder: String): Boolean {
+        val snippetResult = EmailSnippetBuilder.buildSnippet(
+            bodyPlain = msg.bodyPlain,
+            bodyHtml = msg.bodyHtml,
+            subject = msg.subject,
+        )
+
+        val rawEntity = msg.toRawEntity(userId = userId, folder = folder, snippet = snippetResult.snippet)
+
+        val insertResult = rawIngestionRepository.insertLocal(rawEntity)
         if (insertResult is BecalmResult.Failure) {
-            logger.e(TAG, "insertLocal failed id_hash=${redact(messageId)} err=${insertResult.error}")
+            logger.e(TAG, "insertLocal failed id_hash=${redact(msg.messageId)} err=${insertResult.error}")
             return false
         }
-        logger.d(TAG, "insertLocal ok id_hash=${redact(messageId)}")
+        val rawEventId = (insertResult as BecalmResult.Success).value
+
+        val groupEmail = folder == FOLDER_SENT && msg.toAddresses.size > 10
+        val body = buildEmailBody(
+            rawEventId = rawEventId,
+            msg = msg,
+            folder = folder,
+            groupEmail = groupEmail,
+            parseFailed = snippetResult.parseFailed,
+        )
+        emailBodyRepository.insert(body)
+        logger.d(TAG, "insertLocal ok id_hash=${redact(msg.messageId)} folder=$folder")
+
+        if (snippetResult.parseFailed) {
+            // EMAIL-007 graceful degrade: raw event still in timeline but body
+            // text is unparseable. Log only (Sentry wiring is a separate PR).
+            logger.w(
+                TAG,
+                "email_html_parse_failed id_hash=${redact(msg.messageId)} provider=gmail",
+            )
+        }
+
+        // EMAIL-008: skip LLM handoff for subject-only emails — bump the metric
+        // instead so the skip rate is visible in the debug screen.
+        if (snippetResult.sourceKind == SourceKind.SUBJECT_FALLBACK) {
+            metricsStore.incrementSubjectOnlySkipped()
+            logger.d(TAG, "subject-only id_hash=${redact(msg.messageId)} — LLM handoff skipped")
+        } else {
+            workScheduler.enqueueCommitmentExtraction(rawEventId)
+        }
+
         return true
     }
 
     // ── Conversion ────────────────────────────────────────────────────────────
 
     /**
-     * Maps a [GmailMessage] to a [RawIngestionEventEntity].
-     *
-     * Mapping rules:
-     * - `userId`        — authenticated session userId threaded from [doWork]
-     * - `sourceType`    — "gmail"
-     * - `sourceRef`     — messageId
-     * - `eventTitle`    — subject (null when absent)
-     * - `eventSnippet`  — snippet (null when absent)
-     * - `personRef`     — [canonicalizeEmail] applied to the `From` header value
-     * - `timestamp`     — [Instant.fromEpochMilliseconds](internalDate)
-     * - `id`            — fresh UUID v4 (Room primary key)
-     * - `clientEventId` — deterministic `"gmail:$messageId"` so a full-sync retry after a
-     *                     mid-run crash dedupes against the DB UNIQUE index on
-     *                     `(user_id, client_event_id)` instead of inserting a duplicate row
-     *                     under a new random UUID.
+     * Builds the [RawIngestionEventEntity] for this Gmail message. [personRef]
+     * is derived per folder (EMAIL-002): INBOX → From; SENT → To[0] when ≤ 10
+     * recipients, else null. [sourceRef] is a Moshi-serialised
+     * [SourceRefEnvelope] with null fields omitted.
      */
-    private fun GmailMessage.toEntity(userId: String): RawIngestionEventEntity {
-        val folderHint = gmailLabelsToFolder(labelIds)
-        // EMAIL-002 (`.spec/email-pipeline.spec.yml:15-18`) person_ref derivation:
-        // INBOX ⇒ From (the counterparty who wrote to the user), SENT ⇒ first To
-        // (the counterparty the user wrote to). Any other label falls back to `From`
-        // — the pre-EMAIL-001 behaviour, never worse than today.
-        val personRef = when (folderHint) {
-            FOLDER_SENT -> to?.let(::firstRecipientEmail)
+    private fun GmailMessage.toRawEntity(
+        userId: String,
+        folder: String,
+        snippet: String,
+    ): RawIngestionEventEntity {
+        val personRef = when {
+            folder == FOLDER_SENT && toAddresses.size in 1..10 ->
+                canonicalizeEmail(toAddresses.first())
+            folder == FOLDER_SENT -> null
             else -> from?.let(::canonicalizeEmail)
         }
+        val envelope = SourceRefEnvelope(
+            messageId = messageIdHeader ?: messageId,
+            inReplyTo = inReplyTo,
+            references = references,
+        )
+        val sourceRefJson = sourceRefAdapter.toJson(envelope)
+
         return RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
             clientEventId = "gmail:$messageId",
             sourceType = SourceType.GMAIL,
-            sourceRef = messageId,
+            sourceRef = sourceRefJson,
             eventTitle = subject,
             eventSnippet = snippet,
             personRef = personRef,
-            folder = folderHint,
+            folder = folder,
             timestamp = Instant.fromEpochMilliseconds(internalDate),
         )
     }
 
-    // Header parsing helpers (`canonicalizeEmail`, `firstRecipientEmail`,
-    // `gmailLabelsToFolder`) live in `GmailHeaders.kt` so the worker stays focused
-    // on WorkManager orchestration. Per the rubric's COHESION-03 ~400-LOC ceiling.
+    /**
+     * Builds the [EmailBodyEntity] row for the just-inserted raw event. When
+     * [parseFailed] is true the [EmailBodyEntity.bodyPlain] column is cleared
+     * per EMAIL-007 so a partial parse cannot leak into extraction.
+     */
+    private fun buildEmailBody(
+        rawEventId: String,
+        msg: GmailMessage,
+        folder: String,
+        groupEmail: Boolean,
+        parseFailed: Boolean,
+    ): EmailBodyEntity {
+        val toAddressesJson = stringListAdapter.toJson(msg.toAddresses)
+        val attachmentsJson = if (msg.attachmentsMeta.isEmpty()) {
+            null
+        } else {
+            attachmentListAdapter.toJson(msg.attachmentsMeta)
+        }
+        // EMAIL-007: parse_failed forces body_plain=null while keeping body_html
+        // verbatim so a future extractor can retry on a different engine.
+        val finalBodyPlain: String? = if (parseFailed) null else msg.bodyPlain
+
+        return EmailBodyEntity(
+            id = UUID.randomUUID().toString(),
+            rawEventId = rawEventId,
+            providerMessageId = msg.messageId,
+            folder = folder,
+            subject = msg.subject,
+            fromAddress = msg.from?.let(::canonicalizeEmail),
+            toAddresses = toAddressesJson,
+            bodyPlain = finalBodyPlain,
+            bodyHtml = msg.bodyHtml,
+            attachmentsMeta = attachmentsJson,
+            rawHeaders = msg.rawHeadersJson,
+            parseFailed = parseFailed,
+            groupEmail = groupEmail,
+            receivedAt = Instant.fromEpochMilliseconds(msg.internalDate),
+        )
+    }
 
     public companion object {
         private const val TAG = "GmailWorker"

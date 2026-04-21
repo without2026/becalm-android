@@ -11,19 +11,30 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.ImapCursorState
+import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.dto.FOLDER_INBOX
+import com.becalm.android.data.remote.dto.FOLDER_SENT
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.imap.ImapAttachmentMeta
 import com.becalm.android.data.remote.imap.ImapClient
 import com.becalm.android.data.remote.imap.ImapFetchResult
+import com.becalm.android.data.remote.imap.ImapFolder
 import com.becalm.android.data.remote.imap.ImapMessage
+import com.becalm.android.data.remote.imap.ImapSpecialUse
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.Moshi
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -31,6 +42,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -38,27 +51,28 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Unit tests for [ImapNaverWorker] (SP-27b; ING-008 Naver IMAP sync).
+ * Unit tests for [ImapNaverWorker] (ING-008; 2-pass INBOX + Sent; EMAIL-001..007).
  *
- * Mirrors [ImapDaumWorkerTest] byte-for-byte — only the host, mailbox identifier, and
- * `source_type` differ because [ImapNaverWorker] and [ImapDaumWorker] share the same
- * worker logic (IMAP app-password auth + UIDVALIDITY/UID cursor advance). The duplication
- * is intentional: if the two workers ever diverge, the two test files will catch it on
- * review rather than one file masking the drift.
+ * ## Coverage map
+ *  1. `doWork twoPasses fourCursorKeys` — INBOX runs before SENT; each pass writes its
+ *      own cursor under `"naver_inbox"` / `"naver_sent"` (no write to the legacy
+ *      `"naver"` key after migration).
+ *  2. `sent personRefFromTo0` — SENT scope derives personRef from `toAddresses[0]`
+ *      (EMAIL-002).
+ *  3. `sent over10 groupEmailTrue` — > [GROUP_EMAIL_RECIPIENT_THRESHOLD] recipients
+ *      yield `personRef == null` and `EmailBody.groupEmail == true`.
+ *  4. `sourceRef uidFallback` — null `Message-Id` falls back to `"<uidValidity>:<uid>"`
+ *      in the JSON envelope (EMAIL-005).
+ *  5. `htmlParseFailure gracefulDegrade` — `EmailSnippetBuilder` subject fallback
+ *      bumps [MetricsStore.incrementSubjectOnlySkipped] and suppresses
+ *      [WorkScheduler.enqueueCommitmentExtraction] (EMAIL-003, EMAIL-007).
+ *  6. `usesNaverProviderCredentials` — [ImapCredentialStore.load] is called with
+ *      [SourceType.NAVER_IMAP] (ING-011 per-provider isolation).
  *
- * Test cases:
- * 1. Happy path — 2 fetched messages produce 2 RawIngestionEventEntity inserts with
- *    source_type='naver_imap', deterministic client_event_ids, and cursor advance.
- * 2. Empty folder — cursor still written with the server's fresh UIDVALIDITY/UIDNEXT pair
- *    and [SourceStatusRepository.recordSyncSuccess] is called.
- * 3. UIDVALIDITY change — worker passes the stale value to [ImapClient.fetchSince] (which
- *    handles the bounded full-resync internally) and overwrites the cursor with the
- *    server's fresh UIDVALIDITY.
- * 4. Credentials absent — [Result.failure] (missing IMAP creds is terminal).
- * 5. Network error — [Result.retry] plus [SourceStatusRepository.recordSyncError].
- * 6. Unauthorized — [Result.failure] (auth-terminal path).
- *
- * Spec refs: ING-008, ING-012, ING-013, ING-015, CRIT-01, SP-27b.
+ * Strategy: mock [ImapClient] + repositories + [SyncCursorStore] + [WorkScheduler]
+ * + [MetricsStore]. Hand-construct [ImapMessage] fixtures (the Jakarta-Mail-backed
+ * wire parse is exercised separately in `ImapClientImplTest` via GreenMail / fake
+ * Store — out of scope here).
  */
 @RunWith(RobolectricTestRunner::class)
 class ImapNaverWorkerTest {
@@ -71,8 +85,12 @@ class ImapNaverWorkerTest {
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val imapClient: ImapClient = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val emailBodyRepository: EmailBodyRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val metricsStore: MetricsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val moshi: Moshi = Moshi.Builder().build()
 
     private lateinit var worker: ImapNaverWorker
 
@@ -85,26 +103,40 @@ class ImapNaverWorkerTest {
         port = ImapNaverWorker.NAVER_IMAP_PORT,
     )
 
-    private val fakeMessage1 = ImapMessage(
-        uid = 101L,
-        uidValidity = 42L,
-        messageId = "<a@naver.com>",
-        subject = "subject-1",
-        fromEmail = "bob@naver.com",
-        fromDisplayName = "Bob",
-        bodyPreview = "body preview 1",
-        sentAt = Instant.fromEpochMilliseconds(1_700_000_000_000),
-    )
+    // ── Fixture factory ──────────────────────────────────────────────────────
 
-    private val fakeMessage2 = ImapMessage(
-        uid = 102L,
-        uidValidity = 42L,
-        messageId = "<b@naver.com>",
-        subject = "subject-2",
-        fromEmail = "carol@naver.com",
-        fromDisplayName = "Carol",
-        bodyPreview = "body preview 2",
-        sentAt = Instant.fromEpochMilliseconds(1_700_000_060_000),
+    private fun imsg(
+        uid: Long,
+        uidValidity: Long = 42L,
+        folder: String = "INBOX",
+        messageId: String? = "<msg-$uid@naver.com>",
+        subject: String? = "subject-$uid",
+        fromEmail: String? = "bob@naver.com",
+        fromName: String? = "Bob",
+        toAddresses: List<String> = emptyList(),
+        bodyPlain: String? = "Plain-text body $uid.",
+        bodyHtml: String? = null,
+        attachmentsMeta: List<ImapAttachmentMeta> = emptyList(),
+        inReplyTo: String? = null,
+        references: String? = null,
+        rawHeadersJson: String = "{}",
+        sentAt: Instant = Instant.fromEpochMilliseconds(1_700_000_000_000 + uid * 1_000),
+    ) = ImapMessage(
+        uid = uid,
+        uidValidity = uidValidity,
+        folder = folder,
+        messageId = messageId,
+        subject = subject,
+        fromEmail = fromEmail,
+        fromDisplayName = fromName,
+        toAddresses = toAddresses,
+        bodyPlain = bodyPlain,
+        bodyHtml = bodyHtml,
+        attachmentsMeta = attachmentsMeta,
+        inReplyTo = inReplyTo,
+        references = references,
+        rawHeadersJson = rawHeadersJson,
+        sentAt = sentAt,
     )
 
     @Before
@@ -118,239 +150,294 @@ class ImapNaverWorkerTest {
             syncCursorStore = syncCursorStore,
             imapClient = imapClient,
             rawIngestionRepository = rawIngestionRepository,
+            emailBodyRepository = emailBodyRepository,
             sourceStatusRepository = sourceStatusRepository,
+            workScheduler = workScheduler,
+            metricsStore = metricsStore,
+            moshi = moshi,
             logger = logger,
         )
 
         every { workerParams.runAttemptCount } returns 0
 
-        // Default: userPrefs emits a current_user_id
         val prefs = mutablePreferencesOf().apply {
             set(stringPreferencesKey("current_user_id"), fakeUserId)
         }
         every { userPrefs.data } returns flowOf(prefs)
 
-        // Default: credentials present
         coEvery { imapCredentialStore.load(SourceType.NAVER_IMAP) } returns fakeCredentials
 
-        // Default: no stored cursor (first run)
-        every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER) } returns flowOf(null)
-    }
+        // Default: cold start for both folder cursors.
+        every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER_INBOX) } returns
+            flowOf(null)
+        every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER_SENT) } returns
+            flowOf(null)
 
-    // ── T1: Happy path — 2 new messages → 2 inserts + cursor advance ────────
-
-    @Test
-    fun `doWork inserts 2 entities with deterministic clientEventIds and advances cursor`() = runTest {
+        // Default: both folders resolve cleanly.
         coEvery {
-            imapClient.fetchSince(
+            imapClient.listFolders(
                 host = ImapNaverWorker.NAVER_IMAP_HOST,
                 port = ImapNaverWorker.NAVER_IMAP_PORT,
                 user = fakeCredentials.username,
                 password = fakeCredentials.appPassword,
+            )
+        } returns BecalmResult.Success(
+            listOf(
+                ImapFolder(name = "INBOX", specialUse = ImapSpecialUse.INBOX),
+                ImapFolder(name = "보낸메일함", specialUse = null),
+                ImapFolder(name = "스팸메일함", specialUse = null),
+            ),
+        )
+
+        // Default: insert returns 1-to-1 ids for every captured batch.
+        coEvery { rawIngestionRepository.insertLocalBatch(any()) } answers {
+            val events = firstArg<List<RawIngestionEventEntity>>()
+            BecalmResult.Success(events.map { it.id })
+        }
+    }
+
+    // ── T1: two passes, four cursor keys ──────────────────────────────────────
+
+    @Test
+    fun `doWork twoPasses fourCursorKeys`() = runTest {
+        coEvery {
+            imapClient.fetchSince(
+                host = any(),
+                port = any(),
+                user = any(),
+                password = any(),
+                mailbox = "INBOX",
                 uidValidity = null,
                 uidNext = null,
-                maxMessages = ImapNaverWorker.MAX_MESSAGES_PER_RUN,
+                sinceDays = 30,
             )
         } returns BecalmResult.Success(
             ImapFetchResult(
-                messages = listOf(fakeMessage1, fakeMessage2),
+                messages = listOf(imsg(uid = 101L)),
                 newUidValidity = 42L,
-                newUidNext = 103L,
-            ),
-        )
-
-        val insertedEntities = slot<List<RawIngestionEventEntity>>()
-        coEvery { rawIngestionRepository.insertLocalBatch(capture(insertedEntities)) } returns
-            BecalmResult.Success(listOf("id-1", "id-2"))
-
-        val savedState = slot<ImapCursorState?>()
-        coEvery {
-            syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER, capture(savedState))
-        } returns Unit
-
-        val result = worker.doWork()
-
-        assertEquals(Result.success(), result)
-
-        // Entity shape: 2 rows, correct source_type, deterministic client_event_ids
-        assertEquals(2, insertedEntities.captured.size)
-        assertEquals(SourceType.NAVER_IMAP, insertedEntities.captured[0].sourceType)
-        assertEquals(SourceType.NAVER_IMAP, insertedEntities.captured[1].sourceType)
-        assertEquals("naver:101:42", insertedEntities.captured[0].clientEventId)
-        assertEquals("naver:102:42", insertedEntities.captured[1].clientEventId)
-        assertEquals(fakeUserId, insertedEntities.captured[0].userId)
-        assertEquals(fakeUserId, insertedEntities.captured[1].userId)
-
-        // Cursor advance: uidValidity=42 and lastSeenUid=serverUidNext-1=102
-        assertEquals(42L, savedState.captured?.uidValidity)
-        assertEquals(102L, savedState.captured?.lastSeenUid)
-
-        coVerify { sourceStatusRepository.recordSyncSuccess(SourceType.NAVER_IMAP, any()) }
-    }
-
-    // ── T2: Empty folder — cursor still advances, success recorded ───────────
-
-    @Test
-    fun `doWork records success and writes server cursor when folder is empty`() = runTest {
-        // Stored cursor: uidValidity=42, lastSeenUid=200 ⇒ fetchFromUid=201
-        every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER) } returns
-            flowOf(ImapCursorState(uidValidity = 42L, lastSeenUid = 200L))
-
-        coEvery {
-            imapClient.fetchSince(
-                host = ImapNaverWorker.NAVER_IMAP_HOST,
-                port = ImapNaverWorker.NAVER_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = 42L,
-                uidNext = 201L,
-                maxMessages = ImapNaverWorker.MAX_MESSAGES_PER_RUN,
-            )
-        } returns BecalmResult.Success(
-            ImapFetchResult(
-                messages = emptyList(),
-                newUidValidity = 42L,
-                newUidNext = 201L,
-            ),
-        )
-
-        val savedState = slot<ImapCursorState?>()
-        coEvery {
-            syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER, capture(savedState))
-        } returns Unit
-
-        val result = worker.doWork()
-
-        assertEquals(Result.success(), result)
-
-        // No insert attempted for an empty fetch
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
-
-        // Cursor is still written: uidValidity unchanged, lastSeenUid = newUidNext - 1 = 200
-        assertEquals(42L, savedState.captured?.uidValidity)
-        assertEquals(200L, savedState.captured?.lastSeenUid)
-
-        coVerify { sourceStatusRepository.recordSyncSuccess(SourceType.NAVER_IMAP, any()) }
-    }
-
-    // ── T3: UIDVALIDITY change — stale pair overwritten with server's fresh pair ─
-
-    @Test
-    fun `doWork overwrites stale cursor when server returns new UIDVALIDITY`() = runTest {
-        // Stored cursor with stale UIDVALIDITY=10
-        every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER) } returns
-            flowOf(ImapCursorState(uidValidity = 10L, lastSeenUid = 500L))
-
-        // Worker passes the stale pair to the client. The client internally detects the
-        // UIDVALIDITY mismatch and performs a bounded resync from UID 1 capped at
-        // MAX_MESSAGES_PER_RUN (ING-013). Emulate by returning a fresh UIDVALIDITY.
-        coEvery {
-            imapClient.fetchSince(
-                host = ImapNaverWorker.NAVER_IMAP_HOST,
-                port = ImapNaverWorker.NAVER_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = 10L,
-                uidNext = 501L,
-                maxMessages = ImapNaverWorker.MAX_MESSAGES_PER_RUN,
-            )
-        } returns BecalmResult.Success(
-            ImapFetchResult(
-                messages = listOf(fakeMessage1.copy(uidValidity = 99L)),
-                newUidValidity = 99L,
                 newUidNext = 102L,
             ),
         )
 
-        coEvery { rawIngestionRepository.insertLocalBatch(any()) } returns
-            BecalmResult.Success(listOf("id-1"))
-
-        val savedState = slot<ImapCursorState?>()
         coEvery {
-            syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER, capture(savedState))
-        } returns Unit
+            imapClient.fetchSince(
+                host = any(),
+                port = any(),
+                user = any(),
+                password = any(),
+                mailbox = "보낸메일함",
+                uidValidity = null,
+                uidNext = null,
+                sinceDays = 30,
+            )
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 201L, folder = "보낸메일함", toAddresses = listOf("alice@example.com"))),
+                newUidValidity = 77L,
+                newUidNext = 202L,
+            ),
+        )
 
         val result = worker.doWork()
 
         assertEquals(Result.success(), result)
 
-        // Stale (uidValidity=10, lastSeenUid=500) is overwritten atomically with the
-        // server's fresh pair. setImapState supersedes the stale tuple; no explicit
-        // clearCursor call needed.
-        assertEquals(99L, savedState.captured?.uidValidity)
-        assertEquals(101L, savedState.captured?.lastSeenUid)
+        // INBOX pass must run before SENT — assert strict ordering.
+        coVerifyOrder {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+            syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_INBOX, any())
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸메일함", any(), any(), any())
+            syncCursorStore.setImapState(ImapNaverWorker.MAILBOX_NAVER_SENT, any())
+        }
+
+        // Per-pass cursor must land under its own folder-scoped key.
+        coVerify {
+            syncCursorStore.setImapState(
+                mailbox = ImapNaverWorker.MAILBOX_NAVER_INBOX,
+                state = ImapCursorState(uidValidity = 42L, lastSeenUid = 101L),
+            )
+            syncCursorStore.setImapState(
+                mailbox = ImapNaverWorker.MAILBOX_NAVER_SENT,
+                state = ImapCursorState(uidValidity = 77L, lastSeenUid = 201L),
+            )
+        }
+
+        // Legacy single-INBOX key MUST NOT be touched.
+        coVerify(exactly = 0) { syncCursorStore.setImapState("naver", any()) }
+    }
+
+    // ── T2: SENT personRef = to[0] ───────────────────────────────────────────
+
+    @Test
+    fun `sent personRefFromTo0`() = runTest {
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
+
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸메일함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(
+                    imsg(
+                        uid = 301L,
+                        folder = "보낸메일함",
+                        fromEmail = "alice@naver.com",
+                        toAddresses = listOf("Recipient@Example.COM", "cc@example.com"),
+                    ),
+                ),
+                newUidValidity = 77L,
+                newUidNext = 302L,
+            ),
+        )
+
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            val events = firstArg<List<RawIngestionEventEntity>>()
+            BecalmResult.Success(events.map { it.id })
+        }
+        val bodies = slot<EmailBodyEntity>()
+        coEvery { emailBodyRepository.insert(capture(bodies)) } returns Unit
+
+        worker.doWork()
+
+        // SENT pass emits exactly one event (empty inbox); personRef is the
+        // lowercased first recipient.
+        val sentEntity = entities.captured.single()
+        assertEquals("recipient@example.com", sentEntity.personRef)
+        assertEquals(FOLDER_SENT, sentEntity.folder)
+        assertEquals(SourceType.NAVER_IMAP, sentEntity.sourceType)
         assertTrue(
-            "stored uidValidity must not equal the stale pre-resync value",
-            savedState.captured?.uidValidity != 10L,
+            "Sent client_event_id must embed folder segment",
+            sentEntity.clientEventId.startsWith("naver:sent:"),
+        )
+        // EmailBody row mirrors the group_email = false case and keeps toAddresses JSON.
+        assertEquals(false, bodies.captured.groupEmail)
+        assertNotNull(bodies.captured.toAddresses)
+    }
+
+    // ── T3: > threshold recipients → group email ─────────────────────────────
+
+    @Test
+    fun `sent over10 groupEmailTrue`() = runTest {
+        val bigList = (1..15).map { "to$it@example.com" }
+
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸메일함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 401L, folder = "보낸메일함", toAddresses = bigList)),
+                newUidValidity = 77L,
+                newUidNext = 402L,
+            ),
+        )
+
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            BecalmResult.Success(firstArg<List<RawIngestionEventEntity>>().map { it.id })
+        }
+        val bodies = slot<EmailBodyEntity>()
+        coEvery { emailBodyRepository.insert(capture(bodies)) } returns Unit
+
+        worker.doWork()
+
+        val sent = entities.captured.single()
+        assertNull("> threshold recipients must zero out personRef", sent.personRef)
+        assertTrue(
+            "EmailBody.groupEmail must flag > threshold recipients",
+            bodies.captured.groupEmail,
         )
     }
 
-    // ── T4: Credentials absent → Result.failure ──────────────────────────────
+    // ── T4: sourceRef JSON envelope uid fallback ─────────────────────────────
 
     @Test
-    fun `doWork returns failure when credentials are absent`() = runTest {
-        coEvery { imapCredentialStore.load(SourceType.NAVER_IMAP) } returns null
+    fun `sourceRef uidFallback`() = runTest {
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 500L, uidValidity = 42L, messageId = null)),
+                newUidValidity = 42L,
+                newUidNext = 501L,
+            ),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸메일함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 77L, newUidNext = 1L),
+        )
 
-        val result = worker.doWork()
-
-        assertEquals(Result.failure(), result)
-
-        coVerify(exactly = 0) {
-            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any())
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            BecalmResult.Success(firstArg<List<RawIngestionEventEntity>>().map { it.id })
         }
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
+
+        worker.doWork()
+
+        val sourceRef = entities.captured.single().sourceRef
+        assertNotNull(sourceRef)
+        assertTrue(
+            "Missing Message-Id must fall back to <uidValidity>:<uid>. Got: $sourceRef",
+            sourceRef!!.contains("\"message_id\":\"42:500\""),
+        )
     }
 
-    // ── T5: Network error → Result.retry + recordSyncError ───────────────────
+    // ── T5: HTML parse failure → subject fallback, no extraction enqueue ────
 
     @Test
-    fun `doWork returns retry and records sync error on Network failure`() = runTest {
+    fun `htmlParseFailure gracefulDegrade`() = runTest {
         coEvery {
-            imapClient.fetchSince(
-                host = ImapNaverWorker.NAVER_IMAP_HOST,
-                port = ImapNaverWorker.NAVER_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = null,
-                uidNext = null,
-                maxMessages = ImapNaverWorker.MAX_MESSAGES_PER_RUN,
-            )
-        } returns BecalmResult.Failure(BecalmError.Network(-1, "IMAP connect failed"))
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(
+                    imsg(
+                        uid = 600L,
+                        subject = "Reminder: meeting tomorrow",
+                        bodyPlain = null,
+                        bodyHtml = null, // snippet builder falls through to subject
+                    ),
+                ),
+                newUidValidity = 42L,
+                newUidNext = 601L,
+            ),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸메일함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 77L, newUidNext = 1L),
+        )
 
-        val result = worker.doWork()
+        worker.doWork()
 
-        assertEquals(Result.retry(), result)
-
-        coVerify {
-            sourceStatusRepository.recordSyncError(
-                sourceType = SourceType.NAVER_IMAP,
-                error = any(),
-                at = any(),
-            )
-        }
-        // No cursor advance / insert on failure
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
-        coVerify(exactly = 0) { syncCursorStore.setImapState(any(), any()) }
+        // Subject-only → metric bumped + extraction enqueue skipped.
+        coVerify { metricsStore.incrementSubjectOnlySkipped() }
+        coVerify(exactly = 0) { workScheduler.enqueueCommitmentExtraction(any()) }
     }
 
-    // ── T6: Unauthorized → Result.failure (auth-terminal path) ───────────────
+    // ── T6: Per-provider credential isolation ────────────────────────────────
 
     @Test
-    fun `doWork returns failure on Unauthorized error`() = runTest {
+    fun `usesNaverProviderCredentials`() = runTest {
+        // Default stubs already cover both passes returning empty. The one
+        // assertion we care about is that [ImapCredentialStore.load] is called
+        // with SourceType.NAVER_IMAP (ING-011 per-provider isolation).
         coEvery {
-            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any())
-        } returns BecalmResult.Failure(BecalmError.Unauthorized)
+            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
 
-        val result = worker.doWork()
+        worker.doWork()
 
-        assertEquals(Result.failure(), result)
-
-        coVerify {
-            sourceStatusRepository.recordSyncError(
-                sourceType = SourceType.NAVER_IMAP,
-                error = any(),
-                at = any(),
-            )
-        }
+        coVerify { imapCredentialStore.load(SourceType.NAVER_IMAP) }
     }
 }

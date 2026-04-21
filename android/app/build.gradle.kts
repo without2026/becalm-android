@@ -46,6 +46,17 @@ android {
         buildConfigField("String", "BECALM_API_BASE_URL", "\"${localProp("BECALM_API_BASE_URL")}\"")
         buildConfigField("String", "SUPABASE_URL",        "\"${localProp("SUPABASE_URL")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY",   "\"${localProp("SUPABASE_ANON_KEY")}\"")
+        // MSAL Microsoft Entra application (client) ID — consumed by AuthModule via
+        // @Named("msalClientId"). Developer overrides via Gradle property `msal.client.id`
+        // (typically set in ~/.gradle/gradle.properties or local.properties); CI supplies
+        // the production value. Placeholder zero-GUID is a valid format for debug/test
+        // builds that never hit the actual MSAL endpoint.
+        // See docs/plans/repo-auth-msgraph-oauth-provider.md § 5.4.
+        buildConfigField(
+            "String",
+            "MSAL_CLIENT_ID",
+            "\"${findProperty("msal.client.id") ?: "00000000-0000-0000-0000-000000000000"}\"",
+        )
     }
 
     buildTypes {
@@ -174,8 +185,16 @@ dependencies {
     implementation(libs.googleid)
     implementation(libs.play.services.auth)
 
+    // ─── MSAL (MS Graph OAuth — MsGraphTokenProviderImpl, ING-007) ───────────
+    implementation(libs.msal)
+
     // ─── libphonenumber (E.164 normalization for call-recording person_ref) ──
     implementation(libs.libphonenumber)
+
+    // ─── Gemini Nano (on-device LLM via AICore) ──────────────────────────────
+    // Powers CommitmentExtractionWorker's email-source on-device commitment extraction.
+    // Spec: EMAIL-001 / EMAIL-008 / KTR-GEMINI-NANO.
+    implementation(libs.gemini.nano.aicore)
 
     // ─── Timber ──────────────────────────────────────────────────────────────
     implementation(libs.timber)
@@ -197,6 +216,8 @@ dependencies {
     // fields). Unused at runtime — compileOnly on main would also work, but the reflection
     // is only exercised from src/test so it is declared as testImplementation.
     testImplementation(libs.kotlin.reflect)
+    // ApplicationProvider used by Robolectric unit tests (EmailPromptBuilderTest, CommitmentExtractionWorkerTest).
+    testImplementation(libs.androidx.test.core)
 
     // ─── Instrumented Tests ───────────────────────────────────────────────────
     androidTestImplementation(libs.androidx.test.ext.junit)

@@ -151,7 +151,10 @@ public class UploadWorker @AssistedInject constructor(
             "batch all retryable, backing off",
             now,
         )
-        return Result.retry(retryOutput("batch_all_retryable_$domain", attempt).build())
+        // Retry reason / attempt are already captured in the logger.w call above and the
+        // sourceStatusRepository.recordSyncError row; WorkManager's Result.retry() does not
+        // accept output data.
+        return Result.retry()
     }
 
     public companion object {

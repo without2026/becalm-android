@@ -49,4 +49,30 @@ public interface AuthTokenProvider {
      *   Pass an empty string when the caller had no token (first call with no session).
      */
     public suspend fun refresh(previousAccessToken: String): String?
+
+    /**
+     * Warms the in-memory access-token cache from persisted storage so the first
+     * hot-path request avoids a disk read (Round 6A.4).
+     *
+     * Default implementation is a no-op because [DefaultAuthTokenProvider] already
+     * observes [com.becalm.android.data.remote.supabase.SupabaseSessionStore.observe]
+     * and auto-populates the cache on session save. Callers invoke this after sign-in
+     * to make the warming intent explicit at the call site.
+     */
+    public suspend fun primeCache() {
+        // Default: observer-based providers auto-prime on session save.
+    }
+
+    /**
+     * Drops the in-memory access-token cache so the next hot-path request re-consults
+     * storage (Round 6A.4).
+     *
+     * Default implementation is a no-op because [DefaultAuthTokenProvider] observes
+     * [com.becalm.android.data.remote.supabase.SupabaseSessionStore.observe] and
+     * auto-clears the cache on session clear. Callers invoke this after sign-out or
+     * session invalidation to make the invalidation intent explicit.
+     */
+    public fun invalidate() {
+        // Default: observer-based providers auto-invalidate on session clear.
+    }
 }

@@ -2,6 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        Gemini Nano (AICore) declares minSdk 31 but only ~30% of our users run ≥ API 31 at
+        the moment. Keeping minSdk at 28 means the rest of the app still loads on Android 9 /
+        10 / 11 devices; CommitmentExtractionWorker gracefully no-ops on unsupported devices
+        by catching the AICore init `Throwable` and returning
+        BecalmError.ExtractorUnavailable(reason="AICORE_NOT_AVAILABLE") (see GeminiNanoExtractor).
+        The worker's handleFailure lookup returns Result.success() on that reason, so there is
+        no retry storm.
+
+        Spec refs: EMAIL-008, KTR-GEMINI-NANO, docs/plans/domain-email-commitment-extractor.md.
+    -->
+    <uses-sdk tools:overrideLibrary="com.google.ai.edge.aicore" />
+
     <!-- ── Permissions ──────────────────────────────────────────────────────── -->
 
     <!-- Network (Supabase + Railway API) -->
@@ -83,6 +96,33 @@
         <receiver
             android:name="com.becalm.android.receiver.ReminderBroadcastReceiver"
             android:exported="false" />
+
+        <!-- ── MSAL Browser Tab Activity (ING-007 / MsGraphTokenProviderImpl) ─ -->
+
+        <!--
+            MSAL launches Chrome Custom Tabs for the Microsoft OAuth2 consent flow and
+            receives the `msauth://<applicationId>/<keyhash>` redirect through this
+            activity. See docs/plans/repo-auth-msgraph-oauth-provider.md § 5.4.
+
+            `PLACEHOLDER_KEYHASH` is a build-time sentinel — the debug keystore SHA-1
+            base64url-encoded value is registered in the Microsoft Entra app registration
+            and must be substituted per build variant (sourceSet override or
+            manifestPlaceholders) before the flow resolves on a real device. Unit tests
+            do not exercise this path.
+        -->
+        <activity
+            android:name="com.microsoft.identity.client.BrowserTabActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="msauth"
+                    android:host="com.becalm.android"
+                    android:path="/PLACEHOLDER_KEYHASH" />
+            </intent-filter>
+        </activity>
 
         <!-- ── WorkManager: disable auto-init; BecalmApplication provides HiltWorkerFactory ── -->
 
