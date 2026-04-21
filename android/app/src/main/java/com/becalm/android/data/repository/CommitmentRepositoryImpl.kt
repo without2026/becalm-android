@@ -88,6 +88,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override fun observeById(id: String): Flow<CommitmentEntity?> =
         dao.observeById(id)
 
+    override fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?> =
+        dao.observeByIdForUser(userId, id)
+
     // ── Remote refresh ────────────────────────────────────────────────────────
 
     override suspend fun refreshSince(
@@ -162,7 +165,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
         id: String,
         event: CommitmentEvent,
     ): BecalmResult<CommitmentEntity> = withContext(ioDispatcher) {
-        val entity = dao.findById(id)
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+        val entity = dao.findByIdForUser(actorId, id)
             ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
 
         val current = CommitmentState.fromWire(entity.actionState)
@@ -199,7 +204,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
             )
         }
 
-        val entity = dao.findById(id)
+        val actorId = resolveActorId()
+            ?: return BecalmResult.Failure(BecalmError.Unauthorized)
+        val entity = dao.findByIdForUser(actorId, id)
             ?: return BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
         // Retained lookup guards against a caller racing updateActionState against a
         // local deletion — we fail loudly rather than silently no-op the DAO update.
@@ -402,37 +409,45 @@ public class CommitmentRepositoryImpl @Inject constructor(
         val now = Clock.System.now()
         val newId = UUID.randomUUID().toString()
 
-        // Build the manual row. Contract pinned by `.spec/manual-commitment.spec.yml`
-        // invariants:
-        //   - source_type = 'manual' (spec MAN-003).
-        //   - confidence  = 1.0 (user-entered; spec MAN-003).
-        //   - source_ref + source_event_title are NULL; source_event_occurred_at
-        //     equals created_at (the user's save moment), NOT an LLM-extracted
-        //     event timestamp (spec MAN-003 + invariant 2).
-        //   - last_edited_by/at are populated immediately so the audit trail
-        //     mirrors the LLM-extracted rows (EDIT-008 parity).
-        //   - supersedes_commitment_id carries `supersedeOf` when present.
-        // GREP GUARD: this path MUST NEVER insert into raw_ingestion_events
-        // (`rawIngestionEventDao.insert` / `rawEventDao.insert` etc.). Manual
-        // commitments have no backing raw event by spec MAN-003 invariant 4.
+        // EDIT-007 supersede: load the old row first so we can copy its quote +
+        // source fields onto the new row. The spec is explicit that supersede
+        // preserves evidentiary provenance — the new row inherits source_type,
+        // source_event_title, source_event_occurred_at, and source_ref from the
+        // old row. Only the user-editable fields come from `input`.
+        val oldRow: CommitmentEntity? = supersedeOf?.let { dao.findByIdForUser(actorId, it) }
+
+        // Build the new row. Two sources:
+        //   1. Manual create (supersedeOf == null) — spec MAN-003 invariants:
+        //      source_type='manual', confidence=1.0, source_ref=null,
+        //      source_event_title=null, source_event_occurred_at=created_at.
+        //      GREP GUARD: this branch MUST NEVER insert into raw_ingestion_events
+        //      (`rawIngestionEventDao.insert` / `rawEventDao.insert`). Manual
+        //      rows have no backing raw event per MAN-003 invariant 4.
+        //   2. Supersede (supersedeOf != null, oldRow != null) — spec EDIT-007:
+        //      quote + source_* copied verbatim from the old row to preserve
+        //      evidentiary provenance. confidence follows the old row so an
+        //      LLM-extracted commitment that gets corrected keeps its original
+        //      confidence score. user-editable fields still come from `input`.
+        //   In both cases last_edited_by/at are populated immediately so the
+        //   audit trail mirrors LLM-extracted rows (EDIT-008 parity).
         val newRow = CommitmentEntity(
             id = newId,
             userId = actorId,
             direction = input.direction,
-            counterpartyRaw = null,
+            counterpartyRaw = oldRow?.counterpartyRaw,
             personRef = input.personRef,
             title = input.title,
             description = null,
-            quote = input.quote,
-            sourceEventTitle = null,
-            sourceEventOccurredAt = now,
+            quote = oldRow?.quote ?: input.quote,
+            sourceEventTitle = oldRow?.sourceEventTitle,
+            sourceEventOccurredAt = oldRow?.sourceEventOccurredAt ?: now,
             dueAt = input.dueAt,
             dueHint = input.dueHint,
             dueIsApproximate = input.dueIsApproximate,
             actionState = "pending",
-            sourceType = SourceType.MANUAL,
-            sourceRef = null,
-            confidence = 1.0,
+            sourceType = oldRow?.sourceType ?: SourceType.MANUAL,
+            sourceRef = oldRow?.sourceRef,
+            confidence = oldRow?.confidence ?: 1.0,
             commitmentState = CommitmentLifecycleLegacy.DRAFT,
             syncStatus = "pending",
             createdAt = now,
@@ -446,6 +461,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
         )
 
         if (supersedeOf != null) {
+            if (oldRow == null) {
+                return@withContext BecalmResult.Failure(
+                    BecalmError.NotFound("commitment/$supersedeOf")
+                )
+            }
             // EDIT-007 reuses this path: supersede() wraps INSERT + softDelete
             // in a single Room transaction + best-effort upload of the new row.
             return@withContext supersede(supersedeOf, newRow)

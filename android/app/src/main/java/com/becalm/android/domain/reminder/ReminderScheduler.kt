@@ -7,12 +7,15 @@ import android.content.Intent
 import android.os.Build
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration.Companion.hours
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Instant
 
 /**
@@ -38,6 +41,7 @@ import kotlinx.datetime.Instant
 public class ReminderScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val clock: Clock,
+    private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) {
 
@@ -73,8 +77,26 @@ public class ReminderScheduler @Inject constructor(
             return
         }
 
+        // Capture the currently signed-in user id at schedule time so the
+        // receiver can enforce a user-scoped Room lookup on fire. An alarm
+        // scheduled for one account must never surface data for another
+        // account even if the user signs out and signs in as someone else
+        // before the alarm fires (data-model.yml:476 cross-account leak
+        // guard). runBlocking is acceptable here because this runs on a
+        // background coroutine (the VM's viewModelScope) and we only read
+        // a DataStore value that is already cached in memory.
+        val userId = runBlocking { userPrefsStore.observeCurrentUserId().firstOrNull() }
+        if (userId.isNullOrBlank()) {
+            logger.w(
+                TAG,
+                "schedule skipped: no signed-in user for commitment %08x"
+                    .format(commitmentId.hashCode()),
+            )
+            return
+        }
+
         val requestCode = commitmentIdToRequestCode(commitmentId)
-        val pi = buildPendingIntent(commitmentId, requestCode)
+        val pi = buildPendingIntent(commitmentId, userId, requestCode)
         val triggerMs = triggerAt.toEpochMilliseconds()
 
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -109,7 +131,10 @@ public class ReminderScheduler @Inject constructor(
      */
     public fun cancel(commitmentId: String) {
         val requestCode = commitmentIdToRequestCode(commitmentId)
-        val pi = buildPendingIntent(commitmentId, requestCode)
+        // For cancel we only need a matching PendingIntent to invalidate; the
+        // extras are ignored by AlarmManager's intent-equality rules once the
+        // request code + filter match. Pass an empty user id as a sentinel.
+        val pi = buildPendingIntent(commitmentId, userId = "", requestCode = requestCode)
         alarmManager.cancel(pi)
         pi.cancel()
         logger.d(TAG, "Alarm cancelled for commitment %08x".format(commitmentId.hashCode()))
@@ -117,9 +142,14 @@ public class ReminderScheduler @Inject constructor(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun buildPendingIntent(commitmentId: String, requestCode: Int): PendingIntent {
+    private fun buildPendingIntent(
+        commitmentId: String,
+        userId: String,
+        requestCode: Int,
+    ): PendingIntent {
         val intent = Intent(context, ReminderBroadcastReceiver::class.java).apply {
             putExtra(ReminderBroadcastReceiver.EXTRA_COMMITMENT_ID, commitmentId)
+            putExtra(ReminderBroadcastReceiver.EXTRA_USER_ID, userId)
         }
         return PendingIntent.getBroadcast(
             context,

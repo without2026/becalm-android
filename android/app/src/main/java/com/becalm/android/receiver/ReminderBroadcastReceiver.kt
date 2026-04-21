@@ -59,6 +59,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val commitmentId = intent.getStringExtra(EXTRA_COMMITMENT_ID) ?: return
+        val scheduledUserId = intent.getStringExtra(EXTRA_USER_ID).orEmpty()
 
         // Finding 4 (security-auditor): POST_NOTIFICATIONS is a runtime permission on API 33+.
         // Skip notification silently rather than crash; log WARN with redacted ID for diagnostics.
@@ -82,7 +83,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         val pending = goAsync()
         receiverScope.launch {
             try {
-                handle(context, commitmentId)
+                handle(context, commitmentId, scheduledUserId)
             } finally {
                 pending.finish()
             }
@@ -98,8 +99,24 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
      * the row is missing or in a terminal state (CMT-008). Otherwise posts the
      * `commitment_due_soon` notification.
      */
-    internal suspend fun handle(context: Context, commitmentId: String) {
-        val entity = commitmentDao.findById(commitmentId)
+    internal suspend fun handle(
+        context: Context,
+        commitmentId: String,
+        scheduledUserId: String,
+    ) {
+        if (scheduledUserId.isBlank()) {
+            // An alarm without a captured owner predates the user-scoping fix
+            // (data-model.yml:476). Silently drop rather than query unscoped —
+            // a stale alarm is cheap; surfacing another account's commitment is
+            // not.
+            logger.w(
+                TAG,
+                "silent drop: alarm missing scheduled user_id for " +
+                    "commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
+        val entity = commitmentDao.findByIdForUser(scheduledUserId, commitmentId)
         if (entity == null) {
             logger.d(
                 TAG,
@@ -171,6 +188,15 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
     public companion object {
         /** Intent extra key carrying the opaque commitment identifier. */
         public const val EXTRA_COMMITMENT_ID: String = "commitment_id"
+
+        /**
+         * Intent extra key carrying the user id that owned the commitment at
+         * schedule time. Captured by [com.becalm.android.domain.reminder.ReminderScheduler]
+         * when the alarm is armed; the receiver passes it to the user-scoped
+         * `findByIdForUser` DAO query to rule out cross-account leaks
+         * (data-model.yml:476). A missing / blank value causes a silent drop.
+         */
+        public const val EXTRA_USER_ID: String = "user_id"
 
         /**
          * Notification channel ID used by the `commitment_due_soon` channel. Registered

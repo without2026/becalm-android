@@ -157,9 +157,9 @@ class ReminderBroadcastReceiverTest {
     @Test
     fun `pending commitment posts a notification`() = runTest(testDispatcher) {
         val entity = commitmentEntity(id = "c-1", actionState = "pending")
-        coEvery { commitmentDao.findById("c-1") } returns entity
+        coEvery { commitmentDao.findByIdForUser("user-1","c-1") } returns entity
 
-        buildReceiver().handle(context, "c-1")
+        buildReceiver().handle(context, scheduledUserId = "user-1", commitmentId = "c-1")
 
         verify(exactly = 1) { notificationManagerCompat.notify(any<Int>(), any()) }
     }
@@ -167,9 +167,9 @@ class ReminderBroadcastReceiverTest {
     @Test
     fun `completed commitment is silently dropped`() = runTest(testDispatcher) {
         val entity = commitmentEntity(id = "c-2", actionState = "completed")
-        coEvery { commitmentDao.findById("c-2") } returns entity
+        coEvery { commitmentDao.findByIdForUser("user-1","c-2") } returns entity
 
-        buildReceiver().handle(context, "c-2")
+        buildReceiver().handle(context, scheduledUserId = "user-1", commitmentId = "c-2")
 
         verify(exactly = 0) { notificationManagerCompat.notify(any<Int>(), any()) }
     }
@@ -177,18 +177,18 @@ class ReminderBroadcastReceiverTest {
     @Test
     fun `cancelled commitment is silently dropped`() = runTest(testDispatcher) {
         val entity = commitmentEntity(id = "c-3", actionState = "cancelled")
-        coEvery { commitmentDao.findById("c-3") } returns entity
+        coEvery { commitmentDao.findByIdForUser("user-1","c-3") } returns entity
 
-        buildReceiver().handle(context, "c-3")
+        buildReceiver().handle(context, scheduledUserId = "user-1", commitmentId = "c-3")
 
         verify(exactly = 0) { notificationManagerCompat.notify(any<Int>(), any()) }
     }
 
     @Test
     fun `missing commitment is silently dropped`() = runTest(testDispatcher) {
-        coEvery { commitmentDao.findById("c-4") } returns null
+        coEvery { commitmentDao.findByIdForUser("user-1","c-4") } returns null
 
-        buildReceiver().handle(context, "c-4")
+        buildReceiver().handle(context, scheduledUserId = "user-1", commitmentId = "c-4")
 
         verify(exactly = 0) { notificationManagerCompat.notify(any<Int>(), any()) }
     }

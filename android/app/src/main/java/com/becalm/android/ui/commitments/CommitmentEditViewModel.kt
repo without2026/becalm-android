@@ -130,6 +130,7 @@ private const val TAG = "CommitmentEditVM"
 @HiltViewModel
 public class CommitmentEditViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
+    private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
 ) : ViewModel() {
@@ -276,7 +277,15 @@ public class CommitmentEditViewModel @Inject constructor(
 
     private fun load() {
         viewModelScope.launch {
-            val entity = commitmentRepository.observeById(id).firstOrNull()
+            // Resolve the current user id first so we can read via the user-scoped
+            // DAO query. A bare-id observation could otherwise surface another
+            // account's row after a sign-out/sign-in on the shared Room DB.
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(loading = false, notFound = true) }
+                return@launch
+            }
+            val entity = commitmentRepository.observeByIdForUser(userId, id).firstOrNull()
             if (entity == null) {
                 _uiState.update { it.copy(loading = false, notFound = true) }
                 return@launch

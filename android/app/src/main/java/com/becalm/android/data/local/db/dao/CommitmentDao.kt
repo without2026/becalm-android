@@ -79,7 +79,8 @@ public interface CommitmentDao {
         """
         UPDATE commitments
         SET action_state = :newState,
-            updated_at   = :updatedAt
+            updated_at   = :updatedAt,
+            sync_status  = 'pending'
         WHERE id = :id
         """
     )
@@ -297,6 +298,21 @@ public interface CommitmentDao {
     public suspend fun findById(id: String): CommitmentEntity?
 
     /**
+     * User-scoped reactive read of a single commitment by [id]. The preferred API
+     * for any Wave 4 surface that renders commitment detail — bare-id lookups
+     * risk surfacing another account's row after a sign-out/sign-in on the
+     * shared Room DB (cross-account leak guard, `.spec/contracts/data-model.yml:476`).
+     *
+     * Emits `null` when no row matches the (user_id, id) pair OR when the row is
+     * soft-deleted (`deleted_at IS NOT NULL`).
+     *
+     * @param userId Supabase auth user id owning the commitment.
+     * @param id UUID of the commitment.
+     */
+    @Query("SELECT * FROM commitments WHERE user_id = :userId AND id = :id AND deleted_at IS NULL")
+    public suspend fun findByIdForUser(userId: String, id: String): CommitmentEntity?
+
+    /**
      * Emits the live commitment identified by [id] and re-emits on every matching
      * `commitments` row write. Emits `null` when no row matches OR the matching row
      * has been soft-deleted.
@@ -313,6 +329,21 @@ public interface CommitmentDao {
      */
     @Query("SELECT * FROM commitments WHERE id = :id AND deleted_at IS NULL")
     public fun observeById(id: String): Flow<CommitmentEntity?>
+
+    /**
+     * User-scoped reactive observer, paired with [findByIdForUser]. Emits `null`
+     * when no row matches the (user_id, id) pair OR when the row is soft-deleted.
+     *
+     * Use this variant in every detail-sheet / edit-sheet / create-sheet ViewModel
+     * so the subscribed row is guaranteed to belong to the currently signed-in
+     * user — a bare-id subscription can silently surface another account's data
+     * after account switching on the shared Room database.
+     *
+     * @param userId Supabase auth user id owning the commitment.
+     * @param id UUID of the commitment to observe.
+     */
+    @Query("SELECT * FROM commitments WHERE user_id = :userId AND id = :id AND deleted_at IS NULL")
+    public fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?>
 
     /**
      * Returns the live-or-tombstoned commitments for [userId] whose [CommitmentEntity.id]

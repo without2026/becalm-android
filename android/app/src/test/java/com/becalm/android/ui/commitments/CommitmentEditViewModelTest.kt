@@ -50,11 +50,13 @@ class CommitmentEditViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
+    private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
     }
 
     @After
@@ -68,6 +70,7 @@ class CommitmentEditViewModelTest {
     private fun buildViewModel(id: String = "cmt-1"): CommitmentEditViewModel =
         CommitmentEditViewModel(
             commitmentRepository = commitmentRepository,
+            userPrefsStore = userPrefsStore,
             savedStateHandle = savedState(id),
             logger = logger,
         )
@@ -82,7 +85,7 @@ class CommitmentEditViewModelTest {
             direction = "take",
             personRef = "+821012345678",
         )
-        every { commitmentRepository.observeById("cmt-1") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-1") } returns flowOf(entity)
 
         val viewModel = buildViewModel("cmt-1")
 
@@ -102,7 +105,7 @@ class CommitmentEditViewModelTest {
 
     @Test
     fun `load path flips notFound when observeById emits null`() = runTest(testDispatcher) {
-        every { commitmentRepository.observeById("missing") } returns flowOf(null)
+        every { commitmentRepository.observeByIdForUser("user-1","missing") } returns flowOf(null)
 
         val viewModel = buildViewModel("missing")
 
@@ -122,7 +125,7 @@ class CommitmentEditViewModelTest {
     fun `onSave with empty title surfaces field error and does not call repo`() =
         runTest(testDispatcher) {
             val entity = makeEntity(id = "cmt-v", title = "")
-            every { commitmentRepository.observeById("cmt-v") } returns flowOf(entity)
+            every { commitmentRepository.observeByIdForUser("user-1","cmt-v") } returns flowOf(entity)
 
             val viewModel = buildViewModel("cmt-v")
             // Drain the initial seed emission.
@@ -151,7 +154,7 @@ class CommitmentEditViewModelTest {
     @Test
     fun `onSave with valid draft emits Saved dismiss event`() = runTest(testDispatcher) {
         val entity = makeEntity(id = "cmt-s", title = "Pay rent")
-        every { commitmentRepository.observeById("cmt-s") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-s") } returns flowOf(entity)
         coEvery {
             commitmentRepository.editCommitment(eq("cmt-s"), any<CommitmentEditPatch>())
         } returns BecalmResult.Success(Unit)
@@ -170,7 +173,7 @@ class CommitmentEditViewModelTest {
     @Test
     fun `onSave failure surfaces saveError and does not dismiss`() = runTest(testDispatcher) {
         val entity = makeEntity(id = "cmt-f", title = "Pay rent")
-        every { commitmentRepository.observeById("cmt-f") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-f") } returns flowOf(entity)
         coEvery {
             commitmentRepository.editCommitment(eq("cmt-f"), any<CommitmentEditPatch>())
         } returns BecalmResult.Failure(BecalmError.Unauthorized)
@@ -191,7 +194,7 @@ class CommitmentEditViewModelTest {
     @Test
     fun `onToggleDispute flips readOnly flag after Success`() = runTest(testDispatcher) {
         val entity = makeEntity(id = "cmt-d", quoteDisputed = false)
-        every { commitmentRepository.observeById("cmt-d") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-d") } returns flowOf(entity)
         coEvery { commitmentRepository.markQuoteDisputed("cmt-d") } returns BecalmResult.Success(Unit)
 
         val viewModel = buildViewModel("cmt-d")
@@ -210,7 +213,7 @@ class CommitmentEditViewModelTest {
     @Test
     fun `onConfirmDelete emits Deleted dismiss event on Success`() = runTest(testDispatcher) {
         val entity = makeEntity(id = "cmt-del")
-        every { commitmentRepository.observeById("cmt-del") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-del") } returns flowOf(entity)
         coEvery { commitmentRepository.softDelete("cmt-del") } returns BecalmResult.Success(Unit)
 
         val viewModel = buildViewModel("cmt-del")
@@ -229,7 +232,7 @@ class CommitmentEditViewModelTest {
     @Test
     fun `onCancel emits Cancelled without touching repository`() = runTest(testDispatcher) {
         val entity = makeEntity(id = "cmt-c")
-        every { commitmentRepository.observeById("cmt-c") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-c") } returns flowOf(entity)
 
         val viewModel = buildViewModel("cmt-c")
         testDispatcher.scheduler.advanceUntilIdle()

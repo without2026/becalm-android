@@ -40,6 +40,7 @@ class ReminderSchedulerTest {
     private lateinit var alarmManager: AlarmManager
     private lateinit var logger: Logger
     private lateinit var clock: Clock
+    private lateinit var userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore
     private lateinit var scheduler: ReminderScheduler
 
     @Before
@@ -48,12 +49,15 @@ class ReminderSchedulerTest {
         alarmManager = mockk(relaxed = true)
         logger = mockk(relaxed = true)
         clock = mockk(relaxed = true)
+        userPrefsStore = mockk(relaxed = true)
 
         every { context.getSystemService(Context.ALARM_SERVICE) } returns alarmManager
         every { alarmManager.canScheduleExactAlarms() } returns true
         every { clock.nowInstant() } returns NOW
+        every { userPrefsStore.observeCurrentUserId() } returns
+            kotlinx.coroutines.flow.flowOf("user-1")
 
-        scheduler = ReminderScheduler(context, clock, logger)
+        scheduler = ReminderScheduler(context, clock, userPrefsStore, logger)
     }
 
     // ── schedule() gate cases ─────────────────────────────────────────────────

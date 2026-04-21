@@ -47,6 +47,7 @@ class CommitmentDetailViewModelTest {
 
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
+    private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
@@ -56,6 +57,7 @@ class CommitmentDetailViewModelTest {
         // resolution need no extra stubbing.
         every { personEnrichmentRepository.observeEnrichmentMap() } returns
             flowOf(emptyMap<String, PersonEnrichmentEntity>())
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
     }
 
     @After
@@ -70,6 +72,7 @@ class CommitmentDetailViewModelTest {
         CommitmentDetailViewModel(
             commitmentRepository = commitmentRepository,
             personEnrichmentRepository = personEnrichmentRepository,
+            userPrefsStore = userPrefsStore,
             savedStateHandle = savedState(id),
             logger = logger,
         )
@@ -84,7 +87,7 @@ class CommitmentDetailViewModelTest {
             displayName = "Alice Kim",
             lastSyncedAt = Instant.fromEpochMilliseconds(1),
         )
-        every { commitmentRepository.observeById("cmt-1") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-1") } returns flowOf(entity)
         every { personEnrichmentRepository.observeEnrichmentMap() } returns
             flowOf(mapOf(entity.personRef!! to enrichment))
 
@@ -108,7 +111,7 @@ class CommitmentDetailViewModelTest {
 
     @Test
     fun `null entity from repo flips error to empty-key and clears loading`() = runTest(testDispatcher) {
-        every { commitmentRepository.observeById("cmt-gone") } returns flowOf(null)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-gone") } returns flowOf(null)
 
         val viewModel = buildViewModel("cmt-gone")
 
@@ -133,7 +136,7 @@ class CommitmentDetailViewModelTest {
             quoteDisputed = true,
             quoteDisputedAt = disputedAt,
         )
-        every { commitmentRepository.observeById("cmt-d") } returns flowOf(entity)
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-d") } returns flowOf(entity)
 
         val viewModel = buildViewModel("cmt-d")
 
@@ -155,7 +158,7 @@ class CommitmentDetailViewModelTest {
         val initial = makeEntity(id = "cmt-r", actionState = "pending")
         val updated = initial.copy(actionState = "reminded")
         val flow = MutableStateFlow<CommitmentEntity?>(initial)
-        every { commitmentRepository.observeById("cmt-r") } returns flow
+        every { commitmentRepository.observeByIdForUser("user-1","cmt-r") } returns flow
 
         val viewModel = buildViewModel("cmt-r")
 

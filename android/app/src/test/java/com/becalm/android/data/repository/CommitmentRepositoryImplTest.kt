@@ -868,6 +868,9 @@ class CommitmentRepositoryImplTest {
 
         override suspend fun findById(id: String): CommitmentEntity? = rows[id]
 
+        override suspend fun findByIdForUser(userId: String, id: String): CommitmentEntity? =
+            rows[id]?.takeIf { it.userId == userId && it.deletedAt == null }
+
         override suspend fun findByIdsForMerge(
             userId: String,
             ids: List<String>,
@@ -890,6 +893,11 @@ class CommitmentRepositoryImplTest {
          */
         override fun observeById(id: String): Flow<CommitmentEntity?> =
             snapshots.map { it[id] }
+
+        override fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?> =
+            snapshots.map { map ->
+                map[id]?.takeIf { it.userId == userId && it.deletedAt == null }
+            }
 
         override suspend fun findPendingSync(userId: String, limit: Int): List<CommitmentEntity> =
             rows.values.filter { it.userId == userId && it.syncStatus == "pending" }.take(limit)

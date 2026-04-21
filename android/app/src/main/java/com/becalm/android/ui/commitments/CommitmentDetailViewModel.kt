@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
@@ -17,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -72,6 +75,7 @@ private const val COUNTERPARTY_DISPLAY_MAX = 30
 public class CommitmentDetailViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
 ) : ViewModel() {
@@ -98,8 +102,17 @@ public class CommitmentDetailViewModel @Inject constructor(
 
     private fun observe() {
         viewModelScope.launch {
+            // User-scoped observation: the deep link / nav argument carries only
+            // the commitment id, but the shared Room DB could otherwise surface
+            // another account's row after account switching. Resolving the user
+            // id here and switching to observeByIdForUser closes that gap
+            // (cross-account leak guard, data-model.yml:476).
+            val commitmentFlow = userPrefsStore.observeCurrentUserId().flatMapLatest { userId ->
+                if (userId.isNullOrBlank()) flowOf(null)
+                else commitmentRepository.observeByIdForUser(userId, id)
+            }
             combine(
-                commitmentRepository.observeById(id),
+                commitmentFlow,
                 personEnrichmentRepository.observeEnrichmentMap(),
             ) { entity, enrichment -> entity to enrichment }
                 .catch { e ->

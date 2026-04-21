@@ -13,6 +13,7 @@ import com.becalm.android.domain.commitment.ManualCommitmentInput
 import com.becalm.android.ui.navigation.BecalmRoute
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.Dispatchers
@@ -49,11 +50,13 @@ class CommitmentCreateViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
+    private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
     }
 
     @After
@@ -70,6 +73,7 @@ class CommitmentCreateViewModelTest {
     private fun buildViewModel(supersedeOf: String? = null): CommitmentCreateViewModel =
         CommitmentCreateViewModel(
             commitmentRepository = commitmentRepository,
+            userPrefsStore = userPrefsStore,
             savedStateHandle = savedState(supersedeOf),
             logger = logger,
         )
@@ -159,13 +163,17 @@ class CommitmentCreateViewModelTest {
     // ─── SUPERSEDE mode ───────────────────────────────────────────────────────
 
     @Test
-    fun `SUPERSEDE mode loads old row and seeds read-only quote`() = runTest(testDispatcher) {
+    fun `SUPERSEDE mode loads old row and seeds only the read-only quote`() = runTest(testDispatcher) {
+        // EDIT-007 — only `quote` + `source_*` are pre-filled from the old row.
+        // Editable fields (title / direction / person_ref / due_at / due_hint) must
+        // start at manual defaults so the supersede action describes the new
+        // commitment, not the old one.
         val old = makeEntity(
             id = "cmt-old",
             title = "Old title",
             quote = "Old evidentiary quote",
         )
-        coEvery { commitmentRepository.observeById("cmt-old") } returns flowOf(old)
+        coEvery { commitmentRepository.observeByIdForUser("user-1", "cmt-old") } returns flowOf(old)
 
         val viewModel = buildViewModel(supersedeOf = "cmt-old")
         testDispatcher.scheduler.advanceUntilIdle()
@@ -173,9 +181,12 @@ class CommitmentCreateViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(CommitmentCreateMode.SUPERSEDE, state.mode)
         assertEquals(old, state.supersedeSource)
-        // Old row quote seeded into draft so onSave can re-send it verbatim.
         assertEquals("Old evidentiary quote", state.draft.quote)
-        assertEquals("Old title", state.draft.title)
+        // Editable fields must NOT inherit from the old row.
+        assertEquals("", state.draft.title)
+        assertEquals("give", state.draft.direction)
+        assertEquals(null, state.draft.personRef)
+        assertEquals(null, state.draft.dueAtMillis)
     }
 
     @Test
@@ -186,7 +197,7 @@ class CommitmentCreateViewModelTest {
                 title = "Old",
                 quote = "Old quote verbatim",
             )
-            coEvery { commitmentRepository.observeById("cmt-old") } returns flowOf(old)
+            coEvery { commitmentRepository.observeByIdForUser("user-1", "cmt-old") } returns flowOf(old)
             coEvery {
                 commitmentRepository.saveManualCommitment(any(), "cmt-old")
             } returns BecalmResult.Success("new-id-2")

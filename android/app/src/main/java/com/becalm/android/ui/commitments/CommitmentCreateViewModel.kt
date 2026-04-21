@@ -109,6 +109,7 @@ private const val TAG = "CommitmentCreateVM"
 @HiltViewModel
 public class CommitmentCreateViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
+    private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
 ) : ViewModel() {
@@ -262,7 +263,15 @@ public class CommitmentCreateViewModel @Inject constructor(
 
     private fun loadSupersedeSource(id: String) {
         viewModelScope.launch {
-            val entity = commitmentRepository.observeById(id).firstOrNull()
+            // User-scoped read so a deep-linked supersede id cannot resolve to
+            // another account's row after account switching on the shared
+            // Room DB (data-model.yml:476 cross-account leak guard).
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId.isNullOrBlank()) {
+                logger.w(TAG, "supersede source — no signed-in user id=${hashId(id)}")
+                return@launch
+            }
+            val entity = commitmentRepository.observeByIdForUser(userId, id).firstOrNull()
             if (entity == null) {
                 logger.w(TAG, "supersede source not found id=${hashId(id)}")
                 // Leave supersedeSource null; the UI shows an empty read-only
@@ -272,18 +281,12 @@ public class CommitmentCreateViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     supersedeSource = entity,
-                    // Seed editable fields from the old row so the user's
-                    // "supersede" action reads as an amendment — they can
-                    // tweak title / due / person_ref and leave the rest.
-                    draft = it.draft.copy(
-                        title = entity.title,
-                        direction = entity.direction,
-                        quote = entity.quote,
-                        personRef = entity.personRef,
-                        dueAtMillis = entity.dueAt?.toEpochMilliseconds(),
-                        dueHint = entity.dueHint,
-                        dueIsApproximate = entity.dueIsApproximate,
-                    ),
+                    // EDIT-007: only `quote` + `source_*` are pre-filled from the old
+                    // row (read-only in the UI, forwarded verbatim by the repository).
+                    // Editable fields (title / direction / person_ref / due_at /
+                    // due_hint / approx) start at manual defaults so the user's
+                    // supersede action describes the new commitment, not the old one.
+                    draft = it.draft.copy(quote = entity.quote),
                 )
             }
         }

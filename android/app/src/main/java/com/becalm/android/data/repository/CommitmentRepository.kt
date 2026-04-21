@@ -56,9 +56,25 @@ public interface CommitmentRepository {
      * live-updates when a VM handler triggers a state transition (e.g.
      * [transitionState]) and the corresponding DAO write lands.
      *
+     * Note: bare-id observation is unscoped — the caller is responsible for
+     * making sure `id` belongs to the currently signed-in user. Prefer
+     * [observeByIdForUser] on any new UI surface so cross-account leaks
+     * (`.spec/contracts/data-model.yml:476`) are impossible by construction.
+     *
      * @param id UUID of the commitment to observe.
      */
     public fun observeById(id: String): Flow<CommitmentEntity?>
+
+    /**
+     * User-scoped observer paired with the [CommitmentDao.observeByIdForUser]
+     * query. Emits `null` when no row matches the `(userId, id)` tuple OR when
+     * the row is soft-deleted. This is the preferred observer for detail / edit
+     * / create sheets: the same `id` returned by a deep link can resolve to a
+     * different user's row after account switching on the shared Room database,
+     * and this query guarantees the caller only ever sees rows belonging to
+     * [userId].
+     */
+    public fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?>
 
     // ── Remote refresh ───────────────────────────────────────────────────────
 

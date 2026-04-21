@@ -408,6 +408,7 @@ class UploadWorkerTest {
         override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> = emptyFlow()
         override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> = emptyFlow()
         override fun observeById(id: String): Flow<CommitmentEntity?> = emptyFlow()
+        override fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?> = emptyFlow()
 
         override suspend fun refreshSince(
             userId: String,
