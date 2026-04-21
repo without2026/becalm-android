@@ -16,14 +16,19 @@ import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -32,12 +37,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Instant
 
 /**
@@ -78,6 +86,39 @@ public fun CommitmentManagementScreen(
         }
     }
 
+    // CMT-013 — collect one-shot undo snapshots emitted by [onComplete] / [onCancel]
+    // and present a `[복구]` snackbar with a 5 s window. Material3 does not expose a
+    // 5 s SnackbarDuration token (Short ≈ 4 s, Long ≈ 10 s), so we race the Long
+    // snackbar against an explicit 5 s timeout via [withTimeoutOrNull]. When the
+    // user taps the action before the timeout fires we see [SnackbarResult.ActionPerformed]
+    // and invoke [onUndo]; a timeout or dismissal leaves the terminal state as-is.
+    val undoCompletedMessage = stringResource(R.string.commitment_undo_completed)
+    val undoCancelledMessage = stringResource(R.string.commitment_undo_cancelled)
+    val undoActionLabel = stringResource(R.string.commitment_undo_action)
+    LaunchedEffect(Unit) {
+        viewModel.undoFlow.collect { snapshot ->
+            val message = when (snapshot) {
+                is CommitmentUndoSnapshot.Completed -> undoCompletedMessage
+                is CommitmentUndoSnapshot.Cancelled -> undoCancelledMessage
+            }
+            scope.launch {
+                val result = withTimeoutOrNull(UNDO_WINDOW_MS) {
+                    snackbarHostState.showSnackbar(
+                        message = message,
+                        actionLabel = undoActionLabel,
+                        duration = SnackbarDuration.Long,
+                    )
+                }
+                if (result == SnackbarResult.ActionPerformed) {
+                    viewModel.onUndo(snapshot)
+                } else {
+                    // 5s elapsed without a tap — dismiss the still-showing Long snackbar.
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                }
+            }
+        }
+    }
+
     BecalmScaffold(
         title = stringResource(R.string.commitments_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -112,28 +153,81 @@ public fun CommitmentManagementScreen(
                         )
                     }
                     else -> {
+                        // CMT-009 — partition rows into active + the two terminal sections
+                        // (completed / cancelled). The active group renders without a
+                        // header; each non-empty terminal group renders behind a
+                        // collapsed-by-default [ExpandableSectionHeader]. Empty groups
+                        // omit their header entirely so `이행 완료 (0)` never flashes.
+                        val activeRows = state.items.filter {
+                            it.actionState != CommitmentState.COMPLETED &&
+                                it.actionState != CommitmentState.CANCELLED
+                        }
+                        val completedRows = state.items.filter {
+                            it.actionState == CommitmentState.COMPLETED
+                        }
+                        val cancelledRows = state.items.filter {
+                            it.actionState == CommitmentState.CANCELLED
+                        }
+                        var completedExpanded by rememberSaveable {
+                            mutableStateOf(false)
+                        }
+                        var cancelledExpanded by rememberSaveable {
+                            mutableStateOf(false)
+                        }
+                        val completedHeader = stringResource(
+                            R.string.commitment_section_completed_fmt,
+                            completedRows.size,
+                        )
+                        val cancelledHeader = stringResource(
+                            R.string.commitment_section_cancelled_fmt,
+                            cancelledRows.size,
+                        )
                         LazyColumn(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            items(items = state.items, key = { it.id }) { row ->
-                                CommitmentCard(
-                                    title = row.title,
-                                    direction = row.direction,
-                                    derivedStatus = row.derivedStatus,
-                                    dueAt = row.dueAt,
-                                    counterpartyDisplayName = row.counterpartyDisplayName,
-                                    dueIsApproximate = row.dueIsApproximate,
-                                    dueHint = row.dueHint,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    // C4 wiring — card tap opens the CommitmentDetailSheet
-                                    // route (see BecalmRoute.CommitmentDetail). Action
-                                    // buttons live inside the sheet; onMarkDone stays
-                                    // unset so the card stays visually minimal.
-                                    onClick = { onOpenDetail(row.id) },
-                                )
+                            items(items = activeRows, key = { "active-${it.id}" }) { row ->
+                                CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                            }
+
+                            if (completedRows.isNotEmpty()) {
+                                item(key = "header-completed") {
+                                    ExpandableSectionHeader(
+                                        title = completedHeader,
+                                        expanded = completedExpanded,
+                                        onToggle = {
+                                            completedExpanded = !completedExpanded
+                                        },
+                                    )
+                                }
+                                if (completedExpanded) {
+                                    items(
+                                        items = completedRows,
+                                        key = { "completed-${it.id}" },
+                                    ) { row ->
+                                        CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                                    }
+                                }
+                            }
+
+                            if (cancelledRows.isNotEmpty()) {
+                                item(key = "header-cancelled") {
+                                    ExpandableSectionHeader(
+                                        title = cancelledHeader,
+                                        expanded = cancelledExpanded,
+                                        onToggle = {
+                                            cancelledExpanded = !cancelledExpanded
+                                        },
+                                    )
+                                }
+                                if (cancelledExpanded) {
+                                    items(
+                                        items = cancelledRows,
+                                        key = { "cancelled-${it.id}" },
+                                    ) { row ->
+                                        CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                                    }
+                                }
                             }
                         }
                     }
@@ -147,6 +241,40 @@ public fun CommitmentManagementScreen(
             }
         }
     }
+}
+
+/**
+ * CMT-013 undo window. Spec pins it at 5 seconds; Material3's [SnackbarDuration.Long]
+ * is the closest built-in (~10 s), so the call-site races it against this timeout.
+ */
+private const val UNDO_WINDOW_MS: Long = 5_000L
+
+/**
+ * Renders one [CommitmentRow] as a [CommitmentCard]. Extracted so the LazyColumn call
+ * sites in the three partitioned groups (active / completed / cancelled) share a
+ * single card contract — particularly the C4 detail-sheet navigation wiring.
+ */
+@Composable
+private fun CommitmentRowCard(
+    row: CommitmentRow,
+    onOpenDetail: (id: String) -> Unit,
+) {
+    CommitmentCard(
+        title = row.title,
+        direction = row.direction,
+        derivedStatus = row.derivedStatus,
+        dueAt = row.dueAt,
+        counterpartyDisplayName = row.counterpartyDisplayName,
+        dueIsApproximate = row.dueIsApproximate,
+        dueHint = row.dueHint,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        // C4 wiring — card tap opens the CommitmentDetailSheet route
+        // (see BecalmRoute.CommitmentDetail). Action buttons live inside the sheet;
+        // onMarkDone stays unset so the card stays visually minimal.
+        onClick = { onOpenDetail(row.id) },
+    )
 }
 
 @Composable

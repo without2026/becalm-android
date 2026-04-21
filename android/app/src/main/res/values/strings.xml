@@ -164,6 +164,17 @@
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
 
+    <!-- Commitment management screen sections (CMT-009) -->
+    <string name="commitment_section_active_fmt">진행 중 (%1$d)</string>
+    <string name="commitment_section_completed_fmt">이행 완료 (%1$d)</string>
+    <string name="commitment_section_cancelled_fmt">취소된 약속 (%1$d)</string>
+    <string name="commitment_section_expand_desc">섹션 펼치기/접기</string>
+
+    <!-- Commitment undo snackbar (CMT-013) -->
+    <string name="commitment_undo_completed">완료 처리됨</string>
+    <string name="commitment_undo_cancelled">취소 처리됨</string>
+    <string name="commitment_undo_action">복구</string>
+
     <!-- Commitment reminder alarm (CMT-005 + CMT-008) -->
     <string name="commitment_alarm_title">곧 마감되는 약속 (1시간 뒤)</string>
     <string name="commitment_alarm_body_give_fmt">내가 한 약속: %1$s</string>

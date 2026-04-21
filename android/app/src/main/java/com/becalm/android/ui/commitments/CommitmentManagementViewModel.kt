@@ -13,8 +13,12 @@ import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
 
@@ -80,6 +85,44 @@ public data class CommitmentRow(
      */
     val dueHint: String? = null,
 )
+
+// ─── Undo snapshot ────────────────────────────────────────────────────────────
+
+/**
+ * One-shot snapshot of a just-transitioned commitment so the UI can offer `[복구]` within
+ * the 5-second undo window (spec CMT-013).
+ *
+ * [priorState] is captured from the Room row *before* the transition is applied, so undo
+ * reverts to the exact state the user saw (REMINDED, FOLLOWED_UP, OVERDUE, PENDING).
+ * The subtype ([Completed] / [Cancelled]) lets the UI disambiguate "완료 처리됨" vs
+ * "취소 처리됨" snackbar copy and covers both terminal transitions — CMT-013 makes the
+ * undo affordance one-shot across both.
+ *
+ * The undo path uses the field-level [CommitmentRepository.updateActionState] write
+ * intentionally — the 6-state transition matrix forbids hopping from COMPLETED /
+ * CANCELLED back to any non-terminal state, and we do not want to widen the state
+ * machine just to model "revert". `updateActionState` is repository-level and already
+ * allowed to hop anywhere.
+ *
+ * Per CMT-013 the reminder alarm is **not** re-armed on undo: completing/cancelling
+ * cancelled the alarm, and the user has to press [리마인드] again to re-arm.
+ */
+public sealed interface CommitmentUndoSnapshot {
+    public val commitmentId: String
+    public val priorState: CommitmentState
+
+    /** Undo snapshot produced by [CommitmentManagementViewModel.onComplete]. */
+    public data class Completed(
+        override val commitmentId: String,
+        override val priorState: CommitmentState,
+    ) : CommitmentUndoSnapshot
+
+    /** Undo snapshot produced by [CommitmentManagementViewModel.onCancel]. */
+    public data class Cancelled(
+        override val commitmentId: String,
+        override val priorState: CommitmentState,
+    ) : CommitmentUndoSnapshot
+}
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
@@ -148,6 +191,27 @@ public class CommitmentManagementViewModel @Inject constructor(
 
     /** Current UI state. Starts loading; settles once the first Room emission arrives. */
     public val uiState: StateFlow<CommitmentUiState> = _uiState.asStateFlow()
+
+    /**
+     * One-shot emission of the most recent completed/cancelled transition. The UI collects
+     * this to raise a `[복구]` snackbar for the 5-second undo window per CMT-013.
+     *
+     * Semantics:
+     *  - `replay = 0`             : late collectors don't see stale snapshots.
+     *  - `extraBufferCapacity = 1`: exactly one pending event is buffered so the emit-site
+     *    never suspends, and concurrent user taps do not drop the most recent action.
+     *  - `DROP_OLDEST`            : if two transitions land faster than the UI can show the
+     *    first snackbar, the older one is dropped — the most recent action is always the
+     *    one the user sees, matching the "one-shot" invariant.
+     */
+    private val _undoFlow: MutableSharedFlow<CommitmentUndoSnapshot> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Publicly exposed undo stream for the [CommitmentManagementScreen] collector. */
+    public val undoFlow: SharedFlow<CommitmentUndoSnapshot> = _undoFlow.asSharedFlow()
 
     /**
      * Backing store for the unfiltered entity list from Room. Required so that
@@ -311,14 +375,27 @@ public class CommitmentManagementViewModel @Inject constructor(
      * Records that the user pressed [완료] on the commitment (CMT-007).
      *
      * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → COMPLETED and cancels
-     * any pending reminder.
+     * any pending reminder. On success, emits a [CommitmentUndoSnapshot.Completed] on
+     * [undoFlow] so the UI can offer a 5-second `[복구]` snackbar per CMT-013. The
+     * snapshot captures the *prior* action_state (e.g. REMINDED) so undo restores the
+     * exact state the user saw.
      */
-    // spec: CMT-007
+    // spec: CMT-007, CMT-013
     public fun onComplete(id: String) {
+        // Snapshot *before* the transition runs so undo restores the prior state exactly.
+        // When the row is not in memory (evicted by a concurrent refresh, or never loaded
+        // in a test harness) we still run the completion transition — we just skip the
+        // snackbar emit, since undo without a prior state would be meaningless.
+        val priorState = snapshotPriorState(id)
         launchAction(
             name = "onComplete",
             id = id,
-            effect = { reminderScheduler.cancel(id) },
+            effect = {
+                reminderScheduler.cancel(id)
+                if (priorState != null) {
+                    _undoFlow.tryEmit(CommitmentUndoSnapshot.Completed(id, priorState))
+                }
+            },
         ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Complete)
         }
@@ -328,17 +405,78 @@ public class CommitmentManagementViewModel @Inject constructor(
      * Records that the user pressed [취소] on the commitment (CMT-012).
      *
      * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → CANCELLED and cancels
-     * any pending reminder.
+     * any pending reminder. On success, emits a [CommitmentUndoSnapshot.Cancelled] on
+     * [undoFlow] so the UI can offer a 5-second `[복구]` snackbar per CMT-013.
      */
-    // spec: CMT-012
+    // spec: CMT-012, CMT-013
     public fun onCancel(id: String) {
+        // See [onComplete] — same prior-state snapshot semantics.
+        val priorState = snapshotPriorState(id)
         launchAction(
             name = "onCancel",
             id = id,
-            effect = { reminderScheduler.cancel(id) },
+            effect = {
+                reminderScheduler.cancel(id)
+                if (priorState != null) {
+                    _undoFlow.tryEmit(CommitmentUndoSnapshot.Cancelled(id, priorState))
+                }
+            },
         ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Cancel)
         }
+    }
+
+    /**
+     * Reverts the most recent completed/cancelled transition (CMT-013) using a
+     * field-level action_state write. Does **not** re-register the reminder alarm:
+     * per spec line 131 the original completion/cancel path has already cancelled the
+     * alarm and the user must press [리마인드] again if they want it back.
+     *
+     * Uses [CommitmentRepository.updateActionState] rather than
+     * [CommitmentRepository.transitionState] because the 6-state machine intentionally
+     * forbids transitions out of COMPLETED / CANCELLED — widening the matrix just for
+     * undo would poison every other state-machine call-site. `updateActionState` is a
+     * repository-level override that also flips `sync_status` to pending so UploadWorker
+     * will PATCH the server with the reverted state.
+     */
+    // spec: CMT-013
+    public fun onUndo(snapshot: CommitmentUndoSnapshot) {
+        viewModelScope.launch {
+            val result = commitmentRepository.updateActionState(
+                id = snapshot.commitmentId,
+                newState = snapshot.priorState.wireValue,
+                updatedAt = Clock.System.now(),
+            )
+            when (result) {
+                is BecalmResult.Success -> {
+                    logger.d(
+                        TAG,
+                        "onUndo succeeded id=${hashId(snapshot.commitmentId)} " +
+                            "priorState=${snapshot.priorState.wireValue} " +
+                            "from=${snapshot::class.simpleName}",
+                    )
+                    _uiState.update { it.copy(error = null) }
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(
+                        TAG,
+                        "onUndo failed id=${hashId(snapshot.commitmentId)}: ${result.error}",
+                    )
+                    _uiState.update { it.copy(error = result.error.toString()) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads the current [CommitmentState] from the in-memory Room cache so the caller
+     * can snapshot it before issuing a transition. Returns `null` when the id is not
+     * present — e.g. if the row was evicted by a concurrent refresh — in which case the
+     * caller must short-circuit rather than emit a snapshot with stale data.
+     */
+    private fun snapshotPriorState(id: String): CommitmentState? {
+        val entity = allEntities.value.firstOrNull { it.id == id } ?: return null
+        return CommitmentState.fromWire(entity.actionState)
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
