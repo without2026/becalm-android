@@ -47,12 +47,6 @@ public object CommitmentEditValidator {
 
     private const val TITLE_MAX = 200
 
-    /** Strict E.164 per ITU-T recommendation: leading `+`, 8..15 digits, no spaces. */
-    private val E164_REGEX: Regex = Regex("""^\+[1-9]\d{7,14}$""")
-
-    /** Characters permitted in a phone-shaped [CommitmentEditDraft.personRef]. */
-    private val PHONE_SHAPE_CHARS: Regex = Regex("""^[+\-\d\s]+$""")
-
     /**
      * Fields that can carry a validation error. The enum exists so the UI can
      * render errors adjacent to specific form inputs without string-matching
@@ -82,13 +76,10 @@ public object CommitmentEditValidator {
         // dueAtMillis: null is allowed. Any non-null Long is a valid Instant — we
         // do not reject past dates per EDIT-004 ("past is OK").
 
-        val rawRef = input.personRef?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-        if (rawRef != null && PHONE_SHAPE_CHARS.matches(rawRef) && rawRef.any { it.isDigit() }) {
-            val compact = rawRef.replace(Regex("""[\s\-]"""), "")
-            if (!E164_REGEX.matches(compact)) {
-                errors[Field.PERSON_REF] =
-                    "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
-            }
+        val normalisedRef = PersonRefNormalizer.normalize(input.personRef)
+        if (normalisedRef != null && !PersonRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
+            errors[Field.PERSON_REF] =
+                "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
         }
 
         if (input.direction != "give" && input.direction != "take") {
@@ -112,7 +103,7 @@ public object CommitmentEditValidator {
             dueAt = draft.dueAtMillis?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it) },
             dueHint = draft.dueHint?.trim()?.takeIf { it.isNotBlank() },
             dueIsApproximate = draft.dueIsApproximate,
-            personRef = draft.personRef?.trim()?.lowercase()?.takeIf { it.isNotBlank() },
+            personRef = PersonRefNormalizer.normalize(draft.personRef),
             direction = draft.direction,
         )
 }

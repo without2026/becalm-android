@@ -10,10 +10,8 @@ package com.becalm.android.domain.commitment
  * normalize + phone-shape validation rules in one place so MAN-005 and EDIT-004
  * stay aligned.
  *
- * The `CommitmentEditValidator` object predates this extraction and will migrate
- * to use this helper in a follow-up cleanup pass; for C9 we introduce the shared
- * helper and use it from [CommitmentManualValidator] only — we do not modify the
- * edit validator per the plan's "surgical changes" constraint.
+ * Both [CommitmentEditValidator] and [CommitmentManualValidator] delegate here
+ * so the phone-shape rules stay in one place.
  */
 public object PersonRefNormalizer {
 

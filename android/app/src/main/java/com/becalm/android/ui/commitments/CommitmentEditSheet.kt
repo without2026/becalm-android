@@ -42,7 +42,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
-import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -82,20 +81,20 @@ import kotlinx.datetime.toLocalDateTime
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun CommitmentEditSheet(
-    commitmentId: String,
+    @Suppress("UNUSED_PARAMETER") commitmentId: String,
     onDismiss: () -> Unit,
     viewModel: CommitmentEditViewModel = hiltViewModel(),
 ) {
-    @Suppress("UNUSED_PARAMETER") val idForLogging = commitmentId
+    // `commitmentId` is consumed by the Hilt-injected [CommitmentEditViewModel]
+    // via its SavedStateHandle; the parameter stays on this signature so the nav
+    // host can pass it explicitly at call time (see BecalmNavHost wiring).
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     // Consume one-shot dismiss events from the VM (saved / deleted / cancelled).
+    // All three events map to the same outcome here — pop the sheet.
     LaunchedEffect(viewModel) {
-        viewModel.dismiss.collect { event ->
-            @Suppress("UNUSED_VARIABLE") val tag = event
-            onDismiss()
-        }
+        viewModel.dismiss.collect { onDismiss() }
     }
 
     // NotFound short-circuit — the row was deleted between detail-sheet open

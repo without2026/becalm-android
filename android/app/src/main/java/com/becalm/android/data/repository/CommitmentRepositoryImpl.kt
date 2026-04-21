@@ -235,9 +235,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
         id: String,
         patch: CommitmentEditPatch,
     ): BecalmResult<Unit> = withContext(ioDispatcher) {
-        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-            BecalmError.Unauthorized,
-        )
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
         val editedAt = Clock.System.now()
 
         val rows = dao.applyEdit(
@@ -276,9 +275,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
     override suspend fun markQuoteDisputed(id: String): BecalmResult<Unit> =
         withContext(ioDispatcher) {
-            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-                BecalmError.Unauthorized,
-            )
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
             val at = Clock.System.now()
             val rows = dao.markQuoteDisputed(id = id, actor = actorId, at = at)
             if (rows == 0) {
@@ -299,9 +297,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
     override suspend fun clearQuoteDispute(id: String): BecalmResult<Unit> =
         withContext(ioDispatcher) {
-            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-                BecalmError.Unauthorized,
-            )
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
             val at = Clock.System.now()
             val rows = dao.clearQuoteDispute(id = id, actor = actorId, at = at)
             if (rows == 0) {
@@ -321,9 +318,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
     override suspend fun softDelete(id: String): BecalmResult<Unit> =
         withContext(ioDispatcher) {
-            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-                BecalmError.Unauthorized,
-            )
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
             val at = Clock.System.now()
             val rows = dao.softDelete(id = id, actor = actorId, at = at)
             if (rows == 0) {
@@ -345,9 +341,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
         oldId: String,
         newRow: CommitmentEntity,
     ): BecalmResult<String> = withContext(ioDispatcher) {
-        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-            BecalmError.Unauthorized,
-        )
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
         val editedAt = Clock.System.now()
 
         // Atomic: INSERT new row + soft-delete old row. Room's withTransaction wraps
@@ -402,9 +397,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
         input: ManualCommitmentInput,
         supersedeOf: String?,
     ): BecalmResult<String> = withContext(ioDispatcher) {
-        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
-            BecalmError.Unauthorized,
-        )
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
         val now = Clock.System.now()
         val newId = UUID.randomUUID().toString()
 

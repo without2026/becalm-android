@@ -41,7 +41,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentManualValidator.Field
-import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -84,11 +83,13 @@ import kotlinx.datetime.toLocalDateTime
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun CommitmentCreateSheet(
-    supersedeOf: String?,
+    @Suppress("UNUSED_PARAMETER") supersedeOf: String?,
     onDismiss: () -> Unit,
     viewModel: CommitmentCreateViewModel = hiltViewModel(),
 ) {
-    @Suppress("UNUSED_PARAMETER") val idForLogging = supersedeOf
+    // `supersedeOf` is consumed by the Hilt-injected [CommitmentCreateViewModel]
+    // via its SavedStateHandle; the parameter stays on this signature so the nav
+    // host can pass it explicitly at call time (see BecalmNavHost wiring).
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 

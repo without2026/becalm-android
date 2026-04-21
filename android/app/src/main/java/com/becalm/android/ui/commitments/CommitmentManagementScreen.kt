@@ -178,16 +178,8 @@ public fun CommitmentManagementScreen(
                         // header; each non-empty terminal group renders behind a
                         // collapsed-by-default [ExpandableSectionHeader]. Empty groups
                         // omit their header entirely so `이행 완료 (0)` never flashes.
-                        val activeRows = state.items.filter {
-                            it.actionState != CommitmentState.COMPLETED &&
-                                it.actionState != CommitmentState.CANCELLED
-                        }
-                        val completedRows = state.items.filter {
-                            it.actionState == CommitmentState.COMPLETED
-                        }
-                        val cancelledRows = state.items.filter {
-                            it.actionState == CommitmentState.CANCELLED
-                        }
+                        val (activeRows, completedRows, cancelledRows) =
+                            partitionRowsByLifecycle(state.items)
                         var completedExpanded by rememberSaveable {
                             mutableStateOf(false)
                         }
@@ -268,6 +260,28 @@ public fun CommitmentManagementScreen(
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
  */
 private const val UNDO_WINDOW_MS: Long = 5_000L
+
+/**
+ * CMT-009 — partitions the full [rows] list into the three rendering buckets used by
+ * [CommitmentManagementScreen]. Extracted as a pure helper so the Composable body reads
+ * as "partition + render" rather than three inline [List.filter] lambdas.
+ *
+ * @return A [Triple] of (active, completed, cancelled). `active` is every row whose
+ *   `action_state` is neither COMPLETED nor CANCELLED — i.e. PENDING / REMINDED /
+ *   FOLLOWED_UP / OVERDUE. The three buckets are disjoint and their union equals
+ *   [rows] (no row is dropped or duplicated).
+ */
+private fun partitionRowsByLifecycle(
+    rows: List<CommitmentRow>,
+): Triple<List<CommitmentRow>, List<CommitmentRow>, List<CommitmentRow>> {
+    val active = rows.filter {
+        it.actionState != CommitmentState.COMPLETED &&
+            it.actionState != CommitmentState.CANCELLED
+    }
+    val completed = rows.filter { it.actionState == CommitmentState.COMPLETED }
+    val cancelled = rows.filter { it.actionState == CommitmentState.CANCELLED }
+    return Triple(active, completed, cancelled)
+}
 
 /**
  * Renders one [CommitmentRow] as a [CommitmentCard]. Extracted so the LazyColumn call
