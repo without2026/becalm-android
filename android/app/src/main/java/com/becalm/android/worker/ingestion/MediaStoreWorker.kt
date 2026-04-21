@@ -22,27 +22,37 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
 /**
- * Periodic CoroutineWorker that enumerates new voice recordings since the last
- * successful run, advancing the per-source watermark cursor in [SyncCursorStore].
+ * Periodic CoroutineWorker that enumerates new voice **and call** recordings since the
+ * last successful run, advancing the shared [SyncCursorStore.KIND_VOICE] watermark.
  *
- * The voice ingestion path is owned by [VoiceMediaStoreProbe]; this worker only
- * orchestrates the audio permission check, dispatches to the probe, and surfaces
- * the [androidx.work.ListenableWorker.Result].
+ * Both ingestion paths are owned by [VoiceMediaStoreProbe]; this worker only
+ * orchestrates the audio permission check, dispatches to the probe's two sibling
+ * methods ([VoiceMediaStoreProbe.ingestVoiceRecordings] and
+ * [VoiceMediaStoreProbe.ingestCallRecordings]), and surfaces the
+ * [androidx.work.ListenableWorker.Result]. The two branches scan disjoint path
+ * subtrees (voice excludes `Recordings/Call/%`; call_recording is `Recordings/Call/%`
+ * only) so no file is counted twice.
  *
  * The probe is constructed internally from the worker's existing collaborators so that
  * unit tests instantiating [MediaStoreWorker] directly do not need to know about the split.
  *
- * ## ING-003 — Voice recording capture (VOI-001, VOI-005, VOI-007) ([VoiceMediaStoreProbe])
+ * ## ING-001 / ING-003 — Voice + Call recording capture (VOI-001, VOI-005, VOI-007) ([VoiceMediaStoreProbe])
  * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for audio files added since the
  * last watermark. For each newly-discovered recording:
- * 1. A [RawIngestionEventEntity] row (source_type="voice", sync_status="pending") is
- *    inserted via `RawIngestionEventDao.insert` with `OnConflictStrategy.IGNORE`.
- *    The `clientEventId` is deterministic (`"mediastore:voice:<mediaId>"`) so re-running
- *    the worker against the same file is idempotent — the DB unique index on
- *    (user_id, client_event_id) silently drops duplicates.
+ * 1. A [RawIngestionEventEntity] row is inserted via `RawIngestionEventDao.insert` with
+ *    `OnConflictStrategy.IGNORE`. `source_type` is `"voice"` for files under
+ *    `Recordings/Voice Recorder/` / `Recordings/` / legacy `VoiceRecorder/`, and
+ *    `"call_recording"` for files under `Recordings/Call/`. For call_recording rows,
+ *    `person_ref` is the E.164 normalization of the counterparty number extracted from
+ *    the DISPLAY_NAME (null when no valid phone number can be parsed — per ING-001
+ *    "없으면 null"). The `clientEventId` is deterministic
+ *    (`"mediastore:voice:<mediaId>"` or `"mediastore:call_recording:<mediaId>"`) so
+ *    re-running the worker against the same file is idempotent — the DB unique index
+ *    on (user_id, client_event_id) silently drops duplicates.
  * 2. If the row was freshly inserted (not a duplicate), `WorkScheduler.enqueueVoiceUpload`
  *    is called with the row's UUID and the content URI so that
  *    [com.becalm.android.worker.VoiceUploadWorker] can stream audio bytes upstream.
+ *    Both source_types share the same upload pipeline (VOI-001).
  *
  * The audio content URI is built via
  * `ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, _ID)`.
@@ -76,9 +86,10 @@ import kotlinx.datetime.Clock
  * deferred to a Wave 6 onboarding PR tracked by `refactor/ui/onboarding/saf-tree`. See
  * `docs/plans/worker-voice-ingestion-realign.md` (finding PR #14) for the full design and
  * `docs/plans/worker-voice-ingestion-saf-tree-followup.md` for the deferred sub-scope.
- * This PR only realigns the recorder-folder LIKE patterns to Samsung One UI 6.x's
- * space-separated `"Voice Recorder/"` and declares the `Call/` constant for the follow-up
- * `feat/worker/voice/call-recording` (finding PR #15) to wire through.
+ * The recorder-folder LIKE patterns were realigned to Samsung One UI 6.x's
+ * space-separated `"Voice Recorder/"` in PR #14, and the Call/ subtree is now wired
+ * through via [VoiceMediaStoreProbe.ingestCallRecordings] in
+ * `feat/worker/voice/call-recording` (finding PR #15).
  */
 @HiltWorker
 public class MediaStoreWorker @AssistedInject constructor(
@@ -120,9 +131,23 @@ public class MediaStoreWorker @AssistedInject constructor(
         }
 
         val now = Clock.System.now()
-        val voiceResult = voiceMediaStoreProbe.ingestVoiceRecordings(now)
+        val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now)
+        val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now)
 
-        logger.d(TAG, "doWork complete voiceInserted=$voiceResult")
+        // A ContentResolver query failure in the `Recordings/Call/` scan is recorded in
+        // SourceStatusRepository but does not advance any cursor — returning
+        // [Result.success] would swallow the failure and skip retry/backoff. Map to
+        // [Result.retry] so WorkManager re-attempts this run (ING-001 data-loss guard).
+        if (callOutcome is CallRecordingIngestOutcome.ScanFailed) {
+            logger.w(TAG, "doWork call_recording scan failed — requesting retry")
+            return@withContext Result.retry()
+        }
+
+        val callInserted = (callOutcome as CallRecordingIngestOutcome.Success).insertedCount
+        logger.d(
+            TAG,
+            "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted",
+        )
         Result.success()
     }
 
@@ -137,8 +162,18 @@ public class MediaStoreWorker @AssistedInject constructor(
         /** Maximum WorkManager attempts before permanently failing (R4-02). */
         public const val MAX_RETRIES: Int = 5
 
-        /** [SyncCursorStore] MediaStore kind key for voice recordings. */
+        /** [SyncCursorStore] MediaStore kind key for voice recordings (`Recordings/Voice Recorder/`). */
         public const val KIND_VOICE: String = "voice"
+
+        /**
+         * [SyncCursorStore] MediaStore kind key for Samsung call recordings
+         * (`Recordings/Call/`). Persisted separately from [KIND_VOICE] so that advancing
+         * the voice branch's watermark cannot skip past unseen call-recording rows whose
+         * `DATE_ADDED` happens to be older than the newest voice memo ingested in the
+         * same worker run (ING-001 data-loss safety). The two scans read disjoint folder
+         * subtrees, so an independent cursor per kind is the correctness-preserving choice.
+         */
+        public const val KIND_CALL_RECORDING: String = "call_recording"
 
         /**
          * Samsung Voice Recorder default relative folder name (ONB-002 / ONB-003 spec
@@ -168,9 +203,8 @@ public class MediaStoreWorker @AssistedInject constructor(
 
         /**
          * Samsung One UI 6.x `Call/` subfolder under `Recordings/`. Maps to
-         * `SourceType.CALL_RECORDING` when paths pass through the ingest probe. Wired up by
-         * `feat/worker/voice/call-recording` (finding PR #15) — this PR declares the
-         * constant only.
+         * `SourceType.CALL_RECORDING` when paths pass through
+         * [VoiceMediaStoreProbe.ingestCallRecordings] (ING-001, finding PR #15).
          */
         public const val CALL_FOLDER: String = "Call"
 

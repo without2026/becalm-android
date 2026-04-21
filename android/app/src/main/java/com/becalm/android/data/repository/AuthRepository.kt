@@ -10,6 +10,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
@@ -134,6 +135,13 @@ public class AuthRepositoryImpl @Inject constructor(
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val imapCredentialStore: ImapCredentialStore,
+    // Concrete type (not the [com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider]
+    // interface) so the sign-out cleanup hook [GoogleAuthTokenProviderImpl.signOutCleanup]
+    // is reachable. Without wiping the Gmail OAuth credential on sign-out, a second account
+    // on the same device would inherit the previous user's Gmail grant on the next cold
+    // start after [com.becalm.android.BecalmApplication] calls
+    // [GoogleAuthTokenProviderImpl.warmUp] (cross-account data leak).
+    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
     private val logger: Logger,
 ) : AuthRepository {
 
@@ -180,7 +188,11 @@ public class AuthRepositoryImpl @Inject constructor(
             // personEnrichmentRepository.deleteAll() already returns BecalmResult<Int>;
             // wrap its throw semantics without double-wrapping the returned Result.
             add(NamedStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
-            add(NamedStep("imapCredentialClear") { imapCredentialStore.clear() })
+            add(NamedStep("imapCredentialClear") { imapCredentialStore.clearAll() })
+            // Wipe the Gmail OAuth credential (disk + in-memory cache) and transition the
+            // OAuthTokenState to Unauthenticated so a subsequent account on the same device
+            // cannot inherit the previous user's Gmail grant (PIPA cross-account leak guard).
+            add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
             add(NamedStep("sessionStoreClear") { sessionStore.clear() })
             // Drop the in-memory access-token cache in lockstep with the persisted session
             // so the next hot-path request re-consults storage and reflects the cleared state
@@ -215,7 +227,11 @@ public class AuthRepositoryImpl @Inject constructor(
             }
             // IMAP credentials are tied to the current account (not the raw Room event data),
             // so they are considered part of "session" and are cleared here.
-            add(NamedStep("imapCredentialClear") { imapCredentialStore.clear() })
+            add(NamedStep("imapCredentialClear") { imapCredentialStore.clearAll() })
+            // Same rationale applies to the Gmail OAuth credential: account-scoped grant,
+            // cleared on every session-invalidate to prevent the next account from
+            // inheriting it (cross-account leak guard).
+            add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
             add(NamedStep("sessionStoreClear") { sessionStore.clear() })
             // Drop the in-memory access-token cache in lockstep with the persisted session
             // so the next hot-path request re-consults storage (Round 6A.4).

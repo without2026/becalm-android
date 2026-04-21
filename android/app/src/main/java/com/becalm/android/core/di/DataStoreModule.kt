@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import com.becalm.android.data.local.datastore.MetricsStore
+import com.becalm.android.data.local.datastore.MetricsStoreImpl
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.SyncCursorStoreImpl
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -87,4 +89,16 @@ public object DataStoreModule {
     public fun provideUserPrefsStore(
         @UserPrefs ds: DataStore<Preferences>,
     ): UserPrefsStore = UserPrefsStoreImpl(ds)
+
+    /**
+     * Wires [MetricsStoreImpl] over the same [@UserPrefs][UserPrefs] DataStore so the
+     * `email_subject_only_skipped` counter shares a file with [UserPrefsStore] (one fewer
+     * `.preferences_pb` to manage at sign-out wipe). Hilt injects the qualifier through
+     * the impl's `@Inject` constructor; this @Provides surfaces the interface.
+     */
+    @Provides
+    @Singleton
+    public fun provideMetricsStore(
+        @UserPrefs ds: DataStore<Preferences>,
+    ): MetricsStore = MetricsStoreImpl(ds)
 }

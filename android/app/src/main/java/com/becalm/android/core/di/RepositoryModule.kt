@@ -6,6 +6,8 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CalendarEventRepositoryImpl
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
+import com.becalm.android.data.repository.EmailBodyRepository
+import com.becalm.android.data.repository.EmailBodyRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -59,4 +61,12 @@ public abstract class RepositoryModule {
     @Binds
     @Singleton
     public abstract fun bindSourceStatusRepository(impl: SourceStatusRepositoryImpl): SourceStatusRepository
+
+    /**
+     * Binds [EmailBodyRepositoryImpl] — owns the EMAIL-006 PIPA invariant boundary
+     * (room-only `email_body` table; never serialised to any wire DTO).
+     */
+    @Binds
+    @Singleton
+    public abstract fun bindEmailBodyRepository(impl: EmailBodyRepositoryImpl): EmailBodyRepository
 }

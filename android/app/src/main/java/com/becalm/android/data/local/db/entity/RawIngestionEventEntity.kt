@@ -113,7 +113,8 @@ public data class RawIngestionEventEntity(
      * [com.becalm.android.worker.VoiceUploadWorker] receives a successful Railway response.
      * Transcript itself is never persisted (voice-pipeline.spec.yml v2 invariant) — the quote
      * is the only persisted text for voice events. Null when no commitments were extracted.
-     * Email: first 200 chars of body.
+     * Email: body_plain[:200] → Jsoup(html).text()[:200] → subject[:200], whitespace collapsed.
+     * See [com.becalm.android.domain.email.EmailSnippetBuilder.buildSnippet] & spec EMAIL-003.
      * Null for calendar events.
      */
     @ColumnInfo(name = "event_snippet")

@@ -17,6 +17,7 @@ import com.becalm.android.data.remote.gmail.GmailClient
 import com.becalm.android.data.remote.gmail.GmailLabel
 import com.becalm.android.data.remote.gmail.GmailMessage
 import com.becalm.android.data.remote.gmail.GmailMessagePage
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -63,6 +64,7 @@ public class GmailWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
     private val gmailClient: GmailClient,
+    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val cursorStore: SyncCursorStore,
@@ -73,6 +75,25 @@ public class GmailWorker @AssistedInject constructor(
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         logger.d(TAG, "doWork start")
+
+        // Step 1. Load the persisted Gmail credential into the in-memory cache. The
+        // Application.onCreate fire-and-forget warmUp is not a barrier — if WorkManager
+        // fires this worker before that launch completes, every Gmail request would see
+        // a cold cache. warmUp is idempotent (last-write-wins) so the steady-state cost
+        // is one EncryptedSharedPreferences read.
+        googleAuthTokenProvider.warmUp()
+
+        // Step 2. If the cached token is absent or aged into the 60s safety window (or
+        // was ever emitted into a null hole by a previous hot-path CAS), attempt a
+        // silent refresh from the background. `refreshSilently` takes a Context — the
+        // application context is fine — and issues a fresh Gmail access token when the
+        // device-side grant still covers the readonly scope. If it does not, state
+        // flips to ReauthRequired and the worker returns Result.failure below so the
+        // UI can drive the interactive reauth via `startSignIn(activity)`.
+        if (googleAuthTokenProvider.currentToken() == null) {
+            val refreshed = googleAuthTokenProvider.refreshSilently(appContext)
+            logger.d(TAG, "doWork silent refresh attempted ok=$refreshed")
+        }
 
         // Every ingested row must be tagged with the authenticated user's UUID. Without a
         // session the row would become invisible to UploadWorker (its WHERE user_id=? query

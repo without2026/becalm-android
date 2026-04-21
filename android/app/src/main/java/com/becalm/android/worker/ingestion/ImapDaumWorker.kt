@@ -16,6 +16,7 @@ import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.SourceType
@@ -41,12 +42,12 @@ import java.util.UUID
  * and `source_type` differ. The same app-password auth path (CRIT-01) is used; Daum
  * does not expose a public OAuth flow for IMAP access, so the credential shape is
  * identical to Naver's. The credential store is provisioned by the onboarding flow
- * (SP-53); the shared [ImapCredentialStore] file holds exactly one IMAP credential
- * tuple at a time (`host` column distinguishes provider) — callers must re-save the
- * correct credential before enqueuing this worker.
+ * (SP-53). Credentials are isolated per source_type via namespaced keys in
+ * [ImapCredentialStore] — no re-save required across providers (ING-011
+ * parallel-execution invariant).
  *
  * Connects to `imap.daum.net:993` using the app-password credential retrieved from
- * [ImapCredentialStore.getCredentials]. Incremental sync is driven by the
+ * [ImapCredentialStore.load] under [SourceType.DAUM_IMAP]. Incremental sync is driven by the
  * UIDVALIDITY + UIDNEXT cursor pair persisted in [SyncCursorStore] under mailbox
  * [MAILBOX_DAUM]. A UIDVALIDITY mismatch causes a full resync (handled inside
  * [ImapClient.fetchSince]: it fetches from UID 1 and caps the result at
@@ -86,6 +87,7 @@ public class ImapDaumWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     @UserPrefs private val userPrefs: DataStore<Preferences>,
     private val imapCredentialStore: ImapCredentialStore,
+    private val imapCredentialStoreMigrator: ImapCredentialStoreMigrator,
     private val syncCursorStore: SyncCursorStore,
     private val imapClient: ImapClient,
     private val rawIngestionRepository: RawIngestionRepository,
@@ -95,6 +97,13 @@ public class ImapDaumWorker @AssistedInject constructor(
 
     public override suspend fun doWork(): Result {
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+
+        // ── 0. Ensure legacy-tuple migration has completed ───────────────────
+        // Fire-and-forget [Application.onCreate] launch of [migrateIfNeeded] is not a
+        // barrier — invoke synchronously here so this worker never reads the
+        // `daum_imap_*` namespace before the legacy `imap_*` tuple is migrated into it.
+        // Idempotent via the UserPrefsStore flag.
+        imapCredentialStoreMigrator.migrateIfNeeded()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
         val credentials = loadCredentials() ?: return Result.failure()
@@ -145,7 +154,7 @@ public class ImapDaumWorker @AssistedInject constructor(
      * absent and returns `null` so the caller can short-circuit to [Result.failure].
      */
     private suspend fun loadCredentials(): ImapCredentials? {
-        val credentials = imapCredentialStore.getCredentials()
+        val credentials = imapCredentialStore.load(SourceType.DAUM_IMAP)
         if (credentials == null) {
             logger.w(TAG, "IMAP Daum credentials absent — provisioned by SP-53")
         }
