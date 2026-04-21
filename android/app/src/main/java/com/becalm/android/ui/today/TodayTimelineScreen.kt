@@ -213,7 +213,7 @@ private fun TimelineItemRow(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = titleOf(item),
+            text = item.title,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -236,17 +236,6 @@ private fun sectionLabelFor(item: TimelineItem): String = when (item) {
     is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
     is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
-}
-
-/**
- * Extracts the display title from any [TimelineItem] subtype. `title` is declared
- * on each subtype separately (not on the sealed parent) because the three DTOs
- * carry subtly different semantics; this helper is the single read-site.
- */
-private fun titleOf(item: TimelineItem): String = when (item) {
-    is TimelineItem.Commitment -> item.title
-    is TimelineItem.CalendarEvent -> item.title
-    is TimelineItem.Meeting -> item.title
 }
 
 @PreviewLightDark

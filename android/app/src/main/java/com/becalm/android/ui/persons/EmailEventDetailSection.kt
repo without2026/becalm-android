@@ -90,6 +90,16 @@ internal fun EmailEventDetailSection(
 
 // ─── Internals ────────────────────────────────────────────────────────────────
 
+/**
+ * Character threshold above which the plain-text email body is collapsed behind an
+ * expand toggle.
+ *
+ * UX heuristic: 500 chars fits roughly a 5–7 line preview on a phone-sized device —
+ * long enough to show the salutation plus the first actionable paragraph, short
+ * enough that a two-page thread forward doesn't dominate the sheet. Chosen over a
+ * line-count cap because line wrapping depends on font metrics that are not stable
+ * at measurement time; a char count is dispatch-agnostic and testable.
+ */
 private const val BODY_COLLAPSED_CHAR_LIMIT: Int = 500
 
 /**

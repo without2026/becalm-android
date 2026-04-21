@@ -2,7 +2,6 @@ package com.becalm.android.ui.persons
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -64,9 +63,7 @@ private fun EventRow(row: InteractionRow.Event) {
     )
     IngestionTimestamp(timestamp = row.timestamp)
     if (row.commitmentsExtractedCount > 0) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CommitmentsExtractedBadge(count = row.commitmentsExtractedCount)
-        }
+        CommitmentsExtractedBadge(count = row.commitmentsExtractedCount)
     }
 }
 

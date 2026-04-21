@@ -230,28 +230,10 @@ public class PersonDetailViewModel @Inject constructor(
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
     ): InteractionSections {
-        val eventRows: List<InteractionRow> = rawEvents.map { e ->
-            InteractionRow.Event(
-                timestamp = e.timestamp,
-                source = e.sourceType,
-                summary = e.eventTitle,
-                commitmentsExtractedCount = e.commitmentsExtractedCount,
-            )
-        }
-        val commitmentRows: List<InteractionRow.Commitment> = commitments.map { c ->
-            InteractionRow.Commitment(
-                timestamp = c.sourceEventOccurredAt,
-                title = c.title,
-                direction = c.direction,
-                actionState = c.actionState,
-            )
-        }
-        val calendarRows: List<InteractionRow> = calendarEvents.map { m ->
-            InteractionRow.CalendarMeeting(
-                timestamp = m.startAt,
-                title = m.title,
-            )
-        }
+        val eventRows: List<InteractionRow> = rawEvents.map(::toEventRow)
+        val commitmentRows: List<InteractionRow.Commitment> = commitments.map(::toCommitmentRow)
+        val calendarRows: List<InteractionRow> = calendarEvents.map(::toCalendarMeetingRow)
+
         // Partition on the v5 `action_state` column only — the legacy
         // `commitment_state` column is retained for schema parity but drifts on
         // the dispute/edit path (see CommitmentRepositoryImpl).
@@ -274,4 +256,26 @@ public class PersonDetailViewModel @Inject constructor(
             interactionHistory = history,
         )
     }
+
+    private fun toEventRow(e: RawIngestionEventEntity): InteractionRow.Event =
+        InteractionRow.Event(
+            timestamp = e.timestamp,
+            source = e.sourceType,
+            summary = e.eventTitle,
+            commitmentsExtractedCount = e.commitmentsExtractedCount,
+        )
+
+    private fun toCommitmentRow(c: CommitmentEntity): InteractionRow.Commitment =
+        InteractionRow.Commitment(
+            timestamp = c.sourceEventOccurredAt,
+            title = c.title,
+            direction = c.direction,
+            actionState = c.actionState,
+        )
+
+    private fun toCalendarMeetingRow(m: CalendarEventEntity): InteractionRow.CalendarMeeting =
+        InteractionRow.CalendarMeeting(
+            timestamp = m.startAt,
+            title = m.title,
+        )
 }

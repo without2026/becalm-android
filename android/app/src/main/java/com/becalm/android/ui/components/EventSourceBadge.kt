@@ -44,8 +44,7 @@ public fun EventSourceBadge(
     sourceType: String,
     modifier: Modifier = Modifier,
 ) {
-    val labelRes = sourceLabelResource(sourceType)
-    val icon = sourceIcon(sourceType)
+    val style = sourceBadgeFor(sourceType)
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(percent = 50),
@@ -57,41 +56,49 @@ public fun EventSourceBadge(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = icon,
+                imageVector = style.icon,
                 contentDescription = null, // label below already conveys the source
                 modifier = Modifier.size(size = 14.dp),
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = stringResource(labelRes),
+                text = stringResource(style.labelRes),
                 style = MaterialTheme.typography.labelSmall,
             )
         }
     }
 }
 
-private fun sourceLabelResource(sourceType: String): Int = when (sourceType) {
-    SourceType.GMAIL -> R.string.raw_event_source_badge_gmail
-    SourceType.OUTLOOK_MAIL -> R.string.raw_event_source_badge_outlook_mail
-    SourceType.NAVER_IMAP -> R.string.raw_event_source_badge_naver_imap
-    SourceType.DAUM_IMAP -> R.string.raw_event_source_badge_daum_imap
-    SourceType.GOOGLE_CALENDAR -> R.string.raw_event_source_badge_google_calendar
-    SourceType.OUTLOOK_CALENDAR -> R.string.raw_event_source_badge_outlook_calendar
-    SourceType.VOICE -> R.string.raw_event_source_badge_voice
-    SourceType.CALL_RECORDING -> R.string.raw_event_source_badge_call_recording
-    else -> R.string.raw_event_source_badge_unknown
-}
+/**
+ * Resolved presentation for a `source_type` wire value — label string resource
+ * and leading icon. Kept as one struct (not two parallel `when`s) so adding a
+ * new source edits a single site, eliminating the class of bug where the label
+ * and icon drift out of sync.
+ */
+private data class SourceBadgeStyle(
+    val labelRes: Int,
+    val icon: ImageVector,
+)
 
-private fun sourceIcon(sourceType: String): ImageVector = when (sourceType) {
-    SourceType.GMAIL,
-    SourceType.OUTLOOK_MAIL,
-    SourceType.NAVER_IMAP,
-    SourceType.DAUM_IMAP -> Icons.Outlined.Email
-    SourceType.GOOGLE_CALENDAR,
-    SourceType.OUTLOOK_CALENDAR -> Icons.Outlined.CalendarMonth
-    SourceType.VOICE,
-    SourceType.CALL_RECORDING -> Icons.Outlined.Mic
-    else -> Icons.Outlined.Email
+private fun sourceBadgeFor(sourceType: String): SourceBadgeStyle = when (sourceType) {
+    SourceType.GMAIL ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_gmail, Icons.Outlined.Email)
+    SourceType.OUTLOOK_MAIL ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_outlook_mail, Icons.Outlined.Email)
+    SourceType.NAVER_IMAP ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_naver_imap, Icons.Outlined.Email)
+    SourceType.DAUM_IMAP ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_daum_imap, Icons.Outlined.Email)
+    SourceType.GOOGLE_CALENDAR ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_google_calendar, Icons.Outlined.CalendarMonth)
+    SourceType.OUTLOOK_CALENDAR ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_outlook_calendar, Icons.Outlined.CalendarMonth)
+    SourceType.VOICE ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_voice, Icons.Outlined.Mic)
+    SourceType.CALL_RECORDING ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_call_recording, Icons.Outlined.Mic)
+    else ->
+        SourceBadgeStyle(R.string.raw_event_source_badge_unknown, Icons.Outlined.Email)
 }
 
 @PreviewLightDark

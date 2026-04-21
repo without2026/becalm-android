@@ -43,6 +43,9 @@ import javax.inject.Inject
 public sealed class TimelineItem {
     public abstract val sortKey: Instant
 
+    /** Display title rendered as the row headline by the Today timeline. */
+    public abstract val title: String
+
     /**
      * A commitment that is pending on today's date.
      *
@@ -52,7 +55,7 @@ public sealed class TimelineItem {
      */
     public data class Commitment(
         val id: String,
-        val title: String,
+        override val title: String,
         val direction: String,
         val counterpartyDisplayName: String?,
         override val sortKey: Instant,
@@ -65,7 +68,7 @@ public sealed class TimelineItem {
      */
     public data class CalendarEvent(
         val id: String,
-        val title: String,
+        override val title: String,
         override val sortKey: Instant,
     ) : TimelineItem()
 
@@ -76,7 +79,7 @@ public sealed class TimelineItem {
      */
     public data class Meeting(
         val id: String,
-        val title: String,
+        override val title: String,
         val attendeesRaw: String?,
         override val sortKey: Instant,
     ) : TimelineItem()

@@ -1,12 +1,11 @@
 package com.becalm.android.ui.persons
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -150,12 +149,10 @@ public fun RawEventDetailSheet(
 @Composable
 private fun NonEmailEventDetailSection(state: RawEventDetailUiState) {
     val sourceType = state.sourceType ?: return
-    Column {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         EventSourceBadge(sourceType = sourceType)
-        Spacer(modifier = Modifier.height(12.dp))
         if (state.eventTitle != null) {
             EventTitleText(title = state.eventTitle)
-            Spacer(modifier = Modifier.height(12.dp))
         }
         if (state.snippet != null) {
             Text(
@@ -163,7 +160,6 @@ private fun NonEmailEventDetailSection(state: RawEventDetailUiState) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(12.dp))
         }
         state.timestamp?.let { IngestionTimestamp(timestamp = it) }
     }

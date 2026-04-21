@@ -77,10 +77,10 @@ private fun DirectionBadgePill(
 }
 
 /** Wire value for "I promised to do something." */
-internal const val DIRECTION_GIVE: String = "give"
+private const val DIRECTION_GIVE: String = "give"
 
 /** Wire value for "Someone promised to do something for me." */
-internal const val DIRECTION_TAKE: String = "take"
+private const val DIRECTION_TAKE: String = "take"
 
 @PreviewLightDark
 @Composable
