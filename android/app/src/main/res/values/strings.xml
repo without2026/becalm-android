@@ -145,6 +145,25 @@
     <string name="commitment_state_overdue">놓침</string>
     <string name="commitment_state_cancelled">취소됨</string>
 
+    <!-- Commitment detail sheet (CMT-003 + EDIT-008 + MAN-004) -->
+    <string name="commitment_detail_title">약속 상세</string>
+    <string name="commitment_detail_quote_label">원문</string>
+    <string name="commitment_detail_counterparty_label">상대방</string>
+    <string name="commitment_detail_due_label">마감</string>
+    <string name="commitment_detail_last_edited_fmt">마지막 수정: %1$s (본인)</string>
+    <string name="commitment_detail_disputed_badge_fmt">⚠ 원문 이의 제기됨 (%1$s)</string>
+    <string name="commitment_detail_superseded_link">이전 약속 보기</string>
+    <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
+    <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
+    <string name="commitment_detail_empty_error">삭제된 약속</string>
+
+    <!-- Commitment action buttons (CMT-005..012 + EDIT-001) -->
+    <string name="commitment_action_remind">리마인드</string>
+    <string name="commitment_action_follow_up">팔로업</string>
+    <string name="commitment_action_complete">완료</string>
+    <string name="commitment_action_cancel">취소</string>
+    <string name="commitment_action_edit">편집</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_account_section">Account</string>

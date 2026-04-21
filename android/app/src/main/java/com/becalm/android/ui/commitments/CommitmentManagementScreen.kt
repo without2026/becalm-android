@@ -59,6 +59,7 @@ import kotlinx.datetime.Instant
 @Composable
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
+    onOpenDetail: (id: String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -127,11 +128,11 @@ public fun CommitmentManagementScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp),
-                                    // onMarkDone wiring is intentionally absent in Wave 4 —
-                                    // card taps will surface CommitmentDetailSheet (C4) where
-                                    // [리마인드]/[팔로업]/[완료]/[취소] live. Until that sheet lands,
-                                    // users trigger transitions programmatically via the VM.
-                                    onClick = {},
+                                    // C4 wiring — card tap opens the CommitmentDetailSheet
+                                    // route (see BecalmRoute.CommitmentDetail). Action
+                                    // buttons live inside the sheet; onMarkDone stays
+                                    // unset so the card stays visually minimal.
+                                    onClick = { onOpenDetail(row.id) },
                                 )
                             }
                         }

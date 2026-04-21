@@ -46,6 +46,18 @@ public interface CommitmentRepository {
     /** Emits all commitments for [userId] linked to [personRef], re-emits on change. */
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
 
+    /**
+     * Emits the live commitment identified by [id] and re-emits on every matching
+     * row write. Emits `null` when no row matches OR the row is soft-deleted.
+     *
+     * Drives `CommitmentDetailSheet` via `CommitmentDetailViewModel` so the sheet
+     * live-updates when a VM handler triggers a state transition (e.g.
+     * [transitionState]) and the corresponding DAO write lands.
+     *
+     * @param id UUID of the commitment to observe.
+     */
+    public fun observeById(id: String): Flow<CommitmentEntity?>
+
     // ── Remote refresh ───────────────────────────────────────────────────────
 
     /**

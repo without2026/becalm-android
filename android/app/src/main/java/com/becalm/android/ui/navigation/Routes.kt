@@ -143,6 +143,25 @@ public sealed class BecalmRoute(public val path: String) {
     /** Tab 3: commitment management with filter tabs (전체 / 내가 한 / 상대가 한). */
     public data object Commitments : BecalmRoute("commitments")
 
+    /**
+     * Commitment detail bottom sheet: full quote + source context + 5 action buttons
+     * (CMT-003). Opened on card tap from [Commitments]; also the landing target for
+     * the `becalm://commitments/{id}` reminder deep link registered in a future
+     * commit (C5).
+     *
+     * Usage: `navController.navigate(BecalmRoute.CommitmentDetail("cmt_abc").path)`
+     */
+    public data class CommitmentDetail(public val id: String) :
+        BecalmRoute("commitments/$id") {
+        public companion object {
+            /** NavHost destination template. */
+            public const val PATH: String = "commitments/{id}"
+
+            /** `navArgument` key for the commitment UUID. */
+            public const val ARG_ID: String = "id"
+        }
+    }
+
     // ── Settings ───────────────────────────────────────────────────────────────
 
     /** Settings root — accessed via top-right icon on TodayTimelineScreen. */

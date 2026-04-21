@@ -11,6 +11,7 @@ import androidx.navigation.navArgument
 import com.becalm.android.ui.auth.LoginScreen
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsScreen
+import com.becalm.android.ui.commitments.CommitmentDetailSheet
 import com.becalm.android.ui.commitments.CommitmentManagementScreen
 import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
 import com.becalm.android.ui.onboarding.ColdSyncScreen
@@ -178,7 +179,24 @@ public fun BecalmNavHost(
         }
 
         composable(route = BecalmRoute.Commitments.path) {
-            CommitmentManagementScreen()
+            CommitmentManagementScreen(
+                onOpenDetail = { id ->
+                    navController.navigate(BecalmRoute.CommitmentDetail(id).path)
+                },
+            )
+        }
+
+        composable(
+            route = BecalmRoute.CommitmentDetail.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.CommitmentDetail.ARG_ID) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val id = backStackEntry.stringArg(BecalmRoute.CommitmentDetail.ARG_ID).orEmpty()
+            CommitmentDetailSheet(
+                commitmentId = id,
+                onDismiss = { navController.popBackStack() },
+            )
         }
 
         // ── Settings ───────────────────────────────────────────────────────────

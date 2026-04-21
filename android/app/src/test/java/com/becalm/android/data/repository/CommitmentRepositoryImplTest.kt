@@ -24,6 +24,8 @@ import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -357,6 +359,32 @@ class CommitmentRepositoryImplTest {
         assertEquals(disputedAt, after.quoteDisputedAt)
     }
 
+    // ── observeById: reactive re-emission on DAO write ────────────────────────
+
+    @Test
+    fun `observeById re-emits after a DAO write flips actionState`() = runTest(testDispatcher) {
+        val initial = makeEntity(id = "c-obs", actionState = "pending", syncStatus = "synced")
+        dao.insert(initial)
+
+        // First observation — seeded state.
+        val first = repository.observeById("c-obs").first()
+        assertEquals("pending", first?.actionState)
+
+        // Trigger a DAO write (simulating CMT-005 Remind → REMINDED transition).
+        dao.updateActionState(
+            id = "c-obs",
+            newState = "reminded",
+            updatedAt = Instant.fromEpochMilliseconds(123),
+        )
+
+        val afterWrite = repository.observeById("c-obs").first()
+        assertEquals(
+            "reactive observeById must reflect the new action_state after a DAO write",
+            "reminded",
+            afterWrite?.actionState,
+        )
+    }
+
     @Test
     fun `findByIdsForMerge returns tombstoned rows (deleted_at filter bypass)`() = runTest(testDispatcher) {
         val live = makeEntity(id = "c-live", syncStatus = "synced")
@@ -434,21 +462,33 @@ class CommitmentRepositoryImplTest {
      * [notImplemented] so a test that incidentally hits an unused path fails loudly.
      */
     private class FakeCommitmentDao : CommitmentDao {
+        // Backing state exposed as a MutableStateFlow so observe*-style consumers (e.g.
+        // CommitmentRepositoryImpl.observeById -> DAO.observeById) can re-emit on every
+        // write path. `rows` continues to be the canonical map; writers mutate the map
+        // and then call [bump] to republish a snapshot, mirroring Room's invalidation
+        // tracker behaviour for Flow-returning queries.
         private val rows = linkedMapOf<String, CommitmentEntity>()
+        private val snapshots =
+            kotlinx.coroutines.flow.MutableStateFlow<Map<String, CommitmentEntity>>(emptyMap())
+
+        private fun bump() { snapshots.value = rows.toMap() }
 
         override suspend fun insert(entity: CommitmentEntity): Long {
             rows[entity.id] = entity
+            bump()
             return 1L
         }
 
         override suspend fun insertAll(entities: List<CommitmentEntity>): List<Long> {
             entities.forEach { rows[it.id] = it }
+            bump()
             return entities.map { 1L }
         }
 
         override suspend fun update(entity: CommitmentEntity): Int {
             if (rows.containsKey(entity.id)) {
                 rows[entity.id] = entity
+                bump()
                 return 1
             }
             return 0
@@ -457,6 +497,7 @@ class CommitmentRepositoryImplTest {
         override suspend fun updateActionState(id: String, newState: String, updatedAt: Instant): Int {
             val row = rows[id] ?: return 0
             rows[id] = row.copy(actionState = newState, updatedAt = updatedAt)
+            bump()
             return 1
         }
 
@@ -464,14 +505,17 @@ class CommitmentRepositoryImplTest {
             ids.forEach { id ->
                 rows[id]?.let { rows[id] = it.copy(syncStatus = "synced") }
             }
+            bump()
         }
 
         override suspend fun markPending(id: String) {
             rows[id]?.let { rows[id] = it.copy(syncStatus = "pending") }
+            bump()
         }
 
         override suspend fun markFailed(id: String) {
             rows[id]?.let { rows[id] = it.copy(syncStatus = "failed") }
+            bump()
         }
 
         override suspend fun deleteAllForUser(userId: String): Int {
@@ -495,6 +539,15 @@ class CommitmentRepositoryImplTest {
         override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> = emptyFlow()
 
         override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> = emptyFlow()
+
+        /**
+         * Reactive observer — emits the current [rows] entry on every subscription and
+         * re-emits when any write path mutates the map. Mirrors Room's invalidation
+         * tracker behaviour for Flow-returning queries so production tests can assert
+         * re-emission without spinning up a real database.
+         */
+        override fun observeById(id: String): Flow<CommitmentEntity?> =
+            snapshots.map { it[id] }
 
         override suspend fun findPendingSync(userId: String, limit: Int): List<CommitmentEntity> =
             rows.values.filter { it.userId == userId && it.syncStatus == "pending" }.take(limit)

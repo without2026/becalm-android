@@ -1,7 +1,7 @@
 # UI / Commitment / Detail-Sheet — CMT-003 + EDIT-008 host composable
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C4
+**Status**: IMPLEMENTED — Wave 4 commit C4.
 **E2E Stage**: 5 — Commitment Management
 **Severity**: High
 **Type**: Gap

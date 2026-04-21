@@ -73,6 +73,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForPerson(userId, personRef)
 
+    override fun observeById(id: String): Flow<CommitmentEntity?> =
+        dao.observeById(id)
+
     // ── Remote refresh ────────────────────────────────────────────────────────
 
     override suspend fun refreshSince(

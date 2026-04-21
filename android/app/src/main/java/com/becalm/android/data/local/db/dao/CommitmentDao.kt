@@ -155,6 +155,24 @@ public interface CommitmentDao {
     public suspend fun findById(id: String): CommitmentEntity?
 
     /**
+     * Emits the live commitment identified by [id] and re-emits on every matching
+     * `commitments` row write. Emits `null` when no row matches OR the matching row
+     * has been soft-deleted.
+     *
+     * This is the reactive sibling of [findById]; consumers such as
+     * `CommitmentDetailViewModel` subscribe so the sheet live-updates when the entity
+     * changes (e.g. after a state transition flips `action_state`). The `AND deleted_at
+     * IS NULL` clause is the same MUST-level invariant applied to [findById] and every
+     * other user-facing SELECT per `.spec/contracts/data-model.yml:204-205`.
+     *
+     * @param id UUID of the commitment to observe.
+     * @return A [Flow] that emits the matching live [CommitmentEntity], or `null`
+     *   when absent or soft-deleted.
+     */
+    @Query("SELECT * FROM commitments WHERE id = :id AND deleted_at IS NULL")
+    public fun observeById(id: String): Flow<CommitmentEntity?>
+
+    /**
      * Returns the live-or-tombstoned commitments for [userId] whose [CommitmentEntity.id]
      * is in [ids]. Intentionally **omits** the `deleted_at IS NULL` filter so that the
      * refresh-merge path in [com.becalm.android.data.repository.CommitmentRepository.refreshSince]
