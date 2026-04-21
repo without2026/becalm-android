@@ -268,6 +268,110 @@ class CommitmentRepositoryImplTest {
         assertEquals("pending", dao.findById("c-1")?.syncStatus)
     }
 
+    // ── refreshSince: merges server response with local lifecycle state ──────
+
+    /**
+     * Regression coverage for the refresh-merge path (`findByIdsForMerge` +
+     * [CommitmentBatchMapper.toEntity] lifecycle merge). A legacy `/v1/commitments`
+     * build that does not yet emit the v5 lifecycle columns returns them at their
+     * DTO defaults (null / false); without the merge, `insertAll` would REPLACE
+     * every local row and silently wipe user-set state (edits, disputes,
+     * soft-deletes, supersedes). These tests pin down that the DAO bypass query
+     * returns tombstones too AND that the mapper preserves their values on upsert.
+     */
+    @Test
+    fun `refreshSince with legacy DTO preserves local lifecycle fields`() = runTest(testDispatcher) {
+        val disputedAt = Instant.fromEpochMilliseconds(1_234)
+        val deletedAt = Instant.fromEpochMilliseconds(5_678)
+        val localEditedAt = Instant.fromEpochMilliseconds(9_999)
+        val localRow = makeEntity(id = "c-local", syncStatus = "synced").copy(
+            lastEditedBy = "user-1",
+            lastEditedAt = localEditedAt,
+            quoteDisputed = true,
+            quoteDisputedAt = disputedAt,
+            deletedAt = deletedAt,
+            supersedesCommitmentId = "c-prior",
+        )
+        dao.insert(localRow)
+
+        // Server DTO omits all six lifecycle fields (older backend).
+        val legacyDto = makeDto(localRow).copy(
+            lastEditedBy = null,
+            lastEditedAt = null,
+            quoteDisputed = false,
+            quoteDisputedAt = null,
+            deletedAt = null,
+            supersedesCommitmentId = null,
+        )
+        api.getCommitmentsResponder = {
+            Response.success(
+                PaginatedCommitmentsResponse(
+                    data = listOf(legacyDto),
+                    cursor = "",
+                    hasMore = false,
+                ),
+            )
+        }
+
+        val result = repository.refreshSince(userId = "user-1", since = null)
+
+        assertTrue("expected Success but was $result", result is BecalmResult.Success)
+        val after = dao.findByIdsForMerge("user-1", listOf("c-local")).single()
+        assertEquals("user-1", after.lastEditedBy)
+        assertEquals(localEditedAt, after.lastEditedAt)
+        assertEquals(true, after.quoteDisputed)
+        assertEquals(disputedAt, after.quoteDisputedAt)
+        assertEquals(deletedAt, after.deletedAt)
+        assertEquals("c-prior", after.supersedesCommitmentId)
+    }
+
+    @Test
+    fun `refreshSince with lifecycle-aware DTO trusts server and allows dispute release`() = runTest(testDispatcher) {
+        val disputedAt = Instant.fromEpochMilliseconds(2_222)
+        val localRow = makeEntity(id = "c-lifecycle", syncStatus = "synced").copy(
+            quoteDisputed = true,
+            quoteDisputedAt = disputedAt,
+        )
+        dao.insert(localRow)
+
+        // Server emits quote_disputed=false while retaining the historical timestamp —
+        // the user released the dispute on another device.
+        val releasedDto = makeDto(localRow).copy(
+            quoteDisputed = false,
+            quoteDisputedAt = disputedAt,
+        )
+        api.getCommitmentsResponder = {
+            Response.success(
+                PaginatedCommitmentsResponse(
+                    data = listOf(releasedDto),
+                    cursor = "",
+                    hasMore = false,
+                ),
+            )
+        }
+
+        repository.refreshSince(userId = "user-1", since = null)
+
+        val after = dao.findByIdsForMerge("user-1", listOf("c-lifecycle")).single()
+        assertEquals(false, after.quoteDisputed)
+        assertEquals(disputedAt, after.quoteDisputedAt)
+    }
+
+    @Test
+    fun `findByIdsForMerge returns tombstoned rows (deleted_at filter bypass)`() = runTest(testDispatcher) {
+        val live = makeEntity(id = "c-live", syncStatus = "synced")
+        val tombstoned = makeEntity(id = "c-deleted", syncStatus = "pending").copy(
+            deletedAt = Instant.fromEpochMilliseconds(42),
+        )
+        dao.insert(live)
+        dao.insert(tombstoned)
+
+        val rows = dao.findByIdsForMerge("user-1", listOf("c-live", "c-deleted"))
+
+        assertEquals(2, rows.size)
+        assertNotNull("tombstone must survive the merge-path fetch", rows.find { it.id == "c-deleted" })
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun makeEntity(
@@ -378,6 +482,14 @@ class CommitmentRepositoryImplTest {
 
         override suspend fun findById(id: String): CommitmentEntity? = rows[id]
 
+        override suspend fun findByIdsForMerge(
+            userId: String,
+            ids: List<String>,
+        ): List<CommitmentEntity> =
+            // Mirrors the production query: scoped by user_id, tombstones included so the
+            // refresh-merge path can preserve locally-set lifecycle state.
+            rows.values.filter { it.userId == userId && it.id in ids }
+
         override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> = emptyFlow()
 
         override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> = emptyFlow()
@@ -401,6 +513,9 @@ class CommitmentRepositoryImplTest {
         var uploadBatchResponder: (CommitmentBatchRequestDto) -> Response<CommitmentBatchResponseDto> =
             { Response.success(CommitmentBatchResponseDto(acknowledged = 0, failed = emptyList())) }
 
+        var getCommitmentsResponder: () -> Response<PaginatedCommitmentsResponse> =
+            { notImplemented() }
+
         val uploadCommitmentsBatchCalls = AtomicInteger(0)
 
         override suspend fun batchUploadRawEvents(
@@ -415,7 +530,7 @@ class CommitmentRepositoryImplTest {
             personRef: String?,
             direction: String?,
             actionState: String?,
-        ): Response<PaginatedCommitmentsResponse> = notImplemented()
+        ): Response<PaginatedCommitmentsResponse> = getCommitmentsResponder()
 
         override suspend fun patchCommitment(
             id: String,

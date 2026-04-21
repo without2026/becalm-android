@@ -42,6 +42,19 @@ import java.util.UUID
  *
  * Constructed by [MediaStoreWorker] from its own collaborators rather than via Hilt
  * `@Inject`, so unit tests do not need to know about the split.
+ *
+ * ## Known gap (follow-up)
+ * The full SAF tree URI migration required by `.spec/onboarding.spec.yml:37-44` (ONB-003)
+ * is deferred to a Wave 6 onboarding PR tracked by `refactor/ui/onboarding/saf-tree`.
+ * This file continues to query `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` directly;
+ * the LIKE patterns below were realigned to Samsung One UI 6.x's
+ * `Recordings/Voice Recorder/` layout in PR #14 (see
+ * `docs/plans/worker-voice-ingestion-realign.md` and
+ * `docs/plans/worker-voice-ingestion-saf-tree-followup.md`) so that ingestion no longer
+ * silently returns zero on Samsung devices. The eventual pivot to
+ * `DocumentsContract.buildChildDocumentsUriUsingTree` + `COLUMN_LAST_MODIFIED` watermarks
+ * is tracked separately and requires coordinated onboarding UI changes (SAF picker +
+ * `takePersistableUriPermission`) that are out of scope for this PR.
  */
 internal class VoiceMediaStoreProbe(
     private val appContext: Context,
@@ -107,16 +120,63 @@ internal class VoiceMediaStoreProbe(
         )
         // Use >= so siblings sharing the same DATE_ADDED second are not permanently skipped
         // on a mid-batch failure. clientEventId dedup absorbs the one-second overlap.
-        val (folderArg1, folderArg2) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // RELATIVE_PATH ends with "/" (e.g. "VoiceRecorder/"); trailing slash prevents matching siblings
-            Pair("${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%", "${MediaStoreWorker.RECORDER_FOLDER_STOCK}/%")
+        //
+        // Four real-world recorder layouts, all tagged `SourceType.VOICE`:
+        //   1. Samsung One UI 6.x Voice Recorder nested under `Recordings/Voice Recorder/`.
+        //      Covered by the broad `Recordings/%` pattern.
+        //   2. Stock AOSP / Pixel Recorder writing voice memos directly under `Recordings/`
+        //      with no recorder-specific subfolder. Covered by the same broad `Recordings/%`.
+        //   3. Samsung Voice Recorder root-relative with space: `Voice Recorder/...`
+        //      (some variant One UI builds place the recorder folder at path root).
+        //   4. Samsung legacy fallback without space: `VoiceRecorder/...` — explicitly
+        //      documented at `.spec/onboarding.spec.yml:33` as the secondary auto-discovery
+        //      root for older and variant devices.
+        //
+        // CRITICAL CARVE-OUT: Samsung One UI 6.x *also* stores call recordings under
+        // `Recordings/Call/...`. Ingesting those as `SourceType.VOICE` would misclassify
+        // call audio. The broad `Recordings/%` match is therefore AND-ed with
+        // `NOT LIKE 'Recordings/Call/%'` so the `Call/` subtree is excluded. Call-recording
+        // ingestion is owned by `feat/worker/voice/call-recording` (finding PR #15), which
+        // will add an inclusive `Recordings/Call/%` query with the correct
+        // `SourceType.CALL_RECORDING` tagging.
+        val callSubfolderExclusion = "Recordings/${MediaStoreWorker.CALL_FOLDER}/%"
+        data class PathPatterns(
+            val recordings: String,
+            val voiceRecorder: String,
+            val voiceRecorderLegacy: String,
+            val callExclusion: String,
+        )
+        val patterns = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // RELATIVE_PATH ends with "/" (e.g. "Voice Recorder/"); trailing slash prevents
+            // matching siblings. Embedded spaces in "Voice Recorder" are carried safely
+            // through quoted selectionArgs.
+            PathPatterns(
+                recordings = "Recordings/%",
+                voiceRecorder = "${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%",
+                voiceRecorderLegacy = "${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG_LEGACY}/%",
+                callExclusion = callSubfolderExclusion,
+            )
         } else {
-            // DATA is the full absolute path; match either known recorder directory
-            Pair("%/${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%", "%/${MediaStoreWorker.RECORDER_FOLDER_STOCK}/%")
+            // DATA is the full absolute path — match at any depth with leading `%`.
+            PathPatterns(
+                recordings = "%/Recordings/%",
+                voiceRecorder = "%/${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%",
+                voiceRecorderLegacy = "%/${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG_LEGACY}/%",
+                callExclusion = "%/$callSubfolderExclusion",
+            )
         }
-        val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND " +
-            "($folderColumn LIKE ? OR $folderColumn LIKE ?)"
-        val selectionArgs = arrayOf(lastSeenSec.toString(), folderArg1, folderArg2)
+        val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND (" +
+            "($folderColumn LIKE ? AND $folderColumn NOT LIKE ?)" +
+            " OR $folderColumn LIKE ?" +
+            " OR $folderColumn LIKE ?" +
+            ")"
+        val selectionArgs = arrayOf(
+            lastSeenSec.toString(),
+            patterns.recordings,
+            patterns.callExclusion,
+            patterns.voiceRecorder,
+            patterns.voiceRecorderLegacy,
+        )
         val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} ASC"
 
         var insertedCount = 0

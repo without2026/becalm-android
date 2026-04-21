@@ -201,6 +201,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                         index = index,
                         userId = userId,
                         sourceRef = entity.sourceRef,
+                        sourceType = entity.sourceType,
                         sourceEventTitle = entity.eventTitle,
                         sourceEventOccurredAt = entity.timestamp,
                         now = now,

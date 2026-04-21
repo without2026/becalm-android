@@ -107,7 +107,16 @@ public class CommitmentRepositoryImpl @Inject constructor(
                 is BecalmResult.Failure -> return result
                 is BecalmResult.Success -> {
                     val page = result.value
-                    val entities = page.data.map { it.toEntity(userId) }
+                    // Merge server response with any locally-set lifecycle state so that a
+                    // legacy backend that does not yet return last_edited_*/quote_disputed*/
+                    // deleted_at/supersedes_commitment_id cannot silently wipe local edits
+                    // or tombstones via a REPLACE upsert (stock Moshi cannot distinguish
+                    // "field omitted" from "field explicitly null/false"). See the function
+                    // KDoc on [toEntity] for the append-only merge rules.
+                    val existingById: Map<String, CommitmentEntity> =
+                        dao.findByIdsForMerge(userId, page.data.map { it.id })
+                            .associateBy { it.id }
+                    val entities = page.data.map { it.toEntity(userId, existingById[it.id]) }
                     dao.insertAll(entities)
                     totalFetched += page.data.size
                     totalUpserted += entities.size

@@ -50,6 +50,16 @@ internal fun CommitmentEntity.toBatchItemDto(): CommitmentBatchItemDto =
             confidence = confidence,
             createdAt = createdAt,
             updatedAt = updatedAt,
+            // v5 lifecycle fields — must round-trip on upload so local edits / disputes /
+            // soft-deletes / supersede links are not silently lost when a commitment is
+            // re-sent (e.g. an optimistic PATCH fell back to `sync_status='pending'` and
+            // the next batch flushes the full row).
+            lastEditedBy = lastEditedBy,
+            lastEditedAt = lastEditedAt,
+            quoteDisputed = quoteDisputed,
+            quoteDisputedAt = quoteDisputedAt,
+            deletedAt = deletedAt,
+            supersedesCommitmentId = supersedesCommitmentId,
         ),
     )
 
@@ -70,7 +80,43 @@ internal fun FailedEventDto.toDomain(): CommitmentRepository.FailedEvent =
 
 // ─── DTO → Entity mapping ─────────────────────────────────────────────────────
 
-internal fun CommitmentDto.toEntity(userId: String): CommitmentEntity =
+/**
+ * Maps a wire [CommitmentDto] to a local [CommitmentEntity], merging the six v5
+ * lifecycle columns (`last_edited_*`, `quote_disputed*`, `deleted_at`,
+ * `supersedes_commitment_id`) against [existing] when provided so that stock Moshi
+ * parsing — which cannot distinguish "server omitted the field" from "server
+ * explicitly sent null/false" — does not silently erase local state.
+ *
+ * ### Merge semantics (per-field)
+ * - `last_edited_by` / `last_edited_at` — nullable, set-once-then-mutable. Rule:
+ *   if the DTO is null, fall back to [existing]. Otherwise trust the DTO. A null
+ *   DTO value is assumed to mean "server omitted the field", because the append-
+ *   only client-writable nature of these columns means the server never clears a
+ *   once-set identifier back to null.
+ * - `quote_disputed` — boolean, toggleable. Rule: trust the DTO when the paired
+ *   `quote_disputed_at` timestamp is non-null (that combination proves the server
+ *   has a first-class dispute view and can legitimately release the flag by
+ *   sending `quote_disputed=false` while retaining the historical timestamp). If
+ *   the DTO's `quote_disputed_at` is null, fall back to [existing] to cover both
+ *   (a) a legacy backend that does not yet return the field and (b) a row that
+ *   has genuinely never been disputed — both cases collapse to safe preservation.
+ * - `quote_disputed_at` — monotonically-retained timestamp. Rule: DTO ?: existing.
+ * - `deleted_at` — append-only tombstone (null → timestamp, never back per EDIT-006).
+ *   Rule: DTO ?: existing. A local soft-delete that has not round-tripped survives
+ *   the next refresh.
+ * - `supersedes_commitment_id` — set once on EDIT-007 supersede. Rule: DTO ?: existing.
+ *
+ * Pass [existing] = null when the caller has not yet looked up a local row (e.g.
+ * the refresh path's first insert). The merge then reduces to "accept the DTO
+ * values as-is", which is correct because there is no local state to preserve.
+ *
+ * Non-lifecycle columns always take the wire value; the server is authoritative
+ * for them.
+ */
+internal fun CommitmentDto.toEntity(
+    userId: String,
+    existing: CommitmentEntity? = null,
+): CommitmentEntity =
     CommitmentEntity(
         id = id,
         userId = userId,
@@ -92,4 +138,19 @@ internal fun CommitmentDto.toEntity(userId: String): CommitmentEntity =
         syncStatus = syncStatus ?: "synced",
         createdAt = createdAt,
         updatedAt = updatedAt,
+        // Lifecycle merge — see function KDoc for per-field rationale.
+        lastEditedBy = lastEditedBy ?: existing?.lastEditedBy,
+        lastEditedAt = lastEditedAt ?: existing?.lastEditedAt,
+        quoteDisputed = if (quoteDisputedAt != null) {
+            // Server has a first-class dispute view: trust its boolean (including
+            // release to false while keeping the historical timestamp).
+            quoteDisputed
+        } else {
+            // Server omitted the timestamp: preserve whatever local knows. When
+            // local has never disputed either, this collapses to `false` — no drift.
+            existing?.quoteDisputed ?: false
+        },
+        quoteDisputedAt = quoteDisputedAt ?: existing?.quoteDisputedAt,
+        deletedAt = deletedAt ?: existing?.deletedAt,
+        supersedesCommitmentId = supersedesCommitmentId ?: existing?.supersedesCommitmentId,
     )

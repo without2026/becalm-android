@@ -68,6 +68,17 @@ import kotlinx.datetime.Clock
  * SP-32 WorkScheduler registers this class as a periodic job and as an expedited
  * one-shot triggered by [com.becalm.android.worker.ContentObserverBootstrap]'s voice
  * observer (pending `refactor/worker/voice/ingestion-realign`).
+ *
+ * ## Known gap (follow-up)
+ * The full SAF tree URI migration required by `.spec/onboarding.spec.yml:37-44` (ONB-003)
+ * — `ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission` + `DocumentsContract`
+ * child traversal rooted at Samsung One UI 6.x `/storage/emulated/0/Recordings/` — is
+ * deferred to a Wave 6 onboarding PR tracked by `refactor/ui/onboarding/saf-tree`. See
+ * `docs/plans/worker-voice-ingestion-realign.md` (finding PR #14) for the full design and
+ * `docs/plans/worker-voice-ingestion-saf-tree-followup.md` for the deferred sub-scope.
+ * This PR only realigns the recorder-folder LIKE patterns to Samsung One UI 6.x's
+ * space-separated `"Voice Recorder/"` and declares the `Call/` constant for the follow-up
+ * `feat/worker/voice/call-recording` (finding PR #15) to wire through.
  */
 @HiltWorker
 public class MediaStoreWorker @AssistedInject constructor(
@@ -130,17 +141,46 @@ public class MediaStoreWorker @AssistedInject constructor(
         public const val KIND_VOICE: String = "voice"
 
         /**
-         * Samsung Voice Recorder default relative folder name (ONB-002 spec reference).
-         * Used as a LIKE pattern prefix on API 29+ (`RELATIVE_PATH LIKE 'VoiceRecorder%'`)
-         * or as a path segment on API 28 (`DATA LIKE '%/VoiceRecorder/%'`).
+         * Samsung Voice Recorder default relative folder name (ONB-002 / ONB-003 spec
+         * reference — `.spec/onboarding.spec.yml:29-33, 37-44`). Samsung One UI 6.x stores
+         * voice-memo recordings under `Recordings/Voice Recorder/` with the space-separated
+         * folder name; the legacy spelling without a space did NOT match real-device
+         * layouts and caused ingestion to silently return zero rows.
+         *
+         * Used as a LIKE pattern prefix on API 29+ (`RELATIVE_PATH LIKE 'Voice Recorder/%'`)
+         * or as a path segment on API 28 (`DATA LIKE '%/Voice Recorder/%'` — the embedded
+         * space is safely carried through quoted selectionArgs).
          */
-        public const val RECORDER_FOLDER_SAMSUNG: String = "VoiceRecorder"
+        public const val RECORDER_FOLDER_SAMSUNG: String = "Voice Recorder"
 
         /**
-         * Stock Android voice recorder default relative folder name (AOSP / Pixel Recorder).
-         * Used alongside [RECORDER_FOLDER_SAMSUNG] in the OR clause of the MediaStore query
-         * to cover devices that do not use Samsung's default path.
+         * Legacy Samsung voice-recorder folder name without the space — covers older and
+         * variant One UI builds that still store recordings at
+         * `/storage/emulated/0/VoiceRecorder/` rather than the One UI 6.x
+         * `Recordings/Voice Recorder/` nested layout. Documented at
+         * `.spec/onboarding.spec.yml:33` as the fallback auto-discovery root.
+         *
+         * Kept as its own constant (rather than folded into [RECORDER_FOLDER_SAMSUNG]) so
+         * that the probe can LIKE-match both spellings independently and neither one
+         * shadows the other in future string-building.
          */
-        public const val RECORDER_FOLDER_STOCK: String = "Recordings"
+        public const val RECORDER_FOLDER_SAMSUNG_LEGACY: String = "VoiceRecorder"
+
+        /**
+         * Samsung One UI 6.x `Call/` subfolder under `Recordings/`. Maps to
+         * `SourceType.CALL_RECORDING` when paths pass through the ingest probe. Wired up by
+         * `feat/worker/voice/call-recording` (finding PR #15) — this PR declares the
+         * constant only.
+         */
+        public const val CALL_FOLDER: String = "Call"
+
+        // NOTE: a `RECORDER_FOLDER_STOCK = "Recordings"` constant was removed because every
+        // call site is now inline inside [VoiceMediaStoreProbe]'s selection SQL, which
+        // carves out `Recordings/Call/%` via a NOT LIKE clause. Do NOT reintroduce a bare
+        // `Recordings/%` LIKE without that guard — Samsung One UI 6.x stores call
+        // recordings under `Recordings/Call/...` and a broad match would misclassify them
+        // as `SourceType.VOICE`. Call-recording ingestion is owned by
+        // `feat/worker/voice/call-recording` (PR #15) with the correct
+        // `SourceType.CALL_RECORDING` tagging.
     }
 }

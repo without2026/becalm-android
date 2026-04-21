@@ -17,6 +17,7 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.imap.ImapClient
 import com.becalm.android.data.remote.imap.ImapFetchResult
@@ -258,6 +259,10 @@ public class ImapDaumWorker @AssistedInject constructor(
             personRef = fromEmail,
             eventTitle = subject,
             eventSnippet = bodyPreview,
+            // EMAIL-001 direction hint (`.spec/email-pipeline.spec.yml:15-18`). This worker
+            // selects the `INBOX` IMAP folder; a follow-up ADAPT-EMAIL-* PR will add the
+            // `Sent` / `Sent Messages` mailbox with its own `folder = "SENT"` tagging.
+            folder = FOLDER_INBOX,
             timestamp = sentAt,
         )
 

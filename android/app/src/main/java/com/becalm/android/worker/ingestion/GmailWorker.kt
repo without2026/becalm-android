@@ -11,8 +11,10 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.FOLDER_SENT
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.gmail.GmailClient
+import com.becalm.android.data.remote.gmail.GmailLabel
 import com.becalm.android.data.remote.gmail.GmailMessage
 import com.becalm.android.data.remote.gmail.GmailMessagePage
 import com.becalm.android.data.repository.AuthRepository
@@ -192,27 +194,61 @@ public class GmailWorker @AssistedInject constructor(
      * without needing to know it in advance.
      */
     private suspend fun runFullSync(userId: String): SyncOutcome {
-        var pageToken: String? = null
         var totalFetched = 0
 
-        while (true) {
-            val result: BecalmResult<GmailMessagePage> = gmailClient.listMessagesFullSync(pageToken)
-            when (result) {
-                is BecalmResult.Failure -> return result.error.toSyncOutcome()
-                is BecalmResult.Success -> {
-                    val page = result.value
-                    val insertedCount = insertMessages(userId, page.messageIds)
-                    totalFetched += insertedCount
-                    logger.d(TAG, "full-sync page inserted=$insertedCount total=$totalFetched")
-
-                    pageToken = page.nextPageToken ?: break
-                }
+        // EMAIL-001 (`.spec/email-pipeline.spec.yml:15-18`) requires both inbound and
+        // sent mail to reach ingestion so the `folder` direction hint covers every row
+        // in the mailbox. Fetch the two labels sequentially; the per-message GET then
+        // exposes Gmail's label set and [GmailMessage.toEntity] picks the right
+        // `folder` / `personRef` pair per row.
+        for (label in GmailLabel.entries) {
+            when (val outcome = runFullSyncForLabel(userId, label)) {
+                is SyncOutcome.Success -> totalFetched += outcome.fetchedCount
+                // Any non-success outcome short-circuits the backfill and surfaces to
+                // the worker entry point, preserving the pre-W1 behaviour of aborting
+                // on the first failure / auth / history issue.
+                SyncOutcome.HistoryExpired,
+                SyncOutcome.Unauthorized,
+                is SyncOutcome.Retryable,
+                -> return outcome
             }
         }
 
         seedHistoryIdCursor()
 
         return SyncOutcome.Success(totalFetched)
+    }
+
+    /**
+     * Paginates `messages.list` scoped to a single [label] and inserts every
+     * discovered message through the shared [insertMessages] pipeline.
+     *
+     * Extracted so [runFullSync] can compose inbound + sent passes without
+     * duplicating the pagination loop or failure-mapping.
+     */
+    private suspend fun runFullSyncForLabel(
+        userId: String,
+        label: GmailLabel,
+    ): SyncOutcome {
+        var pageToken: String? = null
+        var inserted = 0
+        while (true) {
+            val result: BecalmResult<GmailMessagePage> =
+                gmailClient.listMessagesFullSync(label, pageToken)
+            when (result) {
+                is BecalmResult.Failure -> return result.error.toSyncOutcome()
+                is BecalmResult.Success -> {
+                    val page = result.value
+                    val insertedThisPage = insertMessages(userId, page.messageIds)
+                    inserted += insertedThisPage
+                    logger.d(
+                        TAG,
+                        "full-sync page label=$label inserted=$insertedThisPage running=$inserted",
+                    )
+                    pageToken = page.nextPageToken ?: return SyncOutcome.Success(inserted)
+                }
+            }
+        }
     }
 
     /**
@@ -296,6 +332,15 @@ public class GmailWorker @AssistedInject constructor(
      *                     under a new random UUID.
      */
     private fun GmailMessage.toEntity(userId: String): RawIngestionEventEntity {
+        val folderHint = gmailLabelsToFolder(labelIds)
+        // EMAIL-002 (`.spec/email-pipeline.spec.yml:15-18`) person_ref derivation:
+        // INBOX ⇒ From (the counterparty who wrote to the user), SENT ⇒ first To
+        // (the counterparty the user wrote to). Any other label falls back to `From`
+        // — the pre-EMAIL-001 behaviour, never worse than today.
+        val personRef = when (folderHint) {
+            FOLDER_SENT -> to?.let(::firstRecipientEmail)
+            else -> from?.let(::canonicalizeEmail)
+        }
         return RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
@@ -304,37 +349,15 @@ public class GmailWorker @AssistedInject constructor(
             sourceRef = messageId,
             eventTitle = subject,
             eventSnippet = snippet,
-            personRef = from?.let { canonicalizeEmail(it) },
+            personRef = personRef,
+            folder = folderHint,
             timestamp = Instant.fromEpochMilliseconds(internalDate),
         )
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /**
-     * Extracts and canonicalizes the email address from an RFC 5322 `From` header value.
-     *
-     * Handles two common forms:
-     * - `Display Name <address@example.com>` — extracts the part inside `< >`.
-     * - `address@example.com` — uses the raw value after trimming whitespace.
-     *
-     * Normalizes by lowercasing the entire address. Uses [indexOf] rather than a regex
-     * to eliminate any backtracking risk.
-     *
-     * @param fromHeader Raw `From` header value; may include display name.
-     * @return Lowercased canonical email address, or null when the input is blank.
-     */
-    internal fun canonicalizeEmail(fromHeader: String): String? {
-        if (fromHeader.isBlank()) return null
-        val angleBracketStart = fromHeader.indexOf('<')
-        val angleBracketEnd = fromHeader.indexOf('>')
-        val raw = if (angleBracketStart >= 0 && angleBracketEnd > angleBracketStart) {
-            fromHeader.substring(angleBracketStart + 1, angleBracketEnd).trim()
-        } else {
-            fromHeader.trim()
-        }
-        return raw.lowercase().ifBlank { null }
-    }
+    // Header parsing helpers (`canonicalizeEmail`, `firstRecipientEmail`,
+    // `gmailLabelsToFolder`) live in `GmailHeaders.kt` so the worker stays focused
+    // on WorkManager orchestration. Per the rubric's COHESION-03 ~400-LOC ceiling.
 
     public companion object {
         private const val TAG = "GmailWorker"

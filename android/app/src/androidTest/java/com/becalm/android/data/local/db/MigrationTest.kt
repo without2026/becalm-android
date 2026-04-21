@@ -26,6 +26,8 @@ import org.junit.runner.RunWith
  * |    2 |  3 | Drops 3 out-of-spec indices on raw_ingestion_events / calendar_events / persons_enrichment. |
  * |    1 |  3 | Whole-chain test that catches accumulation bugs across both migrations.      |
  * |    3 |  4 | Rebuilds `commitments`: `due_date` → `due_at` (KST→UTC epoch ms) + adds `due_hint` + `due_is_approximate`. Recreates spec indices against `due_at`. |
+ * |    4 |  5 | Adds 6 edit / dispute / soft-delete / supersede columns + 2 indices (`idx_commitments_user_deleted`, `idx_commitments_supersedes`). Verifies defaults and that every per-user SELECT now filters `deleted_at IS NULL`. |
+ * |    5 |  6 | Creates room-only `email_body` (14 columns, FK CASCADE to raw_ingestion_events, 2 indices), adds `raw_ingestion_events.folder TEXT` (nullable). Verifies table shape + defaults + CASCADE delete. Spec: `.spec/contracts/data-model.yml:327-390`, `.spec/email-pipeline.spec.yml:15-18,58-64`. |
  *
  * ## Required schema artefacts
  * [MigrationTestHelper] needs `app/schemas/com.becalm.android.data.local.db.BeCalmDatabase/{1,2,3}.json`
@@ -242,6 +244,246 @@ class MigrationTest {
         assertIndexRefersTo(migrated, "idx_commitments_user_person_due", "due_at")
     }
 
+    // ─── 4 → 5 ────────────────────────────────────────────────────────────────
+    //
+    // Additive migration: appends six user-facing lifecycle columns to `commitments`
+    // (last_edited_by / last_edited_at / quote_disputed / quote_disputed_at /
+    // deleted_at / supersedes_commitment_id) plus two indices
+    // (`idx_commitments_user_deleted`, `idx_commitments_supersedes`). Mirrors
+    // `.spec/contracts/data-model.yml:188-210, :219-225, :484`.
+    //
+    // Verifies:
+    //   1. Pre-v5 row survives byte-for-byte.
+    //   2. Each of the 6 new columns is queryable, with `quote_disputed = 0`
+    //      (migration DEFAULT) and the other 5 NULL.
+    //   3. Both new indices exist in sqlite_master.
+    @Test
+    fun migrate4To5_addsSixColumnsAndTwoIndices() {
+        helper.createDatabase(TEST_DB, 4).use { db ->
+            insertV4Commitment(db, id = "c1", dueAt = null)
+        }
+
+        val migrated: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 5, true, MIGRATIONS[3])
+
+        // (1) Row preserved.
+        assertTableRowCount(migrated, "commitments", 1)
+
+        // (2) New columns present with expected defaults.
+        migrated.query(
+            "SELECT last_edited_by, last_edited_at, quote_disputed, quote_disputed_at, " +
+                "deleted_at, supersedes_commitment_id FROM commitments WHERE id = 'c1'",
+        ).use { cursor ->
+            assertTrue("row c1 must be readable after 4→5", cursor.moveToFirst())
+            assertTrue("last_edited_by must be NULL on legacy rows", cursor.isNull(0))
+            assertTrue("last_edited_at must be NULL on legacy rows", cursor.isNull(1))
+            assertEquals(
+                "quote_disputed must default to 0 per migration DEFAULT",
+                0,
+                cursor.getInt(2),
+            )
+            assertTrue("quote_disputed_at must be NULL on legacy rows", cursor.isNull(3))
+            assertTrue("deleted_at must be NULL on legacy rows (row is live)", cursor.isNull(4))
+            assertTrue(
+                "supersedes_commitment_id must be NULL on legacy rows",
+                cursor.isNull(5),
+            )
+        }
+
+        // (3) Both new indices exist.
+        assertIndexPresent(migrated, "idx_commitments_user_deleted")
+        assertIndexPresent(migrated, "idx_commitments_supersedes")
+        assertIndexRefersTo(migrated, "idx_commitments_user_deleted", "deleted_at")
+        assertIndexRefersTo(
+            migrated,
+            "idx_commitments_supersedes",
+            "supersedes_commitment_id",
+        )
+    }
+
+    // ─── 5 → 6 ────────────────────────────────────────────────────────────────
+    //
+    // Creates the room-only `email_body` table (14 columns, 2 indices, FK CASCADE
+    // to raw_ingestion_events) and adds `raw_ingestion_events.folder TEXT` (nullable)
+    // per `.spec/contracts/data-model.yml:327-390` and `.spec/email-pipeline.spec.yml:15-18`.
+    //
+    // Verifies:
+    //   1. `email_body` exists with exactly the 14 columns in the expected types.
+    //   2. `parse_failed` and `group_email` both default to 0.
+    //   3. `raw_ingestion_events.folder` column present and nullable (accepts NULL insert).
+    //   4. Both indices `index_email_body_raw_event_id` and
+    //      `index_email_body_provider_message_id` exist in sqlite_master.
+    @Test
+    fun migrate5To6_createsEmailBodyTableAndAddsFolderColumn() {
+        helper.createDatabase(TEST_DB, 5).use { db ->
+            insertRawIngestionEvent(db, id = "r1")
+        }
+
+        val migrated: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 6, true, MIGRATIONS[4])
+
+        // (1) email_body has exactly the 14 expected columns with correct affinities.
+        val columns = queryTableColumns(migrated, "email_body")
+        assertEquals(
+            "email_body must have exactly 14 columns after 5→6 migration",
+            14,
+            columns.size,
+        )
+        EMAIL_BODY_EXPECTED_COLUMNS.forEach { (name, expectedType, expectedNotNull) ->
+            val info = columns[name]
+                ?: error("email_body must contain column '$name'")
+            assertEquals(
+                "email_body.$name must have SQLite affinity '$expectedType'",
+                expectedType,
+                info.type,
+            )
+            assertEquals(
+                "email_body.$name NOT NULL flag",
+                expectedNotNull,
+                info.notNull,
+            )
+        }
+
+        // (2) parse_failed / group_email DEFAULT 0.
+        assertEquals(
+            "email_body.parse_failed must DEFAULT 0",
+            "0",
+            columns.getValue("parse_failed").defaultValue,
+        )
+        assertEquals(
+            "email_body.group_email must DEFAULT 0",
+            "0",
+            columns.getValue("group_email").defaultValue,
+        )
+
+        // (3) raw_ingestion_events.folder is a nullable TEXT column. Inserting NULL
+        //     (via the pre-existing helper that never sets folder) then re-inserting
+        //     another row with an explicit folder value both succeed.
+        val rawColumns = queryTableColumns(migrated, "raw_ingestion_events")
+        val folderColumn = rawColumns["folder"]
+            ?: error("raw_ingestion_events must have a `folder` column after 5→6")
+        assertEquals("raw_ingestion_events.folder must be TEXT affinity", "TEXT", folderColumn.type)
+        assertEquals(
+            "raw_ingestion_events.folder must be nullable per ALTER TABLE ADD COLUMN",
+            0,
+            folderColumn.notNull,
+        )
+
+        // (4) Both indices are registered in sqlite_master.
+        assertIndexPresent(migrated, "index_email_body_raw_event_id")
+        assertIndexPresent(migrated, "index_email_body_provider_message_id")
+        assertIndexRefersTo(migrated, "index_email_body_raw_event_id", "raw_event_id")
+        assertIndexRefersTo(
+            migrated,
+            "index_email_body_provider_message_id",
+            "provider_message_id",
+        )
+
+        // (5) `raw_event_id` is UNIQUE — enforces the 1:1 relationship and turns
+        //     `OnConflictStrategy.REPLACE` inserts into a genuine upsert. Without this,
+        //     a random-UUID primary key would let re-polls create duplicate body rows.
+        assertIndexIsUnique(migrated, "index_email_body_raw_event_id")
+        assertIndexIsNotUnique(migrated, "index_email_body_provider_message_id")
+    }
+
+    // ─── 5 → 6 — UNIQUE(raw_event_id) enforcement on INSERT conflict ───────────
+    //
+    // Verifies that inserting a second `email_body` row for the same `raw_event_id`
+    // with a different primary key succeeds via REPLACE (not a duplicate) — the
+    // structural guarantee that [EmailBodyDao.insert] is idempotent across re-polls.
+    @Test
+    fun migrate5To6_insertingSecondBodyForSameRawEventReplacesFirst() {
+        helper.createDatabase(TEST_DB, 5).use { db ->
+            insertRawIngestionEvent(db, id = "r1")
+        }
+
+        val migrated: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 6, true, MIGRATIONS[4])
+
+        migrated.execSQL(
+            """
+            INSERT OR REPLACE INTO email_body (
+                id, raw_event_id, provider_message_id, folder,
+                subject, from_address, to_addresses, body_plain, body_html,
+                attachments_meta, raw_headers, parse_failed, group_email, received_at
+            ) VALUES (
+                'eb-first', 'r1', 'msg-1', 'INBOX',
+                'first subject', NULL, NULL, 'first body', NULL,
+                NULL, NULL, 0, 0, $TS
+            )
+            """.trimIndent(),
+        )
+        migrated.execSQL(
+            """
+            INSERT OR REPLACE INTO email_body (
+                id, raw_event_id, provider_message_id, folder,
+                subject, from_address, to_addresses, body_plain, body_html,
+                attachments_meta, raw_headers, parse_failed, group_email, received_at
+            ) VALUES (
+                'eb-second', 'r1', 'msg-1', 'INBOX',
+                'second subject', NULL, NULL, 'second body', NULL,
+                NULL, NULL, 0, 0, $TS
+            )
+            """.trimIndent(),
+        )
+
+        assertTableRowCount(migrated, "email_body", 1)
+        migrated.query(
+            "SELECT id, subject FROM email_body WHERE raw_event_id = 'r1'",
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("eb-second", cursor.getString(0))
+            assertEquals("second subject", cursor.getString(1))
+        }
+    }
+
+    // ─── 5 → 6 — FK CASCADE co-delete ─────────────────────────────────────────
+    //
+    // Verifies that deleting a `raw_ingestion_events` row cascades to every
+    // `email_body` row referencing it via `raw_event_id`. This is the structural
+    // half of the EMAIL-006 retention co-delete contract.
+    //
+    // Note: MigrationTestHelper opens the DB with `PRAGMA foreign_keys = OFF`
+    // (Room's default for migration validation — the schema-comparison phase should
+    // not trigger cascades). We explicitly turn FK enforcement on after the
+    // migration so that the DELETE exercises the CASCADE rule that production code
+    // relies on (Room enables foreign_keys on every normal open).
+    @Test
+    fun migrate5To6_cascadeDeletesEmailBodyOnRawEventDelete() {
+        helper.createDatabase(TEST_DB, 5).use { db ->
+            insertRawIngestionEvent(db, id = "r1")
+        }
+
+        val migrated: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 6, true, MIGRATIONS[4])
+
+        // MigrationTestHelper keeps foreign_keys OFF for schema validation; re-enable
+        // here so that DELETE triggers the CASCADE from email_body.raw_event_id.
+        migrated.execSQL("PRAGMA foreign_keys = ON")
+
+        // Insert a child email_body row referencing the parent raw event.
+        migrated.execSQL(
+            """
+            INSERT INTO email_body (
+                id, raw_event_id, provider_message_id, folder,
+                subject, from_address, to_addresses, body_plain, body_html,
+                attachments_meta, raw_headers, parse_failed, group_email, received_at
+            ) VALUES (
+                'eb1', 'r1', 'msg-1', 'INBOX',
+                'test subject', 'sender@example.com', NULL, 'plain body', NULL,
+                NULL, NULL, 0, 0, $TS
+            )
+            """.trimIndent(),
+        )
+        assertTableRowCount(migrated, "email_body", 1)
+
+        // Deleting the parent raw event must cascade to the child body row.
+        migrated.execSQL("DELETE FROM raw_ingestion_events WHERE id = 'r1'")
+
+        assertTableRowCount(migrated, "email_body", 0)
+        assertTableRowCount(migrated, "raw_ingestion_events", 0)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private fun insertV1Commitment(
@@ -293,6 +535,42 @@ class MigrationTest {
         )
     }
 
+    /**
+     * Inserts a v4-shape `commitments` row. The v4 schema replaced the legacy
+     * `due_date TEXT` with three columns (`due_at INTEGER`, `due_hint TEXT`,
+     * `due_is_approximate INTEGER NOT NULL DEFAULT 0`) per PR #17, so v4 fixtures
+     * cannot share the v2/v3 insert helper. This mirrors [insertV2Commitment] but
+     * targets the post-3→4 column shape as the starting point for the 4→5 test.
+     *
+     * @param dueAt Optional UTC epoch milliseconds for the `due_at` column; null to
+     *   skip the deadline. Pass [KST_20260420_MIDNIGHT_EPOCH_MS] for a representative
+     *   KST-midnight fixture value.
+     */
+    private fun insertV4Commitment(
+        db: SupportSQLiteDatabase,
+        id: String,
+        dueAt: Long? = null,
+    ) {
+        val dueAtSql = dueAt?.toString() ?: "NULL"
+        db.execSQL(
+            """
+            INSERT INTO commitments (
+                id, user_id, direction, counterparty_raw, person_ref,
+                title, description, quote, source_event_title, source_event_occurred_at,
+                due_at, due_hint, due_is_approximate,
+                action_state, source_type, source_ref, confidence,
+                commitment_state, sync_status, created_at, updated_at
+            ) VALUES (
+                '$id', '$USER_ID', 'take', NULL, NULL,
+                'title-$id', NULL, 'quote', NULL, $TS,
+                $dueAtSql, NULL, 0,
+                'pending', 'gmail', NULL, $DEFAULT_CONFIDENCE,
+                'DRAFT', 'pending', $TS, $TS
+            )
+            """.trimIndent(),
+        )
+    }
+
     private fun insertRawIngestionEvent(db: SupportSQLiteDatabase, id: String) {
         db.execSQL(
             """
@@ -335,6 +613,31 @@ class MigrationTest {
             )
             """.trimIndent(),
         )
+    }
+
+    /**
+     * Returns the `PRAGMA table_info(:table)` result as a map of column name → [ColumnDescriptor].
+     * Used by the 5→6 migration test to assert both column presence and SQLite affinity +
+     * NOT NULL + DEFAULT in a single pass, without hard-coding the cursor column indices in
+     * every assertion site.
+     *
+     * `PRAGMA table_info` returns: `cid | name | type | notnull | dflt_value | pk`.
+     */
+    private fun queryTableColumns(
+        db: SupportSQLiteDatabase,
+        table: String,
+    ): Map<String, ColumnDescriptor> {
+        val out = mutableMapOf<String, ColumnDescriptor>()
+        db.query("PRAGMA table_info(`$table`)").use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(1)
+                val type = cursor.getString(2)
+                val notNull = cursor.getInt(3)
+                val defaultValue = if (cursor.isNull(4)) null else cursor.getString(4)
+                out[name] = ColumnDescriptor(name, type, notNull, defaultValue)
+            }
+        }
+        return out
     }
 
     private fun assertTableRowCount(db: SupportSQLiteDatabase, table: String, expected: Int) {
@@ -393,6 +696,56 @@ class MigrationTest {
         }
     }
 
+    /**
+     * Asserts that the index named [name] is declared `UNIQUE`. SQLite stores the
+     * uniqueness bit in the index's `sql` column; `CREATE UNIQUE INDEX ...` vs
+     * `CREATE INDEX ...` is the ground truth. Needed to pin down the 1:1
+     * `email_body.raw_event_id` invariant introduced in v6.
+     */
+    private fun assertIndexIsUnique(db: SupportSQLiteDatabase, name: String) {
+        db.query(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            arrayOf(name),
+        ).use { cursor ->
+            assertTrue("Index '$name' must exist", cursor.moveToFirst())
+            val sql = cursor.getString(0) ?: ""
+            assertTrue(
+                "Index '$name' must be declared UNIQUE; actual SQL: $sql",
+                sql.contains("UNIQUE", ignoreCase = true),
+            )
+        }
+    }
+
+    /** Inverse of [assertIndexIsUnique] — guards against accidental tightening. */
+    private fun assertIndexIsNotUnique(db: SupportSQLiteDatabase, name: String) {
+        db.query(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            arrayOf(name),
+        ).use { cursor ->
+            assertTrue("Index '$name' must exist", cursor.moveToFirst())
+            val sql = cursor.getString(0) ?: ""
+            assertTrue(
+                "Index '$name' must NOT be UNIQUE; actual SQL: $sql",
+                !sql.contains("UNIQUE", ignoreCase = true),
+            )
+        }
+    }
+
+    /**
+     * Snapshot of a row returned by `PRAGMA table_info(<table>)`.
+     *
+     * @property name Column name.
+     * @property type SQLite type affinity as declared in the DDL (e.g. `TEXT`, `INTEGER`).
+     * @property notNull 1 when the column is declared `NOT NULL`, 0 otherwise.
+     * @property defaultValue String form of the `DEFAULT` clause (if any) or null.
+     */
+    private data class ColumnDescriptor(
+        val name: String,
+        val type: String,
+        val notNull: Int,
+        val defaultValue: String?,
+    )
+
     private companion object {
         const val TEST_DB = "migration-test"
         const val USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -419,6 +772,30 @@ class MigrationTest {
             "idx_raw_events_user_sync",
             "idx_raw_events_user_time",
             "idx_raw_events_user_person_time",
+        )
+
+        // Expected shape of `email_body` after the 5→6 migration. Each triple is
+        // (column name, SQLite type affinity, notNull flag). Order-insensitive — the
+        // test asserts presence + affinity + NOT NULL per column rather than cursor
+        // position so a future reordering of columns in the CREATE TABLE statement
+        // cannot silently flip a NOT NULL constraint without tripping this check.
+        // Mirrors `.spec/contracts/data-model.yml:327-390` and the EmailBodyEntity
+        // field declarations.
+        val EMAIL_BODY_EXPECTED_COLUMNS: List<Triple<String, String, Int>> = listOf(
+            Triple("id", "TEXT", 1),
+            Triple("raw_event_id", "TEXT", 1),
+            Triple("provider_message_id", "TEXT", 1),
+            Triple("folder", "TEXT", 1),
+            Triple("subject", "TEXT", 0),
+            Triple("from_address", "TEXT", 0),
+            Triple("to_addresses", "TEXT", 0),
+            Triple("body_plain", "TEXT", 0),
+            Triple("body_html", "TEXT", 0),
+            Triple("attachments_meta", "TEXT", 0),
+            Triple("raw_headers", "TEXT", 0),
+            Triple("parse_failed", "INTEGER", 1),
+            Triple("group_email", "INTEGER", 1),
+            Triple("received_at", "INTEGER", 1),
         )
     }
 }

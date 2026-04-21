@@ -75,6 +75,19 @@ public data class RawIngestionEventDto(
     @field:Json(name = "location") val location: String? = null,
 
     /**
+     * EMAIL-001 direction hint: `INBOX` or `SENT` for email source types
+     * (`gmail` / `outlook_mail` / `naver_imap` / `daum_imap`). Null for every other
+     * source type (`voice`, `google_calendar`, `outlook_calendar`, etc.).
+     *
+     * Forwarded to Railway so that the server-side `person_ref` resolver in the
+     * extraction pipeline can replay the same `INBOX → From` / `SENT → To[0]`
+     * decision the client already made locally — this keeps server re-derivation
+     * idempotent with [com.becalm.android.data.local.db.entity.RawIngestionEventEntity.folder].
+     * Spec: `.spec/email-pipeline.spec.yml:15-18`.
+     */
+    @field:Json(name = "folder") val folder: String? = null,
+
+    /**
      * Number of commitments extracted from this event by the LLM pipeline.
      * Defaults to 0 at upload time; updated after extraction runs.
      */

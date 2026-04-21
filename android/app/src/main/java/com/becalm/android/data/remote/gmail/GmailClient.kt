@@ -155,12 +155,41 @@ public data class GmailMessagePage(
  * @param snippet      Gmail-generated short preview of the message body.
  * @param internalDate Epoch milliseconds when Gmail received the message.
  */
+/**
+ * Gmail system labels the cold-start sync is scoped to. EMAIL-001 requires both
+ * inbound and sent mail to populate the `raw_ingestion_events.folder` direction
+ * hint during first-run backfill; [INBOX] drives the inbound side,
+ * [SENT] drives the sent side.
+ */
+public enum class GmailLabel(
+    /** The exact `labelIds` query value Gmail expects on `messages.list`. */
+    internal val wire: String,
+) {
+    INBOX("INBOX"),
+    SENT("SENT"),
+}
+
 public data class GmailMessage(
     val messageId: String,
     val subject: String?,
     val from: String?,
+    /**
+     * Raw `To` header value. Parsed from the message's metadata headers so the
+     * worker can derive `personRef` from the recipient when the message is in
+     * the `SENT` label (sender-side view — `from` is the signed-in user's own
+     * address for sent mail and would produce self-as-counterparty rows).
+     * Null when the header is absent.
+     */
+    val to: String?,
     val snippet: String?,
     val internalDate: Long,
+    /**
+     * The Gmail system labels applied to this message (e.g. `INBOX`, `SENT`, `DRAFT`).
+     * EMAIL-001 (`.spec/email-pipeline.spec.yml:15-18`) uses this to derive the
+     * `raw_ingestion_events.folder` direction hint — "INBOX" → recipient view,
+     * "SENT" → sender view. Empty when Gmail omits `labelIds` from the response.
+     */
+    val labelIds: List<String> = emptyList(),
 )
 
 // ─── Interface ────────────────────────────────────────────────────────────────
@@ -194,14 +223,22 @@ public interface GmailClient {
     public suspend fun listHistory(startHistoryId: String): BecalmResult<GmailHistoryPage>
 
     /**
-     * Fetches a page of all message IDs in the inbox (for full-sync).
+     * Fetches a page of message IDs scoped to a single Gmail system label (`INBOX` or
+     * `SENT`) — the cold-start backfill primitive.
      *
-     * Maps to `GET /gmail/v1/users/me/messages?labelIds=INBOX&pageToken=…`.
+     * Maps to `GET /gmail/v1/users/me/messages?labelIds=<label>&pageToken=…`.
      *
+     * @param label Gmail system label to filter on. Use [GmailLabel.INBOX] for inbound
+     *   mail and [GmailLabel.SENT] for sent mail; the EMAIL-001 direction hint
+     *   (`.spec/email-pipeline.spec.yml:15-18`) requires both sides of the mailbox
+     *   to reach ingestion during first-run sync.
      * @param pageToken Pagination token from the previous page; null for the first page.
      * @return [BecalmResult.Success] with [GmailMessagePage], or a typed [BecalmError].
      */
-    public suspend fun listMessagesFullSync(pageToken: String?): BecalmResult<GmailMessagePage>
+    public suspend fun listMessagesFullSync(
+        label: GmailLabel,
+        pageToken: String?,
+    ): BecalmResult<GmailMessagePage>
 
     /**
      * Fetches a single message by [messageId] in `format=metadata` (headers + snippet only).
@@ -266,9 +303,12 @@ public class GmailClientImpl(
         }
     }
 
-    override suspend fun listMessagesFullSync(pageToken: String?): BecalmResult<GmailMessagePage> {
+    override suspend fun listMessagesFullSync(
+        label: GmailLabel,
+        pageToken: String?,
+    ): BecalmResult<GmailMessagePage> {
         val url = buildString {
-            append("$GMAIL_BASE_URL/messages?labelIds=INBOX")
+            append("$GMAIL_BASE_URL/messages?labelIds=${label.wire}")
             if (pageToken != null) append("&pageToken=$pageToken")
         }
         return executeRequest(url) { body ->
@@ -285,6 +325,7 @@ public class GmailClientImpl(
         val url = "$GMAIL_BASE_URL/messages/$messageId" +
             "?format=metadata" +
             "&metadataHeaders=From" +
+            "&metadataHeaders=To" +
             "&metadataHeaders=Subject"
         return executeRequest(url) { body ->
             parseOrFail(messageGetAdapter, body, "messages.get") { parsed ->
@@ -293,8 +334,10 @@ public class GmailClientImpl(
                     messageId = parsed.id,
                     subject = headers.firstOrNull { it.name.equals("Subject", ignoreCase = true) }?.value,
                     from = headers.firstOrNull { it.name.equals("From", ignoreCase = true) }?.value,
+                    to = headers.firstOrNull { it.name.equals("To", ignoreCase = true) }?.value,
                     snippet = parsed.snippet,
                     internalDate = parsed.internalDate,
+                    labelIds = parsed.labelIds.orEmpty(),
                 )
             }
         }
@@ -390,4 +433,9 @@ internal data class GmailMessageGetResponse(
     @Json(name = "snippet") val snippet: String?,
     @Json(name = "internalDate") val internalDate: Long,
     @Json(name = "payload") val payload: GmailMessagePayload?,
+    /**
+     * Gmail system labels (`INBOX`, `SENT`, `DRAFT`, …). Included so EMAIL-001 can
+     * resolve the folder direction hint without a second API round-trip.
+     */
+    @Json(name = "labelIds") val labelIds: List<String>? = null,
 )
