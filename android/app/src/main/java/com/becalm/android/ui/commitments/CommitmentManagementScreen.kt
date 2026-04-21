@@ -13,8 +13,12 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -68,6 +72,7 @@ import kotlinx.datetime.Instant
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
+    onOpenCreate: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -122,6 +127,21 @@ public fun CommitmentManagementScreen(
     BecalmScaffold(
         title = stringResource(R.string.commitments_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            // C9 / MAN-001 — Manual add FAB. Navigates to the create sheet with
+            // supersedeOf=null; edit-sheet supersede path reuses the same destination
+            // with supersedeOf bound to the old row id.
+            ExtendedFloatingActionButton(
+                onClick = onOpenCreate,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.commitment_fab_add_content_desc),
+                    )
+                },
+                text = { Text(text = stringResource(R.string.commitment_fab_add)) },
+            )
+        },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -267,6 +287,7 @@ private fun CommitmentRowCard(
         counterpartyDisplayName = row.counterpartyDisplayName,
         dueIsApproximate = row.dueIsApproximate,
         dueHint = row.dueHint,
+        isManual = row.isManual,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),

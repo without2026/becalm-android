@@ -8,6 +8,7 @@ import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
+import com.becalm.android.domain.commitment.ManualCommitmentInput
 import com.becalm.android.domain.commitment.TransitionError
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
@@ -174,6 +175,43 @@ public interface CommitmentRepository {
      * @return `Success(newId)` on success, `Failure(error)` on DAO failure.
      */
     public suspend fun supersede(oldId: String, newRow: CommitmentEntity): BecalmResult<String>
+
+    // ── Manual create (MAN-001..006) ─────────────────────────────────────────
+
+    /**
+     * Implements MAN-003: saves a user-created commitment with
+     * `source_type = 'manual'`, `confidence = 1.0`, `source_ref = null`,
+     * `source_event_title = null`, and `source_event_occurred_at = created_at`.
+     *
+     * **No `raw_ingestion_events` row is ever created on this path** — manual
+     * commitments have no originating raw event (spec MAN-003 invariant 4).
+     *
+     * When [supersedeOf] is non-null, the operation delegates to [supersede] so
+     * the old row is atomically soft-deleted and the new row carries
+     * `supersedes_commitment_id = oldId`. This is the EDIT-007 "이건 다른
+     * 약속입니다" path; the same sheet reuses [saveManualCommitment] for both
+     * flows per the manual-commitment spec.
+     *
+     * Actor id is resolved from
+     * [com.becalm.android.data.local.datastore.UserPrefsStore]; a blank id
+     * short-circuits to [com.becalm.android.core.result.BecalmError.Unauthorized].
+     *
+     * After the local write lands, the repository makes a best-effort
+     * `POST /v1/commitments:batch` for the new row. Non-2xx or IOException
+     * leaves `sync_status = 'pending'` so UploadWorker retries on the next
+     * run — callers always see `Success(id)` when the local write succeeded.
+     *
+     * @param input Validated user input (title / direction / quote /
+     *   personRef / due_*). For supersede mode the caller ignores the draft's
+     *   quote and passes the old row's quote verbatim.
+     * @param supersedeOf UUID of the row being superseded, or null for plain
+     *   manual-create.
+     * @return `Success(newId)` on success, typed `Failure` on DAO / auth error.
+     */
+    public suspend fun saveManualCommitment(
+        input: ManualCommitmentInput,
+        supersedeOf: String?,
+    ): BecalmResult<String>
 
     // ── Sync helpers (SP-29 worker) ──────────────────────────────────────────
 

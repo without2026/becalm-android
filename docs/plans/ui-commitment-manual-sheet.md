@@ -1,7 +1,7 @@
 # UI / Commitment / Manual Add Sheet — MAN-001..006 + EDIT-007 supersede reuse
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C9
+**Status**: IMPLEMENTED — Wave 4 commit C9.
 **E2E Stage**: 5 — Commitment Management
 **Severity**: High
 **Type**: Gap

@@ -65,6 +65,13 @@ import java.util.UUID
  *   `AICORE_ERROR` → `Result.retry()` so WorkManager applies exponential backoff.
  * - Any other error bubble → `Result.retry()`.
  *
+ * ## Manual commitments (MAN-003 invariant 4)
+ * This worker only ever iterates `raw_ingestion_events` → writes new `commitments` rows
+ * with a fresh deterministic UUID. Manual commitments (`source_type = 'manual'`) have no
+ * backing raw event and are therefore naturally invisible to this worker: there is no
+ * code path in this file that mutates existing commitment rows, so a user's manually-added
+ * row cannot be touched here. See `.spec/manual-commitment.spec.yml` invariant 4.
+ *
  * ## Out of scope
  * - INBOX=take / SENT=give default-direction HINT interpretation: we pass the [folder] value
  *   through [EmailPromptBuilder] which substitutes `default_direction` into the system

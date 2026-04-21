@@ -482,5 +482,10 @@ class UploadWorkerTest {
             oldId: String,
             newRow: CommitmentEntity,
         ): BecalmResult<String> = BecalmResult.Success(newRow.id)
+
+        override suspend fun saveManualCommitment(
+            input: com.becalm.android.domain.commitment.ManualCommitmentInput,
+            supersedeOf: String?,
+        ): BecalmResult<String> = BecalmResult.Success("fake-manual-id")
     }
 }

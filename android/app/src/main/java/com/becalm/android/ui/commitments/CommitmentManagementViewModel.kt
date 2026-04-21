@@ -7,6 +7,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
@@ -84,6 +85,13 @@ public data class CommitmentRow(
      * [dueIsApproximate] is true.
      */
     val dueHint: String? = null,
+    /**
+     * True iff the row's `source_type` is `"manual"`. Drives the `📝 수동 추가`
+     * chip on the card per MAN-004. Manual rows share the exact same lifecycle
+     * and action-button wiring as LLM-extracted rows — this flag is purely a
+     * visual discriminator.
+     */
+    val isManual: Boolean = false,
 )
 
 // ─── Undo snapshot ────────────────────────────────────────────────────────────
@@ -540,6 +548,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                 dueIsApproximate = entity.dueIsApproximate,
                 counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),
                 dueHint = entity.dueHint,
+                isManual = entity.sourceType == SourceType.MANUAL,
             )
         }
     }

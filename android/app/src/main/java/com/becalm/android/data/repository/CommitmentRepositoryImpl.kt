@@ -18,6 +18,8 @@ import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
 import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.internal.MAX_BATCH_SIZE
 import com.becalm.android.data.repository.internal.toBatchItemDto
 import com.becalm.android.data.repository.internal.toDomain
@@ -26,6 +28,7 @@ import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
+import com.becalm.android.domain.commitment.ManualCommitmentInput
 import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
 import kotlinx.coroutines.CoroutineDispatcher
@@ -36,6 +39,7 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -390,6 +394,102 @@ public class CommitmentRepositoryImpl @Inject constructor(
             logTag = "supersede/tombstoneOld",
         )
         result
+    }
+
+    // ── Manual create (MAN-001..006) ──────────────────────────────────────────
+
+    override suspend fun saveManualCommitment(
+        input: ManualCommitmentInput,
+        supersedeOf: String?,
+    ): BecalmResult<String> = withContext(ioDispatcher) {
+        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+            BecalmError.Unauthorized,
+        )
+        val now = Clock.System.now()
+        val newId = UUID.randomUUID().toString()
+
+        // Build the manual row. Contract pinned by `.spec/manual-commitment.spec.yml`
+        // invariants:
+        //   - source_type = 'manual' (spec MAN-003).
+        //   - confidence  = 1.0 (user-entered; spec MAN-003).
+        //   - source_ref + source_event_title are NULL; source_event_occurred_at
+        //     equals created_at (the user's save moment), NOT an LLM-extracted
+        //     event timestamp (spec MAN-003 + invariant 2).
+        //   - last_edited_by/at are populated immediately so the audit trail
+        //     mirrors the LLM-extracted rows (EDIT-008 parity).
+        //   - supersedes_commitment_id carries `supersedeOf` when present.
+        // GREP GUARD: this path MUST NEVER insert into raw_ingestion_events
+        // (`rawIngestionEventDao.insert` / `rawEventDao.insert` etc.). Manual
+        // commitments have no backing raw event by spec MAN-003 invariant 4.
+        val newRow = CommitmentEntity(
+            id = newId,
+            userId = actorId,
+            direction = input.direction,
+            counterpartyRaw = null,
+            personRef = input.personRef,
+            title = input.title,
+            description = null,
+            quote = input.quote,
+            sourceEventTitle = null,
+            sourceEventOccurredAt = now,
+            dueAt = input.dueAt,
+            dueHint = input.dueHint,
+            dueIsApproximate = input.dueIsApproximate,
+            actionState = "pending",
+            sourceType = SourceType.MANUAL,
+            sourceRef = null,
+            confidence = 1.0,
+            commitmentState = CommitmentLifecycleLegacy.DRAFT,
+            syncStatus = "pending",
+            createdAt = now,
+            updatedAt = now,
+            lastEditedBy = actorId,
+            lastEditedAt = now,
+            quoteDisputed = false,
+            quoteDisputedAt = null,
+            deletedAt = null,
+            supersedesCommitmentId = supersedeOf,
+        )
+
+        if (supersedeOf != null) {
+            // EDIT-007 reuses this path: supersede() wraps INSERT + softDelete
+            // in a single Room transaction + best-effort upload of the new row.
+            return@withContext supersede(supersedeOf, newRow)
+        }
+
+        // Plain manual create — local INSERT then best-effort batch POST.
+        try {
+            dao.insert(newRow)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            logger.e(TAG, "saveManualCommitment dao.insert failed id=$newId", e)
+            return@withContext BecalmResult.Failure(BecalmError.Io(e.message ?: "dao insert failed"))
+        }
+
+        // Best-effort upload. Failure is absorbed into the standard
+        // `sync_status='pending'` retry queue (UploadWorker drains it).
+        runCatching {
+            api.uploadCommitmentsBatch(
+                request = CommitmentBatchRequestDto(commitments = listOf(newRow.toBatchItemDto())),
+            )
+        }.onSuccess { response ->
+            if (response.isSuccessful) {
+                dao.markSynced(listOf(newId))
+            } else {
+                logger.w(
+                    TAG,
+                    "saveManualCommitment upload non-2xx id=$newId http=${response.code()} — leaving pending",
+                )
+            }
+        }.onFailure { e ->
+            if (e is IOException) {
+                logger.w(TAG, "saveManualCommitment upload IOException id=$newId — leaving pending")
+            } else {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "saveManualCommitment upload failed id=$newId", e)
+            }
+        }
+        BecalmResult.Success(newId)
     }
 
     // ── Sync helpers ──────────────────────────────────────────────────────────

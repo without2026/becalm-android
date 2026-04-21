@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -42,6 +43,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.becalm.android.R
 import com.becalm.android.core.util.KST
 import com.becalm.android.ui.theme.BecalmStateColors
 import com.becalm.android.ui.theme.BecalmTheme
@@ -106,6 +108,10 @@ import kotlinx.datetime.toLocalDateTime
  * @param onMarkDone    Optional callback for the inline check icon button. The button
  *                      is only rendered when non-null AND [derivedStatus] is not
  *                      `"COMPLETED"` or `"CANCELLED"` (terminal states).
+ * @param isManual      When true, the card renders a `📝 수동 추가` chip adjacent to
+ *                      the title (spec MAN-004). The chip helps users distinguish
+ *                      user-created rows from LLM-extracted rows while keeping the
+ *                      overall lifecycle rendering identical. Default false.
  */
 @Composable
 public fun CommitmentCard(
@@ -117,6 +123,7 @@ public fun CommitmentCard(
     modifier: Modifier = Modifier,
     dueIsApproximate: Boolean = false,
     dueHint: String? = null,
+    isManual: Boolean = false,
     onClick: (() -> Unit)? = null,
     onMarkDone: (() -> Unit)? = null,
 ) {
@@ -215,6 +222,21 @@ public fun CommitmentCard(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
+                    // Manual-add chip (MAN-004). Rendered before the D-N badge so the
+                    // `📝 수동 추가` label sits nearest the title — it identifies the
+                    // origin of the row, whereas the D-N badge is a deadline indicator.
+                    // Re-uses the pending-action token for a neutral tone; the chip is
+                    // intentionally not colour-coded by lifecycle state (source_type is
+                    // orthogonal to action_state per MAN-006 invariant).
+                    if (isManual) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        PillBadge(
+                            label = stringResource(R.string.commitment_manual_badge),
+                            stateColors = colors.actionStatePending,
+                            horizontalPadding = 6.dp,
+                            verticalPadding = 2.dp,
+                        )
+                    }
                     // D-N badge
                     if (badge != null) {
                         val (badgeLabel, badgeColors) = badge

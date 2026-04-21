@@ -164,6 +164,31 @@
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
 
+    <!-- Manual-create / supersede sheet (MAN-001..006 + EDIT-007) -->
+    <string name="commitment_fab_add">+ 약속 추가</string>
+    <string name="commitment_fab_add_content_desc">새 약속 추가</string>
+    <string name="commitment_manual_badge">📝 수동 추가</string>
+    <string name="commitment_manual_sheet_title_new">약속 추가</string>
+    <string name="commitment_manual_sheet_title_supersede">다른 약속으로 교체</string>
+    <string name="commitment_manual_quote_hint">상대의 약속 내용을 메모하세요 (1~500자)</string>
+    <string name="commitment_manual_supersede_quote_label">원문 (수정 불가)</string>
+    <string name="commitment_manual_no_due_date">마감 없음</string>
+    <string name="commitment_manual_source_manual_fmt">사용자 직접 추가 %1$s KST</string>
+    <string name="commitment_manual_error_title">제목을 1~200자로 입력해주세요</string>
+    <string name="commitment_manual_error_direction">방향을 선택해주세요</string>
+    <string name="commitment_manual_error_quote">약속 맥락을 1~500자로 입력해주세요</string>
+    <string name="commitment_manual_error_person_ref">전화번호는 E.164(+821012345678) 형식이어야 합니다</string>
+    <string name="commitment_manual_save">저장</string>
+    <string name="commitment_manual_cancel">취소</string>
+    <string name="commitment_manual_field_title">제목</string>
+    <string name="commitment_manual_field_direction_give">내가 한 약속</string>
+    <string name="commitment_manual_field_direction_take">상대가 한 약속</string>
+    <string name="commitment_manual_field_person_ref">상대방 (선택)</string>
+    <string name="commitment_manual_field_due_pick">마감 선택</string>
+    <string name="commitment_manual_field_due_hint">원문 표현 (예: 월말)</string>
+    <string name="commitment_manual_field_due_approximate">대략적</string>
+    <string name="commitment_manual_save_failure">저장 실패 — 다시 시도해주세요</string>
+
     <!-- Commitment edit sheet (EDIT-001..008) -->
     <string name="commitment_edit_title">약속 편집</string>
     <string name="commitment_edit_field_title">제목</string>

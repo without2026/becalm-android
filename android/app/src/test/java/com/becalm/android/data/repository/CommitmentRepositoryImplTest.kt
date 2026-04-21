@@ -39,6 +39,7 @@ import kotlinx.datetime.Instant
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.Response
@@ -554,6 +555,117 @@ class CommitmentRepositoryImplTest {
             assertEquals("pending", saved.syncStatus)
             // Quote remains intact (legally evidentiary even on tombstoned rows).
             assertEquals(entity.quote, saved.quote)
+        }
+
+    // ── MAN-003: saveManualCommitment (plain manual) ──────────────────────────
+
+    @Test
+    fun `saveManualCommitment MANUAL inserts row with manual source_type and confidence 1`() =
+        runTest(testDispatcher) {
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "Send contract",
+                direction = "give",
+                quote = "I'll send the contract by Friday.",
+                personRef = "+821012345678",
+                dueAt = Instant.fromEpochMilliseconds(2_000_000),
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+            // Best-effort batch upload succeeds; should flip sync_status='synced'.
+            api.uploadBatchResponder = { _ ->
+                Response.success(
+                    CommitmentBatchResponseDto(acknowledged = 1, failed = emptyList()),
+                )
+            }
+
+            val result = repository.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val newId = (result as BecalmResult.Success).value
+            val saved = dao.findById(newId)
+            assertNotNull("manual row must be inserted", saved)
+            val row = saved!!
+            // Core MAN-003 invariants.
+            assertEquals("manual", row.sourceType)
+            assertEquals(1.0, row.confidence, 0.0)
+            assertNull("manual rows have no sourceRef", row.sourceRef)
+            assertNull("manual rows have no sourceEventTitle", row.sourceEventTitle)
+            // source_event_occurred_at == created_at (both populated at save time).
+            assertEquals(row.createdAt, row.sourceEventOccurredAt)
+            // Legal/evidentiary + user inputs preserved.
+            assertEquals("Send contract", row.title)
+            assertEquals("give", row.direction)
+            assertEquals("I'll send the contract by Friday.", row.quote)
+            assertEquals("+821012345678", row.personRef)
+            assertEquals(Instant.fromEpochMilliseconds(2_000_000), row.dueAt)
+            // supersedes_commitment_id must be null in plain-create mode.
+            assertNull(row.supersedesCommitmentId)
+            // Best-effort upload succeeded → sync_status flipped to 'synced'.
+            assertEquals("synced", row.syncStatus)
+            // Audit columns populated with actor id.
+            assertEquals("user-1", row.lastEditedBy)
+            assertNotNull(row.lastEditedAt)
+            // Invoked exactly once.
+            assertEquals(1, api.uploadCommitmentsBatchCalls.get())
+        }
+
+    @Test
+    fun `saveManualCommitment MANUAL leaves sync_status pending on upload IOException`() =
+        runTest(testDispatcher) {
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "t",
+                direction = "give",
+                quote = "q",
+                personRef = null,
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+            api.uploadBatchResponder = { _ -> throw IOException("offline") }
+
+            val result = repository.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val newId = (result as BecalmResult.Success).value
+            val row = dao.findById(newId)!!
+            // Local write still lands; retry queue drains the row via UploadWorker.
+            assertEquals("pending", row.syncStatus)
+            assertEquals("manual", row.sourceType)
+        }
+
+    @Test
+    fun `saveManualCommitment returns Unauthorized when actor id is blank`() =
+        runTest(testDispatcher) {
+            val blankActorPrefs: UserPrefsStore = mockk(relaxed = true) {
+                every { observeCurrentUserId() } returns flowOf("")
+            }
+            val repo: CommitmentRepository = CommitmentRepositoryImpl(
+                dao = dao,
+                api = api,
+                cursorStore = cursorStore,
+                userPrefsStore = blankActorPrefs,
+                database = database,
+                logger = logger,
+                ioDispatcher = testDispatcher,
+            )
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "t",
+                direction = "give",
+                quote = "q",
+                personRef = null,
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+
+            val result = repo.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Failure but was $result", result is BecalmResult.Failure)
+            val err = (result as BecalmResult.Failure).error
+            assertTrue(
+                "expected Unauthorized but was $err",
+                err is BecalmError.Unauthorized,
+            )
         }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -144,6 +144,45 @@ public sealed class BecalmRoute(public val path: String) {
     public data object Commitments : BecalmRoute("commitments")
 
     /**
+     * Manual-create / supersede-create commitment bottom sheet
+     * (MAN-001..006 + EDIT-007).
+     *
+     * Two entry modes:
+     * - Plain manual add: `supersedeOf = null` → empty form, user types
+     *   title / direction / quote / due / person_ref from scratch.
+     * - EDIT-007 supersede: `supersedeOf = <uuid>` → quote + source section
+     *   are pre-filled read-only from the old row; on save, the old row is
+     *   soft-deleted and the new row carries `supersedes_commitment_id = old.id`.
+     *
+     * The `supersedeOf` query argument is optional and declared with
+     * `nullable=true, defaultValue=null` in [BecalmNavHost].
+     *
+     * Usage:
+     * ```kotlin
+     * // Plain manual add from the management screen FAB
+     * navController.navigate(BecalmRoute.CommitmentCreate(null).path)
+     *
+     * // Supersede from the edit sheet's [이건 다른 약속입니다] button
+     * navController.navigate(BecalmRoute.CommitmentCreate("cmt_old").path)
+     * ```
+     */
+    public data class CommitmentCreate(public val supersedeOf: String?) : BecalmRoute(
+        if (supersedeOf == null) {
+            "commitments/new"
+        } else {
+            "commitments/new?supersedeOf=$supersedeOf"
+        },
+    ) {
+        public companion object {
+            /** NavHost destination template — declares the optional query arg. */
+            public const val PATH: String = "commitments/new?supersedeOf={supersedeOf}"
+
+            /** `navArgument` key for the optional supersede target UUID. */
+            public const val ARG_SUPERSEDE_OF: String = "supersedeOf"
+        }
+    }
+
+    /**
      * Commitment detail bottom sheet: full quote + source context + 5 action buttons
      * (CMT-003). Opened on card tap from [Commitments]; also the landing target for
      * the `becalm://commitments/{id}` reminder deep link registered in a future
