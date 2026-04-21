@@ -164,6 +164,38 @@
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
 
+    <!-- Commitment edit sheet (EDIT-001..008) -->
+    <string name="commitment_edit_title">약속 편집</string>
+    <string name="commitment_edit_field_title">제목</string>
+    <string name="commitment_edit_field_due">마감</string>
+    <string name="commitment_edit_field_due_pick">마감 시간 선택</string>
+    <string name="commitment_edit_field_due_clear">마감 지우기</string>
+    <string name="commitment_edit_field_due_approximate">대략적</string>
+    <string name="commitment_edit_field_due_hint">원문 표현 (예: 내일 오후)</string>
+    <string name="commitment_edit_field_person">상대방</string>
+    <string name="commitment_edit_field_person_placeholder">전화번호 또는 이름</string>
+    <string name="commitment_edit_field_direction">방향</string>
+    <string name="commitment_edit_field_direction_give">내가 한 약속</string>
+    <string name="commitment_edit_field_direction_take">상대가 한 약속</string>
+    <string name="commitment_edit_readonly_quote_label">원문 (수정 불가 — 법적 증거)</string>
+    <string name="commitment_edit_readonly_quote_disputed">이의 제기됨</string>
+    <string name="commitment_edit_toggle_dispute">원문 이의 제기 토글</string>
+    <string name="commitment_edit_toggle_dispute_on">이의 제기</string>
+    <string name="commitment_edit_toggle_dispute_off">이의 해제</string>
+    <string name="commitment_edit_save">저장</string>
+    <string name="commitment_edit_cancel">취소</string>
+    <string name="commitment_edit_delete">삭제</string>
+    <string name="commitment_edit_delete_confirm_title">약속을 삭제하시겠습니까?</string>
+    <string name="commitment_edit_delete_confirm_body">이 약속은 목록에서 숨겨집니다. (상대가 이행하지 않아 기록만 남기고 싶으면 대신 \"취소\"를 사용하세요.)</string>
+    <string name="commitment_edit_delete_confirm_ok">삭제</string>
+    <string name="commitment_edit_delete_confirm_cancel">취소</string>
+    <string name="commitment_edit_error_title_required">제목을 입력해주세요</string>
+    <string name="commitment_edit_error_title_too_long">제목은 200자 이하여야 합니다</string>
+    <string name="commitment_edit_error_person_ref_invalid">전화번호 형식이 올바르지 않습니다 (+821012345678)</string>
+    <string name="commitment_edit_error_direction_required">방향을 선택해주세요</string>
+    <string name="commitment_edit_saving">저장 중…</string>
+    <string name="commitment_edit_save_failed">저장 실패. 다시 시도해주세요.</string>
+
     <!-- Commitment management screen sections (CMT-009) -->
     <string name="commitment_section_active_fmt">진행 중 (%1$d)</string>
     <string name="commitment_section_completed_fmt">이행 완료 (%1$d)</string>

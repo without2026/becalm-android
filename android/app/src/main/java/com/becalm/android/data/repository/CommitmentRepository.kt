@@ -4,6 +4,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
@@ -105,6 +106,74 @@ public interface CommitmentRepository {
         newState: String,
         updatedAt: Instant,
     ): BecalmResult<Unit>
+
+    // ── Edit / dispute / soft-delete / supersede (EDIT-001..008) ────────────
+
+    /**
+     * Applies the user-validated [patch] to the commitment identified by [id]
+     * (EDIT-003). The repository resolves the acting user id from
+     * [com.becalm.android.data.local.datastore.UserPrefsStore] and writes both
+     * the mutable columns AND the audit columns (`last_edited_by`, `last_edited_at`)
+     * atomically in a single DAO update.
+     *
+     * On DAO write:
+     * - 0 rows affected → [com.becalm.android.core.result.BecalmError.NotFound].
+     * - Row is soft-deleted → DAO filter rejects the write (also 0 rows).
+     *
+     * On Railway PATCH:
+     * - 2xx → `Success(Unit)`.
+     * - Any non-2xx or IOException → leaves `sync_status='pending'` so the
+     *   existing UploadWorker drains the queue on the next run. Returns
+     *   `Success(Unit)` — the local write already landed, and the spec guarantees
+     *   eventual consistency via the pending queue (EDIT-003 invariant 2).
+     *
+     * @param id UUID of the commitment to edit.
+     * @param patch Validated user patch.
+     */
+    public suspend fun editCommitment(id: String, patch: CommitmentEditPatch): BecalmResult<Unit>
+
+    /**
+     * Raises a dispute against the commitment's quote (EDIT-005). Writes
+     * `quote_disputed=true` + timestamp + audit columns; **never** mutates the
+     * quote string itself.
+     */
+    public suspend fun markQuoteDisputed(id: String): BecalmResult<Unit>
+
+    /**
+     * Clears a previously-raised dispute (EDIT-005 toggle-off). Inverse of
+     * [markQuoteDisputed]; the quote string is untouched.
+     */
+    public suspend fun clearQuoteDispute(id: String): BecalmResult<Unit>
+
+    /**
+     * Soft-deletes the commitment identified by [id] (EDIT-006). Writes
+     * `deleted_at=now()` so that every user-facing SELECT filters the row out.
+     * This is distinct from `action_state='cancelled'` — cancellation means
+     * "the agreement was rescinded"; soft-delete means "this row was wrong".
+     *
+     * The local DAO write always lands. The Railway PATCH is best-effort; on
+     * failure the row remains `sync_status='pending'` and UploadWorker replays it.
+     */
+    public suspend fun softDelete(id: String): BecalmResult<Unit>
+
+    /**
+     * Implements EDIT-007 "this is actually a different commitment". Atomically:
+     * 1. Inserts [newRow] (expected to already carry `supersedes_commitment_id = oldId`).
+     * 2. Soft-deletes the [oldId] row.
+     *
+     * Both writes share a single Room transaction so a crash between them cannot
+     * leave the table with orphaned supersede lineage. After the transaction
+     * commits, the repository attempts a best-effort POST /v1/commitments:batch
+     * for the new row and a PATCH for the old row; both failures are absorbed
+     * into the standard `sync_status='pending'` retry queue.
+     *
+     * @param oldId UUID of the row being superseded.
+     * @param newRow Fully populated replacement entity. The caller is responsible
+     *   for copying the legally evidentiary [com.becalm.android.data.local.db.entity.CommitmentEntity.quote]
+     *   and `source_*` columns from the old row verbatim.
+     * @return `Success(newId)` on success, `Failure(error)` on DAO failure.
+     */
+    public suspend fun supersede(oldId: String, newRow: CommitmentEntity): BecalmResult<String>
 
     // ── Sync helpers (SP-29 worker) ──────────────────────────────────────────
 

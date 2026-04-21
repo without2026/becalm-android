@@ -109,6 +109,148 @@ public interface CommitmentDao {
     @Query("UPDATE commitments SET sync_status = 'pending' WHERE id = :id")
     public suspend fun markPending(id: String)
 
+    // ─── Edit / dispute / soft-delete (EDIT-001..008) ─────────────────────────
+
+    /**
+     * Applies a user edit to the mutable fields of the commitment identified by [id]
+     * (EDIT-003). Updates `title`, `due_at`, `due_hint`, `due_is_approximate`,
+     * `person_ref`, `direction` plus the audit columns `last_edited_by` /
+     * `last_edited_at` (spec `.spec/commitment-edit.spec.yml` EDIT-003 invariant).
+     *
+     * Every successful write flips `sync_status='pending'` so the SP-29 UploadWorker
+     * replays the full row via [com.becalm.android.data.remote.api.RailwayApi.uploadCommitmentsBatch]
+     * on the next flush. The `AND deleted_at IS NULL` guard ensures soft-deleted rows
+     * reject edits — the caller receives `0` rows-affected and surfaces
+     * [com.becalm.android.core.result.BecalmError.NotFound].
+     *
+     * `updated_at` is deliberately written from [editedAt] so the local Room copy stays
+     * monotone with the server's own `updated_at` once the PATCH round-trips; the
+     * server's authoritative value overwrites on the next refresh.
+     *
+     * @param id UUID of the commitment to edit.
+     * @param title New short title (spec: length 1..200, pre-trimmed by the caller).
+     * @param dueAt New deadline instant or null (EDIT-004 allows null).
+     * @param dueHint New verbatim due-date expression, or null to clear.
+     * @param approx New `due_is_approximate` flag (defaults false in the client form).
+     * @param personRef Canonicalized counterparty identifier, or null.
+     * @param direction `"give"` or `"take"` (EDIT-004 enum).
+     * @param actorId Supabase auth.users UUID of the editing user. Never blank —
+     *   the repository fails fast with [com.becalm.android.core.result.BecalmError.Unauthorized]
+     *   before calling this method.
+     * @param editedAt Monotonic edit timestamp (both `last_edited_at` and `updated_at`).
+     * @return Number of rows affected: 1 on success, 0 when [id] does not exist or the
+     *   row is soft-deleted.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET title = :title,
+            due_at = :dueAt,
+            due_hint = :dueHint,
+            due_is_approximate = :approx,
+            person_ref = :personRef,
+            direction = :direction,
+            last_edited_by = :actorId,
+            last_edited_at = :editedAt,
+            updated_at = :editedAt,
+            sync_status = 'pending'
+        WHERE id = :id AND deleted_at IS NULL
+        """
+    )
+    public suspend fun applyEdit(
+        id: String,
+        title: String,
+        dueAt: Instant?,
+        dueHint: String?,
+        approx: Boolean,
+        personRef: String?,
+        direction: String,
+        actorId: String,
+        editedAt: Instant,
+    ): Int
+
+    /**
+     * Flips [CommitmentEntity.quoteDisputed] to `true` and records the dispute
+     * timestamp (EDIT-005 dispute flow). The verbatim [CommitmentEntity.quote] is
+     * **never** altered — that column is legally evidentiary per
+     * `.spec/commitment-edit.spec.yml` invariant 1.
+     *
+     * The `AND deleted_at IS NULL` guard silently rejects disputes against
+     * soft-deleted rows; the repository surfaces this as
+     * [com.becalm.android.core.result.BecalmError.NotFound] on rows-affected = 0.
+     *
+     * @return Number of rows affected: 1 on success, 0 when absent or soft-deleted.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET quote_disputed = 1,
+            quote_disputed_at = :at,
+            last_edited_by = :actor,
+            last_edited_at = :at,
+            updated_at = :at,
+            sync_status = 'pending'
+        WHERE id = :id AND deleted_at IS NULL
+        """
+    )
+    public suspend fun markQuoteDisputed(id: String, actor: String, at: Instant): Int
+
+    /**
+     * Clears a previously-raised dispute (EDIT-005 toggle-off via `[이의 제기 해제]`).
+     * Resets [CommitmentEntity.quoteDisputed] to `false` and nulls the paired
+     * timestamp. The quote string itself remains immutable — only the flag flips.
+     *
+     * The `AND deleted_at IS NULL` guard prevents clears against tombstoned rows.
+     *
+     * @return Number of rows affected: 1 on success, 0 when absent or soft-deleted.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET quote_disputed = 0,
+            quote_disputed_at = NULL,
+            last_edited_by = :actor,
+            last_edited_at = :at,
+            updated_at = :at,
+            sync_status = 'pending'
+        WHERE id = :id AND deleted_at IS NULL
+        """
+    )
+    public suspend fun clearQuoteDispute(id: String, actor: String, at: Instant): Int
+
+    /**
+     * Soft-deletes the commitment identified by [id] by writing a non-null
+     * [CommitmentEntity.deletedAt] timestamp (EDIT-006).
+     *
+     * Unlike the edit / dispute queries above, this statement **deliberately omits**
+     * the `AND deleted_at IS NULL` guard. Rationale: double-soft-delete of an
+     * already-tombstoned row is still a write the server eventually needs to see if
+     * the tombstone has not yet round-tripped (for example, the client may overwrite
+     * the existing `deleted_at` with a later timestamp and a fresh `last_edited_*`
+     * audit pair). The update is therefore idempotent — running it twice is harmless
+     * and returns 1 rows-affected both times — and the repository does not treat the
+     * second write as an error.
+     *
+     * The row is not hard-deleted. Retention of tombstones is required for
+     * supersede audit lineage and for the PIPA 제36조 right-to-correction trail
+     * (see `.spec/commitment-edit.spec.yml` EDIT-007).
+     *
+     * @return Number of rows affected: 1 on success, 0 only when [id] does not exist
+     *   in the local table at all.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET deleted_at = :at,
+            last_edited_by = :actor,
+            last_edited_at = :at,
+            updated_at = :at,
+            sync_status = 'pending'
+        WHERE id = :id
+        """
+    )
+    public suspend fun softDelete(id: String, actor: String, at: Instant): Int
+
     /**
      * Marks the row identified by [id] as `sync_status='failed'` (quarantine).
      *

@@ -1,7 +1,7 @@
 # UI / Commitment / Edit Sheet — EDIT-001..008 full wiring
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C8
+**Status**: IMPLEMENTED — Wave 4 commit C8.
 **E2E Stage**: 5 — Commitment Management (PIPA 제36조 correction right)
 **Severity**: High
 **Type**: Gap

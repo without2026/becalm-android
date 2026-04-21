@@ -58,15 +58,17 @@ import kotlinx.datetime.toLocalDateTime
  * list it collects is immediately garbage-collected when the sheet dismisses.
  * This is a deliberate trade-off per plan §5.2.
  *
- * The [편집] button click intentionally does not navigate anywhere — the edit sheet
- * lands in a later commit (C8 / `ui-commitment-edit-sheet`). Until then, the
- * click logs a TODO and dismisses the sheet so the user is not stranded.
+ * Clicking the [편집] button invokes [onEdit], which the nav host wires up to
+ * [BecalmRoute.CommitmentEdit] (wave 4 C8). The sheet is dismissed first so the
+ * back-stack pops cleanly on the edit sheet's own dismiss.
  *
  * @param commitmentId UUID of the commitment to display. Threaded via
  *   [SavedStateHandle] into [CommitmentDetailViewModel]; the parameter exists on
  *   the composable signature so callers — including the nav host — pass the id
  *   explicitly even though the VM also reads it from SavedState.
  * @param onDismiss Invoked when the sheet dismisses (swipe-down or action click).
+ * @param onEdit Invoked when the user taps `[편집]`. The nav host navigates to
+ *   [BecalmRoute.CommitmentEdit]; tests pass a no-op.
  * @param detailViewModel VM that owns the reactive entity flow.
  * @param managementViewModel VM that owns the state-machine handlers.
  */
@@ -75,6 +77,7 @@ import kotlinx.datetime.toLocalDateTime
 public fun CommitmentDetailSheet(
     commitmentId: String,
     onDismiss: () -> Unit,
+    onEdit: () -> Unit = {},
     detailViewModel: CommitmentDetailViewModel = hiltViewModel(),
     managementViewModel: CommitmentManagementViewModel = hiltViewModel(),
 ) {
@@ -132,10 +135,11 @@ public fun CommitmentDetailSheet(
                         onDismiss()
                     },
                     onEdit = {
-                        // TODO(C8 — ui-commitment-edit-sheet.md): navigate to the
-                        // edit sheet route here. For now we just dismiss so the
-                        // user is not left staring at an inert button.
+                        // Dismiss the detail sheet first so the edit sheet lands
+                        // as the single visible modal. The nav host wires this
+                        // callback to BecalmRoute.CommitmentEdit (EDIT-001..008).
                         onDismiss()
+                        onEdit()
                     },
                 )
             }

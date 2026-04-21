@@ -6,6 +6,7 @@ import com.becalm.android.data.remote.dto.CalendarEventListResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
@@ -123,6 +124,29 @@ public interface RailwayApi {
         @Path("id") id: String,
         @Header("X-BeCalm-Idempotent") idem: String = "1",
         @Body request: PatchCommitmentRequest,
+    ): Response<SingleCommitmentResponse>
+
+    /**
+     * Expanded-body partial update for `PATCH /v1/commitments/{id}` used by the
+     * Stage-5 edit / dispute / soft-delete / supersede flows (EDIT-003..007).
+     *
+     * Distinct from [patchCommitment] because this body may carry any subset of
+     * mutable columns (title, due_at, due_hint, person_ref, direction,
+     * quote_disputed, deleted_at, last_edited_*) rather than the single-field
+     * [PatchCommitmentRequest.actionState]. A legacy 422 response means the
+     * server has not yet shipped the EDIT endpoint extension; the repository
+     * treats that as "best-effort" and leaves `sync_status='pending'` so
+     * UploadWorker retries.
+     *
+     * @param id Supabase-assigned UUID of the commitment.
+     * @param idem Opt-in sentinel; keep default `"1"` to enable idempotency.
+     * @param request Partial [CommitmentPatchDto] body.
+     */
+    @PATCH("v1/commitments/{id}")
+    public suspend fun updateCommitment(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: CommitmentPatchDto,
     ): Response<SingleCommitmentResponse>
 
     /**

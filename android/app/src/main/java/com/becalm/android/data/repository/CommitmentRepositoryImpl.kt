@@ -7,17 +7,22 @@ import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.result.map
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
+import androidx.room.withTransaction
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.data.repository.internal.MAX_BATCH_SIZE
 import com.becalm.android.data.repository.internal.toBatchItemDto
 import com.becalm.android.data.repository.internal.toDomain
 import com.becalm.android.data.repository.internal.toEntity
+import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
@@ -25,6 +30,7 @@ import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -58,6 +64,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
     private val dao: CommitmentDao,
     private val api: RailwayApi,
     private val cursorStore: SyncCursorStore,
+    private val userPrefsStore: UserPrefsStore,
+    private val database: BeCalmDatabase,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CommitmentRepository {
@@ -217,6 +225,173 @@ public class CommitmentRepositoryImpl @Inject constructor(
         return mapped
     }
 
+    // ── Edit / dispute / soft-delete / supersede ─────────────────────────────
+
+    override suspend fun editCommitment(
+        id: String,
+        patch: CommitmentEditPatch,
+    ): BecalmResult<Unit> = withContext(ioDispatcher) {
+        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+            BecalmError.Unauthorized,
+        )
+        val editedAt = Clock.System.now()
+
+        val rows = dao.applyEdit(
+            id = id,
+            title = patch.title,
+            dueAt = patch.dueAt,
+            dueHint = patch.dueHint,
+            approx = patch.dueIsApproximate,
+            personRef = patch.personRef,
+            direction = patch.direction,
+            actorId = actorId,
+            editedAt = editedAt,
+        )
+        if (rows == 0) {
+            return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+        }
+
+        // Best-effort server PATCH. A 2xx flips sync_status='synced'; anything
+        // else (non-2xx or IOException) leaves 'pending' so UploadWorker retries.
+        bestEffortPatch(
+            id = id,
+            dto = CommitmentPatchDto(
+                title = patch.title,
+                dueAt = patch.dueAt,
+                dueHint = patch.dueHint,
+                dueIsApproximate = patch.dueIsApproximate,
+                personRef = patch.personRef,
+                direction = patch.direction,
+                lastEditedBy = actorId,
+                lastEditedAt = editedAt,
+            ),
+            logTag = "editCommitment",
+        )
+        BecalmResult.Success(Unit)
+    }
+
+    override suspend fun markQuoteDisputed(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+                BecalmError.Unauthorized,
+            )
+            val at = Clock.System.now()
+            val rows = dao.markQuoteDisputed(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    quoteDisputed = true,
+                    quoteDisputedAt = at,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "markQuoteDisputed",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun clearQuoteDispute(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+                BecalmError.Unauthorized,
+            )
+            val at = Clock.System.now()
+            val rows = dao.clearQuoteDispute(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    quoteDisputed = false,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "clearQuoteDispute",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun softDelete(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+                BecalmError.Unauthorized,
+            )
+            val at = Clock.System.now()
+            val rows = dao.softDelete(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    deletedAt = at,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "softDelete",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun supersede(
+        oldId: String,
+        newRow: CommitmentEntity,
+    ): BecalmResult<String> = withContext(ioDispatcher) {
+        val actorId = resolveActorId() ?: return@withContext BecalmResult.Failure(
+            BecalmError.Unauthorized,
+        )
+        val editedAt = Clock.System.now()
+
+        // Atomic: INSERT new row + soft-delete old row. Room's withTransaction wraps
+        // both DAO calls in a single SQLite transaction so a crash between them
+        // cannot leave the table with either a dangling supersede child (new row
+        // inserted but old row not tombstoned) or an orphaned tombstone (old row
+        // tombstoned but new row not inserted).
+        val result: BecalmResult<String> = try {
+            database.withTransaction {
+                dao.insert(newRow)
+                val deletedRows = dao.softDelete(id = oldId, actor = actorId, at = editedAt)
+                if (deletedRows == 0) {
+                    BecalmResult.Failure(BecalmError.NotFound("commitment/$oldId"))
+                } else {
+                    BecalmResult.Success(newRow.id)
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(TAG, "supersede transaction failed oldId=$oldId", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "transaction failed"))
+        }
+        if (result is BecalmResult.Failure) return@withContext result
+
+        // Best-effort uploads. POST the new row via batch endpoint and PATCH the
+        // old row's tombstone. Both failures are absorbed into the retry queue.
+        runCatching {
+            api.uploadCommitmentsBatch(
+                request = CommitmentBatchRequestDto(commitments = listOf(newRow.toBatchItemDto())),
+            )
+        }.onFailure { e ->
+            if (e is IOException) {
+                logger.w(TAG, "supersede batch upload IOException newId=${newRow.id}")
+            } else {
+                logger.e(TAG, "supersede batch upload failed newId=${newRow.id}", e)
+            }
+        }
+        bestEffortPatch(
+            id = oldId,
+            dto = CommitmentPatchDto(
+                deletedAt = editedAt,
+                lastEditedBy = actorId,
+                lastEditedAt = editedAt,
+            ),
+            logTag = "supersede/tombstoneOld",
+        )
+        result
+    }
+
     // ── Sync helpers ──────────────────────────────────────────────────────────
 
     override suspend fun findPendingSync(userId: String, limit: Int): List<CommitmentEntity> =
@@ -282,6 +457,64 @@ public class CommitmentRepositoryImpl @Inject constructor(
         }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Resolves the acting Supabase user id from [UserPrefsStore]. Returns `null`
+     * when the user is signed out or the persisted id is blank — callers must
+     * map that to [BecalmError.Unauthorized] and short-circuit.
+     *
+     * The EDIT-003/005/006/007 audit columns (`last_edited_by`) and the
+     * supersede tombstone MUST carry a real user id per
+     * `.spec/commitment-edit.spec.yml` invariant 3 (audit trail). We refuse to
+     * write a synthetic "unknown" actor — that would silently corrupt the
+     * audit log which PIPA 제36조 정정권 (correction right) audits rely on.
+     */
+    private suspend fun resolveActorId(): String? =
+        userPrefsStore.observeCurrentUserId().firstOrNull()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Best-effort `PATCH /v1/commitments/{id}` for the Stage-5 edit /
+     * dispute / soft-delete / supersede flows.
+     *
+     * The local DAO write has already landed (caller checks rows>0). This
+     * helper is purely about the server mirror:
+     * - 2xx → flip `sync_status='synced'` so the UploadWorker does not
+     *   re-upload on the next run.
+     * - Non-2xx, IOException, or any other exception → leave `sync_status='pending'`
+     *   so [UploadWorker.flushCommitments] retries via [uploadBatch] on the
+     *   next trigger. This matches the EDIT-003 / EDIT-006 invariant 2
+     *   ("offline edits must eventually reach the server").
+     *
+     * Does NOT propagate failures back up — the caller's contract is
+     * "local write landed; server catch-up is async". Returns [Unit] to
+     * underline that intent at call sites.
+     *
+     * @param id     UUID of the commitment row being mirrored.
+     * @param dto    Partial patch body carrying only the mutated columns.
+     * @param logTag Short label used to disambiguate log lines (which flow
+     *               triggered this mirror).
+     */
+    private suspend fun bestEffortPatch(
+        id: String,
+        dto: CommitmentPatchDto,
+        logTag: String,
+    ) {
+        try {
+            val response = api.updateCommitment(id = id, request = dto)
+            if (response.isSuccessful) {
+                dao.markSynced(listOf(id))
+            } else {
+                logger.w(TAG, "$logTag PATCH non-2xx id=$id http=${response.code()} — leaving pending")
+            }
+        } catch (e: IOException) {
+            logger.w(TAG, "$logTag PATCH IOException id=$id msg=${e.message} — leaving pending")
+        } catch (e: Exception) {
+            // Preserve structured-concurrency cancellation; anything else is
+            // best-effort and absorbed into the retry queue.
+            e.rethrowIfCancellation()
+            logger.e(TAG, "$logTag PATCH unexpected error id=$id — leaving pending", e)
+        }
+    }
 
     /**
      * refreshSince·updateActionState 두 곳의 동일한 `try { api() } catch (IOException)`

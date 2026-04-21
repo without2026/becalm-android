@@ -162,6 +162,24 @@ public sealed class BecalmRoute(public val path: String) {
         }
     }
 
+    /**
+     * Commitment edit bottom sheet (EDIT-001..008). Opened from the
+     * `[편집]` button on [CommitmentDetail]. Carries the same UUID as the
+     * detail sheet so back-stack pops land cleanly on the detail screen.
+     *
+     * Usage: `navController.navigate(BecalmRoute.CommitmentEdit("cmt_abc").path)`
+     */
+    public data class CommitmentEdit(public val id: String) :
+        BecalmRoute("commitments/$id/edit") {
+        public companion object {
+            /** NavHost destination template. */
+            public const val PATH: String = "commitments/{id}/edit"
+
+            /** `navArgument` key for the commitment UUID. */
+            public const val ARG_ID: String = "id"
+        }
+    }
+
     // ── Settings ───────────────────────────────────────────────────────────────
 
     /** Settings root — accessed via top-right icon on TodayTimelineScreen. */

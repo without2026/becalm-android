@@ -16,6 +16,7 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import io.mockk.every
 import io.mockk.mockk
@@ -453,5 +454,33 @@ class UploadWorkerTest {
         }
 
         override suspend fun deleteAllForUser(userId: String): BecalmResult<Int> = BecalmResult.Success(0)
+
+        // ── EDIT-001..008: not exercised by UploadWorker (the worker only drains the
+        // pending queue via uploadBatch + markSynced / markFailed). Fakes return
+        // Success so an accidental call does not break the test, but we log via
+        // a sentinel list so a regression that invokes these methods is visible.
+        val editCalls: MutableList<Pair<String, CommitmentEditPatch>> = mutableListOf()
+
+        override suspend fun editCommitment(
+            id: String,
+            patch: CommitmentEditPatch,
+        ): BecalmResult<Unit> {
+            editCalls += id to patch
+            return BecalmResult.Success(Unit)
+        }
+
+        override suspend fun markQuoteDisputed(id: String): BecalmResult<Unit> =
+            BecalmResult.Success(Unit)
+
+        override suspend fun clearQuoteDispute(id: String): BecalmResult<Unit> =
+            BecalmResult.Success(Unit)
+
+        override suspend fun softDelete(id: String): BecalmResult<Unit> =
+            BecalmResult.Success(Unit)
+
+        override suspend fun supersede(
+            oldId: String,
+            newRow: CommitmentEntity,
+        ): BecalmResult<String> = BecalmResult.Success(newRow.id)
     }
 }
