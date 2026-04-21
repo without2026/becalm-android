@@ -256,7 +256,7 @@ class CommitmentManagementViewModelTest {
     }
 
     @Test
-    fun `onRemind skips scheduler when dueAt is null`() = runTest {
+    fun `onRemind forwards null dueAt to scheduler which owns the null-and-past gate`() = runTest {
         val entity = makeEntity(id = "r-2", actionState = "pending", dueAt = null)
         every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(entity))
 
@@ -271,8 +271,9 @@ class CommitmentManagementViewModelTest {
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
-        // ReminderScheduler must NOT be called when dueAt is null — C5 gate.
-        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        // C5 moved the null/past gate into ReminderScheduler.schedule; the VM always
+        // invokes the scheduler and the scheduler decides whether to arm an alarm.
+        verify(exactly = 1) { reminderScheduler.schedule("r-2", null) }
     }
 
     @Test

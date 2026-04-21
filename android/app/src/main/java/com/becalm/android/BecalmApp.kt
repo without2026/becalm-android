@@ -3,6 +3,7 @@ package com.becalm.android
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -23,12 +24,31 @@ private val TAB_ROUTES = setOf(
  *
  * Navigation always starts at [BecalmRoute.Splash]; the Splash screen itself
  * handles the onboarding-completed / auth-state routing decision.
+ *
+ * @param pendingCommitmentDeepLinkId Commitment id parsed from an incoming
+ *   `becalm://commitments/{id}` deep link (CMT-008). When non-null, triggers a
+ *   navigate to [BecalmRoute.CommitmentDetail] as soon as the nav graph is ready,
+ *   then calls [onDeepLinkConsumed] so the parent activity can clear the pending
+ *   state and avoid re-navigating on recomposition.
+ * @param onDeepLinkConsumed Callback invoked once the deep-link navigation has been
+ *   dispatched. No-op when [pendingCommitmentDeepLinkId] is null.
  */
 @Composable
-public fun BecalmApp() {
+public fun BecalmApp(
+    pendingCommitmentDeepLinkId: String? = null,
+    onDeepLinkConsumed: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+
+    LaunchedEffect(pendingCommitmentDeepLinkId) {
+        val id = pendingCommitmentDeepLinkId
+        if (!id.isNullOrBlank()) {
+            navController.navigate(BecalmRoute.CommitmentDetail(id).path)
+            onDeepLinkConsumed()
+        }
+    }
 
     Scaffold(
         bottomBar = {

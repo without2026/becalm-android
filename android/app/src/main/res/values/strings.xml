@@ -164,6 +164,13 @@
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
 
+    <!-- Commitment reminder alarm (CMT-005 + CMT-008) -->
+    <string name="commitment_alarm_title">곧 마감되는 약속 (1시간 뒤)</string>
+    <string name="commitment_alarm_body_give_fmt">내가 한 약속: %1$s</string>
+    <string name="commitment_alarm_body_take_fmt">상대가 한 약속: %1$s</string>
+    <string name="commitment_channel_due_soon_name">곧 마감 리마인더</string>
+    <string name="commitment_channel_due_soon_desc">약속 마감 1시간 전 알림</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_account_section">Account</string>

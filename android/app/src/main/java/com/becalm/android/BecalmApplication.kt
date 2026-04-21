@@ -1,11 +1,14 @@
 package com.becalm.android
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.receiver.ReminderBroadcastReceiver
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -99,6 +102,12 @@ public class BecalmApplication : Application(), Configuration.Provider {
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
+
+        // CMT-008: register the commitment_due_soon high-importance notification
+        // channel at process start. createNotificationChannel is idempotent on API 26+,
+        // so repeat cold starts are safe no-ops. ReminderBroadcastReceiver posts to
+        // this channel after re-querying Room for the commitment's live state.
+        registerCommitmentDueSoonChannel()
         // Fire-and-forget upgrade compat: cancel WorkManager unique-work under the pre-#13
         // `ingest.sms_call` name so devices upgrading from that build don't run duplicate
         // MediaStore scans alongside the new `ingest.media_store` key. Idempotent — cancelling
@@ -161,6 +170,33 @@ public class BecalmApplication : Application(), Configuration.Provider {
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
         }
 
+        // Enroll the daily 30-day retention sweep (EMAIL-006, unchanged below).
+
+        enrollRetentionSweep()
+    }
+
+    /**
+     * Registers the `commitment_due_soon` notification channel (CMT-008) with
+     * `IMPORTANCE_HIGH`. The channel description and name are localized via
+     * string resources so the system notification-settings screen can display
+     * them in the user's locale.
+     *
+     * Idempotent on API 26+ — repeat calls from subsequent cold starts are no-ops.
+     */
+    private fun registerCommitmentDueSoonChannel() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(ReminderBroadcastReceiver.CHANNEL_ID) != null) return
+        val channel = NotificationChannel(
+            ReminderBroadcastReceiver.CHANNEL_ID,
+            getString(R.string.commitment_channel_due_soon_name),
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = getString(R.string.commitment_channel_due_soon_desc)
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun enrollRetentionSweep() {
         // Enroll the daily 30-day retention sweep (EMAIL-006,
         // `.spec/data-ingestion.spec.yml:160`). `enqueueUniquePeriodicWork` with
         // `ExistingPeriodicWorkPolicy.KEEP` is idempotent: repeated cold-start calls

@@ -46,8 +46,15 @@
     <!-- Battery optimization exemption (ONB-005) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- Alarm reminders (SP-37) -->
+    <!-- Alarm reminders (SP-37, CMT-005) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!--
+        API 33+ preferred exact-alarm permission (auto-granted to apps with a calendar /
+        reminder use case, per platform policy). Declared alongside SCHEDULE_EXACT_ALARM
+        so ReminderScheduler.setExactAndAllowWhileIdle is granted on newer devices
+        without the user-facing approval prompt introduced on API 31.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <!--
         API 33+ (TIRAMISU): POST_NOTIFICATIONS is a runtime permission.
@@ -83,6 +90,18 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!--
+                CMT-008: deep link for commitment reminder taps.
+                Posted by ReminderBroadcastReceiver as becalm://commitments/{id};
+                MainActivity parses Intent.data and navigates to
+                BecalmRoute.CommitmentDetail(id).
+            -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="becalm" android:host="commitments" />
             </intent-filter>
         </activity>
 

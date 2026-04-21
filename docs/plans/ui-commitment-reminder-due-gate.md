@@ -1,7 +1,7 @@
 # UI / Commitment / Reminder Due Gate — CMT-005 + CMT-008 alarm realignment
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C5
+**Status**: IMPLEMENTED — Wave 4 commit C5.
 **E2E Stage**: 5 — Commitment Management
 **Severity**: High
 **Type**: Drift

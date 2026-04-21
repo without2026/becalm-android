@@ -5,31 +5,39 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.time.Duration.Companion.hours
 import kotlinx.datetime.Instant
 
 /**
  * Schedules and cancels exact-alarm reminders for commitments.
  *
- * Uses [AlarmManager.setExactAndAllowWhileIdle] when the SCHEDULE_EXACT_ALARM
- * permission is granted (API 31+); falls back to [AlarmManager.setAndAllowWhileIdle]
- * otherwise, logging a WARN so operators are aware of reduced accuracy.
+ * Spec CMT-005: alarm must fire at `due_at − 1h` via
+ * [AlarmManager.setExactAndAllowWhileIdle] with [PendingIntent.FLAG_IMMUTABLE]. The
+ * scheduler silently skips when `dueAt == null` or when the computed trigger has
+ * already passed, so callers can pass the raw `due_at` Instant without a pre-check.
+ *
+ * On API 31+ without SCHEDULE_EXACT_ALARM the scheduler degrades to
+ * [AlarmManager.setWindow] (10-minute window) and logs a WARN.
  *
  * ## PIPA note
  * Commitment content is never passed to the alarm or notification payloads.
  * Only the commitment ID (redacted in logs) is carried as an intent extra.
  *
  * @param context Application context for system service access and intent construction.
- * @param logger Structured log sink.
+ * @param clock   Injected [Clock] so tests can freeze "now" deterministically.
+ * @param logger  Structured log sink.
  */
 @Singleton
 public class ReminderScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val clock: Clock,
     private val logger: Logger,
 ) {
 
@@ -37,20 +45,36 @@ public class ReminderScheduler @Inject constructor(
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     /**
-     * Schedules an exact-alarm reminder for the commitment identified by [commitmentId]
-     * to fire at [triggerAt].
+     * Schedules an exact-alarm reminder for [commitmentId] at `dueAt − 1h` (CMT-005).
+     *
+     * Skips (no-op + log) when:
+     *  - [dueAt] is `null` (commitment has no deadline), or
+     *  - the computed trigger already lies in the past.
      *
      * If the app does not hold SCHEDULE_EXACT_ALARM on API 31+, the scheduler falls
-     * back to [AlarmManager.setAndAllowWhileIdle] and logs a WARN.
+     * back to [AlarmManager.setWindow] with a 10-minute window and logs a WARN.
      *
      * @param commitmentId Opaque commitment identifier (redacted in logs).
-     * @param triggerAt    Wall-clock instant at which the alarm should fire.
+     * @param dueAt        Commitment deadline. The actual alarm fires 1 hour before this.
      */
-    public fun schedule(commitmentId: String, triggerAt: Instant) {
+    public fun schedule(commitmentId: String, dueAt: Instant?) {
+        if (dueAt == null) {
+            logger.d(TAG, "schedule skipped: dueAt null for %08x".format(commitmentId.hashCode()))
+            return
+        }
+        val triggerAt = dueAt.minus(REMINDER_LEAD_TIME)
+        val now = clock.nowInstant()
+        if (triggerAt <= now) {
+            logger.d(
+                TAG,
+                "schedule skipped: triggerAt=$triggerAt already past now=$now for " +
+                    "commitment %08x".format(commitmentId.hashCode()),
+            )
+            return
+        }
+
         val requestCode = commitmentIdToRequestCode(commitmentId)
         val pi = buildPendingIntent(commitmentId, requestCode)
-        // AlarmManager accepts a Long epoch-ms at the boundary; we convert here so that
-        // ReminderScheduler's own signature stays on kotlinx.datetime.Instant.
         val triggerMs = triggerAt.toEpochMilliseconds()
 
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -60,10 +84,16 @@ public class ReminderScheduler @Inject constructor(
             alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
             logger.d(TAG, "Exact alarm scheduled for commitment %08x".format(commitmentId.hashCode()))
         } else {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerMs, pi)
+            // Degraded path: 10-minute window around the intended trigger.
+            alarmManager.setWindow(
+                AlarmManager.RTC_WAKEUP,
+                triggerMs,
+                INEXACT_WINDOW_MS,
+                pi,
+            )
             logger.w(
                 TAG,
-                "SCHEDULE_EXACT_ALARM not granted — falling back to inexact alarm for " +
+                "SCHEDULE_EXACT_ALARM not granted — falling back to inexact window alarm for " +
                     "commitment %08x".format(commitmentId.hashCode()),
             )
         }
@@ -103,6 +133,12 @@ public class ReminderScheduler @Inject constructor(
 
     private companion object {
         private const val TAG = "ReminderScheduler"
+
+        /** CMT-005: alarm fires 1 hour before `due_at`. */
+        private val REMINDER_LEAD_TIME = 1.hours
+
+        /** 10-minute window used when the exact-alarm permission is missing. */
+        private const val INEXACT_WINDOW_MS: Long = 10 * 60 * 1000L
 
         /**
          * Derives a stable 31-bit int from [commitmentId] for use as a [PendingIntent]

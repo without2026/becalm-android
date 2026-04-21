@@ -274,10 +274,9 @@ public class CommitmentManagementViewModel @Inject constructor(
      * Records that the user pressed [리마인드] on the commitment (CMT-005).
      *
      * Transitions PENDING → REMINDED via the state machine and, on success, asks
-     * [ReminderScheduler] to (re)arm the alarm using the commitment's own `dueAt`.
-     * When `dueAt` is null we skip the scheduler call — the reminder-time calculation
-     * gate lands in C5 (`docs/plans/ui-commitment-reminder-due-gate.md`). Until then,
-     * rows without a due date simply do not fire a new alarm.
+     * [ReminderScheduler] to (re)arm the alarm at `dueAt − 1h`. The scheduler owns
+     * the null-dueAt and past-trigger gates internally, so this call-site passes
+     * the raw `dueAt` through verbatim.
      *
      * On failure surfaces the error string via [CommitmentUiState.error].
      */
@@ -287,15 +286,8 @@ public class CommitmentManagementViewModel @Inject constructor(
             name = "onRemind",
             id = id,
             effect = {
-                // TODO(C5 — ui-commitment-reminder-due-gate.md): compute the actual
-                // reminder trigger (e.g. due_at - 1h) inside ReminderScheduler rather
-                // than passing dueAt through verbatim. For now, skip the scheduler
-                // call entirely when dueAt is null because ReminderScheduler.schedule
-                // requires a non-null Instant.
                 val dueAt: Instant? = allEntities.value.firstOrNull { it.id == id }?.dueAt
-                if (dueAt != null) {
-                    reminderScheduler.schedule(id, dueAt)
-                }
+                reminderScheduler.schedule(id, dueAt)
             },
         ) {
             commitmentRepository.transitionState(id, CommitmentEvent.Remind)
