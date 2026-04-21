@@ -350,7 +350,7 @@ public class ImapClientImpl @Inject constructor(
 
     /**
      * Single-pass extraction: prefers the first `text/plain` part; if none exists, falls back
-     * to the first `text/*` part (e.g. `text/html`). Avoids iterating the parts array twice.
+     * to the first `text/&#42;` part (e.g. `text/html`). Avoids iterating the parts array twice.
      */
     private fun extractFromMultipart(multipart: jakarta.mail.Multipart): String? {
         var textFallback: String? = null

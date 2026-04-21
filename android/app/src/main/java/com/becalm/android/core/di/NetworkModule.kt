@@ -26,6 +26,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.SupabaseClient
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -335,12 +336,12 @@ public class DefaultAuthTokenProvider @Inject constructor(
         }
 
         val result = authClient.refresh(current.refreshToken).getOrNull() ?: return@withLock null
-        sessionStore.save(result.session)
+        sessionStore.save(result)
         // Belt-and-suspenders: the observer will also update the cache on the save() emit.
         // Setting here guarantees the cache is updated before refresh() returns, removing any
         // window where a caller sees the new token from refresh() before observing it via
         // currentAccessToken().
-        cachedAccessToken.set(result.session.accessToken)
-        result.session.accessToken
+        cachedAccessToken.set(result.accessToken)
+        result.accessToken
     }
 }

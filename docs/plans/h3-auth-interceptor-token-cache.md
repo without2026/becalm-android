@@ -5,6 +5,16 @@
 **Spec touched:** AUTH-006 (DefaultAuthTokenProvider), AUTH-007 (AuthInterceptor)
 **Risk tier:** HIGH — every authenticated Railway request flows through this path.
 
+> **⚠ Migration Impact (2026-04-21, `chore/ci/fix-build`)**
+> Supabase Kotlin SDK upgraded **2.6.0 → 3.0.3** (auth-kt rename + Ktor 3.x). The `SupabaseAuthClient.refresh(rt): BecalmResult<SupabaseSession>` now returns a `SupabaseSession` **directly**, NOT a wrapper with a `.session` field. All code snippets in this plan that use `result.session.accessToken` / `sessionStore.save(result.session)` must be rewritten as `result.accessToken` / `sessionStore.save(result)`. Example: §3.5 mutex block becomes
+> ```kotlin
+> val result = authClient.refresh(current.refreshToken).getOrNull() ?: return@withLock null
+> sessionStore.save(result)                 // was: result.session
+> result.accessToken                        // was: result.session.accessToken
+> ```
+> This was already applied to `NetworkModule.kt:338-345` during the migration commit. When implementing the Observer pattern, keep the Supabase 3.x signature in mind.
+> Additionally, `@HiltAndroidApp` / `@HiltWorker` / `@Inject` compilation now runs via **KSP** (not kapt) — `kapt(libs.hilt.compiler)` declarations are replaced with `ksp(libs.hilt.compiler)` and the `org.jetbrains.kotlin.plugin.kapt` plugin is dropped. Any new Hilt dep in this plan must also use `ksp(...)`.
+
 ---
 
 ## 1. Current state (as of 4055379)

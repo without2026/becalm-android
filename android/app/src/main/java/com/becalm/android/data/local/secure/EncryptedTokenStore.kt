@@ -6,6 +6,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
