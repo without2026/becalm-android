@@ -16,6 +16,7 @@ import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.SourceType
@@ -38,8 +39,8 @@ import java.util.UUID
  *
  * ## ING-008 — Naver IMAP sync
  * Connects to `imap.naver.com:993` using the app-password credential retrieved from
- * [ImapCredentialStore.getCredentials] (CRIT-01). The credential store is provisioned
- * by the onboarding flow (SP-53).
+ * [ImapCredentialStore.load] under the [SourceType.NAVER_IMAP] namespace (CRIT-01).
+ * The credential store is provisioned by the onboarding flow (SP-53).
  *
  * Incremental sync is driven by the UIDVALIDITY + UIDNEXT cursor pair persisted in
  * [SyncCursorStore] under mailbox [MAILBOX_NAVER]. A UIDVALIDITY mismatch causes a full
@@ -73,6 +74,7 @@ public class ImapNaverWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     @UserPrefs private val userPrefs: DataStore<Preferences>,
     private val imapCredentialStore: ImapCredentialStore,
+    private val imapCredentialStoreMigrator: ImapCredentialStoreMigrator,
     private val syncCursorStore: SyncCursorStore,
     private val imapClient: ImapClient,
     private val rawIngestionRepository: RawIngestionRepository,
@@ -82,6 +84,15 @@ public class ImapNaverWorker @AssistedInject constructor(
 
     public override suspend fun doWork(): Result {
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+
+        // ── 0. Ensure legacy-tuple migration has completed ───────────────────
+        // The Application.onCreate fire-and-forget launch of [migrateIfNeeded] is not a
+        // barrier: if WorkManager enqueues this worker before that launch completes, the
+        // old-tuple credential would be invisible under the new `naver_imap_*` namespace
+        // and [loadCredentials] would spuriously return null. Calling it synchronously
+        // here — the migrator is idempotent (UserPrefsStore flag short-circuit) so the
+        // steady-state cost is one flag read.
+        imapCredentialStoreMigrator.migrateIfNeeded()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
         val credentials = loadCredentials() ?: return Result.failure()
@@ -132,7 +143,7 @@ public class ImapNaverWorker @AssistedInject constructor(
      * absent and returns `null` so the caller can short-circuit to [Result.failure].
      */
     private suspend fun loadCredentials(): ImapCredentials? {
-        val credentials = imapCredentialStore.getCredentials()
+        val credentials = imapCredentialStore.load(SourceType.NAVER_IMAP)
         if (credentials == null) {
             logger.w(TAG, "IMAP Naver credentials absent — provisioned by SP-53")
         }

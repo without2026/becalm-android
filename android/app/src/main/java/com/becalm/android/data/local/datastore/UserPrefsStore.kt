@@ -176,6 +176,28 @@ public interface UserPrefsStore {
     public fun observeEnabledSources(): Flow<Set<String>>
 
     /**
+     * Emits `true` once the one-shot legacy-to-namespaced [ImapCredentialStore]
+     * migration has completed successfully.
+     *
+     * Defaults to `false` on install. Used exclusively by
+     * [com.becalm.android.data.local.secure.ImapCredentialStoreMigrator] to short-circuit
+     * on subsequent app starts. Persisted under key `imap_credential_store_migrated_v1`.
+     */
+    public fun observeImapMigrated(): Flow<Boolean>
+
+    /**
+     * Persists the [ImapCredentialStore][com.becalm.android.data.local.secure.ImapCredentialStore]
+     * migration-completed flag.
+     *
+     * The migrator only sets this to `true` after a successful migration or an
+     * idempotent no-op. It is never set from product UI — the key is namespaced so
+     * a future v2 migration can ship its own flag.
+     *
+     * @param value `true` once the migration has completed; `false` to reset (tests only).
+     */
+    public suspend fun setImapMigrated(value: Boolean)
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
@@ -203,6 +225,7 @@ public interface UserPrefsStore {
  * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
  * | PIPA third-party consent         | Boolean  | `pipa_third_party_consent`       | false      |
  * | PIPA consent timestamp millis    | Long     | `pipa_consent_timestamp_millis`  | null (absent when consent not currently granted) |
+ * | IMAP store migrated (v1)         | Boolean  | `imap_credential_store_migrated_v1` | false   |
  */
 public class UserPrefsStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
@@ -217,6 +240,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val pipaThirdPartyConsentKey = booleanPreferencesKey("pipa_third_party_consent")
     private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
+    private val imapCredentialStoreMigratedKey = booleanPreferencesKey("imap_credential_store_migrated_v1")
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
@@ -281,6 +305,13 @@ public class UserPrefsStoreImpl @Inject constructor(
     // Stub (SP-14.1): always emits empty set until the source-enable UI lands.
     override fun observeEnabledSources(): Flow<Set<String>> =
         kotlinx.coroutines.flow.flowOf(emptySet())
+
+    override fun observeImapMigrated(): Flow<Boolean> =
+        dataStore.data.map { it[imapCredentialStoreMigratedKey] ?: false }
+
+    override suspend fun setImapMigrated(value: Boolean) {
+        dataStore.edit { prefs -> prefs[imapCredentialStoreMigratedKey] = value }
+    }
 
     override suspend fun clearAll() {
         dataStore.edit { it.clear() }

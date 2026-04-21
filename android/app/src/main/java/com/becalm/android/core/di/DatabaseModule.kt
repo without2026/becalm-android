@@ -4,6 +4,7 @@ import android.content.Context
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import dagger.Module
@@ -70,4 +71,15 @@ public object DatabaseModule {
     @Provides
     public fun providePersonEnrichmentDao(db: BeCalmDatabase): PersonEnrichmentDao =
         db.personEnrichmentDao()
+
+    /**
+     * Provides the room-only [EmailBodyDao] from the singleton [BeCalmDatabase].
+     *
+     * Required by [com.becalm.android.data.repository.EmailBodyRepositoryImpl] —
+     * the repository owns the EMAIL-006 PIPA invariant boundary and never lets
+     * email body fields reach a wire DTO.
+     */
+    @Provides
+    public fun provideEmailBodyDao(db: BeCalmDatabase): EmailBodyDao =
+        db.emailBodyDao()
 }

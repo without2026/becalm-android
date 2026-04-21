@@ -165,6 +165,18 @@ dependencies {
     implementation(libs.jakarta.mail)
     implementation(libs.angus.mail)
 
+    // ─── Jsoup (HTML → plain-text for EmailSnippetBuilder, EMAIL-003) ────────
+    implementation(libs.jsoup)
+
+    // ─── Google Identity Services (Gmail OAuth — GoogleAuthTokenProviderImpl) ─
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+    implementation(libs.play.services.auth)
+
+    // ─── libphonenumber (E.164 normalization for call-recording person_ref) ──
+    implementation(libs.libphonenumber)
+
     // ─── Timber ──────────────────────────────────────────────────────────────
     implementation(libs.timber)
 
@@ -180,6 +192,11 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.mockwebserver)
+    // kotlin-reflect powers the DTO-invariant reflection test
+    // (DtoInvariantTest.rawIngestionEventDto_* asserts the wire shape never leaks EmailBody
+    // fields). Unused at runtime — compileOnly on main would also work, but the reflection
+    // is only exercised from src/test so it is declared as testImplementation.
+    testImplementation(libs.kotlin.reflect)
 
     // ─── Instrumented Tests ───────────────────────────────────────────────────
     androidTestImplementation(libs.androidx.test.ext.junit)

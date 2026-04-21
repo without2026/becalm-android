@@ -63,7 +63,9 @@ public data class RawIngestionEventDto(
     @field:Json(name = "event_title") val eventTitle: String? = null,
 
     /**
-     * Voice: first ~200 chars of transcript (after STT); email: first 200 chars of body.
+     * Voice: first ~200 chars of transcript (after STT).
+     * Email: body_plain[:200] → Jsoup(html).text()[:200] → subject[:200], whitespace collapsed.
+     * See [com.becalm.android.domain.email.EmailSnippetBuilder.buildSnippet] & spec EMAIL-003.
      * Null for calendar events.
      */
     @field:Json(name = "event_snippet") val eventSnippet: String? = null,

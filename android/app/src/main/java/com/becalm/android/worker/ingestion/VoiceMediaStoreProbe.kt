@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.PhoneNumberUtils
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -21,12 +22,29 @@ import kotlinx.datetime.Instant
 import java.util.UUID
 
 /**
- * Voice-recording path of [MediaStoreWorker] (ING-003 / VOI-001 / VOI-004 / VOI-005 / VOI-007).
+ * Voice- and call-recording path of [MediaStoreWorker] (ING-001 / ING-003 / VOI-001 /
+ * VOI-004 / VOI-005 / VOI-007).
  *
- * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for newly-added recordings, inserts
- * deduped [RawIngestionEventEntity] rows (`source_type="voice"`), and enqueues per-row uploads
- * via [WorkScheduler.enqueueVoiceUpload]. The cursor is advanced only when every row in the
- * batch succeeded, so failed rows are re-discovered (the `>=` predicate combined with the
+ * Reads `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for newly-added recordings and
+ * fans out into two disjoint branches that share cursor, consent gating, and dedup
+ * semantics:
+ * - [ingestVoiceRecordings] — Samsung One UI 6.x `Recordings/Voice Recorder/`, stock
+ *   AOSP `Recordings/`, and legacy `VoiceRecorder/`. Inserts `source_type="voice"` rows
+ *   with `person_ref=null`.
+ * - [ingestCallRecordings] — Samsung One UI 6.x `Recordings/Call/`. Inserts
+ *   `source_type="call_recording"` rows with `person_ref` set to the E.164 normalization
+ *   of the counterparty number extracted from the MediaStore DISPLAY_NAME (null when no
+ *   valid number can be parsed — per ING-001 "없으면 null").
+ *
+ * The two branches scan the same table with disjoint path patterns (the voice branch
+ * explicitly excludes `Recordings/Call/%`) so no file is ingested twice. Each branch
+ * owns an independent watermark cursor — [MediaStoreWorker.KIND_VOICE] for the voice
+ * scan, [MediaStoreWorker.KIND_CALL_RECORDING] for the call scan. Using a single
+ * shared watermark would silently skip older rows in the second-scanned subtree when
+ * the first-scanned subtree advanced the cursor past them, which is an ING-001
+ * data-loss hazard. Per-row uploads are enqueued via [WorkScheduler.enqueueVoiceUpload];
+ * each branch's cursor is advanced only when every row in that branch's batch
+ * succeeded so failed rows are re-discovered (the `>=` predicate combined with the
  * deterministic `clientEventId` dedup absorbs the one-second overlap).
  *
  * Per `.spec/cold-sync.spec.yml:49`, the inserted `sync_status` is gated by the user's PIPA
@@ -37,8 +55,11 @@ import java.util.UUID
  * `RawIngestionEventDao.releaseAwaitingConsentToPending` (OFF→ON) and
  * `RawIngestionRepository.parkVoicePendingAsAwaitingConsent` (ON→OFF).
  *
- * Behaviour is byte-identical with the original `MediaStoreWorker.ingestVoiceRecordings`
- * body and is exercised solely through [MediaStoreWorker.doWork] tests.
+ * The voice branch's behaviour is byte-identical with the original
+ * `MediaStoreWorker.ingestVoiceRecordings` body; the call branch reuses the same
+ * cursor/insert/enqueue helpers via optional `sourceType` / `personRef` /
+ * `clientEventIdPrefix` parameters. Both are exercised solely through
+ * [MediaStoreWorker.doWork] tests.
  *
  * Constructed by [MediaStoreWorker] from its own collaborators rather than via Hilt
  * `@Inject`, so unit tests do not need to know about the split.
@@ -261,6 +282,193 @@ internal class VoiceMediaStoreProbe(
     }
 
     /**
+     * Call-recording sibling of [ingestVoiceRecordings] (ING-001 / VOI-001).
+     *
+     * Queries `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` for recordings under
+     * Samsung One UI 6.x's `Recordings/Call/` subtree only — disjoint from the voice
+     * branch (which excludes `Recordings/Call/%`) so no file is ingested twice.
+     *
+     * For each discovered file:
+     * - [sourceType] is [SourceType.CALL_RECORDING] (wire value `"call_recording"`).
+     * - [RawIngestionEventEntity.personRef] is set to the E.164-normalized counterparty
+     *   number extracted from the MediaStore DISPLAY_NAME via
+     *   [PhoneNumberUtils.extractCounterpartyNumberFromDisplayName]. Null when no valid
+     *   phone number can be parsed — per ING-001 "없으면 null", we never throw on
+     *   unparseable inputs (the user can still link the event manually later).
+     * - [clientEventId] uses the prefix `"mediastore:call_recording:<mediaId>"`, disjoint
+     *   from voice's `"mediastore:voice:<mediaId>"` so a single row never collides across
+     *   the two source_types at the UNIQUE (user_id, client_event_id) index.
+     *
+     * The watermark cursor is **independent** from the voice branch's
+     * [MediaStoreWorker.KIND_VOICE]; this scan reads and advances
+     * [MediaStoreWorker.KIND_CALL_RECORDING] instead. A shared cursor would silently
+     * skip a call recording whose `DATE_ADDED` is older than the newest voice memo
+     * ingested earlier in the same worker run (the voice branch runs first in
+     * [MediaStoreWorker.doWork] and advances its cursor before the call branch reads).
+     * PIPA consent snapshot, dedup, enqueue, and cursor advance semantics are otherwise
+     * identical to the voice branch via the shared helpers.
+     *
+     * @return [CallRecordingIngestOutcome] distinguishing a clean scan (inserted rows,
+     *   zero or otherwise) from a scan failure. The worker maps [CallRecordingIngestOutcome.ScanFailed]
+     *   to `Result.retry()` so WorkManager re-attempts instead of silently succeeding past
+     *   a ContentResolver query exception (ING-001 data-loss guard).
+     */
+    suspend fun ingestCallRecordings(now: Instant): CallRecordingIngestOutcome {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId == null) {
+            logger.w(TAG, "userId null — skipping call_recording ingestion this cycle")
+            return CallRecordingIngestOutcome.Success(insertedCount = 0)
+        }
+
+        // PIPA snapshot — same contract as voice branch (cold-sync.spec:49).
+        val pipaConsented = userPrefsStore.observeThirdPartyProvisionConsent().first()
+
+        // Independent watermark per MediaStore folder subtree. Sharing [KIND_VOICE] between
+        // the two branches would allow the voice scan — which runs first in
+        // [MediaStoreWorker.doWork] — to advance past a call recording whose DATE_ADDED is
+        // older than the newest voice memo in the same run, permanently skipping it
+        // (ING-001 data-loss). Using [KIND_CALL_RECORDING] keeps the two subtrees
+        // cursor-independent.
+        val lastSeenMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING).first() ?: 0L
+        val lastSeenSec = lastSeenMs / 1_000L
+
+        val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.RELATIVE_PATH
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Audio.Media.DATA
+        }
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            // TITLE is projected only for the call-recording branch. ING-001 requires
+            // `event_title: MediaStore TITLE` for call recordings so the Today timeline
+            // and commitment detail views can show a readable label instead of an empty
+            // row. The voice branch does not project TITLE (byte-identical preservation).
+            MediaStore.Audio.Media.TITLE,
+            folderColumn,
+        )
+        // Inclusive Call/ pattern — disjoint from the voice branch's NOT LIKE exclusion,
+        // so the two scans never overlap.
+        val callPattern = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // RELATIVE_PATH ends with "/", so the Call/ trailing slash guard prevents
+            // matching siblings named "CallLog" etc.
+            "Recordings/${MediaStoreWorker.CALL_FOLDER}/%"
+        } else {
+            // DATA is the full absolute path — match at any depth with leading `%`.
+            "%/Recordings/${MediaStoreWorker.CALL_FOLDER}/%"
+        }
+        val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND $folderColumn LIKE ?"
+        val selectionArgs = arrayOf(lastSeenSec.toString(), callPattern)
+        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} ASC"
+
+        var insertedCount = 0
+        var hasInsertFailure = false
+        var maxDateAddedMs = lastSeenMs
+
+        val scanned = queryMediaStore(
+            uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection = projection,
+            selection = selection,
+            selectionArgs = selectionArgs,
+            sortOrder = sortOrder,
+            onError = { e ->
+                logger.e(TAG, "call_recording MediaStore query failed", e)
+                sourceStatusRepository.recordSyncError(
+                    SourceType.CALL_RECORDING,
+                    e.message ?: "query failed",
+                    now,
+                )
+            },
+        ) { cursor ->
+            val idxId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+            val idxTitle = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+
+            while (cursor.moveToNext()) {
+                val row = readVoiceRow(
+                    cursor,
+                    idxId,
+                    idxDateAdded,
+                    idxDuration,
+                    idxDisplayName,
+                    clientEventIdPrefix = CALL_RECORDING_CLIENT_EVENT_ID_PREFIX,
+                    idxTitle = idxTitle,
+                )
+
+                // ING-001: extract counterparty number from filename and normalize to E.164;
+                // null when no valid number can be parsed (graceful degrade).
+                val personRef = PhoneNumberUtils.extractCounterpartyNumberFromDisplayName(row.displayName)
+
+                logger.d(
+                    TAG,
+                    "call_recording row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} " +
+                        "dateAddedSec=${row.dateAddedSec} personRefPresent=${personRef != null}",
+                )
+
+                val insertResult = insertVoiceRow(
+                    row = row,
+                    userId = userId,
+                    pipaConsented = pipaConsented,
+                    sourceType = SourceType.CALL_RECORDING,
+                    personRef = personRef,
+                    // ING-001: event_title sourced from MediaStore TITLE. Samsung's
+                    // call-recording files have a meaningful title (timestamp + number);
+                    // null when the column is absent on older Android versions.
+                    eventTitle = row.title,
+                )
+                when (insertResult) {
+                    VoiceInsertResult.Failed -> {
+                        hasInsertFailure = true
+                        continue
+                    }
+                    VoiceInsertResult.DedupSkip -> continue
+                    is VoiceInsertResult.Fresh -> {
+                        val rowMs = row.dateAddedSec * 1_000L
+                        if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+
+                        insertedCount++
+                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = true)) {
+                            hasInsertFailure = true
+                        }
+                    }
+                    is VoiceInsertResult.Dedup -> {
+                        val rowMs = row.dateAddedSec * 1_000L
+                        if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+
+                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = false)) {
+                            hasInsertFailure = true
+                        }
+                    }
+                }
+            }
+        }
+        if (!scanned) {
+            // ContentResolver.query threw — error already recorded in SourceStatusRepository
+            // by queryMediaStore's onError. Surface to the worker so it retries via
+            // WorkManager backoff; returning Success(0) here would mark the run complete
+            // despite the ING-001 subtree being skipped this cycle.
+            return CallRecordingIngestOutcome.ScanFailed
+        }
+
+        if (!hasInsertFailure && maxDateAddedMs > lastSeenMs) {
+            syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING, maxDateAddedMs)
+            logger.d(
+                TAG,
+                "call_recording cursor advanced from=${lastSeenMs}ms to=${maxDateAddedMs}ms inserted=$insertedCount",
+            )
+        }
+
+        sourceStatusRepository.recordSyncSuccess(SourceType.CALL_RECORDING, now)
+        logger.d(TAG, "ING-001 call recordings inserted=$insertedCount")
+        return CallRecordingIngestOutcome.Success(insertedCount = insertedCount)
+    }
+
+    /**
      * MediaStore cursor 스캔 스캐폴드를 한 군데로 모은 헬퍼.
      * `CancellationException`은 그대로 rethrow하여 WorkManager 취소 경로를 보존한다.
      * `.use { }` 자원 해제 동작과 null-cursor 시 no-op 처리 또한 원본과 동일하다.
@@ -305,6 +513,14 @@ internal class VoiceMediaStoreProbe(
         val displayName: String,
         val audioUri: String,
         val clientEventId: String,
+        /**
+         * `MediaStore.Audio.Media.TITLE` when projected by the caller, otherwise null.
+         * Populated only by the call-recording branch per ING-001 contract
+         * (`event_title: MediaStore TITLE`). Voice branch leaves this null because
+         * its pre-existing behavior is byte-identical and the voice `event_title`
+         * story is tracked by a separate plan doc.
+         */
+        val title: String? = null,
     )
 
     /**
@@ -326,7 +542,12 @@ internal class VoiceMediaStoreProbe(
      *
      * - DURATION은 MediaStore 규약에 따라 밀리초이므로 정수 초로 변환한다.
      * - 표시 이름이 null이면 빈 문자열로 표준화한다 (원본과 동일 — PII hash 계산 안정성 보존).
-     * - audioUri / clientEventId는 [ingestVoiceRecordings]의 원본 생성 식과 byte-identical 하다.
+     * - audioUri / clientEventId는 원본 생성 식과 byte-identical 하다.
+     * - [clientEventIdPrefix] 는 voice 분기에서는 `"mediastore:voice:"` (기본값),
+     *   call_recording 분기에서는 `"mediastore:call_recording:"` 를 주입받는다.
+     *   두 prefix 는 서로 다른 Railway dedup key space 를 구성해 voice/call_recording
+     *   rows 가 동일 mediaId 를 공유하지 않음을 보장한다 (현실적으로는 동일 MediaStore
+     *   table 을 공유하므로 mediaId 는 고유하지만, prefix 를 분리해 방어한다).
      */
     private fun readVoiceRow(
         cursor: Cursor,
@@ -334,6 +555,8 @@ internal class VoiceMediaStoreProbe(
         idxDateAdded: Int,
         idxDuration: Int,
         idxDisplayName: Int,
+        clientEventIdPrefix: String = "mediastore:voice:",
+        idxTitle: Int? = null,
     ): VoiceRow {
         val mediaId = cursor.getLong(idxId)
         val dateAddedSec = cursor.getLong(idxDateAdded)
@@ -344,6 +567,9 @@ internal class VoiceMediaStoreProbe(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             mediaId,
         ).toString()
+        // TITLE is only projected by the call-recording branch (ING-001 contract). When
+        // [idxTitle] is null the voice branch's byte-identical behavior is preserved.
+        val title = idxTitle?.let { cursor.getString(it) }
         return VoiceRow(
             mediaId = mediaId,
             dateAddedSec = dateAddedSec,
@@ -351,7 +577,8 @@ internal class VoiceMediaStoreProbe(
             displayName = displayName,
             audioUri = audioUri,
             // Deterministic idempotency key: same mediaId always yields same clientEventId
-            clientEventId = "mediastore:voice:$mediaId",
+            clientEventId = "$clientEventIdPrefix$mediaId",
+            title = title,
         )
     }
 
@@ -367,20 +594,30 @@ internal class VoiceMediaStoreProbe(
      * 에러 로그 문자열("DAO insert failed mediaId=$mediaId nameHash=${redact(displayName)}")은
      * 원본 ingestVoiceRecordings 구현과 완전히 동일하게 유지한다.
      *
-     * [pipaConsented] 는 배치 전체에 대해 [ingestVoiceRecordings] 가 1회 스냅샷한 값이며,
-     * cold-sync.spec:49 에 따라 insertion 시점의 sync_status 를 결정한다.
+     * [pipaConsented] 는 배치 전체에 대해 호출부([ingestVoiceRecordings] / [ingestCallRecordings])
+     * 가 1회 스냅샷한 값이며, cold-sync.spec:49 에 따라 insertion 시점의 sync_status 를 결정한다.
+     *
+     * [sourceType] 과 [personRef] 는 분기별로 주입된다 — voice 분기는
+     * ([SourceType.VOICE], null), call_recording 분기는
+     * ([SourceType.CALL_RECORDING], E.164 또는 null). voice 분기는 기존 호출부가
+     * 기본값을 사용하므로 byte-identical 동작을 유지한다.
      */
     private suspend fun insertVoiceRow(
         row: VoiceRow,
         userId: String,
         pipaConsented: Boolean,
+        sourceType: String = SourceType.VOICE,
+        personRef: String? = null,
+        eventTitle: String? = null,
     ): VoiceInsertResult {
         val entity = RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
             clientEventId = row.clientEventId,
-            sourceType = SourceType.VOICE,
+            sourceType = sourceType,
             sourceRef = row.audioUri,
+            personRef = personRef,
+            eventTitle = eventTitle,
             durationSeconds = row.durationSec,
             timestamp = Instant.fromEpochSeconds(row.dateAddedSec),
             syncStatus = if (pipaConsented) "pending" else "awaiting_consent",
@@ -433,5 +670,36 @@ internal class VoiceMediaStoreProbe(
 
     private companion object {
         private const val TAG = "MediaStoreWorker"
+
+        /**
+         * Client-event-id prefix for call_recording rows. Disjoint from the voice branch's
+         * default `"mediastore:voice:"` so a row never collides across source_types at the
+         * Railway UNIQUE (user_id, client_event_id) constraint. Verified to match the
+         * expectation baked into the plan doc §5.1.
+         */
+        private const val CALL_RECORDING_CLIENT_EVENT_ID_PREFIX = "mediastore:call_recording:"
     }
+}
+
+/**
+ * Outcome of [VoiceMediaStoreProbe.ingestCallRecordings]. Distinguishes a clean scan
+ * (with whatever row count resulted) from a ContentResolver query exception that was
+ * logged + recorded in [SourceStatusRepository] but never reached WorkManager.
+ *
+ * Introduced to close the ING-001 data-loss gap flagged during Wave 2 review: without
+ * this signal, an exception in the `Recordings/Call/` scan would be translated into
+ * `Int = 0` and the worker would return [androidx.work.ListenableWorker.Result.success],
+ * preventing the retry/backoff path that fault-tolerant ingestion depends on.
+ */
+internal sealed interface CallRecordingIngestOutcome {
+
+    /** Scan completed without a query exception; [insertedCount] new rows were written. */
+    data class Success(val insertedCount: Int) : CallRecordingIngestOutcome
+
+    /**
+     * ContentResolver query threw before any row could be read. Caller must map to
+     * [androidx.work.ListenableWorker.Result.retry] so WorkManager re-attempts with
+     * backoff. No cursor advance has taken place, so retry is safe.
+     */
+    data object ScanFailed : CallRecordingIngestOutcome
 }

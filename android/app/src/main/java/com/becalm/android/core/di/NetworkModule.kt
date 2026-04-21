@@ -3,12 +3,14 @@ package com.becalm.android.core.di
 import com.becalm.android.BuildConfig
 import com.becalm.android.core.result.getOrNull
 import com.becalm.android.core.util.Logger
-import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.secure.EncryptedTokenStore
 import com.becalm.android.data.remote.api.ApiFactory
 import com.becalm.android.data.remote.api.HttpTimeouts
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.api.VoiceApi
+import com.becalm.android.data.remote.gmail.GmailClient
+import com.becalm.android.data.remote.gmail.GmailClientImpl
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.DefaultIdempotencyKeyProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
@@ -208,6 +210,29 @@ public abstract class NetworkModule {
             )
             return ApiFactory.createVoiceApi(voiceRetrofit)
         }
+
+        /**
+         * Provides the singleton [GmailClient] used by [com.becalm.android.worker.ingestion.GmailWorker].
+         *
+         * The underlying [GmailClientImpl] is a plain class (no `@Inject`), so Hilt can
+         * only reach it through this factory. It reuses the shared [OkHttpClient] — Gmail
+         * API calls do not require the Railway/Supabase auth interceptor stack; instead,
+         * per-request bearer tokens are sourced from [GoogleAuthTokenProvider] (bound by
+         * [AuthModule] to [com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl]).
+         *
+         * Spec: `.spec/data-ingestion.spec.yml:62` (ING-006) — Gmail OAuth periodic sync.
+         */
+        @Provides
+        @Singleton
+        public fun provideGmailClient(
+            okHttpClient: OkHttpClient,
+            moshi: Moshi,
+            authTokenProvider: GoogleAuthTokenProvider,
+        ): GmailClient = GmailClientImpl(
+            okHttpClient = okHttpClient,
+            moshi = moshi,
+            authTokenProvider = authTokenProvider,
+        )
     }
 }
 

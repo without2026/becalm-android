@@ -16,9 +16,8 @@ import java.io.IOException
 /**
  * Provides a Google OAuth2 bearer token for Gmail API requests.
  *
- * The concrete implementation is delivered in SP-38 (AuthViewModel / Google Sign-In
- * integration). This interface is declared here so [GmailClientImpl] can compile
- * independently; the DI binding will be added when SP-38 lands.
+ * Concrete implementation: [com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl].
+ * Bound in [com.becalm.android.core.di.AuthModule]. Scope: `gmail.readonly` (ING-006 MVP).
  *
  * [currentToken] is synchronous because it is called on the OkHttp dispatcher thread
  * inside [GmailClientImpl]'s request-building path. It must not block on network I/O.
@@ -146,16 +145,6 @@ public data class GmailMessagePage(
 )
 
 /**
- * A fully resolved Gmail message with the fields needed to build a
- * [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
- *
- * @param messageId    The message's stable Gmail ID (`messages.get` `id` field).
- * @param subject      Value of the `Subject` header; null when absent.
- * @param from         Raw value of the `From` header; null when absent.
- * @param snippet      Gmail-generated short preview of the message body.
- * @param internalDate Epoch milliseconds when Gmail received the message.
- */
-/**
  * Gmail system labels the cold-start sync is scoped to. EMAIL-001 requires both
  * inbound and sent mail to populate the `raw_ingestion_events.folder` direction
  * hint during first-run backfill; [INBOX] drives the inbound side,
@@ -169,6 +158,16 @@ public enum class GmailLabel(
     SENT("SENT"),
 }
 
+/**
+ * A fully resolved Gmail message with the fields needed to build a
+ * [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
+ *
+ * @param messageId    The message's stable Gmail ID (`messages.get` `id` field).
+ * @param subject      Value of the `Subject` header; null when absent.
+ * @param from         Raw value of the `From` header; null when absent.
+ * @param snippet      Gmail-generated short preview of the message body.
+ * @param internalDate Epoch milliseconds when Gmail received the message.
+ */
 public data class GmailMessage(
     val messageId: String,
     val subject: String?,

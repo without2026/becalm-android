@@ -27,7 +27,7 @@ import com.becalm.android.data.local.db.entity.EmailBodyEntity
  * violate the performance-tier expectations described in the ingestion spec.
  */
 @Dao
-internal interface EmailBodyDao {
+public interface EmailBodyDao {
 
     // ─── Write ─────────────────────────────────────────────────────────────────
 

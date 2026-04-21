@@ -10,10 +10,12 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.gmail.GmailClient
+import com.becalm.android.data.remote.gmail.OAuthTokenState
 import com.becalm.android.data.remote.gmail.GmailHistoryPage
 import com.becalm.android.data.remote.gmail.GmailLabel
 import com.becalm.android.data.remote.gmail.GmailMessage
 import com.becalm.android.data.remote.gmail.GmailMessagePage
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -60,6 +62,7 @@ class GmailWorkerTest {
     private val context: Context = mockk(relaxed = true)
     private val workerParams: WorkerParameters = mockk(relaxed = true)
     private val gmailClient: GmailClient = mockk()
+    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl = mockk(relaxed = true)
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val cursorStore: SyncCursorStore = mockk(relaxed = true)
@@ -101,6 +104,7 @@ class GmailWorkerTest {
             appContext = context,
             workerParams = workerParams,
             gmailClient = gmailClient,
+            googleAuthTokenProvider = googleAuthTokenProvider,
             rawIngestionRepository = rawIngestionRepository,
             sourceStatusRepository = sourceStatusRepository,
             cursorStore = cursorStore,
@@ -321,5 +325,30 @@ class GmailWorkerTest {
         coVerify(exactly = 0) {
             rawIngestionRepository.insertLocal(match { it.clientEventId == "gmail:abc-1" })
         }
+    }
+
+    // ── OAuth background refresh: worker invokes silent refresh when cache cold ──
+
+    @Test
+    fun `doWork attempts silent refresh when cache is cold at worker start`() = runTest {
+        // Regression for the background-refresh gap flagged in adversarial review: a
+        // cold cache at worker start must NOT cause unconditional Result.failure with
+        // no recovery attempt. The worker's contract is to call warmUp, then if the
+        // token is still null, drive refreshSilently against the application context
+        // so Google Play Services can issue a fresh token from the on-device grant.
+        coEvery { googleAuthTokenProvider.warmUp() } returns OAuthTokenState.ReauthRequired
+        every { googleAuthTokenProvider.currentToken() } returns null
+        coEvery { googleAuthTokenProvider.refreshSilently(any()) } returns true
+
+        // Use a cold gmail sync that can run through to success with no messages.
+        coEvery { gmailClient.listMessagesFullSync(any(), any()) } returns
+            BecalmResult.Success(GmailMessagePage(messageIds = emptyList(), nextPageToken = null))
+        coEvery { gmailClient.listHistory("1") } returns BecalmResult.Success(
+            GmailHistoryPage(messageIds = emptyList(), nextPageToken = null, historyId = "42"),
+        )
+
+        worker.doWork()
+
+        coVerify(exactly = 1) { googleAuthTokenProvider.refreshSilently(any()) }
     }
 }

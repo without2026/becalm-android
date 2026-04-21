@@ -14,6 +14,7 @@ import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.imap.ImapClient
@@ -66,6 +67,7 @@ class ImapNaverWorkerTest {
     private val workerParams: WorkerParameters = mockk(relaxed = true)
     private val userPrefs: DataStore<Preferences> = mockk()
     private val imapCredentialStore: ImapCredentialStore = mockk()
+    private val imapCredentialStoreMigrator: ImapCredentialStoreMigrator = mockk(relaxed = true)
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val imapClient: ImapClient = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
@@ -112,6 +114,7 @@ class ImapNaverWorkerTest {
             workerParams = workerParams,
             userPrefs = userPrefs,
             imapCredentialStore = imapCredentialStore,
+            imapCredentialStoreMigrator = imapCredentialStoreMigrator,
             syncCursorStore = syncCursorStore,
             imapClient = imapClient,
             rawIngestionRepository = rawIngestionRepository,
@@ -128,7 +131,7 @@ class ImapNaverWorkerTest {
         every { userPrefs.data } returns flowOf(prefs)
 
         // Default: credentials present
-        coEvery { imapCredentialStore.getCredentials() } returns fakeCredentials
+        coEvery { imapCredentialStore.load(SourceType.NAVER_IMAP) } returns fakeCredentials
 
         // Default: no stored cursor (first run)
         every { syncCursorStore.observeImapState(ImapNaverWorker.MAILBOX_NAVER) } returns flowOf(null)
@@ -286,7 +289,7 @@ class ImapNaverWorkerTest {
 
     @Test
     fun `doWork returns failure when credentials are absent`() = runTest {
-        coEvery { imapCredentialStore.getCredentials() } returns null
+        coEvery { imapCredentialStore.load(SourceType.NAVER_IMAP) } returns null
 
         val result = worker.doWork()
 
