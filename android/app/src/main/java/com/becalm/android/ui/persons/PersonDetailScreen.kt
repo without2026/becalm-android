@@ -310,6 +310,7 @@ private fun PreviewPersonDetailScreenWithHistory() {
                             timestamp = kotlinx.datetime.Clock.System.now(),
                             title = "Send contract draft",
                             direction = "give",
+                            commitmentState = "DRAFT",
                         ),
                         InteractionRow.CalendarMeeting(
                             timestamp = kotlinx.datetime.Clock.System.now(),

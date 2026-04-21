@@ -9,11 +9,13 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequest
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.worker.extraction.CommitmentExtractionWorker
 import com.becalm.android.worker.ingestion.GmailWorker
 import com.becalm.android.worker.ingestion.GoogleCalendarWorker
 import com.becalm.android.worker.ingestion.ImapDaumWorker
@@ -177,6 +179,53 @@ public class WorkSchedulerImpl @Inject constructor(
         val workKey = UniqueWorkKeys.voiceUpload(rawEventId)
         workManager.cancelUniqueWork(workKey)
         logger.d(TAG, "cancelVoiceUpload rawEventId_hash=${redact(rawEventId)} key=$workKey")
+    }
+
+    override fun enqueueCommitmentExtraction(rawEventId: String) {
+        val extractionConstraints = Constraints.Builder()
+            .setRequiresBatteryNotLow(true)
+            .build()
+        val request = OneTimeWorkRequest.Builder(CommitmentExtractionWorker::class.java)
+            .setConstraints(extractionConstraints)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+            .setInputData(
+                workDataOf(
+                    CommitmentExtractionWorker.KEY_RAW_EVENT_ID to rawEventId,
+                ),
+            )
+            .build()
+        val workKey = UniqueWorkKeys.commitmentExtractionKey(rawEventId)
+        workManager.enqueueUniqueWork(workKey, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+        logger.d(
+            TAG,
+            "enqueueCommitmentExtraction rawEventId_hash=${redact(rawEventId)} key=$workKey",
+        )
+    }
+
+    override fun scheduleRetentionSweep() {
+        val retentionConstraints = Constraints.Builder()
+            // 30-day sweep is purely local DELETEs — no network access required.
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            // LLM inference / upload paths already defer on low battery; retention
+            // should follow the same conservative default so sweeps do not tax
+            // devices running lean.
+            .setRequiresBatteryNotLow(true)
+            .build()
+        val request = PeriodicWorkRequestBuilder<RetentionSweepWorker>(
+            repeatInterval = 1,
+            repeatIntervalTimeUnit = TimeUnit.DAYS,
+        )
+            .setConstraints(retentionConstraints)
+            .build()
+        // KEEP (not UPDATE) — repeated cold-start enqueues must not reset the period
+        // timer and cause duplicate same-day sweeps. Idempotent per WorkManager semantics.
+        workManager.enqueueUniquePeriodicWork(
+            UniqueWorkKeys.RETENTION_SWEEP,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+        logger.d(TAG, "scheduleRetentionSweep key=${UniqueWorkKeys.RETENTION_SWEEP}")
     }
 
     override fun cancelAll() {
@@ -355,6 +404,10 @@ public class WorkSchedulerImpl @Inject constructor(
             UniqueWorkKeys.OUTLOOK_CAL,
             UniqueWorkKeys.UPLOAD,
             UniqueWorkKeys.ENRICHMENT,
+            // Sign-out must tear down the periodic retention sweep alongside every
+            // other unique-work chain so a stale session does not keep pruning
+            // after the user has logged out. Spec refs: EMAIL-006, data-ingestion:160.
+            UniqueWorkKeys.RETENTION_SWEEP,
         )
     }
 }

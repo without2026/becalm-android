@@ -2,7 +2,7 @@ package com.becalm.android.core.di
 
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.data.remote.supabase.AuthResult
+import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -10,6 +10,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -36,10 +37,12 @@ class DefaultAuthTokenProviderTest {
     private lateinit var authClient: SupabaseAuthClient
     private lateinit var sessionStore: SupabaseSessionStore
     private lateinit var sessionChanges: MutableSharedFlow<SupabaseSession?>
+    private lateinit var logger: Logger
 
     @Before
     fun setUp() {
         authClient = mockk()
+        logger = mockk(relaxed = true)
         sessionChanges = MutableSharedFlow(
             replay = 0,
             extraBufferCapacity = 1,
@@ -61,7 +64,7 @@ class DefaultAuthTokenProviderTest {
 
     @Test
     fun `currentAccessToken returns null when no session exists`() {
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
 
         assertNull(provider.currentAccessToken())
     }
@@ -70,7 +73,7 @@ class DefaultAuthTokenProviderTest {
     fun `currentAccessToken cold path loads from store exactly once and seeds cache`() {
         coEvery { sessionStore.load() } returns session("at_v1")
 
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
 
         assertEquals("at_v1", provider.currentAccessToken())
         assertEquals("at_v1", provider.currentAccessToken())
@@ -79,7 +82,7 @@ class DefaultAuthTokenProviderTest {
 
     @Test
     fun `observer updates cache when store emits a new session`() {
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
 
         sessionChanges.tryEmit(session("at_from_observer"))
 
@@ -88,7 +91,7 @@ class DefaultAuthTokenProviderTest {
 
     @Test
     fun `observer clears cache when store emits null`() {
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
         sessionChanges.tryEmit(session("at_v1"))
         assertEquals("at_v1", provider.currentAccessToken())
 
@@ -99,7 +102,7 @@ class DefaultAuthTokenProviderTest {
 
     @Test
     fun `refresh returns null when no session is persisted`() = runTest {
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
 
         assertNull(provider.refresh(previousAccessToken = "stale_token"))
     }
@@ -108,9 +111,9 @@ class DefaultAuthTokenProviderTest {
     fun `refresh success saves new session and caches new access token`() = runTest {
         coEvery { sessionStore.load() } returns session("at_v1", refreshToken = "rt_v1")
         val newSession = session("at_v2", refreshToken = "rt_v2")
-        coEvery { authClient.refresh("rt_v1") } returns BecalmResult.Success(AuthResult(newSession))
+        coEvery { authClient.refresh("rt_v1") } returns BecalmResult.Success(newSession)
 
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
         val result = provider.refresh(previousAccessToken = "at_v1")
 
         assertEquals("at_v2", result)
@@ -125,7 +128,7 @@ class DefaultAuthTokenProviderTest {
             BecalmError.Network(code = -1, message = "bad net"),
         )
 
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
         sessionChanges.tryEmit(session("at_v1"))
 
         val result = provider.refresh(previousAccessToken = "at_v1")
@@ -139,7 +142,7 @@ class DefaultAuthTokenProviderTest {
         coEvery { sessionStore.load() } returns session("at_v2", refreshToken = "rt_v2")
         sessionChanges.tryEmit(session("at_v2"))
 
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
         val result = provider.refresh(previousAccessToken = "at_v1")
 
         assertEquals("at_v2", result)
@@ -152,9 +155,9 @@ class DefaultAuthTokenProviderTest {
         coEvery { sessionStore.load() } returns session("at_v1", refreshToken = "rt_v1")
         sessionChanges.tryEmit(session("at_v1"))
         val newSession = session("at_v2", refreshToken = "rt_v2")
-        coEvery { authClient.refresh("rt_v1") } returns BecalmResult.Success(AuthResult(newSession))
+        coEvery { authClient.refresh("rt_v1") } returns BecalmResult.Success(newSession)
 
-        val provider = DefaultAuthTokenProvider(authClient, sessionStore)
+        val provider = DefaultAuthTokenProvider(authClient, sessionStore, Dispatchers.Unconfined, logger)
         val result = provider.refresh(previousAccessToken = "at_v1")
 
         assertEquals("at_v2", result)

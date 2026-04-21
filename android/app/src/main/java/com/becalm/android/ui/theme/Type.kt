@@ -14,53 +14,22 @@ package com.becalm.android.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import com.becalm.android.R
 
 // ─── Font family ─────────────────────────────────────────────────────────────
 
 /**
- * Pretendard Variable font family.
+ * Pretendard Variable font family — PLACEHOLDER.
  *
- * The variable font supports the weight axis (wght 100–900).  Each [Font] entry
- * pins a [FontVariation.weight] so the system can pick the correct optical weight
- * when the slot is requested.
- *
- * NOTE: `R.font.pretendard_variable` will be an unresolved reference until the
- * `.ttf` file is committed in R10.  The reference is declared here now so all
- * other files can compile once R10 lands without further changes.
+ * The actual variable-font `.ttf` is scheduled for commit in R10.  Until then we
+ * fall back to [FontFamily.Default] so the type scale below compiles and renders
+ * with the system font (NotoSansCJK on One UI, sans-serif elsewhere).  Replacing
+ * this constant with the proper [FontFamily] once `res/font/pretendard_variable.ttf`
+ * lands is a drop-in swap — no other file needs to change.
  */
-internal val PretendardFontFamily = FontFamily(
-    Font(
-        resId = R.font.pretendard_variable,
-        weight = FontWeight.Light,
-        variationSettings = FontVariation.Settings(FontVariation.weight(300)),
-    ),
-    Font(
-        resId = R.font.pretendard_variable,
-        weight = FontWeight.Normal,
-        variationSettings = FontVariation.Settings(FontVariation.weight(400)),
-    ),
-    Font(
-        resId = R.font.pretendard_variable,
-        weight = FontWeight.Medium,
-        variationSettings = FontVariation.Settings(FontVariation.weight(500)),
-    ),
-    Font(
-        resId = R.font.pretendard_variable,
-        weight = FontWeight.SemiBold,
-        variationSettings = FontVariation.Settings(FontVariation.weight(600)),
-    ),
-    Font(
-        resId = R.font.pretendard_variable,
-        weight = FontWeight.Bold,
-        variationSettings = FontVariation.Settings(FontVariation.weight(700)),
-    ),
-)
+internal val PretendardFontFamily: FontFamily = FontFamily.Default
 
 // ─── Typography scale ─────────────────────────────────────────────────────────
 

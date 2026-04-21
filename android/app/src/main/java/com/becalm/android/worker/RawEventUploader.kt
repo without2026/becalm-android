@@ -198,13 +198,11 @@ internal fun mapErrorToOutcome(
                 SHARED_TAG,
                 "$domain 429 retryAfterSec=${error.retryAfterSeconds} computedDelaySec=$delaySec attempt=$attempt",
             )
-            FlushOutcome.TransportRetry(
-                Result.retry(
-                    retryOutput("rate_limited", attempt)
-                        .putLong(UploadWorker.OUTPUT_KEY_RETRY_DELAY_SEC, delaySec)
-                        .build(),
-                ),
-            )
+            // Diagnostic output data ("rate_limited" reason, computed delaySec) is logged
+            // above; WorkManager's Result.retry() does not carry output data per the
+            // ListenableWorker.Result API. UploadBackoff.nextDelaySeconds is surfaced via
+            // the log line so operators can correlate a retry with the computed backoff.
+            FlushOutcome.TransportRetry(Result.retry())
         }
 
         is BecalmError.Unauthorized -> {
@@ -267,8 +265,11 @@ private fun logAndRetryable(
         logger.e(SHARED_TAG, "$domain $noun maxAttempts=$attempt — permanent failure code=$code")
         return FlushOutcome.PermanentFailure(Result.failure(retryOutput(permanentReason, attempt).build()))
     }
-    logger.w(SHARED_TAG, "$domain $noun code=$code attempt=$attempt — retry")
-    return FlushOutcome.TransportRetry(Result.retry(retryOutput(retryReason, attempt).build()))
+    // Retry reason / attempt counter are captured in the log line above; WorkManager's
+    // Result.retry() does not accept output data, so retain the diagnostic context in the
+    // log line rather than in output Data.
+    logger.w(SHARED_TAG, "$domain $noun code=$code attempt=$attempt reason=$retryReason — retry")
+    return FlushOutcome.TransportRetry(Result.retry())
 }
 
 internal fun retryOutput(reason: String, attempt: Int): Data.Builder =

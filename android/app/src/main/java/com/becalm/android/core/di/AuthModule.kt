@@ -1,13 +1,18 @@
 package com.becalm.android.core.di
 
+import com.becalm.android.BuildConfig
 import com.becalm.android.data.remote.gmail.AuthorizationClientGateway
 import com.becalm.android.data.remote.gmail.AuthorizationClientGatewayImpl
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.remote.msgraph.MsGraphTokenProvider
+import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Named
 import javax.inject.Singleton
 
 /**
@@ -61,4 +66,50 @@ public abstract class AuthModule {
     public abstract fun bindAuthorizationClientGateway(
         impl: AuthorizationClientGatewayImpl,
     ): AuthorizationClientGateway
+
+    /**
+     * Binds [MsGraphTokenProviderImpl] as the singleton [MsGraphTokenProvider] consumed
+     * by [com.becalm.android.data.remote.msgraph.MsGraphClientImpl].
+     *
+     * ING-007 (spec `.spec/data-ingestion.spec.yml:71`) — Outlook / MS Graph periodic
+     * sync. Before this binding every `MsGraphClientImpl` call returned Unauthorized
+     * because the interface was stub-only (see plan
+     * `docs/plans/repo-auth-msgraph-oauth-provider.md` § 1). With the binding in place,
+     * [com.becalm.android.worker.ingestion.OutlookMailWorker] resolves a real MSAL-backed
+     * token.
+     */
+    @Binds
+    @Singleton
+    public abstract fun bindMsGraphTokenProvider(
+        impl: MsGraphTokenProviderImpl,
+    ): MsGraphTokenProvider
+
+    // ─── Provides ────────────────────────────────────────────────────────────────
+
+    /**
+     * Companion nested module — Hilt does not allow `@Binds` and `@Provides` in the same
+     * concrete class (the @Binds owner must be abstract). The standard workaround is the
+     * nested object seen in [NetworkModule.NetworkModuleProvides].
+     */
+    @Module
+    @InstallIn(SingletonComponent::class)
+    public object AuthModuleProvides {
+
+        /**
+         * Provides the MSAL Microsoft Entra application (client) ID sourced from
+         * [BuildConfig.MSAL_CLIENT_ID]. Wired via `@Named("msalClientId")` so the raw
+         * [String] does not collide with other string providers in the graph.
+         *
+         * Values originate from `local.properties` → `build.gradle.kts`
+         * `buildConfigField` → [BuildConfig] at build time. The placeholder
+         * `"00000000-0000-0000-0000-000000000000"` is substituted in CI builds and
+         * overridden in developer builds via the `msal.client.id` Gradle property — see
+         * `android/app/build.gradle.kts` and
+         * `docs/plans/repo-auth-msgraph-oauth-provider.md` § 5.4 for the wiring.
+         */
+        @Provides
+        @Singleton
+        @Named("msalClientId")
+        public fun provideMsalClientId(): String = BuildConfig.MSAL_CLIENT_ID
+    }
 }

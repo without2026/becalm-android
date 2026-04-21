@@ -11,6 +11,9 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
 
 /**
@@ -20,6 +23,9 @@ import javax.inject.Singleton
  *   before [KotlinJsonAdapterFactory] so that strongly-typed adapters take precedence.
  * - [Clock]: wall-clock abstraction for deterministic testing.
  * - [Logger]: Timber-backed logging abstraction, decoupled from global Timber state.
+ * - [CoroutineScope]: process-lifetime scope used by [com.becalm.android.worker.ForegroundCatchUpScheduler]
+ *   to debounce foreground catch-up requests. `SupervisorJob` isolates child failures so a
+ *   single dispatched coroutine cannot tear down the shared scope.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -40,4 +46,9 @@ public object AppModule {
     @Provides
     @Singleton
     public fun provideLogger(): Logger = TimberLogger
+
+    @Provides
+    @Singleton
+    public fun provideApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

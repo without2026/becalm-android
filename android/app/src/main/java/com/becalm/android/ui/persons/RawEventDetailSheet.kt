@@ -83,8 +83,14 @@ public fun RawEventDetailSheet(
                     modifier = Modifier.padding(padding),
                 )
             }
-            state.event != null -> {
-                val event = state.event
+            state.sourceType != null -> {
+                // Snapshot the delegated state properties into locals so the compiler can
+                // smart-cast them inside the block below (delegated `by` properties cannot
+                // be smart-cast across references). `sourceType` is guarded non-null by the
+                // branch condition, so `!!` is safe here.
+                val sourceType: String = state.sourceType!!
+                val timestamp = state.timestamp
+                val eventTitle = state.eventTitle
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -99,17 +105,17 @@ public fun RawEventDetailSheet(
                     ) {
                         DetailRow(
                             label = stringResource(R.string.raw_event_detail_source),
-                            value = event.sourceType,
+                            value = sourceType,
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         DetailRow(
                             label = stringResource(R.string.raw_event_detail_timestamp),
-                            value = event.timestamp.toString(),
+                            value = timestamp?.toString() ?: "",
                         )
-                        if (event.eventTitle != null) {
+                        if (eventTitle != null) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = event.eventTitle,
+                                text = eventTitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )

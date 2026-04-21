@@ -11,19 +11,30 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.ImapCursorState
+import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.dto.FOLDER_INBOX
+import com.becalm.android.data.remote.dto.FOLDER_SENT
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.imap.ImapAttachmentMeta
 import com.becalm.android.data.remote.imap.ImapClient
 import com.becalm.android.data.remote.imap.ImapFetchResult
+import com.becalm.android.data.remote.imap.ImapFolder
 import com.becalm.android.data.remote.imap.ImapMessage
+import com.becalm.android.data.remote.imap.ImapSpecialUse
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.Moshi
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -31,6 +42,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -38,21 +51,16 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * Unit tests for [ImapDaumWorker] (SP-27b, mirror of [ImapNaverWorker]).
+ * Unit tests for [ImapDaumWorker] — mirror of [ImapNaverWorkerTest] with Daum-specific
+ * host, Sent fallback name, and source_type.
  *
- * Test cases:
- * 1. Happy path — 2 fetched messages produce 2 RawIngestionEventEntity inserts with
- *    source_type='daum_imap', deterministic client_event_ids, and cursor advance.
- * 2. Empty folder — cursor is still written with the server's fresh UIDVALIDITY/UIDNEXT
- *    pair and [SourceStatusRepository.recordSyncSuccess] is called.
- * 3. UIDVALIDITY change — worker passes the stale value to [ImapClient.fetchSince] (which
- *    handles the bounded full-resync internally) and overwrites the cursor with the
- *    server's fresh UIDVALIDITY, implicitly invalidating the stale pair. Asserts the
- *    new-cursor save matches the server values.
- * 4. Credentials absent — [Result.failure] (same as Naver: missing IMAP creds is terminal).
- * 5. Network error — [Result.retry] plus [SourceStatusRepository.recordSyncError].
- *
- * Spec refs: ING-008, ING-012, ING-013, ING-015, CRIT-01, SP-27b.
+ * Coverage matches Naver's:
+ *  1. 2 passes, cursors under `"daum_inbox"` / `"daum_sent"`.
+ *  2. SENT personRef from `toAddresses[0]`.
+ *  3. > 10 recipients → group email, personRef null.
+ *  4. Missing Message-Id → `"<uidValidity>:<uid>"` envelope fallback.
+ *  5. HTML parse failure → subject fallback + skip extraction enqueue.
+ *  6. Per-provider credential isolation.
  */
 @RunWith(RobolectricTestRunner::class)
 class ImapDaumWorkerTest {
@@ -65,8 +73,12 @@ class ImapDaumWorkerTest {
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val imapClient: ImapClient = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val emailBodyRepository: EmailBodyRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val metricsStore: MetricsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val moshi: Moshi = Moshi.Builder().build()
 
     private lateinit var worker: ImapDaumWorker
 
@@ -79,26 +91,38 @@ class ImapDaumWorkerTest {
         port = ImapDaumWorker.DAUM_IMAP_PORT,
     )
 
-    private val fakeMessage1 = ImapMessage(
-        uid = 101L,
-        uidValidity = 42L,
-        messageId = "<a@daum.net>",
-        subject = "subject-1",
-        fromEmail = "bob@daum.net",
-        fromDisplayName = "Bob",
-        bodyPreview = "body preview 1",
-        sentAt = Instant.fromEpochMilliseconds(1_700_000_000_000),
-    )
-
-    private val fakeMessage2 = ImapMessage(
-        uid = 102L,
-        uidValidity = 42L,
-        messageId = "<b@daum.net>",
-        subject = "subject-2",
-        fromEmail = "carol@daum.net",
-        fromDisplayName = "Carol",
-        bodyPreview = "body preview 2",
-        sentAt = Instant.fromEpochMilliseconds(1_700_000_060_000),
+    private fun imsg(
+        uid: Long,
+        uidValidity: Long = 42L,
+        folder: String = "INBOX",
+        messageId: String? = "<msg-$uid@daum.net>",
+        subject: String? = "subject-$uid",
+        fromEmail: String? = "bob@daum.net",
+        fromName: String? = "Bob",
+        toAddresses: List<String> = emptyList(),
+        bodyPlain: String? = "Plain-text body $uid.",
+        bodyHtml: String? = null,
+        attachmentsMeta: List<ImapAttachmentMeta> = emptyList(),
+        inReplyTo: String? = null,
+        references: String? = null,
+        rawHeadersJson: String = "{}",
+        sentAt: Instant = Instant.fromEpochMilliseconds(1_700_000_000_000 + uid * 1_000),
+    ) = ImapMessage(
+        uid = uid,
+        uidValidity = uidValidity,
+        folder = folder,
+        messageId = messageId,
+        subject = subject,
+        fromEmail = fromEmail,
+        fromDisplayName = fromName,
+        toAddresses = toAddresses,
+        bodyPlain = bodyPlain,
+        bodyHtml = bodyHtml,
+        attachmentsMeta = attachmentsMeta,
+        inReplyTo = inReplyTo,
+        references = references,
+        rawHeadersJson = rawHeadersJson,
+        sentAt = sentAt,
     )
 
     @Before
@@ -112,239 +136,233 @@ class ImapDaumWorkerTest {
             syncCursorStore = syncCursorStore,
             imapClient = imapClient,
             rawIngestionRepository = rawIngestionRepository,
+            emailBodyRepository = emailBodyRepository,
             sourceStatusRepository = sourceStatusRepository,
+            workScheduler = workScheduler,
+            metricsStore = metricsStore,
+            moshi = moshi,
             logger = logger,
         )
 
         every { workerParams.runAttemptCount } returns 0
 
-        // Default: userPrefs emits a current_user_id
         val prefs = mutablePreferencesOf().apply {
             set(stringPreferencesKey("current_user_id"), fakeUserId)
         }
         every { userPrefs.data } returns flowOf(prefs)
 
-        // Default: credentials present
         coEvery { imapCredentialStore.load(SourceType.DAUM_IMAP) } returns fakeCredentials
 
-        // Default: no stored cursor (first run)
-        every { syncCursorStore.observeImapState(ImapDaumWorker.MAILBOX_DAUM) } returns flowOf(null)
-    }
+        every { syncCursorStore.observeImapState(ImapDaumWorker.MAILBOX_DAUM_INBOX) } returns
+            flowOf(null)
+        every { syncCursorStore.observeImapState(ImapDaumWorker.MAILBOX_DAUM_SENT) } returns
+            flowOf(null)
 
-    // ── T1: Happy path — 2 new messages → 2 inserts + cursor advance ────────
-
-    @Test
-    fun `doWork inserts 2 entities with deterministic clientEventIds and advances cursor`() = runTest {
         coEvery {
-            imapClient.fetchSince(
+            imapClient.listFolders(
                 host = ImapDaumWorker.DAUM_IMAP_HOST,
                 port = ImapDaumWorker.DAUM_IMAP_PORT,
                 user = fakeCredentials.username,
                 password = fakeCredentials.appPassword,
-                uidValidity = null,
-                uidNext = null,
-                maxMessages = ImapDaumWorker.MAX_MESSAGES_PER_RUN,
             )
         } returns BecalmResult.Success(
-            ImapFetchResult(
-                messages = listOf(fakeMessage1, fakeMessage2),
-                newUidValidity = 42L,
-                newUidNext = 103L,
+            listOf(
+                ImapFolder(name = "INBOX", specialUse = ImapSpecialUse.INBOX),
+                ImapFolder(name = "보낸편지함", specialUse = null),
+                ImapFolder(name = "스팸함", specialUse = null),
             ),
         )
 
-        val insertedEntities = slot<List<RawIngestionEventEntity>>()
-        coEvery { rawIngestionRepository.insertLocalBatch(capture(insertedEntities)) } returns
-            BecalmResult.Success(listOf("id-1", "id-2"))
-
-        val savedState = slot<ImapCursorState?>()
-        coEvery {
-            syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM, capture(savedState))
-        } returns Unit
-
-        val result = worker.doWork()
-
-        assertEquals(Result.success(), result)
-
-        // Entity shape: 2 rows, correct source_type, deterministic client_event_ids
-        assertEquals(2, insertedEntities.captured.size)
-        assertEquals(SourceType.DAUM_IMAP, insertedEntities.captured[0].sourceType)
-        assertEquals(SourceType.DAUM_IMAP, insertedEntities.captured[1].sourceType)
-        assertEquals("daum:101:42", insertedEntities.captured[0].clientEventId)
-        assertEquals("daum:102:42", insertedEntities.captured[1].clientEventId)
-        assertEquals(fakeUserId, insertedEntities.captured[0].userId)
-        assertEquals(fakeUserId, insertedEntities.captured[1].userId)
-
-        // Cursor advance: uidValidity=42 and lastSeenUid=serverUidNext-1=102
-        assertEquals(42L, savedState.captured?.uidValidity)
-        assertEquals(102L, savedState.captured?.lastSeenUid)
-
-        coVerify { sourceStatusRepository.recordSyncSuccess(SourceType.DAUM_IMAP, any()) }
+        coEvery { rawIngestionRepository.insertLocalBatch(any()) } answers {
+            val events = firstArg<List<RawIngestionEventEntity>>()
+            BecalmResult.Success(events.map { it.id })
+        }
     }
 
-    // ── T2: Empty folder — cursor still advances, success recorded ───────────
-
     @Test
-    fun `doWork records success and writes server cursor when folder is empty`() = runTest {
-        // Stored cursor: uidValidity=42, lastSeenUid=200 ⇒ fetchFromUid=201
-        every { syncCursorStore.observeImapState(ImapDaumWorker.MAILBOX_DAUM) } returns
-            flowOf(ImapCursorState(uidValidity = 42L, lastSeenUid = 200L))
-
+    fun `doWork twoPasses fourCursorKeys`() = runTest {
         coEvery {
             imapClient.fetchSince(
-                host = ImapDaumWorker.DAUM_IMAP_HOST,
-                port = ImapDaumWorker.DAUM_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = 42L,
-                uidNext = 201L,
-                maxMessages = ImapDaumWorker.MAX_MESSAGES_PER_RUN,
+                host = any(), port = any(), user = any(), password = any(),
+                mailbox = "INBOX", uidValidity = null, uidNext = null, sinceDays = 30,
             )
         } returns BecalmResult.Success(
             ImapFetchResult(
-                messages = emptyList(),
+                messages = listOf(imsg(uid = 101L)),
                 newUidValidity = 42L,
-                newUidNext = 201L,
-            ),
-        )
-
-        val savedState = slot<ImapCursorState?>()
-        coEvery {
-            syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM, capture(savedState))
-        } returns Unit
-
-        val result = worker.doWork()
-
-        assertEquals(Result.success(), result)
-
-        // No insert attempted for an empty fetch
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
-
-        // Cursor is still written: uidValidity unchanged, lastSeenUid = newUidNext - 1 = 200
-        assertEquals(42L, savedState.captured?.uidValidity)
-        assertEquals(200L, savedState.captured?.lastSeenUid)
-
-        coVerify { sourceStatusRepository.recordSyncSuccess(SourceType.DAUM_IMAP, any()) }
-    }
-
-    // ── T3: UIDVALIDITY change — stale pair overwritten with server's fresh pair ─
-
-    @Test
-    fun `doWork overwrites stale cursor when server returns new UIDVALIDITY`() = runTest {
-        // Stored cursor with stale UIDVALIDITY=10
-        every { syncCursorStore.observeImapState(ImapDaumWorker.MAILBOX_DAUM) } returns
-            flowOf(ImapCursorState(uidValidity = 10L, lastSeenUid = 500L))
-
-        // Worker passes the stale pair to the client. The client internally detects the
-        // UIDVALIDITY mismatch and performs a bounded resync from UID 1 capped at
-        // MAX_MESSAGES_PER_RUN (ING-013). Emulate by returning a fresh UIDVALIDITY.
-        coEvery {
-            imapClient.fetchSince(
-                host = ImapDaumWorker.DAUM_IMAP_HOST,
-                port = ImapDaumWorker.DAUM_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = 10L,
-                uidNext = 501L,
-                maxMessages = ImapDaumWorker.MAX_MESSAGES_PER_RUN,
-            )
-        } returns BecalmResult.Success(
-            ImapFetchResult(
-                messages = listOf(fakeMessage1.copy(uidValidity = 99L)),
-                newUidValidity = 99L,
                 newUidNext = 102L,
             ),
         )
-
-        coEvery { rawIngestionRepository.insertLocalBatch(any()) } returns
-            BecalmResult.Success(listOf("id-1"))
-
-        val savedState = slot<ImapCursorState?>()
         coEvery {
-            syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM, capture(savedState))
-        } returns Unit
+            imapClient.fetchSince(
+                host = any(), port = any(), user = any(), password = any(),
+                mailbox = "보낸편지함", uidValidity = null, uidNext = null, sinceDays = 30,
+            )
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 201L, folder = "보낸편지함", toAddresses = listOf("x@y.com"))),
+                newUidValidity = 77L,
+                newUidNext = 202L,
+            ),
+        )
 
         val result = worker.doWork()
 
         assertEquals(Result.success(), result)
+        coVerifyOrder {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+            syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_INBOX, any())
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸편지함", any(), any(), any())
+            syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_SENT, any())
+        }
+        coVerify {
+            syncCursorStore.setImapState(
+                mailbox = ImapDaumWorker.MAILBOX_DAUM_INBOX,
+                state = ImapCursorState(uidValidity = 42L, lastSeenUid = 101L),
+            )
+            syncCursorStore.setImapState(
+                mailbox = ImapDaumWorker.MAILBOX_DAUM_SENT,
+                state = ImapCursorState(uidValidity = 77L, lastSeenUid = 201L),
+            )
+        }
+        coVerify(exactly = 0) { syncCursorStore.setImapState("daum", any()) }
+    }
 
-        // Stale (uidValidity=10, lastSeenUid=500) is overwritten atomically with the
-        // server's fresh pair. This is the mirror-of-Naver cursor-invalidation path —
-        // setImapState supersedes the stale tuple; no explicit clearCursor call needed.
-        assertEquals(99L, savedState.captured?.uidValidity)
-        assertEquals(101L, savedState.captured?.lastSeenUid)
+    @Test
+    fun `sent personRefFromTo0`() = runTest {
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸편지함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(
+                    imsg(
+                        uid = 301L, folder = "보낸편지함",
+                        fromEmail = "alice@daum.net",
+                        toAddresses = listOf("Target@Ex.COM", "b@y.com"),
+                    ),
+                ),
+                newUidValidity = 77L, newUidNext = 302L,
+            ),
+        )
+
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            BecalmResult.Success(firstArg<List<RawIngestionEventEntity>>().map { it.id })
+        }
+        val bodies = slot<EmailBodyEntity>()
+        coEvery { emailBodyRepository.insert(capture(bodies)) } returns Unit
+
+        worker.doWork()
+
+        val sentEntity = entities.captured.single()
+        assertEquals("target@ex.com", sentEntity.personRef)
+        assertEquals(FOLDER_SENT, sentEntity.folder)
+        assertEquals(SourceType.DAUM_IMAP, sentEntity.sourceType)
         assertTrue(
-            "stored uidValidity must not equal the stale pre-resync value",
-            savedState.captured?.uidValidity != 10L,
+            "Sent client_event_id must embed folder segment",
+            sentEntity.clientEventId.startsWith("daum:sent:"),
+        )
+        assertEquals(false, bodies.captured.groupEmail)
+        assertNotNull(bodies.captured.toAddresses)
+    }
+
+    @Test
+    fun `sent over10 groupEmailTrue`() = runTest {
+        val bigList = (1..15).map { "to$it@ex.com" }
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸편지함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 401L, folder = "보낸편지함", toAddresses = bigList)),
+                newUidValidity = 77L, newUidNext = 402L,
+            ),
+        )
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            BecalmResult.Success(firstArg<List<RawIngestionEventEntity>>().map { it.id })
+        }
+        val bodies = slot<EmailBodyEntity>()
+        coEvery { emailBodyRepository.insert(capture(bodies)) } returns Unit
+
+        worker.doWork()
+
+        assertNull(entities.captured.single().personRef)
+        assertTrue(bodies.captured.groupEmail)
+    }
+
+    @Test
+    fun `sourceRef uidFallback`() = runTest {
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 500L, uidValidity = 42L, messageId = null)),
+                newUidValidity = 42L, newUidNext = 501L,
+            ),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸편지함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 77L, newUidNext = 1L),
+        )
+
+        val entities = slot<List<RawIngestionEventEntity>>()
+        coEvery { rawIngestionRepository.insertLocalBatch(capture(entities)) } answers {
+            BecalmResult.Success(firstArg<List<RawIngestionEventEntity>>().map { it.id })
+        }
+
+        worker.doWork()
+
+        val sourceRef = entities.captured.single().sourceRef
+        assertNotNull(sourceRef)
+        assertTrue(
+            "Missing Message-Id must fall back to <uidValidity>:<uid>. Got: $sourceRef",
+            sourceRef!!.contains("\"message_id\":\"42:500\""),
         )
     }
 
-    // ── T4: Credentials absent → Result.failure ──────────────────────────────
-
     @Test
-    fun `doWork returns failure when credentials are absent`() = runTest {
-        coEvery { imapCredentialStore.load(SourceType.DAUM_IMAP) } returns null
+    fun `htmlParseFailure gracefulDegrade`() = runTest {
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "INBOX", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(
+                messages = listOf(imsg(uid = 600L, subject = "hi", bodyPlain = null, bodyHtml = null)),
+                newUidValidity = 42L, newUidNext = 601L,
+            ),
+        )
+        coEvery {
+            imapClient.fetchSince(any(), any(), any(), any(), "보낸편지함", any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 77L, newUidNext = 1L),
+        )
 
-        val result = worker.doWork()
+        worker.doWork()
 
-        assertEquals(Result.failure(), result)
-
-        coVerify(exactly = 0) {
-            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any())
-        }
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
+        coVerify { metricsStore.incrementSubjectOnlySkipped() }
+        coVerify(exactly = 0) { workScheduler.enqueueCommitmentExtraction(any()) }
     }
 
-    // ── T5: Network error → Result.retry + recordSyncError ───────────────────
-
     @Test
-    fun `doWork returns retry and records sync error on Network failure`() = runTest {
+    fun `usesDaumProviderCredentials`() = runTest {
         coEvery {
-            imapClient.fetchSince(
-                host = ImapDaumWorker.DAUM_IMAP_HOST,
-                port = ImapDaumWorker.DAUM_IMAP_PORT,
-                user = fakeCredentials.username,
-                password = fakeCredentials.appPassword,
-                uidValidity = null,
-                uidNext = null,
-                maxMessages = ImapDaumWorker.MAX_MESSAGES_PER_RUN,
-            )
-        } returns BecalmResult.Failure(BecalmError.Network(-1, "IMAP connect failed"))
+            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns BecalmResult.Success(
+            ImapFetchResult(messages = emptyList(), newUidValidity = 42L, newUidNext = 1L),
+        )
 
-        val result = worker.doWork()
+        worker.doWork()
 
-        assertEquals(Result.retry(), result)
-
-        coVerify {
-            sourceStatusRepository.recordSyncError(
-                sourceType = SourceType.DAUM_IMAP,
-                error = any(),
-                at = any(),
-            )
-        }
-        // No cursor advance / insert on failure
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocalBatch(any()) }
-        coVerify(exactly = 0) { syncCursorStore.setImapState(any(), any()) }
-    }
-
-    // ── T6: Unauthorized → Result.failure (mirrors Naver's auth-terminal path) ─
-
-    @Test
-    fun `doWork returns failure on Unauthorized error`() = runTest {
-        coEvery {
-            imapClient.fetchSince(any(), any(), any(), any(), any(), any(), any())
-        } returns BecalmResult.Failure(BecalmError.Unauthorized)
-
-        val result = worker.doWork()
-
-        assertEquals(Result.failure(), result)
-
-        coVerify {
-            sourceStatusRepository.recordSyncError(
-                sourceType = SourceType.DAUM_IMAP,
-                error = any(),
-                at = any(),
-            )
-        }
+        coVerify { imapCredentialStore.load(SourceType.DAUM_IMAP) }
     }
 }

@@ -98,6 +98,49 @@ public interface WorkScheduler {
     )
 
     /**
+     * Enqueues a one-shot
+     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker] to run on-device
+     * Gemini Nano commitment extraction against the email raw event identified by
+     * [rawEventId].
+     *
+     * The unique work name is [UniqueWorkKeys.commitmentExtractionKey] and the scheduler
+     * uses [androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE]: a second enqueue for the
+     * same [rawEventId] queues behind (or supersedes) the in-flight job rather than running
+     * two AICore sessions concurrently for the same email.
+     *
+     * Constraints applied by the implementation:
+     * - [androidx.work.Constraints.Builder.setRequiresBatteryNotLow] — AICore inference is
+     *   power-intensive, so work defers when the device is running low on battery.
+     *
+     * Expedited + [androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST] so the
+     * request still runs (eventually) on devices that have exhausted their foreground quota.
+     *
+     * Spec refs: EMAIL-001, EMAIL-008, ADAPT-EMAIL-010.
+     *
+     * @param rawEventId UUID of the
+     *   [com.becalm.android.data.local.db.entity.RawIngestionEventEntity] whose body should be
+     *   extracted. Callers are ingestion workers (`GmailWorker`, `OutlookMailWorker`,
+     *   `ImapNaverWorker`, `ImapDaumWorker`) — wiring those call-sites is out of scope for
+     *   this PR (see `feat/worker/email-*` PRs).
+     */
+    public fun enqueueCommitmentExtraction(rawEventId: String)
+
+    /**
+     * Enqueues a daily [RetentionSweepWorker] periodic request under
+     * [UniqueWorkKeys.RETENTION_SWEEP] to prune `email_body` and `raw_ingestion_events`
+     * rows older than 30 days that have `sync_status = 'synced'`.
+     *
+     * Idempotent by design: the implementation uses
+     * [androidx.work.ExistingPeriodicWorkPolicy.KEEP] so repeated calls on every cold
+     * start do not reset the period timer. Safe to invoke from
+     * [com.becalm.android.BecalmApplication.onCreate] unconditionally.
+     *
+     * Spec refs: EMAIL-006 (`.spec/email-pipeline.spec.yml:58-64`),
+     * data-ingestion invariant line 160.
+     */
+    public fun scheduleRetentionSweep()
+
+    /**
      * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued
      * or running.
      *

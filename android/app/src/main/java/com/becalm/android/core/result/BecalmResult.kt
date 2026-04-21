@@ -5,6 +5,11 @@ package com.becalm.android.core.result
  *
  * Because this is a sealed interface, `when` expressions over it are exhaustive — the compiler
  * enforces handling of both [Success] and [Failure] without a trailing `else` branch.
+ *
+ * Canonical failure vocabulary lives in [BecalmError]: transport errors ([BecalmError.Network],
+ * [BecalmError.ServerError]), local I/O ([BecalmError.Io]), extraction failures
+ * ([BecalmError.ExtractorUnavailable]), and the catch-all [BecalmError.Unknown]. Callers that
+ * `when`-match on the error must handle every arm because [BecalmError] is sealed.
  */
 public sealed interface BecalmResult<out T> {
 

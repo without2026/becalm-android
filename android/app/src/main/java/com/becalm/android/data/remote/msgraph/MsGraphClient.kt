@@ -28,8 +28,14 @@ public data class GraphDeltaResponse<T>(
 /**
  * A single Outlook/Office 365 mail message as projected by the MS Graph messages delta endpoint.
  *
- * Only the fields selected by `$select=id,internetMessageId,subject,from,bodyPreview,receivedDateTime`
- * are mapped here; additional Graph fields are silently ignored by Moshi's default lenient mode.
+ * Mirrors the `$select` set used by [MsGraphClient.messagesDeltaForFolder]:
+ * `id,internetMessageId,conversationId,parentFolderId,subject,from,toRecipients,
+ * ccRecipients,bccRecipients,body,hasAttachments,internetMessageHeaders,receivedDateTime`.
+ * Additional Graph fields that fall outside the projection are silently ignored by
+ * Moshi's default lenient parser.
+ *
+ * Spec refs: EMAIL-001 (folder direction), EMAIL-002 (person_ref derivation),
+ * EMAIL-004 (attachments meta), EMAIL-005 (threading headers), EMAIL-006 (EmailBody columns).
  */
 public data class GraphMessage(
     /** Immutable Graph-assigned message identifier. Used as `sourceRef` in ingestion. */
@@ -46,6 +52,66 @@ public data class GraphMessage(
     val bodyPreview: String?,
     /** When the message was received (UTC). */
     val receivedDateTime: Instant,
+    /**
+     * Direction hint derived from the delta endpoint scope — `"INBOX"` for
+     * `/me/mailFolders/inbox/messages/delta`, `"SENT"` for `/me/mailFolders/sentitems/...`.
+     * Drives EMAIL-002 person_ref assignment in the ingestion worker. Never null because
+     * the client always knows the folder scope it queried.
+     */
+    val folder: String,
+    /**
+     * `To` recipient email addresses extracted from `toRecipients[*].emailAddress.address`.
+     * Lowercase normalisation is deferred to the worker (see
+     * `com.becalm.android.worker.ingestion.canonicalizeEmail`). Empty list when Graph omits
+     * the header (e.g., malformed sent-items entries).
+     */
+    val toRecipients: List<String>,
+    /**
+     * `Cc` recipient email addresses. Preserved verbatim for EmailBody.raw_headers / UI; not
+     * used for personRef derivation.
+     */
+    val ccRecipients: List<String>,
+    /**
+     * `Bcc` recipient email addresses. Same treatment as [ccRecipients]. Typically populated
+     * only for messages the authenticated user sent.
+     */
+    val bccRecipients: List<String>,
+    /**
+     * HTML body content when `body.contentType == "html"`, else null. The worker hands this
+     * to `EmailSnippetBuilder` for Jsoup parsing (EMAIL-003 + EMAIL-007).
+     */
+    val bodyHtml: String?,
+    /**
+     * Plain-text body content when `body.contentType == "text"`, else null. Preferred over
+     * [bodyHtml] when both are available via Jsoup fall-through in the snippet builder.
+     */
+    val bodyPlain: String?,
+    /**
+     * Attachment descriptors populated by a *separate* `/me/messages/{id}/attachments?$select=…`
+     * call — the messages-delta projection itself never inlines attachment arrays. The worker
+     * issues this follow-up only when [hasAttachments] is true (quota optimisation).
+     */
+    val attachmentsMeta: List<GraphAttachmentMeta>,
+    /** `In-Reply-To` header value from `internetMessageHeaders`, null when header absent. */
+    val inReplyTo: String?,
+    /** `References` header value from `internetMessageHeaders`, null when header absent. */
+    val references: String?,
+    /**
+     * JSON-encoded copy of the raw `internetMessageHeaders` array as returned by Graph.
+     * Stored verbatim in `EmailBody.raw_headers` for future thread-aware UI + provenance
+     * audit. Defaults to `"[]"` when the tenant strips headers server-side.
+     */
+    val rawHeadersJson: String,
+    /**
+     * Optimisation flag mirroring Graph's `hasAttachments` boolean. The worker uses this to
+     * skip the `/attachments` round-trip for messages without any.
+     */
+    val hasAttachments: Boolean,
+    /**
+     * Outlook conversation identifier, stored for future thread-grouping UI. Null when Graph
+     * does not supply it (rare — usually populated for every message).
+     */
+    val conversationId: String?,
 )
 
 /**
@@ -127,13 +193,63 @@ public interface MsGraphTokenProvider {
 public interface MsGraphClient {
 
     /**
-     * Fetches a page of mail message deltas.
+     * Fetches a page of mail message deltas from the global `/me/messages/delta` endpoint.
+     *
+     * Delegates to [messagesDeltaForFolder] with [OutlookMailFolder.INBOX] — the global
+     * endpoint is not spec-compliant (see ING-007: indexing must be scoped to
+     * `Inbox` + `Sent Items` only, excluding `Drafts`, `Deleted Items`, `Junk Email`,
+     * `Archive`), so this method is retained only for API backward compatibility and
+     * must not be used by new call sites.
      *
      * @param deltaOrNextLink If `null`, issues the initial full sync request.
      *   If non-null, the value must be an opaque URL previously returned as
      *   [GraphDeltaResponse.nextLink] or [GraphDeltaResponse.deltaLink].
      */
+    @Deprecated(
+        message = "Use messagesDeltaForFolder(OutlookMailFolder, cursor). Global /me/messages/delta" +
+            " violates ING-007 folder scoping.",
+        replaceWith = ReplaceWith(
+            expression = "messagesDeltaForFolder(OutlookMailFolder.INBOX, deltaOrNextLink)",
+        ),
+    )
     public suspend fun messagesDelta(deltaOrNextLink: String?): BecalmResult<GraphDeltaResponse<GraphMessage>>
+
+    /**
+     * Fetches a page of mail message deltas scoped to a single Outlook system [folder].
+     *
+     * Maps to `/me/mailFolders/{folder.endpointPath}/messages/delta` with a fixed
+     * `$select` projection of
+     * `id,internetMessageId,conversationId,parentFolderId,subject,from,toRecipients,
+     * ccRecipients,bccRecipients,body,hasAttachments,internetMessageHeaders,
+     * receivedDateTime`. Per ING-013 a bounded 30-day `$filter=receivedDateTime ge …`
+     * is applied on the initial (cursor == null) call only; subsequent `@odata.nextLink`
+     * URLs are used verbatim because Graph invalidates the delta token if query
+     * parameters are mutated on follow-up pages.
+     *
+     * @param folder Which Outlook system folder to scope the delta to — INBOX or SENT.
+     * @param deltaOrNextLink If `null`, issues the initial full sync request. If non-null,
+     *   must be an opaque URL previously returned as [GraphDeltaResponse.nextLink] or
+     *   [GraphDeltaResponse.deltaLink]. Cursors are tracked per folder.
+     */
+    public suspend fun messagesDeltaForFolder(
+        folder: OutlookMailFolder,
+        deltaOrNextLink: String?,
+    ): BecalmResult<GraphDeltaResponse<GraphMessage>>
+
+    /**
+     * Fetches the attachment metadata list for a single message.
+     *
+     * Maps to `/me/messages/{messageId}/attachments?$select=name,contentType,size`.
+     * Per EMAIL-004 the caller (OutlookMailWorker) MUST gate this call on
+     * [GraphMessage.hasAttachments] to avoid spending quota on messages without any.
+     * Metadata only — binary content is never fetched to honour the on-device
+     * footprint budget.
+     *
+     * @param messageId Graph-assigned message id (the `id` field of [GraphMessage]).
+     */
+    public suspend fun messageAttachments(
+        messageId: String,
+    ): BecalmResult<List<GraphAttachmentMeta>>
 
     /**
      * Fetches a page of calendar event deltas via the `/me/calendarView/delta` endpoint.

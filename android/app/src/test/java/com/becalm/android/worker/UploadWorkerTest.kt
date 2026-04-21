@@ -392,15 +392,15 @@ class UploadWorkerTest {
         val uploadBatchCalls = AtomicInteger(0)
 
         /** Default responder: acks zero rows (used only when no scripted queue). */
-        var uploadBatchResponder: (List<CommitmentEntity>) -> BecalmResult<BatchResponse> = { _ ->
-            BecalmResult.Success(BatchResponse(acknowledged = 0, failed = emptyList()))
+        var uploadBatchResponder: (List<CommitmentEntity>) -> BecalmResult<CommitmentRepository.BatchResponse> = { _ ->
+            BecalmResult.Success(CommitmentRepository.BatchResponse(acknowledged = 0, failed = emptyList()))
         }
 
         /**
          * Optional FIFO queue of responders. When non-empty, each batch upload consumes one
          * entry. Tests use this to script page-by-page server behavior for multi-page cases.
          */
-        val uploadBatchResponderQueue: ArrayDeque<(List<CommitmentEntity>) -> BecalmResult<BatchResponse>> =
+        val uploadBatchResponderQueue: ArrayDeque<(List<CommitmentEntity>) -> BecalmResult<CommitmentRepository.BatchResponse>> =
             ArrayDeque()
 
         override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> = emptyFlow()
@@ -413,7 +413,8 @@ class UploadWorkerTest {
             personRef: String?,
             direction: String?,
             actionState: String?,
-        ): BecalmResult<RefreshStats> = BecalmResult.Success(RefreshStats(0, 0, false, null))
+        ): BecalmResult<CommitmentRepository.RefreshStats> =
+            BecalmResult.Success(CommitmentRepository.RefreshStats(0, 0, false, null))
 
         override suspend fun transitionState(
             id: String,
@@ -444,7 +445,7 @@ class UploadWorkerTest {
             return BecalmResult.Success(Unit)
         }
 
-        override suspend fun uploadBatch(pending: List<CommitmentEntity>): BecalmResult<BatchResponse> {
+        override suspend fun uploadBatch(pending: List<CommitmentEntity>): BecalmResult<CommitmentRepository.BatchResponse> {
             uploadBatchCalls.incrementAndGet()
             val responder = uploadBatchResponderQueue.removeFirstOrNull() ?: uploadBatchResponder
             return responder(pending)

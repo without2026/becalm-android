@@ -18,9 +18,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.eq
 import io.mockk.every
-import io.mockk.match
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
@@ -470,7 +468,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -479,7 +477,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && !it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && !it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -528,7 +526,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -542,7 +540,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && !it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && !it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -569,7 +567,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -578,7 +576,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && !it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && !it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -618,7 +616,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -632,7 +630,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && !it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && !it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -679,7 +677,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && it.contains("NOT LIKE") },
                 any(),
                 any(),
             )
@@ -690,7 +688,7 @@ class MediaStoreWorkerTest {
             contentResolver.query(
                 eq(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI),
                 any(),
-                match<String?> { it != null && !it.contains("NOT LIKE") },
+                matchNullable<String> { it != null && !it.contains("NOT LIKE") },
                 any(),
                 any(),
             )

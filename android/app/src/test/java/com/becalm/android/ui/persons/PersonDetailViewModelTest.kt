@@ -144,11 +144,19 @@ class PersonDetailViewModelTest {
                 while (state.loading) state = awaitItem()
 
                 assertEquals(personRef, state.personRef)
-                assertEquals(enrichment, state.enrichment)
-                assertEquals(3, state.interactions.size)
-                assertTrue(state.interactions.any { it is InteractionRow.Event })
-                assertTrue(state.interactions.any { it is InteractionRow.Commitment })
-                assertTrue(state.interactions.any { it is InteractionRow.CalendarMeeting })
+                // Enrichment has personRef only — all display-name fields null in the entity.
+                assertEquals(enrichment.displayName, state.displayName)
+                assertEquals(enrichment.company, state.companyName)
+                assertEquals(enrichment.title, state.jobTitle)
+                // 1 pending commitment, 0 completed, 2 non-commitment interactions
+                // (1 raw event + 1 calendar meeting) — 3 total when counted across sections.
+                val totalInteractions =
+                    state.pendingCommitments.size + state.completedCommitments.size +
+                        state.interactionHistory.size
+                assertEquals(3, totalInteractions)
+                assertTrue(state.interactionHistory.any { it is InteractionRow.Event })
+                assertTrue(state.pendingCommitments.isNotEmpty())
+                assertTrue(state.interactionHistory.any { it is InteractionRow.CalendarMeeting })
                 assertNull(state.error)
 
                 cancelAndIgnoreRemainingEvents()
@@ -169,8 +177,12 @@ class PersonDetailViewModelTest {
                 while (state.loading) state = awaitItem()
 
                 assertEquals(personRef, state.personRef)
-                assertNull(state.enrichment)
-                assertTrue(state.interactions.isEmpty())
+                assertNull(state.displayName)
+                assertNull(state.companyName)
+                assertNull(state.jobTitle)
+                assertTrue(state.pendingCommitments.isEmpty())
+                assertTrue(state.completedCommitments.isEmpty())
+                assertTrue(state.interactionHistory.isEmpty())
                 assertNull(state.error)
 
                 cancelAndIgnoreRemainingEvents()
@@ -196,8 +208,12 @@ class PersonDetailViewModelTest {
             while (state.loading) state = awaitItem()
 
             assertEquals(personRef, state.personRef)
-            assertNull(state.enrichment)
-            assertTrue(state.interactions.isEmpty())
+            assertNull(state.displayName)
+            assertNull(state.companyName)
+            assertNull(state.jobTitle)
+            assertTrue(state.pendingCommitments.isEmpty())
+            assertTrue(state.completedCommitments.isEmpty())
+            assertTrue(state.interactionHistory.isEmpty())
             assertNull(state.error)
 
             cancelAndIgnoreRemainingEvents()
