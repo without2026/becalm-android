@@ -1,5 +1,6 @@
 # ─── Orchestrator transient state ──
 .pipeline/.sessions/
+.claude/worktrees/
 
 # ─── Python bytecode / venvs ──
 __pycache__/

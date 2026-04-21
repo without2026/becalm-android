@@ -25,6 +25,7 @@ import org.junit.runner.RunWith
  * |    1 |  2 | Adds `commitments.commitment_state TEXT NOT NULL DEFAULT 'DRAFT'`.           |
  * |    2 |  3 | Drops 3 out-of-spec indices on raw_ingestion_events / calendar_events / persons_enrichment. |
  * |    1 |  3 | Whole-chain test that catches accumulation bugs across both migrations.      |
+ * |    3 |  4 | Rebuilds `commitments`: `due_date` → `due_at` (KST→UTC epoch ms) + adds `due_hint` + `due_is_approximate`. Recreates spec indices against `due_at`. |
  *
  * ## Required schema artefacts
  * [MigrationTestHelper] needs `app/schemas/com.becalm.android.data.local.db.BeCalmDatabase/{1,2,3}.json`
@@ -179,6 +180,68 @@ class MigrationTest {
         DROPPED_INDICES.forEach { name -> assertIndexAbsent(migrated, name) }
     }
 
+    // ─── 3 → 4 ────────────────────────────────────────────────────────────────
+    //
+    // Rebuilds the `commitments` table so that the single `due_date TEXT` column becomes
+    // three columns per `.spec/contracts/data-model.yml:132-144`:
+    //   * `due_at INTEGER` (UTC epoch ms; backfilled from KST midnight of pre-v4 `due_date`)
+    //   * `due_hint TEXT` (NULL for legacy rows — no hint recoverable)
+    //   * `due_is_approximate INTEGER NOT NULL DEFAULT 0`
+    // The two spec-mandated indices are recreated against `due_at`.
+    //
+    // Verifies:
+    //   1. Row with `due_date = '2026-04-20'` survives and `due_at = 1776610800000` ms
+    //      (2026-04-20 00:00 KST → 2026-04-19T15:00:00Z → 1776610800000 ms).
+    //   2. `due_hint` is NULL and `due_is_approximate` is 0 for backfilled rows.
+    //   3. `idx_commitments_user_action_due` and `idx_commitments_user_person_due` exist
+    //      and reference `due_at` (not `due_date`).
+    @Test
+    fun migrate3To4_backfillsDueAtAndRecreatesIndices() {
+        helper.createDatabase(TEST_DB, 3).use { db ->
+            // v3 row carrying a concrete due_date for backfill verification.
+            insertV2Commitment(db, id = "c1", dueDate = "2026-04-20")
+            // v3 row with NULL due_date to verify NULL propagation.
+            insertV2Commitment(db, id = "c2", dueDate = null)
+        }
+
+        val migrated: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 4, true, MIGRATIONS[2])
+
+        // (1) + (2) row contents after backfill.
+        migrated.query(
+            "SELECT id, due_at, due_hint, due_is_approximate FROM commitments ORDER BY id",
+        ).use { cursor ->
+            assertTrue(cursor.moveToNext())
+            assertEquals("c1", cursor.getString(0))
+            assertEquals(
+                "2026-04-20 KST midnight must backfill to 1776610800000 UTC epoch ms",
+                KST_20260420_MIDNIGHT_EPOCH_MS,
+                cursor.getLong(1),
+            )
+            assertTrue(
+                "due_hint must be NULL for legacy rows (no hint recoverable)",
+                cursor.isNull(2),
+            )
+            assertEquals(
+                "due_is_approximate must default to 0",
+                0,
+                cursor.getInt(3),
+            )
+
+            assertTrue(cursor.moveToNext())
+            assertEquals("c2", cursor.getString(0))
+            assertTrue("NULL due_date must map to NULL due_at", cursor.isNull(1))
+            assertTrue(cursor.isNull(2))
+            assertEquals(0, cursor.getInt(3))
+        }
+
+        // (3) Spec indices exist and reference due_at.
+        assertIndexPresent(migrated, "idx_commitments_user_action_due")
+        assertIndexPresent(migrated, "idx_commitments_user_person_due")
+        assertIndexRefersTo(migrated, "idx_commitments_user_action_due", "due_at")
+        assertIndexRefersTo(migrated, "idx_commitments_user_person_due", "due_at")
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private fun insertV1Commitment(
@@ -205,8 +268,14 @@ class MigrationTest {
         )
     }
 
-    private fun insertV2Commitment(db: SupportSQLiteDatabase, id: String) {
-        // v2 schema includes commitment_state (added by 1→2).
+    private fun insertV2Commitment(
+        db: SupportSQLiteDatabase,
+        id: String,
+        dueDate: String? = null,
+    ) {
+        // v2 / v3 schema includes commitment_state (added by 1→2). The shape is identical
+        // across v2 and v3 for the commitments table, so the same fixture serves both.
+        val dueDateSql = dueDate?.let { "'$it'" } ?: "NULL"
         db.execSQL(
             """
             INSERT INTO commitments (
@@ -217,7 +286,7 @@ class MigrationTest {
             ) VALUES (
                 '$id', '$USER_ID', 'take', NULL, NULL,
                 'title-$id', NULL, 'quote', NULL, $TS,
-                NULL, 'pending', 'gmail', NULL, $DEFAULT_CONFIDENCE,
+                $dueDateSql, 'pending', 'gmail', NULL, $DEFAULT_CONFIDENCE,
                 'DRAFT', 'pending', $TS, $TS
             )
             """.trimIndent(),
@@ -301,11 +370,39 @@ class MigrationTest {
         }
     }
 
+    /**
+     * Asserts that the SQL definition of an index named [name] mentions [column].
+     * Used to verify the v3→v4 rebuild actually references the new `due_at` column
+     * rather than the legacy `due_date`.
+     */
+    private fun assertIndexRefersTo(
+        db: SupportSQLiteDatabase,
+        name: String,
+        column: String,
+    ) {
+        db.query(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            arrayOf(name),
+        ).use { cursor ->
+            assertTrue("Index '$name' must exist", cursor.moveToFirst())
+            val sql = cursor.getString(0) ?: ""
+            assertTrue(
+                "Index '$name' DDL must reference column '$column'; actual SQL: $sql",
+                sql.contains(column),
+            )
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test"
         const val USER_ID = "00000000-0000-0000-0000-000000000001"
         const val TS = 1_700_000_000_000L
         const val DEFAULT_CONFIDENCE = 0.0
+
+        // 2026-04-20 00:00 Asia/Seoul → 2026-04-19T15:00:00Z → 1_776_610_800_000 ms.
+        // Used by migrate3To4_backfillsDueAtAndRecreatesIndices to verify the
+        // strftime('%s', due_date || ' 00:00:00', '-9 hours') * 1000 conversion.
+        const val KST_20260420_MIDNIGHT_EPOCH_MS = 1_776_610_800_000L
 
         // Indices the 2→3 migration must drop.
         val DROPPED_INDICES = listOf(

@@ -41,12 +41,12 @@ class SourcesListViewModelTest {
         Dispatchers.resetMain()
     }
 
-    // ── SMG-VM-01: lists all sources ─────────────────────────────────────────
+    // ── SMG-VM-01: lists all product sources (PRODUCT_SOURCES, not schema ALL) ──
 
     @Test
-    fun `state lists all sources from SourceType ALL`() = runTest {
+    fun `state lists all product sources from SourceType PRODUCT_SOURCES`() = runTest {
         val now: Instant = Clock.System.now()
-        val statuses = SourceType.ALL.map { st ->
+        val statuses = SourceType.PRODUCT_SOURCES.map { st ->
             SourceStatus(
                 sourceType = st,
                 status = SourceConnectionStatus.CONNECTED,
@@ -65,14 +65,18 @@ class SourcesListViewModelTest {
             var emission = awaitItem()
             // Advance past the empty initial state if needed.
             if (emission.items.isEmpty()) emission = awaitItem()
+            // VM prepends a pseudo-`contacts` row, so items.size = PRODUCT_SOURCES.size + 1.
             assertEquals(
-                "Should have one row per SourceType.ALL entry",
-                SourceType.ALL.size,
+                "Should have one row per PRODUCT_SOURCES entry plus the contacts pseudo-row",
+                SourceType.PRODUCT_SOURCES.size + 1,
                 emission.items.size,
             )
-            val types = emission.items.map { it.sourceType }.toSet()
-            assertEquals(SourceType.ALL, types)
-            // All rows should report CONNECTED status
+            val productTypes = emission.items
+                .map { it.sourceType }
+                .filter { it != "contacts" }
+                .toSet()
+            assertEquals(SourceType.PRODUCT_SOURCES, productTypes)
+            // Product source rows should report CONNECTED status (contacts is always CONNECTED).
             assertTrue(emission.items.all { it.status == SourceConnectionStatus.CONNECTED.name })
             cancelAndIgnoreRemainingEvents()
         }

@@ -285,7 +285,9 @@ class CommitmentRepositoryImplTest {
         quote = "q",
         sourceEventTitle = null,
         sourceEventOccurredAt = Instant.fromEpochMilliseconds(1_000),
-        dueDate = null,
+        dueAt = null,
+        dueHint = null,
+        dueIsApproximate = false,
         actionState = actionState,
         sourceType = "voice",
         sourceRef = null,
@@ -307,7 +309,9 @@ class CommitmentRepositoryImplTest {
         quote = entity.quote,
         sourceEventTitle = entity.sourceEventTitle,
         sourceEventOccurredAt = entity.sourceEventOccurredAt,
-        dueDate = entity.dueDate,
+        dueAt = entity.dueAt,
+        dueHint = entity.dueHint,
+        dueIsApproximate = entity.dueIsApproximate,
         actionState = entity.actionState,
         sourceType = entity.sourceType,
         sourceRef = entity.sourceRef,
@@ -376,7 +380,7 @@ class CommitmentRepositoryImplTest {
 
         override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> = emptyFlow()
 
-        override fun observePendingForToday(userId: String, todayIso: String): Flow<List<CommitmentEntity>> = emptyFlow()
+        override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> = emptyFlow()
 
         override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> = emptyFlow()
 

@@ -31,6 +31,17 @@ public enum class Direction {
  *                  normalized display name). Null when no specific person can be identified.
  * @param dueAt     Optional ISO-8601 instant parsed from the source audio if a due date is
  *                  mentioned; null when no deadline is detected.
+ * @param dueHint   Optional verbatim due-date expression as spoken (e.g. "다음주", "월말").
+ *                  Preserved regardless of whether [dueAt] could be resolved to a concrete
+ *                  instant so that downstream UI can render the original hint alongside the
+ *                  computed deadline. See `.spec/contracts/data-model.yml:132-144` (three-column
+ *                  commitments shape) and `.spec/voice-pipeline.spec.yml` VOI-003 (structured
+ *                  LLM output including `due_hint`). Null when the LLM did not surface a hint.
+ * @param dueIsApproximate
+ *                  True when [dueAt] was inferred from a fuzzy hint (e.g. "next week") rather
+ *                  than an explicit calendar reference. The UI renders a `~` prefix on the
+ *                  D-N badge in this case. Default: false.
+ *                  See `.spec/contracts/data-model.yml:132-144` and VOI-003.
  * @param confidence LLM extraction confidence in [0.0, 1.0]. Higher values indicate greater
  *                  certainty. Matches `CommitmentDraft.confidence` in api-contract.yml.
  *
@@ -42,5 +53,7 @@ public data class CommitmentDraft(
     val quote: String,
     val personRef: String?,
     val dueAt: Instant?,
+    val dueHint: String? = null,
+    val dueIsApproximate: Boolean = false,
     val confidence: Float,
 )

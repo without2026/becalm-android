@@ -32,7 +32,6 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -662,7 +661,9 @@ class TodayViewModelTest {
         quote = "I'll do something",
         sourceEventTitle = null,
         sourceEventOccurredAt = occurredAt,
-        dueDate = LocalDate(2026, 4, 16),
+        dueAt = Instant.parse("2026-04-16T00:00:00+09:00"),
+        dueHint = null,
+        dueIsApproximate = false,
         actionState = "pending",
         sourceType = SourceType.VOICE,
         sourceRef = null,

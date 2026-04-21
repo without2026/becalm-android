@@ -3,6 +3,7 @@ package com.becalm.android.ui.today
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Clock
+import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -31,6 +32,7 @@ import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import javax.inject.Inject
 
@@ -177,7 +179,7 @@ public class TodayViewModel @Inject constructor(
 
     private val commitmentFlow = userIdFlow.flatMapLatest { userId ->
         if (userId == null) return@flatMapLatest flowOf(emptyList())
-        commitmentRepository.observePendingForToday(userId, todayIso())
+        commitmentRepository.observePendingForToday(userId, endOfTodayEpochMs())
     }
 
     private val calendarFlow = userIdFlow.flatMapLatest { userId ->
@@ -363,9 +365,17 @@ public class TodayViewModel @Inject constructor(
             )
         }
 
-    private fun todayIso(): String {
-        val tz = TimeZone.currentSystemDefault()
-        return clock.today(tz).toString()
+    /**
+     * Inclusive end-of-today as UTC epoch milliseconds (KST business calendar).
+     *
+     * Computed as `tomorrow @ 00:00 KST − 1 ms`, matching the `due_at <= :endOfTodayEpochMs`
+     * bound expected by [CommitmentRepository.observePendingForToday]
+     * (data-model.yml:132-144, VOI-003). KST is used verbatim regardless of the device's
+     * selected zone — "today" is a business calendar concept for this product.
+     */
+    private fun endOfTodayEpochMs(): Long {
+        val tomorrowStart = clock.today(KST).plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
+        return tomorrowStart.toEpochMilliseconds() - 1L
     }
 
     private fun todayRange(): Pair<Instant, Instant> {

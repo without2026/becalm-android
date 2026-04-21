@@ -1,9 +1,9 @@
 package com.becalm.android.data.remote.dto
 
+import com.becalm.android.core.util.KstInstant
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
 
 /**
  * Single item in a [CommitmentBatchRequestDto] for POST /v1/commitments:batch.
@@ -73,8 +73,22 @@ public data class CommitmentBatchPayloadDto(
     /** Timestamp of the source event (not extraction time). */
     @field:Json(name = "source_event_occurred_at") val sourceEventOccurredAt: Instant,
 
-    /** Optional deadline date. */
-    @field:Json(name = "due_date") val dueDate: LocalDate? = null,
+    /**
+     * Optional deadline timestamp (ISO-8601 timestamptz). Replaces the pre-v4 `due_date`
+     * field; see data-model.yml:132-144.
+     *
+     * Wire format: ISO-8601 with explicit `+09:00` KST offset per
+     * api-contract.yml:32. Internal storage remains UTC; the [KstInstant]
+     * qualifier only alters the Moshi serialization path for this field.
+     * Parsing is tolerant (accepts `Z` or `+09:00`).
+     */
+    @field:KstInstant @field:Json(name = "due_at") val dueAt: Instant? = null,
+
+    /** Optional verbatim due-date expression surfaced by the LLM (VOI-003). */
+    @field:Json(name = "due_hint") val dueHint: String? = null,
+
+    /** True when [dueAt] was inferred from a fuzzy hint. Default false. */
+    @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean = false,
 
     /** "pending" | "reminded" | "followed_up" | "completed" */
     @field:Json(name = "action_state") val actionState: String,

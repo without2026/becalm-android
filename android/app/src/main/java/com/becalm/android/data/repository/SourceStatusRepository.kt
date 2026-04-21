@@ -66,7 +66,7 @@ public data class SourceStatus(
  * `DataStore<Preferences>` so the Today screen remains functional offline.
  *
  * ## Status derivation (offline fallback)
- * For each source in [SourceType.ALL]:
+ * For each source in [SourceType.PRODUCT_SOURCES]:
  * 1. `lastSyncedAt == null` AND `lastError == null` → [SourceConnectionStatus.NEVER_CONNECTED]
  * 2. `inProgress == true` → [SourceConnectionStatus.SYNCING]
  * 3. `lastError != null && lastError.isNotBlank()` → [SourceConnectionStatus.ERROR]
@@ -75,13 +75,17 @@ public data class SourceStatus(
 public interface SourceStatusRepository {
 
     /**
-     * Emits the status list for all [SourceType.ALL] entries whenever any source's
-     * cursor or prefs change. Order follows [SourceType.ALL] iteration order.
+     * Emits the status list for every [SourceType.PRODUCT_SOURCES] entry whenever any
+     * source's cursor or prefs change. Order follows [SourceType.PRODUCT_SOURCES] iteration
+     * order.
+     *
+     * `VOICE` and `CALL_RECORDING` are deliberately excluded — voice is captured locally
+     * (no OAuth connect) and call_recording is a wave-0 schema-only carve-out.
      */
     public fun observeAll(): Flow<List<SourceStatus>>
 
     /**
-     * Emits a source_type → status map covering every [SourceType.ALL] entry,
+     * Emits a source_type → status map covering every [SourceType.PRODUCT_SOURCES] entry,
      * re-emitting on every cursor or prefs change.
      *
      * Convenience for consumers (e.g. [com.becalm.android.ui.today.TodayViewModel]) that
@@ -201,10 +205,14 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     // ─── Observation ─────────────────────────────────────────────────────────
 
     override fun observeAll(): Flow<List<SourceStatus>> {
-        val flows: List<Flow<SourceStatus>> = SourceType.ALL.map { source ->
+        // PRODUCT_SOURCES (6 external product sources) — NOT the schema-level ALL set.
+        // ALL includes VOICE and CALL_RECORDING which either have no product tile
+        // (CALL_RECORDING wave-0 carve-out) or are captured locally (VOICE), so they
+        // must not appear in the Sources strip or the Today aggregate banner.
+        val flows: List<Flow<SourceStatus>> = SourceType.PRODUCT_SOURCES.map { source ->
             observeFor(source)
         }
-        // combine(List<Flow>) requires at least one flow; ALL always has 7 entries.
+        // combine(List<Flow>) requires at least one flow; PRODUCT_SOURCES always has 6 entries.
         return combine(flows) { statuses -> statuses.toList() }
     }
 
@@ -294,6 +302,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
 
     override suspend fun clearAll(): BecalmResult<Unit> = try {
         userPrefs.edit { prefs ->
+            // Intentionally uses the schema-wide ALL set (not PRODUCT_SOURCES) so sign-out
+            // wipes any stale keys written for VOICE/CALL_RECORDING in an earlier build —
+            // leaving them behind would leak per-user sync metadata across accounts.
             SourceType.ALL.forEach { source ->
                 prefs.remove(lastSyncedAt(source))
                 prefs.remove(lastError(source))

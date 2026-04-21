@@ -37,7 +37,11 @@ public data class SourceStatusRow(
 /**
  * UI state for the sources list screen.
  *
- * @param items List of [SourceStatusRow] in [com.becalm.android.data.remote.dto.SourceType.ALL] order.
+ * @param items List of [SourceStatusRow] in
+ *   [com.becalm.android.data.remote.dto.SourceType.PRODUCT_SOURCES] order (prepended by
+ *   the pseudo-`contacts` row). The schema-wide
+ *   [com.becalm.android.data.remote.dto.SourceType.ALL] set is deliberately not used —
+ *   wave-0 carves out `CALL_RECORDING` (no UI tile yet) and `VOICE` (captured locally).
  */
 public data class SourcesListUiState(
     val items: List<SourceStatusRow> = emptyList(),

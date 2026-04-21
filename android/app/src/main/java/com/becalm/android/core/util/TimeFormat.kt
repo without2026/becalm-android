@@ -14,6 +14,17 @@ import kotlinx.datetime.toLocalDateTime
  * performed so these formatters are safe to use outside an Android [Context].
  */
 
+/**
+ * Canonical KST zone reference used by all date boundaries derived from the user's
+ * local business calendar (e.g. end-of-today for `due_at` filtering, D-N badge diffing).
+ *
+ * Centralised so `.spec/contracts/data-model.yml:132-144` ("Render in Asia/Seoul at the UI
+ * layer") and VOI-003 ("KST-rendered due semantics") map to a single identifier rather than
+ * repeated `"Asia/Seoul"` string literals. Do not mix with [TimeZone.currentSystemDefault] —
+ * business dates are always evaluated in KST regardless of the device's selected zone.
+ */
+public val KST: TimeZone = TimeZone.of("Asia/Seoul")
+
 private fun Int.pad2(): String = toString().padStart(2, '0')
 private fun Int.pad4(): String = toString().padStart(4, '0')
 private fun Int.pad3(): String = toString().padStart(3, '0')

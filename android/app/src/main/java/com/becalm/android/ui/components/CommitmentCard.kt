@@ -42,14 +42,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.becalm.android.core.util.KST
 import com.becalm.android.ui.theme.BecalmStateColors
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.glassPanel
-import java.time.LocalDate as JLocalDate
-import java.time.ZoneOffset
-import java.time.temporal.ChronoUnit
-import kotlinx.datetime.LocalDate
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 
 // ─── CommitmentCard ───────────────────────────────────────────────────────────
 
@@ -72,7 +73,22 @@ import kotlinx.datetime.LocalDate
  * @param derivedStatus Status string driving the chip and card alpha. Accepted values:
  *                      `"DRAFT"`, `"CONFIRMED"`, `"SCHEDULED"`, `"DONE"`, `"DISMISSED"`.
  *                      Unknown values map to pending styling.
- * @param dueDate       Optional due date for the D-N badge. `null` = no badge shown.
+ * @param dueAt         Optional due instant (UTC epoch via kotlinx.datetime.Instant) for
+ *                      the D-N badge. `null` = no badge shown. Converted to an
+ *                      Asia/Seoul calendar date before diffing against today-in-KST
+ *                      (data-model.yml:132-144, VOI-003 KST rendering rule).
+ * @param dueIsApproximate When true the D-N badge switches to the `D~N` form (tilde
+ *                      between the `D` and the count) to signal that the due date was
+ *                      inferred from a fuzzy hint — commitment-management.spec.yml:39-43.
+ *                      Default false.
+ * @param dueHint       Optional verbatim due-date expression (e.g. "월말", "다음주")
+ *                      captured from the source event. Rendered beneath the title
+ *                      ONLY when [dueIsApproximate] is `true` AND the hint is a
+ *                      non-blank string — this auxiliary line exists to help users
+ *                      interpret inferred deadlines. Exact deadlines already carry
+ *                      full information via the D-N badge, so rendering the raw
+ *                      hint text there would be noise. Contract pinned by
+ *                      commitment-management.spec.yml:9,13 ("approximate-only").
  * @param counterpartyDisplayName
  *                      Resolved, human-readable display name of the counterparty shown
  *                      below the title, or `null` to omit the line. Must already be
@@ -94,9 +110,11 @@ public fun CommitmentCard(
     title: String,
     direction: String,
     derivedStatus: String,
-    dueDate: LocalDate?,
+    dueAt: Instant?,
     counterpartyDisplayName: String?,
     modifier: Modifier = Modifier,
+    dueIsApproximate: Boolean = false,
+    dueHint: String? = null,
     onClick: (() -> Unit)? = null,
     onMarkDone: (() -> Unit)? = null,
 ) {
@@ -117,13 +135,24 @@ public fun CommitmentCard(
     val cardAlpha = if (isDismissed || isDone) 0.55f else 1.0f
     val showChip = !isDismissed
 
-    // D-N badge — single date computation, memoised on dueDate. Label + colors
-    // derived together; null = no badge shown.
-    val daysUntil: Int? = remember(dueDate) {
-        dueDate?.let {
-            val today = JLocalDate.now(ZoneOffset.UTC)
-            val jDate = JLocalDate.of(it.year, it.monthNumber, it.dayOfMonth)
-            ChronoUnit.DAYS.between(today, jDate).toInt()
+    // D-N badge — single computation memoised on dueAt. Convert dueAt to an Asia/Seoul
+    // calendar date, diff against today-in-KST, and render per
+    // commitment-management.spec.yml:39-43:
+    //   D-0  same-day exact
+    //   D-N  future N days exact
+    //   D+N  overdue by N days
+    //   D~N  approximate (tilde sits BETWEEN the `D` and the count, not as a leading
+    //        prefix on the whole label — distinguishes spec-correct `D~3` from the
+    //        prior `~D-3` drift)
+    //
+    // [KST] is the canonical business-calendar zone shared with
+    // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
+    // here.
+    val daysUntil: Int? = remember(dueAt) {
+        dueAt?.let {
+            val today = Clock.System.now().toLocalDateTime(KST).date
+            val dueKst = it.toLocalDateTime(KST).date
+            today.daysUntil(dueKst)
         }
     }
     val badge: Pair<String, BecalmStateColors>? = daysUntil?.let { days ->
@@ -133,7 +162,7 @@ public fun CommitmentCard(
             days >= 4 -> colors.dayBadgeUpcoming
             else -> colors.dayBadgeOverdue // negative = past due
         }
-        val label = if (days >= 0) "D-$days" else "D+${-days}"
+        val label = formatDayBadgeLabel(days = days, approximate = dueIsApproximate)
         label to stateColors
     }
 
@@ -211,6 +240,20 @@ public fun CommitmentCard(
                     }
                 }
 
+                // Due-hint line — original verbatim expression from the source event
+                // (e.g. "월말"). Gated to approximate deadlines per
+                // commitment-management.spec.yml:9,13: on exact deadlines the D-N
+                // badge already communicates the date unambiguously, so rendering
+                // the raw hint would be duplicative noise.
+                if (shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = dueHint)) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = dueHint!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+
                 // Counterparty
                 if (counterpartyDisplayName != null) {
                     Spacer(modifier = Modifier.height(2.dp))
@@ -247,6 +290,51 @@ public fun CommitmentCard(
         }
     }
 }
+
+// ─── Label formatting ─────────────────────────────────────────────────────────
+
+/**
+ * Builds the D-N badge label per commitment-management.spec.yml:39-43.
+ *
+ * Exact grammar:
+ *  - `D-0`   same-day exact
+ *  - `D-N`   future in N days (N > 0) exact
+ *  - `D+N`   overdue by N days (N > 0)
+ *  - `D~N`   approximate variant — tilde sits BETWEEN `D` and the count, so a
+ *            same-day approximate renders `D~0`, three-days-out approximate
+ *            renders `D~3`. Overdue + approximate is not a shape the spec
+ *            enumerates; we conservatively prefer the exact overdue form
+ *            (`D+N`) since the date is already known to have passed.
+ *
+ * Kept internal rather than private so focused unit tests in
+ * `CommitmentCardFormatterTest` can assert the exact strings without spinning
+ * up a Compose host.
+ *
+ * @param days Signed day-delta of dueAt relative to today-in-KST; 0 = today,
+ *             positive = future, negative = overdue.
+ * @param approximate True when dueAt was inferred from a fuzzy hint.
+ */
+internal fun formatDayBadgeLabel(days: Int, approximate: Boolean): String = when {
+    days < 0 -> "D+${-days}"
+    approximate -> "D~$days"
+    else -> "D-$days"
+}
+
+/**
+ * Visibility gate for the due-hint auxiliary line on [CommitmentCard].
+ *
+ * Per commitment-management.spec.yml:9,13 the verbatim due-date expression is
+ * only displayed alongside *approximate* deadlines — exact deadlines already
+ * carry full information via the D-N badge. Extracted so the gating contract
+ * can be asserted as a pure unit test without spinning up a Compose host, and
+ * so the card site reads as a single boolean rather than an inline compound
+ * expression.
+ *
+ * @return true iff the hint should render, i.e. the deadline is approximate
+ *         AND the hint is a non-blank string.
+ */
+internal fun shouldShowDueHint(dueIsApproximate: Boolean, dueHint: String?): Boolean =
+    dueIsApproximate && !dueHint.isNullOrBlank()
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
@@ -307,7 +395,7 @@ private fun PreviewCommitmentCardGivePendingD2() {
             title = "Send contract draft",
             direction = "give",
             derivedStatus = "CONFIRMED",
-            dueDate = LocalDate(2026, 4, 18),
+            dueAt = Instant.parse("2026-04-18T00:00:00+09:00"),
             counterpartyDisplayName = "Alice Kim",
             onClick = {},
             onMarkDone = {},
@@ -323,7 +411,7 @@ private fun PreviewCommitmentCardTakeCompleted() {
             title = "Review budget proposal",
             direction = "take",
             derivedStatus = "DONE",
-            dueDate = null,
+            dueAt = null,
             counterpartyDisplayName = "Bob Lee",
         )
     }
@@ -337,8 +425,10 @@ private fun PreviewCommitmentCardOverdueReminded() {
             title = "Submit expense report",
             direction = "give",
             derivedStatus = "SCHEDULED",
-            dueDate = LocalDate(2026, 4, 10),
+            dueAt = Instant.parse("2026-04-10T00:00:00+09:00"),
             counterpartyDisplayName = null,
+            dueIsApproximate = true,
+            dueHint = "월말",
             onClick = {},
         )
     }
@@ -352,7 +442,7 @@ private fun PreviewCommitmentCardNoDueDate() {
             title = "Follow up on proposal",
             direction = "take",
             derivedStatus = "DRAFT",
-            dueDate = null,
+            dueAt = null,
             counterpartyDisplayName = "Carol Park",
         )
     }

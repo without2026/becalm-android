@@ -130,6 +130,9 @@ public class SourceDetailViewModel @Inject constructor(
             SourceDetailUiState(error = "sourceType argument is missing or blank"),
         )
     } else if (sourceType !in SourceType.ALL) {
+        // Schema-level guard — any value not declared in data-model.yml's source_type
+        // enum is rejected. We use ALL (not PRODUCT_SOURCES) so deep links to VOICE or
+        // (future) CALL_RECORDING detail routes remain navigable once their UI ships.
         MutableStateFlow(
             SourceDetailUiState(error = "Invalid source type"),
         )

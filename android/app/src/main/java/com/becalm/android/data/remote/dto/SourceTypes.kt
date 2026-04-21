@@ -15,6 +15,9 @@ public object SourceType {
     /** Audio recording captured by the Android voice recorder. */
     public const val VOICE: String = "voice"
 
+    /** Call recording captured on Samsung One UI (`Recordings/Call/`). Matches data-model.yml:28-32 enum. */
+    public const val CALL_RECORDING: String = "call_recording"
+
     /** Gmail message via Google Gmail API. */
     public const val GMAIL: String = "gmail"
 
@@ -33,9 +36,51 @@ public object SourceType {
     /** Outlook / Microsoft 365 calendar event via MS Graph API. */
     public const val OUTLOOK_CALENDAR: String = "outlook_calendar"
 
-    /** All declared source type values. Useful for validation. */
+    /**
+     * **Schema enum set** — every `source_type` value declared in data-model.yml:28-32.
+     *
+     * Use this set when validating DTOs coming off the wire (e.g. server `source_status`
+     * items, raw ingestion rows from Room that may have been written before a carve-out
+     * took effect). Includes [VOICE] and [CALL_RECORDING] even though neither has a
+     * product-UI tile yet, because the server is allowed to emit them.
+     *
+     * Do **not** use for UI rendering or aggregate banner math — see [PRODUCT_SOURCES].
+     *
+     * Spec ref: data-model.yml:28-32.
+     */
     public val ALL: Set<String> = setOf(
         VOICE,
+        CALL_RECORDING,
+        GMAIL,
+        OUTLOOK_MAIL,
+        NAVER_IMAP,
+        DAUM_IMAP,
+        GOOGLE_CALENDAR,
+        OUTLOOK_CALENDAR,
+    )
+
+    /**
+     * **Product-UI source set** — the external product sources the user connects to in
+     * the Sources screen and whose sync state feeds the Today aggregate banner.
+     *
+     * Excludes [VOICE] (handled by its own capture path — recorder UI, not a connect-able
+     * account) and [CALL_RECORDING] (wave 0 carve-out: schema-only for now; no UI tile,
+     * no ingestion worker — a future wave will ship the Samsung call-recording
+     * ingestion + UI and promote it out of this carve-out).
+     *
+     * Iteration order is the canonical render order for the Sources list and the chips
+     * strip on the Today screen.
+     *
+     * Use this for:
+     * - [SourceStatusRepository.observeAll] — the list of rows rendered to the user
+     * - [TodayOverallSync.deriveOverallState] — the "all synced" banner math
+     * - Any consumer whose output ends up on screen or drives product-facing aggregates
+     *
+     * Do **not** use for DTO validation — see [ALL].
+     *
+     * Spec ref: wave-0 carve-out (CALL_RECORDING schema lands ahead of its UI/ingestion).
+     */
+    public val PRODUCT_SOURCES: Set<String> = setOf(
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,

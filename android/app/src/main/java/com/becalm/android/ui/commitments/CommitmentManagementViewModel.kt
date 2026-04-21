@@ -63,8 +63,18 @@ public data class CommitmentRow(
     val title: String,
     val direction: String,
     val derivedStatus: String,
-    val dueDate: kotlinx.datetime.LocalDate?,
+    val dueAt: Instant?,
+    val dueIsApproximate: Boolean,
     val counterpartyDisplayName: String?,
+    /**
+     * Verbatim due-date expression captured from the source event
+     * (e.g. "다음주", "월말"). Surfaced alongside the rendered due date so users
+     * can understand inferred deadlines — commitment-management.spec.yml:9,13.
+     *
+     * Preserved even when [dueAt] is non-null; especially prominent when
+     * [dueIsApproximate] is true.
+     */
+    val dueHint: String? = null,
 )
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
@@ -338,8 +348,10 @@ public class CommitmentManagementViewModel @Inject constructor(
                 title = entity.title,
                 direction = entity.direction,
                 derivedStatus = entity.commitmentState.name,
-                dueDate = entity.dueDate,
+                dueAt = entity.dueAt,
+                dueIsApproximate = entity.dueIsApproximate,
                 counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),
+                dueHint = entity.dueHint,
             )
         }
     }

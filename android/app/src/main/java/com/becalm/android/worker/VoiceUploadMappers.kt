@@ -6,9 +6,6 @@ import com.becalm.android.data.remote.dto.CommitmentDraftDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -82,7 +79,9 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     quote = quote,
     sourceEventTitle = sourceEventTitle,
     sourceEventOccurredAt = sourceEventOccurredAt,
-    dueDate = dueAt?.toLocalDate(),
+    dueAt = dueAt,
+    dueHint = dueHint,
+    dueIsApproximate = dueIsApproximate,
     actionState = "pending",
     sourceType = SourceType.VOICE,
     sourceRef = sourceRef,
@@ -92,10 +91,6 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     createdAt = now,
     updatedAt = now,
 )
-
-/** Converts an [Instant] to a [LocalDate] in the device's system time zone. */
-private fun Instant.toLocalDate(): LocalDate =
-    toLocalDateTime(TimeZone.currentSystemDefault()).date
 
 /** Convenience: creates a plain-text [RequestBody] from this String. */
 private fun String.toPlainRequestBody(): RequestBody =

@@ -24,7 +24,11 @@ public sealed interface OverallSyncState {
 /**
  * Computes the TDY-008 aggregate state from the per-source strip.
  *
- * Only the six ingestion sources (voice excluded per Q7) count toward the banner.
+ * Only the six external product sources count toward the banner
+ * ([SourceType.PRODUCT_SOURCES]). [SourceStatusRepository.observeAll] already filters
+ * the input to this set, so the belt-and-braces `.filter` below is defensive: if a
+ * caller ever passes a non-product row (e.g. VOICE or CALL_RECORDING) directly, it
+ * still must not skew the aggregate.
  *
  * Priority order:
  * 1. Any source in ERROR → [OverallSyncState.PartialFailure].
@@ -34,7 +38,9 @@ public sealed interface OverallSyncState {
  * 4. Otherwise → [OverallSyncState.Idle].
  */
 internal fun deriveOverallState(sources: List<SourceStatus>): OverallSyncState {
-    val chipSources = sources.filter { it.sourceType != SourceType.VOICE }
+    // Defensive filter — expected input is already PRODUCT_SOURCES only, but guard
+    // against future callers forwarding the schema-wide set.
+    val chipSources = sources.filter { it.sourceType in SourceType.PRODUCT_SOURCES }
     val total = chipSources.size
     val errorCount = chipSources.count { it.status == SourceConnectionStatus.ERROR }
     val syncingCount = chipSources.count { it.status == SourceConnectionStatus.SYNCING }

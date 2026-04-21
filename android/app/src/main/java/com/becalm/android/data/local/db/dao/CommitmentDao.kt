@@ -15,10 +15,11 @@ import kotlinx.datetime.Instant
  * All write paths use [OnConflictStrategy.REPLACE] because Railway is the source of truth;
  * receiving a fresher record from GET /v1/commitments must always overwrite the local copy.
  *
- * The [observePendingForToday] query accepts [todayIso] as an ISO-8601 date string
- * (yyyy-MM-dd) rather than a [kotlinx.datetime.LocalDate] because the LocalDate ↔ String
- * type converter is registered on the database class in SP-13. Using a raw String here
- * avoids a compile-time dependency on the converter being present in this module.
+ * The [observePendingForToday] query accepts `endOfTodayEpochMs` as a UTC epoch-millisecond
+ * bound rather than a date string because `commitments.due_at` is stored as an
+ * [kotlinx.datetime.Instant] (INTEGER epoch ms via the Room converter) as of DB v4.
+ * Callers compute the bound as Asia/Seoul 23:59:59.999 → UTC epoch ms — see
+ * `.spec/contracts/data-model.yml:132-144` and VOI-003.
  *
  * All [Flow]-returning queries are cold; collection begins on the first downstream
  * collector and Room re-emits on every matching table write.
@@ -170,16 +171,18 @@ public interface CommitmentDao {
 
     /**
      * Emits all pending commitments for [userId] that are either undated or due on/before
-     * [todayIso].
+     * end-of-today in Asia/Seoul.
      *
-     * [todayIso] must be an ISO-8601 date string (yyyy-MM-dd). String comparison is
-     * lexicographically correct for this format, which is why no explicit type converter
-     * is needed in the query itself.
+     * `endOfTodayEpochMs` is an inclusive UTC epoch-millisecond upper bound. The caller
+     * must compute it as `Asia/Seoul` 23:59:59.999 converted to UTC epoch ms so that the
+     * comparison `due_at <= :endOfTodayEpochMs` correctly captures every commitment whose
+     * KST calendar date is on or before today (consistent with data-model.yml:132-144 and
+     * VOI-003 KST-rendered due semantics).
      *
      * Used by the daily reminder widget and the home screen "due today" badge.
      *
      * @param userId Supabase auth.users UUID of the owning user.
-     * @param todayIso Today's date as an ISO-8601 string, e.g. "2026-04-16".
+     * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch ms (Asia/Seoul 23:59:59.999).
      * @return A [Flow] that emits a list and re-emits on every qualifying table write.
      */
     @Query(
@@ -187,11 +190,11 @@ public interface CommitmentDao {
         SELECT * FROM commitments
         WHERE user_id      = :userId
           AND action_state = 'pending'
-          AND (due_date IS NULL OR due_date <= :todayIso)
-        ORDER BY due_date IS NULL ASC, due_date ASC, created_at DESC
+          AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs)
+        ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
         """
     )
-    public fun observePendingForToday(userId: String, todayIso: String): Flow<List<CommitmentEntity>>
+    public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
 
     /**
      * Emits all commitments for [userId] linked to [personRef], ordered by due date
@@ -208,7 +211,7 @@ public interface CommitmentDao {
         SELECT * FROM commitments
         WHERE user_id    = :userId
           AND person_ref = :personRef
-        ORDER BY due_date IS NULL ASC, due_date ASC, created_at DESC
+        ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
         """
     )
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
