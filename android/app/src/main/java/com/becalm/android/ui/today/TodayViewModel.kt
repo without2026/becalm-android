@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
@@ -378,11 +377,18 @@ public class TodayViewModel @Inject constructor(
         return tomorrowStart.toEpochMilliseconds() - 1L
     }
 
+    /**
+     * KST-anchored today range `[start, end)` expressed as [Instant] bounds so
+     * calendar-event queries honour the KST-only "today" invariant
+     * ([`.spec/today-timeline.spec.yml`][1] § KST render rule) irrespective of
+     * the device's selected timezone.
+     *
+     * [1]: file://.spec/today-timeline.spec.yml
+     */
     private fun todayRange(): Pair<Instant, Instant> {
-        val tz = TimeZone.currentSystemDefault()
-        val today = clock.today(tz)
-        val start = today.atStartOfDayIn(tz)
-        val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(tz)
+        val today = clock.today(KST)
+        val start = today.atStartOfDayIn(KST)
+        val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
         return start to end
     }
 }

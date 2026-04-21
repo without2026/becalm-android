@@ -35,10 +35,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CounterpartyText
+import com.becalm.android.ui.components.DirectionBadge
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusStrip
+import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -203,30 +206,47 @@ private fun TimelineItemRow(
             .glassPanel(MaterialTheme.shapes.medium)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        val sectionLabel = when (item) {
-            is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
-            is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
-            is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = sectionLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        val title = when (item) {
-            is TimelineItem.Commitment -> item.title
-            is TimelineItem.CalendarEvent -> item.title
-            is TimelineItem.Meeting -> item.title
-        }
         Text(
-            text = title,
+            text = sectionLabelFor(item),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = titleOf(item),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+        if (item is TimelineItem.Commitment) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DirectionBadge(direction = item.direction)
+                Spacer(modifier = Modifier.size(size = 8.dp))
+                CounterpartyText(name = item.counterpartyDisplayName)
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        TimestampText(sortKey = item.sortKey)
     }
+}
+
+/** Returns the localized section header label for [item]. */
+@Composable
+private fun sectionLabelFor(item: TimelineItem): String = when (item) {
+    is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
+    is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
+    is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
+}
+
+/**
+ * Extracts the display title from any [TimelineItem] subtype. `title` is declared
+ * on each subtype separately (not on the sealed parent) because the three DTOs
+ * carry subtly different semantics; this helper is the single read-site.
+ */
+private fun titleOf(item: TimelineItem): String = when (item) {
+    is TimelineItem.Commitment -> item.title
+    is TimelineItem.CalendarEvent -> item.title
+    is TimelineItem.Meeting -> item.title
 }
 
 @PreviewLightDark
