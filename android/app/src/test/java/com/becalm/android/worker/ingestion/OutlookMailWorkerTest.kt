@@ -57,7 +57,8 @@ import org.robolectric.RobolectricTestRunner
  *      advance under the folder-scoped keys.
  *  2. `toEntity sent personRefFromTo0` — SENT scope derives personRef from
  *      `toRecipients[0]` (EMAIL-002).
- *  3. `toEntity sent over10 groupEmailTrue` — > [GROUP_EMAIL_RECIPIENT_THRESHOLD] recipients
+ *  3. `toEntity sent over10 groupEmailTrue` — recipients above
+ *      [com.becalm.android.domain.email.EmailPersonRef.GROUP_EMAIL_RECIPIENT_THRESHOLD]
  *      yield `personRef == null` and `EmailBody.groupEmail == true`.
  *  4. `doWork 410 clearsCorrectCursorOnly` — 410 on SENT pass clears only
  *      `OUTLOOK_MAIL_SENT_CURSOR_KEY`; INBOX cursor survives.

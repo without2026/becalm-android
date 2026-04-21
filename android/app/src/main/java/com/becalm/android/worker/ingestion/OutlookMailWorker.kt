@@ -26,6 +26,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.worker.WorkScheduler
@@ -164,9 +165,7 @@ public class OutlookMailWorker @AssistedInject constructor(
         var totalFetched = 0
 
         while (true) {
-            val result = msGraphClient.messagesDeltaForFolder(folder, cursor)
-
-            when (result) {
+            val page = when (val result = msGraphClient.messagesDeltaForFolder(folder, cursor)) {
                 is BecalmResult.Failure -> {
                     val error = result.error
                     logger.w(TAG, "messagesDeltaForFolder failed folder=$folder error=${error::class.simpleName}")
@@ -177,53 +176,63 @@ public class OutlookMailWorker @AssistedInject constructor(
                     )
                     return SyncOutcome.Terminal(mapErrorToResult(error, cursor, cursorKey))
                 }
+                is BecalmResult.Success -> result.value
+            }
 
-                is BecalmResult.Success -> {
-                    val page = result.value
-                    val messages = page.value
+            val inserted = insertPageMessages(page.value, userId, folder)
+                ?: return SyncOutcome.Terminal(Result.retry())
+            totalFetched += inserted
+            if (inserted > 0) {
+                logger.d(TAG, "page inserted folder=$folder count=$inserted total=$totalFetched")
+            }
 
-                    if (messages.isNotEmpty()) {
-                        val entities = messages.map { it.toEntity(userId, folder) }
-                        val insertResult = rawIngestionRepository.insertLocalBatch(entities)
-                        if (insertResult is BecalmResult.Failure) {
-                            logger.e(TAG, "insertLocalBatch failed folder=$folder — retrying")
-                            return SyncOutcome.Terminal(Result.retry())
-                        }
-                        val rawEventIds = (insertResult as BecalmResult.Success).value
-                        // Persist EmailBody side-effects + optional CommitmentExtraction
-                        // enqueue per message. rawEventIds is ordered the same as messages
-                        // because insertLocalBatch maps 1:1 from the input list.
-                        messages.forEachIndexed { index, message ->
-                            val rawEventId = rawEventIds.getOrNull(index) ?: return@forEachIndexed
-                            persistEmailBody(message, rawEventId, folder)
-                        }
-                        totalFetched += messages.size
-                        logger.d(TAG, "page inserted folder=$folder count=${messages.size} total=$totalFetched")
-                    }
-
-                    when {
-                        page.nextLink != null -> {
-                            syncCursorStore.setCursor(cursorKey, page.nextLink)
-                            cursor = page.nextLink
-                            logger.d(TAG, "page done folder=$folder following nextLink")
-                        }
-
-                        page.deltaLink != null -> {
-                            syncCursorStore.setCursor(cursorKey, page.deltaLink)
-                            logger.d(TAG, "pass complete folder=$folder deltaLink stored totalFetched=$totalFetched")
-                            return SyncOutcome.Success(totalFetched)
-                        }
-
-                        else -> {
-                            logger.w(TAG, "no nextLink or deltaLink folder=$folder — treating as complete")
-                            return SyncOutcome.Success(totalFetched)
-                        }
-                    }
+            when {
+                page.nextLink != null -> {
+                    syncCursorStore.setCursor(cursorKey, page.nextLink)
+                    cursor = page.nextLink
+                    logger.d(TAG, "page done folder=$folder following nextLink")
+                }
+                page.deltaLink != null -> {
+                    syncCursorStore.setCursor(cursorKey, page.deltaLink)
+                    logger.d(TAG, "pass complete folder=$folder deltaLink stored totalFetched=$totalFetched")
+                    return SyncOutcome.Success(totalFetched)
+                }
+                else -> {
+                    logger.w(TAG, "no nextLink or deltaLink folder=$folder — treating as complete")
+                    return SyncOutcome.Success(totalFetched)
                 }
             }
         }
-        @Suppress("UNREACHABLE_CODE")
-        return SyncOutcome.Success(totalFetched)
+    }
+
+    /**
+     * Inserts [messages] into Room (via `insertLocalBatch`) and fans out the per-message
+     * EmailBody + commitment-extraction persistence. Returns the count of inserted rows,
+     * or `null` when `insertLocalBatch` failed (caller must return `Result.retry()`).
+     *
+     * Extracted from [runDeltaLoop] so the while-loop body reads as "fetch → insert →
+     * follow cursor" without branching fifteen lines deep.
+     */
+    private suspend fun insertPageMessages(
+        messages: List<GraphMessage>,
+        userId: String,
+        folder: OutlookMailFolder,
+    ): Int? {
+        if (messages.isEmpty()) return 0
+        val entities = messages.map { it.toEntity(userId, folder) }
+        val insertResult = rawIngestionRepository.insertLocalBatch(entities)
+        if (insertResult is BecalmResult.Failure) {
+            logger.e(TAG, "insertLocalBatch failed folder=$folder — retrying")
+            return null
+        }
+        val rawEventIds = (insertResult as BecalmResult.Success).value
+        // `rawEventIds` is ordered the same as `messages` because insertLocalBatch maps
+        // 1:1 over the input list.
+        messages.forEachIndexed { index, message ->
+            val rawEventId = rawEventIds.getOrNull(index) ?: return@forEachIndexed
+            persistEmailBody(message, rawEventId, folder)
+        }
+        return messages.size
     }
 
     // ── Entity mapping ────────────────────────────────────────────────────────
@@ -282,18 +291,14 @@ public class OutlookMailWorker @AssistedInject constructor(
     }
 
     /**
-     * Returns the EMAIL-002 personRef for this message given the [folder] scope it was
-     * fetched under. Lowercase canonicalisation is delegated to the shared
-     * [canonicalizeEmail] helper (co-located with GmailWorker to keep email address
-     * parsing in one place).
+     * Returns the EMAIL-002 person_ref for this message given the [folder]
+     * scope it was fetched under. The shared [EmailPersonRef] helper owns the
+     * canonicalisation + group-email quarantine rules used by every email
+     * ingestion worker.
      */
     private fun GraphMessage.derivePersonRef(folder: OutlookMailFolder): String? = when (folder) {
-        OutlookMailFolder.INBOX -> fromEmail?.let(::canonicalizeEmail)
-        OutlookMailFolder.SENT -> when {
-            toRecipients.isEmpty() -> null
-            toRecipients.size > GROUP_EMAIL_RECIPIENT_THRESHOLD -> null
-            else -> canonicalizeEmail(toRecipients.first())
-        }
+        OutlookMailFolder.INBOX -> EmailPersonRef.forInbox(fromEmail)
+        OutlookMailFolder.SENT -> EmailPersonRef.forSent(toRecipients)
     }
 
     // ── EmailBody persistence ────────────────────────────────────────────────
@@ -342,7 +347,7 @@ public class OutlookMailWorker @AssistedInject constructor(
         }
 
         val isGroupEmail = folder == OutlookMailFolder.SENT &&
-            message.toRecipients.size > GROUP_EMAIL_RECIPIENT_THRESHOLD
+            EmailPersonRef.isGroupEmail(message.toRecipients.size)
 
         val body = EmailBodyEntity(
             id = UUID.randomUUID().toString(),
@@ -427,11 +432,5 @@ public class OutlookMailWorker @AssistedInject constructor(
 
         /** Maximum number of WorkManager retry attempts before failing permanently. */
         public const val MAX_RETRIES: Int = 5
-
-        /**
-         * `SENT` toRecipients.size > this value → personRef = null (group email quarantine)
-         * per EMAIL-002 (`.spec/email-pipeline.spec.yml:22-27`).
-         */
-        internal const val GROUP_EMAIL_RECIPIENT_THRESHOLD: Int = 10
     }
 }

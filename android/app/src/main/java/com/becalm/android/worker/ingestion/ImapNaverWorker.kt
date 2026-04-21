@@ -33,6 +33,7 @@ import com.becalm.android.data.remote.imap.ImapSpecialUse
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.worker.WorkScheduler
@@ -360,17 +361,13 @@ public class ImapNaverWorker @AssistedInject constructor(
     }
 
     /**
-     * Returns the EMAIL-002 personRef for this message given the [mailboxKey] it was
-     * fetched under. Case-canonicalisation is delegated to [canonicalizeEmail] (shared
-     * with [GmailWorker] / [OutlookMailWorker]).
+     * Returns the EMAIL-002 person_ref for this message given the [mailboxKey]
+     * it was fetched under. Delegates to the shared [EmailPersonRef] helper
+     * (used by every email ingestion worker).
      */
     private fun ImapMessage.derivePersonRef(mailboxKey: String): String? = when (mailboxKey) {
-        MAILBOX_NAVER_INBOX -> fromEmail?.let(::canonicalizeEmail)
-        MAILBOX_NAVER_SENT -> when {
-            toAddresses.isEmpty() -> null
-            toAddresses.size > GROUP_EMAIL_RECIPIENT_THRESHOLD -> null
-            else -> canonicalizeEmail(toAddresses.first())
-        }
+        MAILBOX_NAVER_INBOX -> EmailPersonRef.forInbox(fromEmail)
+        MAILBOX_NAVER_SENT -> EmailPersonRef.forSent(toAddresses)
         else -> null
     }
 
@@ -395,7 +392,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             subject = message.subject,
         )
         val isGroupEmail = mailboxKey == MAILBOX_NAVER_SENT &&
-            message.toAddresses.size > GROUP_EMAIL_RECIPIENT_THRESHOLD
+            EmailPersonRef.isGroupEmail(message.toAddresses.size)
 
         val body = EmailBodyEntity(
             id = UUID.randomUUID().toString(),
@@ -526,12 +523,6 @@ public class ImapNaverWorker @AssistedInject constructor(
          * (ING-013). Passed to [ImapClient.fetchSince.sinceDays].
          */
         internal const val SINCE_DAYS: Int = 30
-
-        /**
-         * SENT `toAddresses.size > this value` → personRef = null (group email
-         * quarantine) per EMAIL-002 (`.spec/email-pipeline.spec.yml:22-27`).
-         */
-        internal const val GROUP_EMAIL_RECIPIENT_THRESHOLD: Int = 10
 
         /**
          * `@UserPrefs` DataStore key for the current user's Supabase UUID.

@@ -27,6 +27,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.worker.WorkScheduler
@@ -259,18 +260,9 @@ public class GmailWorker @AssistedInject constructor(
      * for EMAIL-002 person_ref derivation.
      */
     private fun routeByLabelIds(labelIds: List<String>): String? {
-        if (labelIds.contains("SENT")) return FOLDER_SENT
-        if (!labelIds.contains("INBOX")) return null
-        val excluded = setOf(
-            "CATEGORY_PROMOTIONS",
-            "CATEGORY_SOCIAL",
-            "CATEGORY_UPDATES",
-            "CATEGORY_FORUMS",
-            "SPAM",
-            "TRASH",
-            "DRAFT",
-        )
-        if (labelIds.any { it in excluded }) return null
+        if (labelIds.contains(LABEL_SENT)) return FOLDER_SENT
+        if (!labelIds.contains(LABEL_INBOX)) return null
+        if (labelIds.any { it in EXCLUDED_INBOX_LABELS }) return null
         return FOLDER_INBOX
     }
 
@@ -378,7 +370,8 @@ public class GmailWorker @AssistedInject constructor(
         }
         val rawEventId = (insertResult as BecalmResult.Success).value
 
-        val groupEmail = folder == FOLDER_SENT && msg.toAddresses.size > 10
+        val groupEmail = folder == FOLDER_SENT &&
+            EmailPersonRef.isGroupEmail(msg.toAddresses.size)
         val body = buildEmailBody(
             rawEventId = rawEventId,
             msg = msg,
@@ -414,20 +407,18 @@ public class GmailWorker @AssistedInject constructor(
 
     /**
      * Builds the [RawIngestionEventEntity] for this Gmail message. [personRef]
-     * is derived per folder (EMAIL-002): INBOX → From; SENT → To[0] when ≤ 10
-     * recipients, else null. [sourceRef] is a Moshi-serialised
-     * [SourceRefEnvelope] with null fields omitted.
+     * is derived via the shared [EmailPersonRef] helper per EMAIL-002.
+     * [sourceRef] is a Moshi-serialised [SourceRefEnvelope] with null fields
+     * omitted.
      */
     private fun GmailMessage.toRawEntity(
         userId: String,
         folder: String,
         snippet: String,
     ): RawIngestionEventEntity {
-        val personRef = when {
-            folder == FOLDER_SENT && toAddresses.size in 1..10 ->
-                canonicalizeEmail(toAddresses.first())
-            folder == FOLDER_SENT -> null
-            else -> from?.let(::canonicalizeEmail)
+        val personRef = when (folder) {
+            FOLDER_SENT -> EmailPersonRef.forSent(toAddresses)
+            else -> EmailPersonRef.forInbox(from)
         }
         val envelope = SourceRefEnvelope(
             messageId = messageIdHeader ?: messageId,
@@ -492,6 +483,27 @@ public class GmailWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "GmailWorker"
+
+        // Gmail system labels used for folder routing per EMAIL-001.
+        private const val LABEL_INBOX: String = "INBOX"
+        private const val LABEL_SENT: String = "SENT"
+
+        /**
+         * Gmail labels that disqualify a message from the INBOX ingestion pipeline
+         * per EMAIL-001 (`.spec/email-pipeline.spec.yml:15-18`): marketing categories
+         * (Promotions / Social / Updates / Forums), spam, trash, and drafts. Hoisted
+         * to a companion `val` so the set is constructed once per process rather
+         * than per message.
+         */
+        private val EXCLUDED_INBOX_LABELS: Set<String> = setOf(
+            "CATEGORY_PROMOTIONS",
+            "CATEGORY_SOCIAL",
+            "CATEGORY_UPDATES",
+            "CATEGORY_FORUMS",
+            "SPAM",
+            "TRASH",
+            "DRAFT",
+        )
     }
 }
 

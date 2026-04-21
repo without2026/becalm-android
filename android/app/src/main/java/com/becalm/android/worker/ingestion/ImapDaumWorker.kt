@@ -33,6 +33,7 @@ import com.becalm.android.data.remote.imap.ImapSpecialUse
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.worker.WorkScheduler
@@ -312,12 +313,8 @@ public class ImapDaumWorker @AssistedInject constructor(
     }
 
     private fun ImapMessage.derivePersonRef(mailboxKey: String): String? = when (mailboxKey) {
-        MAILBOX_DAUM_INBOX -> fromEmail?.let(::canonicalizeEmail)
-        MAILBOX_DAUM_SENT -> when {
-            toAddresses.isEmpty() -> null
-            toAddresses.size > GROUP_EMAIL_RECIPIENT_THRESHOLD -> null
-            else -> canonicalizeEmail(toAddresses.first())
-        }
+        MAILBOX_DAUM_INBOX -> EmailPersonRef.forInbox(fromEmail)
+        MAILBOX_DAUM_SENT -> EmailPersonRef.forSent(toAddresses)
         else -> null
     }
 
@@ -333,7 +330,7 @@ public class ImapDaumWorker @AssistedInject constructor(
             subject = message.subject,
         )
         val isGroupEmail = mailboxKey == MAILBOX_DAUM_SENT &&
-            message.toAddresses.size > GROUP_EMAIL_RECIPIENT_THRESHOLD
+            EmailPersonRef.isGroupEmail(message.toAddresses.size)
 
         val body = EmailBodyEntity(
             id = UUID.randomUUID().toString(),
@@ -441,12 +438,6 @@ public class ImapDaumWorker @AssistedInject constructor(
 
         /** Upper bound on message age for cold-start / rebuild passes (ING-013). */
         internal const val SINCE_DAYS: Int = 30
-
-        /**
-         * SENT `toAddresses.size > this value` → personRef = null (group email
-         * quarantine) per EMAIL-002.
-         */
-        internal const val GROUP_EMAIL_RECIPIENT_THRESHOLD: Int = 10
 
         /**
          * `@UserPrefs` DataStore key for the current user's Supabase UUID.

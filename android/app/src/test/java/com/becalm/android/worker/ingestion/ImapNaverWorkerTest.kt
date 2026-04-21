@@ -59,7 +59,8 @@ import org.robolectric.RobolectricTestRunner
  *      `"naver"` key after migration).
  *  2. `sent personRefFromTo0` — SENT scope derives personRef from `toAddresses[0]`
  *      (EMAIL-002).
- *  3. `sent over10 groupEmailTrue` — > [GROUP_EMAIL_RECIPIENT_THRESHOLD] recipients
+ *  3. `sent over10 groupEmailTrue` — recipients above
+ *      [com.becalm.android.domain.email.EmailPersonRef.GROUP_EMAIL_RECIPIENT_THRESHOLD]
  *      yield `personRef == null` and `EmailBody.groupEmail == true`.
  *  4. `sourceRef uidFallback` — null `Message-Id` falls back to `"<uidValidity>:<uid>"`
  *      in the JSON envelope (EMAIL-005).
