@@ -1,7 +1,7 @@
 # UI / Commitment / Pull-to-Refresh — CMT-010 wiring
 
 **Branch**: `feat/ui/commitment` (umbrella)
-**Status**: PLAN ONLY — Wave 4 commit C3
+**Status**: IMPLEMENTED — Wave 4 commit C3.
 **E2E Stage**: 5 — Commitment Management
 **Severity**: Medium
 **Type**: Gap

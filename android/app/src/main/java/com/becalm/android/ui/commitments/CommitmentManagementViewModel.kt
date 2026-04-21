@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
@@ -88,13 +89,18 @@ public data class CommitmentRow(
  * @property items  Filtered, sorted list of [CommitmentRow] to display.
  * @property filter Currently active [CommitmentFilter].
  * @property loading True while the initial collection or a transition is in flight.
+ * @property refreshing True while a user-triggered pull-to-refresh fetch is in
+ *   flight (CMT-010). Drives the [PullRefreshIndicator] in the UI. Independent
+ *   from [loading] — the Room subscription stays hot during a refresh, so the
+ *   timeline rows remain on screen.
  * @property error  Human-readable error string from the last failed action, or null.
  */
-// spec: CMT-001
+// spec: CMT-001, CMT-010
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
     val filter: CommitmentFilter = CommitmentFilter.ALL,
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val error: String? = null,
 )
 
@@ -226,6 +232,41 @@ public class CommitmentManagementViewModel @Inject constructor(
                 filter = filter,
                 items = applyFilter(allEntities.value, filter, enrichmentMap.value),
             )
+        }
+    }
+
+    /**
+     * Handles pull-to-refresh from [CommitmentManagementScreen] (CMT-010).
+     *
+     * Calls [CommitmentRepository.refreshSince] with `since = null` (full refresh)
+     * for the current user; Room upsert then triggers the reactive subscription
+     * that re-renders the list. The active filter is preserved in the UI state,
+     * so the user sees the refreshed data under whichever tab they were on.
+     *
+     * Network failures surface via [CommitmentUiState.error]; the operation is
+     * idempotent and safe to retry. Concurrent presses are deduplicated by an
+     * early-return on the [CommitmentUiState.refreshing] flag.
+     */
+    // spec: CMT-010
+    public fun onPullRefresh() {
+        if (_uiState.value.refreshing) return
+        _uiState.update { it.copy(refreshing = true) }
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId == null) {
+                _uiState.update { it.copy(refreshing = false) }
+                return@launch
+            }
+            when (val result = commitmentRepository.refreshSince(userId, since = null)) {
+                is BecalmResult.Success ->
+                    _uiState.update { it.copy(refreshing = false, error = null) }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "onPullRefresh failed: ${result.error}")
+                    _uiState.update {
+                        it.copy(refreshing = false, error = result.error.toString())
+                    }
+                }
+            }
         }
     }
 

@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +47,7 @@ import kotlinx.datetime.Instant
  * Due-today / overdue indicators surface as per-card DN badges, not top-level filters.
  * Each [CommitmentRow] is rendered via [CommitmentCard].
  * Error surfaced via [SnackbarHost].
+ * Pull-to-refresh (CMT-010) triggers [CommitmentManagementViewModel.onPullRefresh].
  *
  * spec: CMT-001..CMT-010
  *
@@ -50,6 +55,7 @@ import kotlinx.datetime.Instant
  * Navigation entry: [BecalmRoute.Commitments]
  * Navigation exit: none (leaf screen in this round)
  */
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
@@ -57,6 +63,10 @@ public fun CommitmentManagementScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val pullState = rememberPullRefreshState(
+        refreshing = state.refreshing,
+        onRefresh = viewModel::onPullRefresh,
+    )
 
     LaunchedEffect(state.error) {
         state.error?.let { err ->
@@ -83,44 +93,56 @@ public fun CommitmentManagementScreen(
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
             )
-            when {
-                state.loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pullRefresh(pullState),
+            ) {
+                when {
+                    state.loading -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
-                }
-                state.items.isEmpty() -> {
-                    EmptyState(
-                        title = stringResource(R.string.commitments_empty_title),
-                        message = stringResource(R.string.commitments_empty_message),
-                    )
-                }
-                else -> {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(items = state.items, key = { it.id }) { row ->
-                            CommitmentCard(
-                                title = row.title,
-                                direction = row.direction,
-                                derivedStatus = row.derivedStatus,
-                                dueAt = row.dueAt,
-                                counterpartyDisplayName = row.counterpartyDisplayName,
-                                dueIsApproximate = row.dueIsApproximate,
-                                dueHint = row.dueHint,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                // onMarkDone wiring is intentionally absent in Wave 4 —
-                                // card taps will surface CommitmentDetailSheet (C4) where
-                                // [리마인드]/[팔로업]/[완료]/[취소] live. Until that sheet lands,
-                                // users trigger transitions programmatically via the VM.
-                                onClick = {},
-                            )
+                    state.items.isEmpty() -> {
+                        EmptyState(
+                            title = stringResource(R.string.commitments_empty_title),
+                            message = stringResource(R.string.commitments_empty_message),
+                        )
+                    }
+                    else -> {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(items = state.items, key = { it.id }) { row ->
+                                CommitmentCard(
+                                    title = row.title,
+                                    direction = row.direction,
+                                    derivedStatus = row.derivedStatus,
+                                    dueAt = row.dueAt,
+                                    counterpartyDisplayName = row.counterpartyDisplayName,
+                                    dueIsApproximate = row.dueIsApproximate,
+                                    dueHint = row.dueHint,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    // onMarkDone wiring is intentionally absent in Wave 4 —
+                                    // card taps will surface CommitmentDetailSheet (C4) where
+                                    // [리마인드]/[팔로업]/[완료]/[취소] live. Until that sheet lands,
+                                    // users trigger transitions programmatically via the VM.
+                                    onClick = {},
+                                )
+                            }
                         }
                     }
                 }
+
+                PullRefreshIndicator(
+                    refreshing = state.refreshing,
+                    state = pullState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
             }
         }
     }

@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.reminder.ReminderScheduler
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -377,6 +378,101 @@ class CommitmentManagementViewModelTest {
             assertNull(afterDismiss.error)
 
             cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // ── Test 9: onPullRefresh ─ CMT-010 ───────────────────────────────────────
+
+    @Test
+    fun `onPullRefresh sets refreshing while the fetch is in flight then clears it on success`() = runTest {
+        viewModel = buildViewModel()
+
+        coEvery {
+            commitmentRepository.refreshSince("user-1", since = null)
+        } returns BecalmResult.Success(
+            CommitmentRepository.RefreshStats(
+                fetched = 0,
+                upserted = 0,
+                hasMore = false,
+                nextCursor = null,
+            ),
+        )
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        val settled = viewModel.uiState.value
+        assertEquals(false, settled.refreshing)
+        assertNull(settled.error)
+    }
+
+    @Test
+    fun `onPullRefresh surfaces network failure and clears refreshing`() = runTest {
+        viewModel = buildViewModel()
+
+        coEvery {
+            commitmentRepository.refreshSince("user-1", since = null)
+        } returns BecalmResult.Failure(BecalmError.Network(code = 0, message = "offline"))
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(false, state.refreshing)
+        assertNotNull(state.error)
+    }
+
+    @Test
+    fun `onPullRefresh preserves the active filter`() = runTest {
+        val giveEntity = makeEntity(id = "g-1", direction = "give")
+        val takeEntity = makeEntity(id = "t-1", direction = "take")
+        every { commitmentRepository.observeAllForUser("user-1") } returns
+            flowOf(listOf(giveEntity, takeEntity))
+
+        coEvery {
+            commitmentRepository.refreshSince("user-1", since = null)
+        } returns BecalmResult.Success(
+            CommitmentRepository.RefreshStats(
+                fetched = 2,
+                upserted = 2,
+                hasMore = false,
+                nextCursor = null,
+            ),
+        )
+
+        viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.onFilterChange(CommitmentFilter.GIVE)
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(CommitmentFilter.GIVE, state.filter)
+        assertTrue(state.items.all { it.direction == "give" })
+    }
+
+    @Test
+    fun `onPullRefresh deduplicates concurrent presses`() = runTest {
+        viewModel = buildViewModel()
+
+        coEvery {
+            commitmentRepository.refreshSince("user-1", since = null)
+        } returns BecalmResult.Success(
+            CommitmentRepository.RefreshStats(
+                fetched = 0,
+                upserted = 0,
+                hasMore = false,
+                nextCursor = null,
+            ),
+        )
+
+        viewModel.onPullRefresh()
+        viewModel.onPullRefresh() // second press while first still in-flight
+        advanceUntilIdle()
+
+        // Only one round-trip should have been issued.
+        coVerify(exactly = 1) {
+            commitmentRepository.refreshSince("user-1", since = null)
         }
     }
 
