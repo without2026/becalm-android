@@ -17,6 +17,7 @@ import com.becalm.android.data.remote.dto.CalendarEventListResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
@@ -284,6 +285,12 @@ class SourceStatusRepositoryTest {
             id: String,
             idem: String,
             request: PatchCommitmentRequest,
+        ): Response<SingleCommitmentResponse> = notImplemented()
+
+        override suspend fun updateCommitment(
+            id: String,
+            idem: String,
+            request: CommitmentPatchDto,
         ): Response<SingleCommitmentResponse> = notImplemented()
 
         override suspend fun uploadCommitmentsBatch(

@@ -137,6 +137,108 @@
     <string name="commitments_empty_title">No commitments</string>
     <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
 
+    <!-- Commitment action_state labels (CMT-005..012) -->
+    <string name="commitment_state_pending">미확인</string>
+    <string name="commitment_state_reminded">리마인드됨</string>
+    <string name="commitment_state_followed_up">팔로업됨</string>
+    <string name="commitment_state_completed">완료</string>
+    <string name="commitment_state_overdue">놓침</string>
+    <string name="commitment_state_cancelled">취소됨</string>
+
+    <!-- Commitment detail sheet (CMT-003 + EDIT-008 + MAN-004) -->
+    <string name="commitment_detail_title">약속 상세</string>
+    <string name="commitment_detail_quote_label">원문</string>
+    <string name="commitment_detail_counterparty_label">상대방</string>
+    <string name="commitment_detail_due_label">마감</string>
+    <string name="commitment_detail_last_edited_fmt">마지막 수정: %1$s (본인)</string>
+    <string name="commitment_detail_disputed_badge_fmt">⚠ 원문 이의 제기됨 (%1$s)</string>
+    <string name="commitment_detail_superseded_link">이전 약속 보기</string>
+    <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
+    <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
+    <string name="commitment_detail_empty_error">삭제된 약속</string>
+
+    <!-- Commitment action buttons (CMT-005..012 + EDIT-001) -->
+    <string name="commitment_action_remind">리마인드</string>
+    <string name="commitment_action_follow_up">팔로업</string>
+    <string name="commitment_action_complete">완료</string>
+    <string name="commitment_action_cancel">취소</string>
+    <string name="commitment_action_edit">편집</string>
+
+    <!-- Manual-create / supersede sheet (MAN-001..006 + EDIT-007) -->
+    <string name="commitment_fab_add">+ 약속 추가</string>
+    <string name="commitment_fab_add_content_desc">새 약속 추가</string>
+    <string name="commitment_manual_badge">📝 수동 추가</string>
+    <string name="commitment_manual_sheet_title_new">약속 추가</string>
+    <string name="commitment_manual_sheet_title_supersede">다른 약속으로 교체</string>
+    <string name="commitment_manual_quote_hint">상대의 약속 내용을 메모하세요 (1~500자)</string>
+    <string name="commitment_manual_supersede_quote_label">원문 (수정 불가)</string>
+    <string name="commitment_manual_no_due_date">마감 없음</string>
+    <string name="commitment_manual_source_manual_fmt">사용자 직접 추가 %1$s KST</string>
+    <string name="commitment_manual_error_title">제목을 1~200자로 입력해주세요</string>
+    <string name="commitment_manual_error_direction">방향을 선택해주세요</string>
+    <string name="commitment_manual_error_quote">약속 맥락을 1~500자로 입력해주세요</string>
+    <string name="commitment_manual_error_person_ref">전화번호는 E.164(+821012345678) 형식이어야 합니다</string>
+    <string name="commitment_manual_save">저장</string>
+    <string name="commitment_manual_cancel">취소</string>
+    <string name="commitment_manual_field_title">제목</string>
+    <string name="commitment_manual_field_direction_give">내가 한 약속</string>
+    <string name="commitment_manual_field_direction_take">상대가 한 약속</string>
+    <string name="commitment_manual_field_person_ref">상대방 (선택)</string>
+    <string name="commitment_manual_field_due_pick">마감 선택</string>
+    <string name="commitment_manual_field_due_hint">원문 표현 (예: 월말)</string>
+    <string name="commitment_manual_field_due_approximate">대략적</string>
+    <string name="commitment_manual_save_failure">저장 실패 — 다시 시도해주세요</string>
+
+    <!-- Commitment edit sheet (EDIT-001..008) -->
+    <string name="commitment_edit_title">약속 편집</string>
+    <string name="commitment_edit_field_title">제목</string>
+    <string name="commitment_edit_field_due">마감</string>
+    <string name="commitment_edit_field_due_pick">마감 시간 선택</string>
+    <string name="commitment_edit_field_due_clear">마감 지우기</string>
+    <string name="commitment_edit_field_due_approximate">대략적</string>
+    <string name="commitment_edit_field_due_hint">원문 표현 (예: 내일 오후)</string>
+    <string name="commitment_edit_field_person">상대방</string>
+    <string name="commitment_edit_field_person_placeholder">전화번호 또는 이름</string>
+    <string name="commitment_edit_field_direction">방향</string>
+    <string name="commitment_edit_field_direction_give">내가 한 약속</string>
+    <string name="commitment_edit_field_direction_take">상대가 한 약속</string>
+    <string name="commitment_edit_readonly_quote_label">원문 (수정 불가 — 법적 증거)</string>
+    <string name="commitment_edit_readonly_quote_disputed">이의 제기됨</string>
+    <string name="commitment_edit_toggle_dispute">원문 이의 제기 토글</string>
+    <string name="commitment_edit_toggle_dispute_on">이의 제기</string>
+    <string name="commitment_edit_toggle_dispute_off">이의 해제</string>
+    <string name="commitment_edit_save">저장</string>
+    <string name="commitment_edit_cancel">취소</string>
+    <string name="commitment_edit_delete">삭제</string>
+    <string name="commitment_edit_delete_confirm_title">약속을 삭제하시겠습니까?</string>
+    <string name="commitment_edit_delete_confirm_body">이 약속은 목록에서 숨겨집니다. (상대가 이행하지 않아 기록만 남기고 싶으면 대신 \"취소\"를 사용하세요.)</string>
+    <string name="commitment_edit_delete_confirm_ok">삭제</string>
+    <string name="commitment_edit_delete_confirm_cancel">취소</string>
+    <string name="commitment_edit_error_title_required">제목을 입력해주세요</string>
+    <string name="commitment_edit_error_title_too_long">제목은 200자 이하여야 합니다</string>
+    <string name="commitment_edit_error_person_ref_invalid">전화번호 형식이 올바르지 않습니다 (+821012345678)</string>
+    <string name="commitment_edit_error_direction_required">방향을 선택해주세요</string>
+    <string name="commitment_edit_saving">저장 중…</string>
+    <string name="commitment_edit_save_failed">저장 실패. 다시 시도해주세요.</string>
+
+    <!-- Commitment management screen sections (CMT-009) -->
+    <string name="commitment_section_active_fmt">진행 중 (%1$d)</string>
+    <string name="commitment_section_completed_fmt">이행 완료 (%1$d)</string>
+    <string name="commitment_section_cancelled_fmt">취소된 약속 (%1$d)</string>
+    <string name="commitment_section_expand_desc">섹션 펼치기/접기</string>
+
+    <!-- Commitment undo snackbar (CMT-013) -->
+    <string name="commitment_undo_completed">완료 처리됨</string>
+    <string name="commitment_undo_cancelled">취소 처리됨</string>
+    <string name="commitment_undo_action">복구</string>
+
+    <!-- Commitment reminder alarm (CMT-005 + CMT-008) -->
+    <string name="commitment_alarm_title">곧 마감되는 약속 (1시간 뒤)</string>
+    <string name="commitment_alarm_body_give_fmt">내가 한 약속: %1$s</string>
+    <string name="commitment_alarm_body_take_fmt">상대가 한 약속: %1$s</string>
+    <string name="commitment_channel_due_soon_name">곧 마감 리마인더</string>
+    <string name="commitment_channel_due_soon_desc">약속 마감 1시간 전 알림</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_account_section">Account</string>

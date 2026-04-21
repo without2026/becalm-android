@@ -11,6 +11,9 @@ import androidx.navigation.navArgument
 import com.becalm.android.ui.auth.LoginScreen
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsScreen
+import com.becalm.android.ui.commitments.CommitmentCreateSheet
+import com.becalm.android.ui.commitments.CommitmentDetailSheet
+import com.becalm.android.ui.commitments.CommitmentEditSheet
 import com.becalm.android.ui.commitments.CommitmentManagementScreen
 import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
 import com.becalm.android.ui.onboarding.ColdSyncScreen
@@ -178,7 +181,62 @@ public fun BecalmNavHost(
         }
 
         composable(route = BecalmRoute.Commitments.path) {
-            CommitmentManagementScreen()
+            CommitmentManagementScreen(
+                onOpenDetail = { id ->
+                    navController.navigate(BecalmRoute.CommitmentDetail(id).path)
+                },
+                onOpenCreate = {
+                    navController.navigate(BecalmRoute.CommitmentCreate(null).path)
+                },
+            )
+        }
+
+        // MAN-001..006 + EDIT-007: manual-create / supersede-create sheet.
+        // `supersedeOf` is declared nullable with defaultValue=null so the
+        // plain FAB navigation path (`commitments/new`) matches the same
+        // destination as the supersede path (`commitments/new?supersedeOf=...`).
+        composable(
+            route = BecalmRoute.CommitmentCreate.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.CommitmentCreate.ARG_SUPERSEDE_OF) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            val supersedeOf = backStackEntry.stringArg(BecalmRoute.CommitmentCreate.ARG_SUPERSEDE_OF)
+            CommitmentCreateSheet(
+                supersedeOf = supersedeOf,
+                onDismiss = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = BecalmRoute.CommitmentDetail.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.CommitmentDetail.ARG_ID) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val id = backStackEntry.stringArg(BecalmRoute.CommitmentDetail.ARG_ID).orEmpty()
+            CommitmentDetailSheet(
+                commitmentId = id,
+                onDismiss = { navController.popBackStack() },
+                onEdit = { navController.navigate(BecalmRoute.CommitmentEdit(id).path) },
+            )
+        }
+
+        composable(
+            route = BecalmRoute.CommitmentEdit.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.CommitmentEdit.ARG_ID) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val id = backStackEntry.stringArg(BecalmRoute.CommitmentEdit.ARG_ID).orEmpty()
+            CommitmentEditSheet(
+                commitmentId = id,
+                onDismiss = { navController.popBackStack() },
+            )
         }
 
         // ── Settings ───────────────────────────────────────────────────────────

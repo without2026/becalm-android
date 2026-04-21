@@ -1,40 +1,65 @@
 package com.becalm.android.receiver
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.becalm.android.MainActivity
+import com.becalm.android.R
+import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
+import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.domain.commitment.CommitmentState
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Receives alarm broadcasts from [com.becalm.android.domain.reminder.ReminderScheduler]
- * and posts a notification to the user.
+ * and posts a `commitment_due_soon` notification — after re-querying Room to confirm the
+ * commitment is still actionable (CMT-008).
+ *
+ * ## Silent-drop (CMT-008 MUST-NOT)
+ * The receiver re-queries [CommitmentDao.findById] on each broadcast and drops
+ * (no notification posted) when:
+ *  - the row is missing (deleted / soft-deleted), or
+ *  - `action_state ∈ (completed, cancelled)`.
+ *
+ * This prevents ghost reminders after the user has already acted on the commitment
+ * since the alarm was set.
  *
  * ## PIPA
- * Notification content is intentionally generic — the body never contains commitment
- * text, names, or any personally identifiable information. Only the commitment ID is
- * carried in the tap deep-link intent extra so MainActivity can open the correct item.
+ * The notification body only surfaces the commitment title (already user-visible in
+ * the app UI). Quote, person, and counterparty PII are not passed through the
+ * notification. The tap deep link carries only the commitment ID.
  *
  * ## Channel lifecycle
- * [NotificationManager.createNotificationChannel] is idempotent on API 26+; calling it
- * on every broadcast is safe and avoids a separate channel-initialisation step.
+ * The `commitment_due_soon` channel is registered in
+ * [com.becalm.android.BecalmApplication.onCreate] at process start.
  */
 @AndroidEntryPoint
-public class ReminderBroadcastReceiver : BroadcastReceiver() {
+public open class ReminderBroadcastReceiver : BroadcastReceiver() {
+
+    @Inject
+    public lateinit var commitmentDao: CommitmentDao
+
+    @Inject
+    public lateinit var logger: Logger
 
     override fun onReceive(context: Context, intent: Intent) {
         val commitmentId = intent.getStringExtra(EXTRA_COMMITMENT_ID) ?: return
+        val scheduledUserId = intent.getStringExtra(EXTRA_USER_ID).orEmpty()
 
         // Finding 4 (security-auditor): POST_NOTIFICATIONS is a runtime permission on API 33+.
         // Skip notification silently rather than crash; log WARN with redacted ID for diagnostics.
@@ -44,18 +69,94 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
                     android.Manifest.permission.POST_NOTIFICATIONS,
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                Log.w(TAG, "POST_NOTIFICATIONS not granted — notify skipped for commitmentId_hash=${redact(commitmentId)}")
+                logger.w(
+                    TAG,
+                    "POST_NOTIFICATIONS not granted — notify skipped for " +
+                        "commitmentId_hash=${redact(commitmentId)}",
+                )
                 return
             }
         }
 
-        ensureChannelCreated(context)
+        // Extend the receiver's lifetime up to 10 seconds (Android platform cap) so we
+        // can re-query Room on IO and post the notification on the main thread.
+        val pending = goAsync()
+        receiverScope.launch {
+            try {
+                handle(context, commitmentId, scheduledUserId)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
 
+    /**
+     * Business logic extracted for unit testability. Suspend so tests can drive it
+     * inside `runTest { }` without a live [goAsync]/`PendingResult` pair — the real
+     * `onReceive` wires it to goAsync().
+     *
+     * Re-queries Room for the live [commitmentId]; silently drops the broadcast when
+     * the row is missing or in a terminal state (CMT-008). Otherwise posts the
+     * `commitment_due_soon` notification.
+     */
+    internal suspend fun handle(
+        context: Context,
+        commitmentId: String,
+        scheduledUserId: String,
+    ) {
+        if (scheduledUserId.isBlank()) {
+            // An alarm without a captured owner predates the user-scoping fix
+            // (data-model.yml:476). Silently drop rather than query unscoped —
+            // a stale alarm is cheap; surfacing another account's commitment is
+            // not.
+            logger.w(
+                TAG,
+                "silent drop: alarm missing scheduled user_id for " +
+                    "commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
+        val entity = commitmentDao.findByIdForUser(scheduledUserId, commitmentId)
+        if (entity == null) {
+            logger.d(
+                TAG,
+                "silent drop: entity missing for commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
+        val state = CommitmentState.fromWire(entity.actionState)
+        if (state in TERMINAL_STATES) {
+            logger.d(
+                TAG,
+                "silent drop: state=$state for commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
+
+        postNotification(context, commitmentId, entity.title, entity.direction)
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Open + internal so MockK spy-tests can override it to avoid booting the
+     * real Resources / NotificationCompat path — the [handle] contract is
+     * what CMT-008 specifies; the notification composition itself is covered
+     * by instrumented tests when available.
+     */
+    internal open fun postNotification(
+        context: Context,
+        commitmentId: String,
+        title: String,
+        direction: String,
+    ) {
         val notificationId = commitmentIdToNotificationId(commitmentId)
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val deepLink = Uri.parse("becalm://commitments/$commitmentId")
+        val tapIntent = Intent(Intent.ACTION_VIEW, deepLink).apply {
+            setPackage(context.packageName)
+            setClass(context, MainActivity::class.java)
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_COMMITMENT_ID, commitmentId)
         }
         val tapPendingIntent = PendingIntent.getActivity(
             context,
@@ -64,30 +165,22 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val bodyResId = when (direction) {
+            "give" -> R.string.commitment_alarm_body_give_fmt
+            else -> R.string.commitment_alarm_body_take_fmt
+        }
+        val body = context.getString(bodyResId, title)
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(NOTIFICATION_TITLE)
-            .setContentText(NOTIFICATION_BODY)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentTitle(context.getString(R.string.commitment_alarm_title))
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(tapPendingIntent)
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun ensureChannelCreated(context: Context) {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            CHANNEL_NAME,
-            NotificationManager.IMPORTANCE_DEFAULT,
-        )
-        manager.createNotificationChannel(channel)
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
@@ -96,18 +189,38 @@ public class ReminderBroadcastReceiver : BroadcastReceiver() {
         /** Intent extra key carrying the opaque commitment identifier. */
         public const val EXTRA_COMMITMENT_ID: String = "commitment_id"
 
+        /**
+         * Intent extra key carrying the user id that owned the commitment at
+         * schedule time. Captured by [com.becalm.android.domain.reminder.ReminderScheduler]
+         * when the alarm is armed; the receiver passes it to the user-scoped
+         * `findByIdForUser` DAO query to rule out cross-account leaks
+         * (data-model.yml:476). A missing / blank value causes a silent drop.
+         */
+        public const val EXTRA_USER_ID: String = "user_id"
+
+        /**
+         * Notification channel ID used by the `commitment_due_soon` channel. Registered
+         * in [com.becalm.android.BecalmApplication.onCreate]. Also referenced by
+         * `NotificationManager.IMPORTANCE_HIGH` in the channel definition.
+         */
+        public const val CHANNEL_ID: String = "commitment_due_soon"
+
         private const val TAG = "ReminderBroadcastReceiver"
-        private const val CHANNEL_ID = "reminders"
-        private const val CHANNEL_NAME = "리마인더"
-        private const val NOTIFICATION_TITLE = "BeCalm 약속 알림"
-        private const val NOTIFICATION_BODY = "확인할 약속이 있습니다."
+
+        private val TERMINAL_STATES =
+            setOf(CommitmentState.COMPLETED, CommitmentState.CANCELLED)
+
+        /**
+         * Scope for the goAsync() coroutine. [SupervisorJob] prevents a single failing
+         * broadcast from cancelling subsequent ones; [Dispatchers.IO] is appropriate for
+         * Room disk access, and the Android notification-post path is thread-safe.
+         */
+        private val receiverScope: CoroutineScope =
+            CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         /**
          * Derives a stable notification ID from [commitmentId] matching the request code used
          * in [com.becalm.android.domain.reminder.ReminderScheduler.commitmentIdToRequestCode].
-         *
-         * Production IDs are UUIDs; use top 31 bits of the most-significant long.
-         * Non-UUID IDs fall back to [String.hashCode] masked to 31 bits.
          */
         private fun commitmentIdToNotificationId(commitmentId: String): Int =
             try {

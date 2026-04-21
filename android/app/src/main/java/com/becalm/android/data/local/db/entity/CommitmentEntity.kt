@@ -4,7 +4,6 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import com.becalm.android.domain.commitment.CommitmentState
 import kotlinx.datetime.Instant
 
 /**
@@ -66,9 +65,15 @@ import kotlinx.datetime.Instant
  *   Null when no stable external reference exists.
  * @property confidence LLM confidence score for this extraction, in [0.0, 1.0].
  *   Higher values indicate greater extraction confidence. Default: 0.0.
- * @property commitmentState SP-36 lifecycle state managed by [com.becalm.android.domain.commitment.CommitmentStateMachine].
- *   Stored as a TEXT column containing the [CommitmentState] name (e.g. "DRAFT").
- *   Default: [CommitmentState.DRAFT]. Added in DB migration 1 → 2.
+ * @property commitmentState **Dead column** retained for Room schema parity only.
+ *   Historically held the SP-36 legacy lifecycle state (DRAFT / CONFIRMED / SCHEDULED /
+ *   DONE / DISMISSED); as of Wave 4 the spec-aligned lifecycle lives on
+ *   [actionState] and is consumed via
+ *   [com.becalm.android.domain.commitment.CommitmentState]. No production code reads
+ *   or writes this field beyond Room serialization — a future
+ *   `db-commitment-drop-commitment-state-column` migration will drop the underlying
+ *   TEXT column entirely. Typed as [CommitmentLifecycleLegacy] purely so Room can
+ *   still decode rows written by pre-Wave-4 app versions.
  * @property syncStatus Room-only tracking column for Railway upload state.
  *   Valid values: "pending" | "synced" | "failed". Never uploaded to Supabase.
  *   Default: "pending".
@@ -189,7 +194,7 @@ public data class CommitmentEntity(
     val confidence: Double = 0.0,
 
     @ColumnInfo(name = "commitment_state", defaultValue = "DRAFT")
-    val commitmentState: CommitmentState = CommitmentState.DRAFT,
+    val commitmentState: CommitmentLifecycleLegacy = CommitmentLifecycleLegacy.DRAFT,
 
     @ColumnInfo(name = "sync_status", defaultValue = "pending")
     val syncStatus: String = "pending",

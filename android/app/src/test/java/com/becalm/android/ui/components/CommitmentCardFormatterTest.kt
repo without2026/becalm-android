@@ -1,7 +1,10 @@
 package com.becalm.android.ui.components
 
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -76,5 +79,43 @@ class CommitmentCardFormatterTest {
         // Blank strings would render as an empty line; treat as absent.
         assertFalse(shouldShowDueHint(dueIsApproximate = true, dueHint = ""))
         assertFalse(shouldShowDueHint(dueIsApproximate = true, dueHint = "   "))
+    }
+
+    // ─── daysUntilInKst — KST midnight boundary ────────────────────────────────
+    // Pins commitment-management.spec.yml:40 "KST local date" contract. The
+    // historical regression (CommitmentCard.kt had `JLocalDate.now(ZoneOffset.UTC)`)
+    // would misreport one day for any dueAt crossed during KST 00:00–09:00,
+    // because that window is still the prior calendar date in UTC.
+
+    private val kst = TimeZone.of("Asia/Seoul")
+
+    @Test
+    fun `daysUntilInKst returns null when dueAt is null`() {
+        assertNull(daysUntilInKst(dueAt = null, now = Instant.parse("2026-04-18T00:00:00+09:00"), zone = kst))
+    }
+
+    @Test
+    fun `daysUntilInKst reports D-1 just before KST midnight for next-day due`() {
+        // Now: KST 2026-04-17 23:30 (= UTC 2026-04-17 14:30). Due: KST 2026-04-18 00:00.
+        // KST boundary → tomorrow → 1. Under UTC this would incorrectly return 0.
+        val now = Instant.parse("2026-04-17T23:30:00+09:00")
+        val due = Instant.parse("2026-04-18T00:00:00+09:00")
+        assertEquals(1, daysUntilInKst(dueAt = due, now = now, zone = kst))
+    }
+
+    @Test
+    fun `daysUntilInKst reports D-0 just after KST midnight for same-day due`() {
+        // Now: KST 2026-04-18 00:30. Due: KST 2026-04-18 10:00. Same KST date → 0.
+        // Under UTC (where "today" is still 2026-04-17) this would return 1.
+        val now = Instant.parse("2026-04-18T00:30:00+09:00")
+        val due = Instant.parse("2026-04-18T10:00:00+09:00")
+        assertEquals(0, daysUntilInKst(dueAt = due, now = now, zone = kst))
+    }
+
+    @Test
+    fun `daysUntilInKst reports D+N for overdue`() {
+        val now = Instant.parse("2026-04-20T09:00:00+09:00")
+        val due = Instant.parse("2026-04-18T15:00:00+09:00")
+        assertEquals(-2, daysUntilInKst(dueAt = due, now = now, zone = kst))
     }
 }

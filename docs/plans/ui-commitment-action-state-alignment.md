@@ -1,7 +1,7 @@
 # UI / Commitment / action-state-alignment — SP-36 CommitmentState 와 스펙 action_state 의 dual state machine 정렬
 
 **Branch**: `feat/ui/commitment`
-**Status**: PLAN ONLY — 구현은 별도 세션.
+**Status**: IMPLEMENTED — Wave 4 commit C2.
 **E2E Stage**: 5 — CommitmentManagement 화면 렌더
 **Severity**: **Critical** (UI 가 스펙 action_state 값을 표시·전이하지 않음. [리마인드]/[팔로업]/[취소] 버튼이 아예 없고 `DRAFT/CONFIRMED/SCHEDULED/DONE/DISMISSED` 라는 스펙 없는 label 이 사용자에게 노출됨)
 **Type**: Drift (아키텍처 레벨 — dual state machine)

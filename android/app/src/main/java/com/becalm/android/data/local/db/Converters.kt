@@ -1,7 +1,7 @@
 package com.becalm.android.data.local.db
 
 import androidx.room.TypeConverter
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -90,29 +90,36 @@ public class Converters {
     public fun toLocalDate(value: String?): LocalDate? =
         value?.let { LocalDate.parse(it) }
 
-    // ─── CommitmentState ↔ String (enum name) ────────────────────────────────
+    // ─── CommitmentLifecycleLegacy ↔ String (enum name) ──────────────────────
 
     /**
-     * Encodes a [CommitmentState] as its enum [name] for SQLite TEXT storage.
+     * Encodes a [CommitmentLifecycleLegacy] as its enum [name] for SQLite TEXT storage.
      *
-     * @param value The [CommitmentState] to encode, or null.
+     * This converter backs the dead `commitments.commitment_state` column; it is
+     * preserved only so Room can still round-trip rows written by pre-Wave-4 app
+     * versions. New code should rely on [CommitmentEntity.actionState] instead.
+     *
+     * @param value The [CommitmentLifecycleLegacy] to encode, or null.
      * @return The enum name (e.g. "DRAFT"), or null when [value] is null.
      */
     @TypeConverter
-    public fun fromCommitmentState(value: CommitmentState?): String? = value?.name
+    public fun fromCommitmentLifecycleLegacy(value: CommitmentLifecycleLegacy?): String? = value?.name
 
     /**
-     * Reconstructs a [CommitmentState] from its stored enum name.
+     * Reconstructs a [CommitmentLifecycleLegacy] from its stored enum name.
      *
-     * Falls back to [CommitmentState.DRAFT] when the stored string is unrecognized,
-     * so that a future server-side state unknown to an older app version does not crash.
+     * Falls back to [CommitmentLifecycleLegacy.DRAFT] when the stored string is
+     * unrecognized, so that a stored value unknown to this app version does not crash.
      *
      * @param value The stored string (e.g. "DRAFT"), or null.
-     * @return The decoded [CommitmentState], or null when [value] is null.
+     * @return The decoded [CommitmentLifecycleLegacy], or null when [value] is null.
      */
     @TypeConverter
-    public fun toCommitmentState(value: String?): CommitmentState? =
-        value?.let { runCatching { CommitmentState.valueOf(it) }.getOrDefault(CommitmentState.DRAFT) }
+    public fun toCommitmentLifecycleLegacy(value: String?): CommitmentLifecycleLegacy? =
+        value?.let {
+            runCatching { CommitmentLifecycleLegacy.valueOf(it) }
+                .getOrDefault(CommitmentLifecycleLegacy.DRAFT)
+        }
 
     // ─── LocalDateTime ↔ String (ISO "YYYY-MM-DDTHH:MM:SS") ──────────────────
 

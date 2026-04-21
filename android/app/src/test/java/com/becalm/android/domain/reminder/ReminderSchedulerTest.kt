@@ -4,27 +4,33 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
+import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.verify
+import kotlin.time.Duration.Companion.hours
+import kotlinx.datetime.Instant
 import org.junit.Before
 import org.junit.Test
-import kotlinx.datetime.Instant
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Unit tests for [ReminderScheduler].
+ * Unit tests for [ReminderScheduler] after the CMT-005 realignment.
  *
- * Robolectric provides a real [Context] and shadows [AlarmManager] / [PendingIntent]
- * so we can verify the correct AlarmManager API is called without a device.
+ * The scheduler now owns the `dueAt − 1h` calculation and the null / past-trigger
+ * gates; these tests pin the new contract:
+ *  - `dueAt == null` → no alarm is scheduled.
+ *  - `dueAt − 1h ≤ now` → no alarm is scheduled.
+ *  - `dueAt − 1h > now` → `setExactAndAllowWhileIdle` fires with the correct
+ *    trigger epoch-millis and an immutable PendingIntent.
  *
- * MockK is used for [Logger] verification; [AlarmManager] is obtained through the
- * Robolectric shadow and spied upon where needed.
+ * Robolectric provides a real [Context] shell; [AlarmManager] is fully mocked so we can
+ * verify the exact API calls.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [Build.VERSION_CODES.S])
@@ -33,6 +39,8 @@ class ReminderSchedulerTest {
     private lateinit var context: Context
     private lateinit var alarmManager: AlarmManager
     private lateinit var logger: Logger
+    private lateinit var clock: Clock
+    private lateinit var userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore
     private lateinit var scheduler: ReminderScheduler
 
     @Before
@@ -40,59 +48,106 @@ class ReminderSchedulerTest {
         context = mockk(relaxed = true)
         alarmManager = mockk(relaxed = true)
         logger = mockk(relaxed = true)
+        clock = mockk(relaxed = true)
+        userPrefsStore = mockk(relaxed = true)
 
         every { context.getSystemService(Context.ALARM_SERVICE) } returns alarmManager
+        every { alarmManager.canScheduleExactAlarms() } returns true
+        every { clock.nowInstant() } returns NOW
+        every { userPrefsStore.observeCurrentUserId() } returns
+            kotlinx.coroutines.flow.flowOf("user-1")
 
-        scheduler = ReminderScheduler(context, logger)
+        scheduler = ReminderScheduler(context, clock, userPrefsStore, logger)
     }
 
-    // ── schedule() ────────────────────────────────────────────────────────────
+    // ── schedule() gate cases ─────────────────────────────────────────────────
 
-    /**
-     * On API 31+ when canScheduleExactAlarms() returns true, schedule() must call
-     * setExactAndAllowWhileIdle and must NOT call setAndAllowWhileIdle.
-     */
+    /** Case A: dueAt is null → no alarm is scheduled. */
     @Test
-    fun `schedule on API 31+ with canScheduleExactAlarms true calls setExactAndAllowWhileIdle`() {
-        every { alarmManager.canScheduleExactAlarms() } returns true
+    fun `schedule with dueAt null is a no-op`() {
+        scheduler.schedule(COMMITMENT_ID, dueAt = null)
 
-        scheduler.schedule(COMMITMENT_ID, TRIGGER_INSTANT)
+        verify(exactly = 0) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { alarmManager.setAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { alarmManager.setWindow(any(), any(), any(), any<PendingIntent>()) }
+    }
+
+    /** Case B: triggerAt (dueAt - 1h) is in the past → no alarm. */
+    @Test
+    fun `schedule with dueAt in the past is a no-op`() {
+        val pastDueAt = NOW.minus(1.hours) // trigger would be NOW - 2h, clearly past
+
+        scheduler.schedule(COMMITMENT_ID, dueAt = pastDueAt)
+
+        verify(exactly = 0) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { alarmManager.setWindow(any(), any(), any(), any<PendingIntent>()) }
+    }
+
+    /** Case B': triggerAt exactly equals now → still skipped (≤ not <). */
+    @Test
+    fun `schedule with dueAt exactly one hour from now is a no-op`() {
+        val edgeDueAt = NOW.plus(1.hours)
+
+        scheduler.schedule(COMMITMENT_ID, dueAt = edgeDueAt)
+
+        verify(exactly = 0) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
+    }
+
+    // ── schedule() happy path ─────────────────────────────────────────────────
+
+    /** Case C: dueAt is 2h in the future → setExactAndAllowWhileIdle fires. */
+    @Test
+    fun `schedule with dueAt in the future fires exact alarm at dueAt minus 1h`() {
+        val dueAt = NOW.plus(2.hours)
+        val expectedTriggerMs = dueAt.minus(1.hours).toEpochMilliseconds()
+
+        val triggerSlot = slot<Long>()
+        every {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                capture(triggerSlot),
+                any(),
+            )
+        } returns Unit
+
+        scheduler.schedule(COMMITMENT_ID, dueAt = dueAt)
 
         verify(exactly = 1) {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
-                TRIGGER_INSTANT.toEpochMilliseconds(),
+                expectedTriggerMs,
                 any(),
             )
         }
-        verify(exactly = 0) { alarmManager.setAndAllowWhileIdle(any(), any(), any()) }
+        verify(exactly = 0) { alarmManager.setWindow(any(), any(), any(), any<PendingIntent>()) }
+        assert(triggerSlot.captured == expectedTriggerMs) {
+            "Expected triggerMs=$expectedTriggerMs, was ${triggerSlot.captured}"
+        }
     }
 
-    /**
-     * When canScheduleExactAlarms() returns false, schedule() must fall back to
-     * setAndAllowWhileIdle and log a WARN with a redacted commitment ID.
-     */
+    /** When the exact-alarm permission is missing, scheduler degrades to setWindow + WARN. */
     @Test
-    fun `schedule with canScheduleExactAlarms false falls back and logs WARN`() {
+    fun `schedule with canScheduleExactAlarms false falls back to setWindow and logs WARN`() {
         every { alarmManager.canScheduleExactAlarms() } returns false
+        val dueAt = NOW.plus(2.hours)
 
-        scheduler.schedule(COMMITMENT_ID, TRIGGER_INSTANT)
+        scheduler.schedule(COMMITMENT_ID, dueAt = dueAt)
 
         verify(exactly = 1) {
-            alarmManager.setAndAllowWhileIdle(
+            alarmManager.setWindow(
                 AlarmManager.RTC_WAKEUP,
-                TRIGGER_INSTANT.toEpochMilliseconds(),
+                dueAt.minus(1.hours).toEpochMilliseconds(),
                 any(),
+                any<PendingIntent>(),
             )
         }
         verify(exactly = 0) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
 
-        // Verify WARN was logged (message contains the redacted hash, not the raw ID)
         val warnSlot = slot<String>()
         verify(exactly = 1) { logger.w(any(), capture(warnSlot)) }
         val msg = warnSlot.captured
         assert(msg.contains("SCHEDULE_EXACT_ALARM")) {
-            "Expected WARN message to mention SCHEDULE_EXACT_ALARM, was: $msg"
+            "Expected WARN to mention SCHEDULE_EXACT_ALARM, was: $msg"
         }
         assert(!msg.contains(COMMITMENT_ID)) {
             "WARN message must not contain raw commitmentId (PIPA). Was: $msg"
@@ -101,63 +156,33 @@ class ReminderSchedulerTest {
 
     // ── cancel() ──────────────────────────────────────────────────────────────
 
-    /**
-     * cancel() must invoke alarmManager.cancel() with a PendingIntent whose request
-     * code matches commitmentId.hashCode().
-     */
     @Test
     fun `cancel invokes alarmManager cancel`() {
-        every { alarmManager.canScheduleExactAlarms() } returns true
-
         scheduler.cancel(COMMITMENT_ID)
 
-        verify(exactly = 1) { alarmManager.cancel(any<PendingIntent>()) }
-    }
-
-    /**
-     * A PendingIntent built for the same commitmentId must carry FLAG_IMMUTABLE.
-     * We verify this indirectly by asserting that schedule() and cancel() both use
-     * the same request code (commitmentId.hashCode()), making them symmetric.
-     */
-    @Test
-    fun `schedule and cancel use the same requestCode derived from commitmentId hashCode`() {
-        every { alarmManager.canScheduleExactAlarms() } returns true
-
-        // Schedule then cancel — both must touch the same slot without errors
-        scheduler.schedule(COMMITMENT_ID, TRIGGER_INSTANT)
-        scheduler.cancel(COMMITMENT_ID)
-
-        verify(exactly = 1) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
         verify(exactly = 1) { alarmManager.cancel(any<PendingIntent>()) }
     }
 
     // ── PendingIntent flags ───────────────────────────────────────────────────
 
     /**
-     * Verifies that the scheduler does not create any mutable PendingIntents.
-     *
-     * FLAG_IMMUTABLE (0x04000000) is required on API 31+ and is always set in
-     * ReminderScheduler regardless of API level as a security hardening measure.
-     * This test exercises the schedule path on API 31 (Config above) where the
-     * system would reject a missing FLAG_IMMUTABLE.
+     * Verifies that the scheduler always sets FLAG_IMMUTABLE on the broadcast
+     * PendingIntent (security hardening required on API 31+).
      */
     @Test
-    fun `PendingIntent includes FLAG_IMMUTABLE — no mutable intents created`() {
-        every { alarmManager.canScheduleExactAlarms() } returns true
+    fun `PendingIntent includes FLAG_IMMUTABLE`() {
         mockkStatic(PendingIntent::class)
-
-        val piSlot = slot<Int>()
         val dummyPi = mockk<PendingIntent>(relaxed = true)
         every {
-            PendingIntent.getBroadcast(any(), capture(piSlot), any(), any())
+            PendingIntent.getBroadcast(any(), any(), any(), any())
         } returns dummyPi
 
-        scheduler.schedule(COMMITMENT_ID, TRIGGER_INSTANT)
+        scheduler.schedule(COMMITMENT_ID, dueAt = NOW.plus(2.hours))
 
         verify {
             PendingIntent.getBroadcast(
                 any(),
-                COMMITMENT_ID.hashCode(),
+                any(),
                 any(),
                 withArg { flags ->
                     assert(flags and PendingIntent.FLAG_IMMUTABLE != 0) {
@@ -172,6 +197,8 @@ class ReminderSchedulerTest {
 
     private companion object {
         private const val COMMITMENT_ID = "test-commitment-abc123"
-        private val TRIGGER_INSTANT: Instant = Instant.fromEpochMilliseconds(1_800_000_000_000L)
+
+        /** Frozen "now" — 2026-04-22T10:00+09:00 in UTC. */
+        private val NOW: Instant = Instant.parse("2026-04-22T01:00:00Z")
     }
 }

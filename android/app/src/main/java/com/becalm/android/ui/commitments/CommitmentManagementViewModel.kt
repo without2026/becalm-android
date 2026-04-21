@@ -7,20 +7,28 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
 
@@ -47,15 +55,16 @@ public enum class CommitmentFilter {
 
 /**
  * Display-safe projection of a [CommitmentEntity] with a human-readable [derivedStatus] string
- * computed from [CommitmentEntity.commitmentState] and [CommitmentEntity.actionState] at
- * observation time.
+ * computed from [CommitmentEntity.actionState] at observation time.
  *
  * Only fields required by the UI are exposed; raw PII such as quote, personRef, and the full
  * counterpartyRef are kept inside the ViewModel and are never handed to the composable layer.
  * [counterpartyDisplayName] is already truncated to the UI display length.
  *
- * The status string is intentionally a raw label ("DRAFT", "CONFIRMED", etc.) so that the
- * composable layer can localize it independently. No Android resources are imported here.
+ * The status string is intentionally an uppercase-safe key ("PENDING", "REMINDED",
+ * "FOLLOWED_UP", "COMPLETED", "OVERDUE", "CANCELLED") so the composable layer can
+ * localize it independently. [actionState] exposes the same value as a typed enum for
+ * callers that need exhaustive `when` handling. No Android resources are imported here.
  */
 // spec: CMT-001
 public data class CommitmentRow(
@@ -63,6 +72,7 @@ public data class CommitmentRow(
     val title: String,
     val direction: String,
     val derivedStatus: String,
+    val actionState: CommitmentState,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
     val counterpartyDisplayName: String?,
@@ -75,7 +85,52 @@ public data class CommitmentRow(
      * [dueIsApproximate] is true.
      */
     val dueHint: String? = null,
+    /**
+     * True iff the row's `source_type` is `"manual"`. Drives the `📝 수동 추가`
+     * chip on the card per MAN-004. Manual rows share the exact same lifecycle
+     * and action-button wiring as LLM-extracted rows — this flag is purely a
+     * visual discriminator.
+     */
+    val isManual: Boolean = false,
 )
+
+// ─── Undo snapshot ────────────────────────────────────────────────────────────
+
+/**
+ * One-shot snapshot of a just-transitioned commitment so the UI can offer `[복구]` within
+ * the 5-second undo window (spec CMT-013).
+ *
+ * [priorState] is captured from the Room row *before* the transition is applied, so undo
+ * reverts to the exact state the user saw (REMINDED, FOLLOWED_UP, OVERDUE, PENDING).
+ * The subtype ([Completed] / [Cancelled]) lets the UI disambiguate "완료 처리됨" vs
+ * "취소 처리됨" snackbar copy and covers both terminal transitions — CMT-013 makes the
+ * undo affordance one-shot across both.
+ *
+ * The undo path uses the field-level [CommitmentRepository.updateActionState] write
+ * intentionally — the 6-state transition matrix forbids hopping from COMPLETED /
+ * CANCELLED back to any non-terminal state, and we do not want to widen the state
+ * machine just to model "revert". `updateActionState` is repository-level and already
+ * allowed to hop anywhere.
+ *
+ * Per CMT-013 the reminder alarm is **not** re-armed on undo: completing/cancelling
+ * cancelled the alarm, and the user has to press [리마인드] again to re-arm.
+ */
+public sealed interface CommitmentUndoSnapshot {
+    public val commitmentId: String
+    public val priorState: CommitmentState
+
+    /** Undo snapshot produced by [CommitmentManagementViewModel.onComplete]. */
+    public data class Completed(
+        override val commitmentId: String,
+        override val priorState: CommitmentState,
+    ) : CommitmentUndoSnapshot
+
+    /** Undo snapshot produced by [CommitmentManagementViewModel.onCancel]. */
+    public data class Cancelled(
+        override val commitmentId: String,
+        override val priorState: CommitmentState,
+    ) : CommitmentUndoSnapshot
+}
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
@@ -85,13 +140,18 @@ public data class CommitmentRow(
  * @property items  Filtered, sorted list of [CommitmentRow] to display.
  * @property filter Currently active [CommitmentFilter].
  * @property loading True while the initial collection or a transition is in flight.
+ * @property refreshing True while a user-triggered pull-to-refresh fetch is in
+ *   flight (CMT-010). Drives the [PullRefreshIndicator] in the UI. Independent
+ *   from [loading] — the Room subscription stays hot during a refresh, so the
+ *   timeline rows remain on screen.
  * @property error  Human-readable error string from the last failed action, or null.
  */
-// spec: CMT-001
+// spec: CMT-001, CMT-010
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
     val filter: CommitmentFilter = CommitmentFilter.ALL,
     val loading: Boolean = true,
+    val refreshing: Boolean = false,
     val error: String? = null,
 )
 
@@ -139,6 +199,27 @@ public class CommitmentManagementViewModel @Inject constructor(
 
     /** Current UI state. Starts loading; settles once the first Room emission arrives. */
     public val uiState: StateFlow<CommitmentUiState> = _uiState.asStateFlow()
+
+    /**
+     * One-shot emission of the most recent completed/cancelled transition. The UI collects
+     * this to raise a `[복구]` snackbar for the 5-second undo window per CMT-013.
+     *
+     * Semantics:
+     *  - `replay = 0`             : late collectors don't see stale snapshots.
+     *  - `extraBufferCapacity = 1`: exactly one pending event is buffered so the emit-site
+     *    never suspends, and concurrent user taps do not drop the most recent action.
+     *  - `DROP_OLDEST`            : if two transitions land faster than the UI can show the
+     *    first snackbar, the older one is dropped — the most recent action is always the
+     *    one the user sees, matching the "one-shot" invariant.
+     */
+    private val _undoFlow: MutableSharedFlow<CommitmentUndoSnapshot> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Publicly exposed undo stream for the [CommitmentManagementScreen] collector. */
+    public val undoFlow: SharedFlow<CommitmentUndoSnapshot> = _undoFlow.asSharedFlow()
 
     /**
      * Backing store for the unfiltered entity list from Room. Required so that
@@ -227,70 +308,183 @@ public class CommitmentManagementViewModel @Inject constructor(
     }
 
     /**
-     * Confirms a commitment, transitioning it from DRAFT to CONFIRMED.
+     * Handles pull-to-refresh from [CommitmentManagementScreen] (CMT-010).
      *
-     * On failure, surfaces the error string via [CommitmentUiState.error].
+     * Calls [CommitmentRepository.refreshSince] with `since = null` (full refresh)
+     * for the current user; Room upsert then triggers the reactive subscription
+     * that re-renders the list. The active filter is preserved in the UI state,
+     * so the user sees the refreshed data under whichever tab they were on.
+     *
+     * Network failures surface via [CommitmentUiState.error]; the operation is
+     * idempotent and safe to retry. Concurrent presses are deduplicated by an
+     * early-return on the [CommitmentUiState.refreshing] flag.
+     */
+    // spec: CMT-010
+    public fun onPullRefresh() {
+        if (_uiState.value.refreshing) return
+        _uiState.update { it.copy(refreshing = true) }
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+            if (userId == null) {
+                _uiState.update { it.copy(refreshing = false) }
+                return@launch
+            }
+            when (val result = commitmentRepository.refreshSince(userId, since = null)) {
+                is BecalmResult.Success ->
+                    _uiState.update { it.copy(refreshing = false, error = null) }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "onPullRefresh failed: ${result.error}")
+                    _uiState.update {
+                        it.copy(refreshing = false, error = result.error.toString())
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Records that the user pressed [리마인드] on the commitment (CMT-005).
+     *
+     * Transitions PENDING → REMINDED via the state machine and, on success, asks
+     * [ReminderScheduler] to (re)arm the alarm at `dueAt − 1h`. The scheduler owns
+     * the null-dueAt and past-trigger gates internally, so this call-site passes
+     * the raw `dueAt` through verbatim.
+     *
+     * On failure surfaces the error string via [CommitmentUiState.error].
      */
     // spec: CMT-005
-    public fun onConfirm(id: String) {
-        launchAction("onConfirm", id) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Confirm)
-        }
-    }
-
-    /**
-     * Schedules a commitment and registers an exact-alarm reminder at [at].
-     *
-     * Transitions CONFIRMED → SCHEDULED via the state machine, then calls
-     * [ReminderScheduler.schedule] only on success.
-     *
-     * @param id Commitment UUID.
-     * @param at Absolute instant at which the alarm should fire.
-     */
-    // spec: CMT-006
-    public fun onSchedule(id: String, at: Instant) {
+    public fun onRemind(id: String) {
         launchAction(
-            name = "onSchedule",
+            name = "onRemind",
             id = id,
             effect = {
-                reminderScheduler.schedule(id, at)
+                val dueAt: Instant? = allEntities.value.firstOrNull { it.id == id }?.dueAt
+                reminderScheduler.schedule(id, dueAt)
             },
         ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Schedule(at))
+            commitmentRepository.transitionState(id, CommitmentEvent.Remind)
         }
     }
 
     /**
-     * Marks a commitment as done and cancels any pending reminder.
+     * Records that the user pressed [팔로업] on the commitment (CMT-006).
      *
-     * Transitions CONFIRMED or SCHEDULED → DONE, then calls [ReminderScheduler.cancel].
+     * Transitions PENDING or REMINDED → FOLLOWED_UP. No scheduler side effect —
+     * follow-up does not change the alarm configuration per spec.
      */
-    // spec: CMT-007
-    public fun onMarkDone(id: String) {
-        launchAction(
-            name = "onMarkDone",
-            id = id,
-            effect = { reminderScheduler.cancel(id) },
-        ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.MarkDone)
+    // spec: CMT-006
+    public fun onFollowUp(id: String) {
+        launchAction("onFollowUp", id) {
+            commitmentRepository.transitionState(id, CommitmentEvent.FollowUp)
         }
     }
 
     /**
-     * Dismisses a commitment and cancels any pending reminder.
+     * Records that the user pressed [완료] on the commitment (CMT-007).
      *
-     * Transitions DRAFT, CONFIRMED, or SCHEDULED → DISMISSED, then calls
-     * [ReminderScheduler.cancel].
+     * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → COMPLETED and cancels
+     * any pending reminder. On success, emits a [CommitmentUndoSnapshot.Completed] on
+     * [undoFlow] so the UI can offer a 5-second `[복구]` snackbar per CMT-013. The
+     * snapshot captures the *prior* action_state (e.g. REMINDED) so undo restores the
+     * exact state the user saw.
      */
-    // spec: CMT-008
-    public fun onDismiss(id: String) {
+    // spec: CMT-007, CMT-013
+    public fun onComplete(id: String) {
+        // Snapshot *before* the transition runs so undo restores the prior state exactly.
+        // When the row is not in memory (evicted by a concurrent refresh, or never loaded
+        // in a test harness) we still run the completion transition — we just skip the
+        // snackbar emit, since undo without a prior state would be meaningless.
+        val priorState = snapshotPriorState(id)
         launchAction(
-            name = "onDismiss",
+            name = "onComplete",
             id = id,
-            effect = { reminderScheduler.cancel(id) },
+            effect = {
+                reminderScheduler.cancel(id)
+                if (priorState != null) {
+                    _undoFlow.tryEmit(CommitmentUndoSnapshot.Completed(id, priorState))
+                }
+            },
         ) {
-            commitmentRepository.transitionState(id, CommitmentEvent.Dismiss)
+            commitmentRepository.transitionState(id, CommitmentEvent.Complete)
         }
+    }
+
+    /**
+     * Records that the user pressed [취소] on the commitment (CMT-012).
+     *
+     * Transitions PENDING / REMINDED / FOLLOWED_UP / OVERDUE → CANCELLED and cancels
+     * any pending reminder. On success, emits a [CommitmentUndoSnapshot.Cancelled] on
+     * [undoFlow] so the UI can offer a 5-second `[복구]` snackbar per CMT-013.
+     */
+    // spec: CMT-012, CMT-013
+    public fun onCancel(id: String) {
+        // See [onComplete] — same prior-state snapshot semantics.
+        val priorState = snapshotPriorState(id)
+        launchAction(
+            name = "onCancel",
+            id = id,
+            effect = {
+                reminderScheduler.cancel(id)
+                if (priorState != null) {
+                    _undoFlow.tryEmit(CommitmentUndoSnapshot.Cancelled(id, priorState))
+                }
+            },
+        ) {
+            commitmentRepository.transitionState(id, CommitmentEvent.Cancel)
+        }
+    }
+
+    /**
+     * Reverts the most recent completed/cancelled transition (CMT-013) using a
+     * field-level action_state write. Does **not** re-register the reminder alarm:
+     * per spec line 131 the original completion/cancel path has already cancelled the
+     * alarm and the user must press [리마인드] again if they want it back.
+     *
+     * Uses [CommitmentRepository.updateActionState] rather than
+     * [CommitmentRepository.transitionState] because the 6-state machine intentionally
+     * forbids transitions out of COMPLETED / CANCELLED — widening the matrix just for
+     * undo would poison every other state-machine call-site. `updateActionState` is a
+     * repository-level override that also flips `sync_status` to pending so UploadWorker
+     * will PATCH the server with the reverted state.
+     */
+    // spec: CMT-013
+    public fun onUndo(snapshot: CommitmentUndoSnapshot) {
+        viewModelScope.launch {
+            val result = commitmentRepository.updateActionState(
+                id = snapshot.commitmentId,
+                newState = snapshot.priorState.wireValue,
+                updatedAt = Clock.System.now(),
+            )
+            when (result) {
+                is BecalmResult.Success -> {
+                    logger.d(
+                        TAG,
+                        "onUndo succeeded id=${hashId(snapshot.commitmentId)} " +
+                            "priorState=${snapshot.priorState.wireValue} " +
+                            "from=${snapshot::class.simpleName}",
+                    )
+                    _uiState.update { it.copy(error = null) }
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(
+                        TAG,
+                        "onUndo failed id=${hashId(snapshot.commitmentId)}: ${result.error}",
+                    )
+                    _uiState.update { it.copy(error = result.error.toString()) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads the current [CommitmentState] from the in-memory Room cache so the caller
+     * can snapshot it before issuing a transition. Returns `null` when the id is not
+     * present — e.g. if the row was evicted by a concurrent refresh — in which case the
+     * caller must short-circuit rather than emit a snapshot with stale data.
+     */
+    private fun snapshotPriorState(id: String): CommitmentState? {
+        val entity = allEntities.value.firstOrNull { it.id == id } ?: return null
+        return CommitmentState.fromWire(entity.actionState)
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -343,15 +537,18 @@ public class CommitmentManagementViewModel @Inject constructor(
             CommitmentFilter.TAKE -> entities.filter { it.direction == "take" }
         }
         return filtered.map { entity ->
+            val state = CommitmentState.fromWire(entity.actionState)
             CommitmentRow(
                 id = entity.id,
                 title = entity.title,
                 direction = entity.direction,
-                derivedStatus = entity.commitmentState.name,
+                derivedStatus = state.name,
+                actionState = state,
                 dueAt = entity.dueAt,
                 dueIsApproximate = entity.dueIsApproximate,
                 counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),
                 dueHint = entity.dueHint,
+                isManual = entity.sourceType == SourceType.MANUAL,
             )
         }
     }

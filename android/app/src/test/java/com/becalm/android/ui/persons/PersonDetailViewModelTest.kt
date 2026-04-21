@@ -12,7 +12,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -104,7 +104,7 @@ class PersonDetailViewModelTest {
             sourceType = "gmail",
             sourceRef = null,
             confidence = 0.9,
-            commitmentState = CommitmentState.DRAFT,
+            commitmentState = CommitmentLifecycleLegacy.DRAFT,
             createdAt = now,
             updatedAt = now,
         )

@@ -4,6 +4,8 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -13,6 +15,7 @@ import com.becalm.android.data.remote.dto.CalendarEventListResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.FailedEventDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
@@ -20,16 +23,23 @@ import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.domain.commitment.CommitmentEditPatch
+import io.mockk.every
+import io.mockk.mockk
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.Response
@@ -57,11 +67,23 @@ class CommitmentRepositoryImplTest {
     private val dao = FakeCommitmentDao()
     private val api = FakeRailwayApi()
     private val cursorStore = FakeSyncCursorStore()
+    // resolveActorId() reads observeCurrentUserId().firstOrNull() — that's the only
+    // UserPrefsStore method this repository invokes, so we only wire that one flow.
+    private val userPrefsStore: UserPrefsStore = mockk(relaxed = true) {
+        every { observeCurrentUserId() } returns flowOf("user-1")
+    }
+
+    // BeCalmDatabase is only touched by supersede(), which is not exercised by the
+    // tests in this file (that requires a real in-memory Room DB for withTransaction
+    // to work). Other tests safely pass the mock without invoking it.
+    private val database: BeCalmDatabase = mockk(relaxed = true)
 
     private val repository: CommitmentRepository = CommitmentRepositoryImpl(
         dao = dao,
         api = api,
         cursorStore = cursorStore,
+        userPrefsStore = userPrefsStore,
+        database = database,
         logger = logger,
         ioDispatcher = testDispatcher,
     )
@@ -357,6 +379,32 @@ class CommitmentRepositoryImplTest {
         assertEquals(disputedAt, after.quoteDisputedAt)
     }
 
+    // ── observeById: reactive re-emission on DAO write ────────────────────────
+
+    @Test
+    fun `observeById re-emits after a DAO write flips actionState`() = runTest(testDispatcher) {
+        val initial = makeEntity(id = "c-obs", actionState = "pending", syncStatus = "synced")
+        dao.insert(initial)
+
+        // First observation — seeded state.
+        val first = repository.observeById("c-obs").first()
+        assertEquals("pending", first?.actionState)
+
+        // Trigger a DAO write (simulating CMT-005 Remind → REMINDED transition).
+        dao.updateActionState(
+            id = "c-obs",
+            newState = "reminded",
+            updatedAt = Instant.fromEpochMilliseconds(123),
+        )
+
+        val afterWrite = repository.observeById("c-obs").first()
+        assertEquals(
+            "reactive observeById must reflect the new action_state after a DAO write",
+            "reminded",
+            afterWrite?.actionState,
+        )
+    }
+
     @Test
     fun `findByIdsForMerge returns tombstoned rows (deleted_at filter bypass)`() = runTest(testDispatcher) {
         val live = makeEntity(id = "c-live", syncStatus = "synced")
@@ -371,6 +419,254 @@ class CommitmentRepositoryImplTest {
         assertEquals(2, rows.size)
         assertNotNull("tombstone must survive the merge-path fetch", rows.find { it.id == "c-deleted" })
     }
+
+    // ── EDIT-003: editCommitment ──────────────────────────────────────────────
+
+    @Test
+    fun `editCommitment happy path writes mutable columns and flips to synced on PATCH 2xx`() =
+        runTest(testDispatcher) {
+            val entity = makeEntity(id = "c-edit", syncStatus = "synced")
+            dao.insert(entity)
+
+            api.updateCommitmentResponder = { _, _ ->
+                Response.success(SingleCommitmentResponse(data = makeDto(entity.copy(title = "updated"))))
+            }
+
+            val patch = CommitmentEditPatch(
+                title = "updated",
+                dueAt = Instant.fromEpochMilliseconds(10_000),
+                dueHint = "내일",
+                dueIsApproximate = true,
+                personRef = "+821012345678",
+                direction = "take",
+            )
+            val result = repository.editCommitment("c-edit", patch)
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val saved = dao.findById("c-edit")!!
+            assertEquals("updated", saved.title)
+            assertEquals("+821012345678", saved.personRef)
+            assertEquals("take", saved.direction)
+            assertEquals(true, saved.dueIsApproximate)
+            // Best-effort PATCH succeeded → sync_status should flip to 'synced'.
+            assertEquals("synced", saved.syncStatus)
+        }
+
+    @Test
+    fun `editCommitment leaves sync_status pending when PATCH throws IOException`() =
+        runTest(testDispatcher) {
+            val entity = makeEntity(id = "c-edit-io", syncStatus = "synced")
+            dao.insert(entity)
+
+            api.updateCommitmentResponder = { _, _ -> throw IOException("network down") }
+
+            val patch = CommitmentEditPatch(
+                title = "updated",
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+                personRef = null,
+                direction = "give",
+            )
+            val result = repository.editCommitment("c-edit-io", patch)
+
+            assertTrue("local write must still succeed", result is BecalmResult.Success)
+            val saved = dao.findById("c-edit-io")!!
+            assertEquals("updated", saved.title)
+            // PATCH failed → DAO write flipped sync_status='pending'; helper left it there.
+            assertEquals("pending", saved.syncStatus)
+        }
+
+    @Test
+    fun `editCommitment returns NotFound when row is absent`() = runTest(testDispatcher) {
+        val result = repository.editCommitment(
+            id = "missing",
+            patch = CommitmentEditPatch(
+                title = "t",
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+                personRef = null,
+                direction = "give",
+            ),
+        )
+
+        assertTrue("expected Failure but was $result", result is BecalmResult.Failure)
+        assertTrue((result as BecalmResult.Failure).error is BecalmError.NotFound)
+    }
+
+    // ── EDIT-005: markQuoteDisputed / clearQuoteDispute ───────────────────────
+
+    @Test
+    fun `markQuoteDisputed flips flag and writes timestamp`() = runTest(testDispatcher) {
+        val entity = makeEntity(id = "c-disp", syncStatus = "synced")
+        dao.insert(entity)
+
+        api.updateCommitmentResponder = { _, _ ->
+            Response.success(SingleCommitmentResponse(data = makeDto(entity)))
+        }
+
+        val result = repository.markQuoteDisputed("c-disp")
+
+        assertTrue("expected Success but was $result", result is BecalmResult.Success)
+        val saved = dao.findById("c-disp")!!
+        assertEquals(true, saved.quoteDisputed)
+        assertNotNull(saved.quoteDisputedAt)
+        // The quote STRING itself must be untouched — invariance check (EDIT-spec invariant 1).
+        assertEquals(entity.quote, saved.quote)
+    }
+
+    @Test
+    fun `clearQuoteDispute resets flag without touching quote string`() = runTest(testDispatcher) {
+        val entity = makeEntity(id = "c-clear", syncStatus = "synced").copy(
+            quoteDisputed = true,
+            quoteDisputedAt = Instant.fromEpochMilliseconds(5_000),
+        )
+        dao.insert(entity)
+
+        api.updateCommitmentResponder = { _, _ ->
+            Response.success(SingleCommitmentResponse(data = makeDto(entity)))
+        }
+
+        val result = repository.clearQuoteDispute("c-clear")
+
+        assertTrue("expected Success but was $result", result is BecalmResult.Success)
+        val saved = dao.findById("c-clear")!!
+        assertEquals(false, saved.quoteDisputed)
+        // Quote string invariance — clearing dispute MUST NOT mutate the quote.
+        assertEquals(entity.quote, saved.quote)
+    }
+
+    // ── EDIT-006: softDelete ──────────────────────────────────────────────────
+
+    @Test
+    fun `softDelete writes deleted_at and leaves sync_status pending on IOException`() =
+        runTest(testDispatcher) {
+            val entity = makeEntity(id = "c-del", syncStatus = "synced")
+            dao.insert(entity)
+
+            api.updateCommitmentResponder = { _, _ -> throw IOException("offline") }
+
+            val result = repository.softDelete("c-del")
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val saved = dao.findById("c-del")!!
+            assertNotNull("deleted_at must be populated", saved.deletedAt)
+            assertEquals("pending", saved.syncStatus)
+            // Quote remains intact (legally evidentiary even on tombstoned rows).
+            assertEquals(entity.quote, saved.quote)
+        }
+
+    // ── MAN-003: saveManualCommitment (plain manual) ──────────────────────────
+
+    @Test
+    fun `saveManualCommitment MANUAL inserts row with manual source_type and confidence 1`() =
+        runTest(testDispatcher) {
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "Send contract",
+                direction = "give",
+                quote = "I'll send the contract by Friday.",
+                personRef = "+821012345678",
+                dueAt = Instant.fromEpochMilliseconds(2_000_000),
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+            // Best-effort batch upload succeeds; should flip sync_status='synced'.
+            api.uploadBatchResponder = { _ ->
+                Response.success(
+                    CommitmentBatchResponseDto(acknowledged = 1, failed = emptyList()),
+                )
+            }
+
+            val result = repository.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val newId = (result as BecalmResult.Success).value
+            val saved = dao.findById(newId)
+            assertNotNull("manual row must be inserted", saved)
+            val row = saved!!
+            // Core MAN-003 invariants.
+            assertEquals("manual", row.sourceType)
+            assertEquals(1.0, row.confidence, 0.0)
+            assertNull("manual rows have no sourceRef", row.sourceRef)
+            assertNull("manual rows have no sourceEventTitle", row.sourceEventTitle)
+            // source_event_occurred_at == created_at (both populated at save time).
+            assertEquals(row.createdAt, row.sourceEventOccurredAt)
+            // Legal/evidentiary + user inputs preserved.
+            assertEquals("Send contract", row.title)
+            assertEquals("give", row.direction)
+            assertEquals("I'll send the contract by Friday.", row.quote)
+            assertEquals("+821012345678", row.personRef)
+            assertEquals(Instant.fromEpochMilliseconds(2_000_000), row.dueAt)
+            // supersedes_commitment_id must be null in plain-create mode.
+            assertNull(row.supersedesCommitmentId)
+            // Best-effort upload succeeded → sync_status flipped to 'synced'.
+            assertEquals("synced", row.syncStatus)
+            // Audit columns populated with actor id.
+            assertEquals("user-1", row.lastEditedBy)
+            assertNotNull(row.lastEditedAt)
+            // Invoked exactly once.
+            assertEquals(1, api.uploadCommitmentsBatchCalls.get())
+        }
+
+    @Test
+    fun `saveManualCommitment MANUAL leaves sync_status pending on upload IOException`() =
+        runTest(testDispatcher) {
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "t",
+                direction = "give",
+                quote = "q",
+                personRef = null,
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+            api.uploadBatchResponder = { _ -> throw IOException("offline") }
+
+            val result = repository.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Success but was $result", result is BecalmResult.Success)
+            val newId = (result as BecalmResult.Success).value
+            val row = dao.findById(newId)!!
+            // Local write still lands; retry queue drains the row via UploadWorker.
+            assertEquals("pending", row.syncStatus)
+            assertEquals("manual", row.sourceType)
+        }
+
+    @Test
+    fun `saveManualCommitment returns Unauthorized when actor id is blank`() =
+        runTest(testDispatcher) {
+            val blankActorPrefs: UserPrefsStore = mockk(relaxed = true) {
+                every { observeCurrentUserId() } returns flowOf("")
+            }
+            val repo: CommitmentRepository = CommitmentRepositoryImpl(
+                dao = dao,
+                api = api,
+                cursorStore = cursorStore,
+                userPrefsStore = blankActorPrefs,
+                database = database,
+                logger = logger,
+                ioDispatcher = testDispatcher,
+            )
+            val input = com.becalm.android.domain.commitment.ManualCommitmentInput(
+                title = "t",
+                direction = "give",
+                quote = "q",
+                personRef = null,
+                dueAt = null,
+                dueHint = null,
+                dueIsApproximate = false,
+            )
+
+            val result = repo.saveManualCommitment(input = input, supersedeOf = null)
+
+            assertTrue("expected Failure but was $result", result is BecalmResult.Failure)
+            val err = (result as BecalmResult.Failure).error
+            assertTrue(
+                "expected Unauthorized but was $err",
+                err is BecalmError.Unauthorized,
+            )
+        }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -396,7 +692,7 @@ class CommitmentRepositoryImplTest {
         sourceType = "voice",
         sourceRef = null,
         confidence = 0.5,
-        commitmentState = CommitmentState.DRAFT,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = syncStatus,
         createdAt = Instant.fromEpochMilliseconds(0),
         updatedAt = Instant.fromEpochMilliseconds(0),
@@ -434,21 +730,33 @@ class CommitmentRepositoryImplTest {
      * [notImplemented] so a test that incidentally hits an unused path fails loudly.
      */
     private class FakeCommitmentDao : CommitmentDao {
+        // Backing state exposed as a MutableStateFlow so observe*-style consumers (e.g.
+        // CommitmentRepositoryImpl.observeById -> DAO.observeById) can re-emit on every
+        // write path. `rows` continues to be the canonical map; writers mutate the map
+        // and then call [bump] to republish a snapshot, mirroring Room's invalidation
+        // tracker behaviour for Flow-returning queries.
         private val rows = linkedMapOf<String, CommitmentEntity>()
+        private val snapshots =
+            kotlinx.coroutines.flow.MutableStateFlow<Map<String, CommitmentEntity>>(emptyMap())
+
+        private fun bump() { snapshots.value = rows.toMap() }
 
         override suspend fun insert(entity: CommitmentEntity): Long {
             rows[entity.id] = entity
+            bump()
             return 1L
         }
 
         override suspend fun insertAll(entities: List<CommitmentEntity>): List<Long> {
             entities.forEach { rows[it.id] = it }
+            bump()
             return entities.map { 1L }
         }
 
         override suspend fun update(entity: CommitmentEntity): Int {
             if (rows.containsKey(entity.id)) {
                 rows[entity.id] = entity
+                bump()
                 return 1
             }
             return 0
@@ -457,6 +765,7 @@ class CommitmentRepositoryImplTest {
         override suspend fun updateActionState(id: String, newState: String, updatedAt: Instant): Int {
             val row = rows[id] ?: return 0
             rows[id] = row.copy(actionState = newState, updatedAt = updatedAt)
+            bump()
             return 1
         }
 
@@ -464,14 +773,91 @@ class CommitmentRepositoryImplTest {
             ids.forEach { id ->
                 rows[id]?.let { rows[id] = it.copy(syncStatus = "synced") }
             }
+            bump()
         }
 
         override suspend fun markPending(id: String) {
             rows[id]?.let { rows[id] = it.copy(syncStatus = "pending") }
+            bump()
         }
 
         override suspend fun markFailed(id: String) {
             rows[id]?.let { rows[id] = it.copy(syncStatus = "failed") }
+            bump()
+        }
+
+        override suspend fun applyEdit(
+            id: String,
+            title: String,
+            dueAt: Instant?,
+            dueHint: String?,
+            approx: Boolean,
+            personRef: String?,
+            direction: String,
+            actorId: String,
+            editedAt: Instant,
+        ): Int {
+            // Mirror the production DAO: reject soft-deleted rows so applyEdit
+            // cannot resurrect tombstones (matches the `AND deleted_at IS NULL`
+            // guard on the @Query UPDATE).
+            val row = rows[id]?.takeIf { it.deletedAt == null } ?: return 0
+            rows[id] = row.copy(
+                title = title,
+                dueAt = dueAt,
+                dueHint = dueHint,
+                dueIsApproximate = approx,
+                personRef = personRef,
+                direction = direction,
+                lastEditedBy = actorId,
+                lastEditedAt = editedAt,
+                updatedAt = editedAt,
+                syncStatus = "pending",
+            )
+            bump()
+            return 1
+        }
+
+        override suspend fun markQuoteDisputed(id: String, actor: String, at: Instant): Int {
+            val row = rows[id]?.takeIf { it.deletedAt == null } ?: return 0
+            rows[id] = row.copy(
+                quoteDisputed = true,
+                quoteDisputedAt = at,
+                lastEditedBy = actor,
+                lastEditedAt = at,
+                updatedAt = at,
+                syncStatus = "pending",
+            )
+            bump()
+            return 1
+        }
+
+        override suspend fun clearQuoteDispute(id: String, actor: String, at: Instant): Int {
+            val row = rows[id]?.takeIf { it.deletedAt == null } ?: return 0
+            rows[id] = row.copy(
+                quoteDisputed = false,
+                quoteDisputedAt = null,
+                lastEditedBy = actor,
+                lastEditedAt = at,
+                updatedAt = at,
+                syncStatus = "pending",
+            )
+            bump()
+            return 1
+        }
+
+        override suspend fun softDelete(id: String, actor: String, at: Instant): Int {
+            // softDelete() deliberately does NOT filter on deleted_at — idempotent
+            // tombstone writes are allowed. Mirrors the production DAO query.
+            val row = rows[id] ?: return 0
+            rows[id] = row.copy(
+                deletedAt = at,
+                lastEditedBy = actor,
+                lastEditedAt = at,
+                updatedAt = at,
+                syncStatus = "pending",
+            )
+            bump()
+            return 1
         }
 
         override suspend fun deleteAllForUser(userId: String): Int {
@@ -481,6 +867,9 @@ class CommitmentRepositoryImplTest {
         }
 
         override suspend fun findById(id: String): CommitmentEntity? = rows[id]
+
+        override suspend fun findByIdForUser(userId: String, id: String): CommitmentEntity? =
+            rows[id]?.takeIf { it.userId == userId && it.deletedAt == null }
 
         override suspend fun findByIdsForMerge(
             userId: String,
@@ -496,6 +885,20 @@ class CommitmentRepositoryImplTest {
 
         override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> = emptyFlow()
 
+        /**
+         * Reactive observer — emits the current [rows] entry on every subscription and
+         * re-emits when any write path mutates the map. Mirrors Room's invalidation
+         * tracker behaviour for Flow-returning queries so production tests can assert
+         * re-emission without spinning up a real database.
+         */
+        override fun observeById(id: String): Flow<CommitmentEntity?> =
+            snapshots.map { it[id] }
+
+        override fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?> =
+            snapshots.map { map ->
+                map[id]?.takeIf { it.userId == userId && it.deletedAt == null }
+            }
+
         override suspend fun findPendingSync(userId: String, limit: Int): List<CommitmentEntity> =
             rows.values.filter { it.userId == userId && it.syncStatus == "pending" }.take(limit)
     }
@@ -509,6 +912,10 @@ class CommitmentRepositoryImplTest {
     private class FakeRailwayApi : RailwayApi {
         var patchResponder: (id: String, request: PatchCommitmentRequest) -> Response<SingleCommitmentResponse> =
             { _, _ -> throw NotImplementedError("patchResponder not set") }
+
+        /** Defaults to a 200 with a dummy body so edit/dispute/soft-delete tests don't each wire it. */
+        var updateCommitmentResponder: (id: String, request: CommitmentPatchDto) -> Response<SingleCommitmentResponse> =
+            { _, _ -> throw NotImplementedError("updateCommitmentResponder not set") }
 
         var uploadBatchResponder: (CommitmentBatchRequestDto) -> Response<CommitmentBatchResponseDto> =
             { Response.success(CommitmentBatchResponseDto(acknowledged = 0, failed = emptyList())) }
@@ -537,6 +944,12 @@ class CommitmentRepositoryImplTest {
             idem: String,
             request: PatchCommitmentRequest,
         ): Response<SingleCommitmentResponse> = patchResponder(id, request)
+
+        override suspend fun updateCommitment(
+            id: String,
+            idem: String,
+            request: CommitmentPatchDto,
+        ): Response<SingleCommitmentResponse> = updateCommitmentResponder(id, request)
 
         override suspend fun uploadCommitmentsBatch(
             idem: String,

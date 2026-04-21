@@ -17,7 +17,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
-import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.email.EmailPromptBuilder
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.QuotedBlockSplitter
@@ -64,6 +64,13 @@ import java.util.UUID
  * - [BecalmError.ExtractorUnavailable] with reason `LLM_JSON_PARSE_FAILED` or
  *   `AICORE_ERROR` → `Result.retry()` so WorkManager applies exponential backoff.
  * - Any other error bubble → `Result.retry()`.
+ *
+ * ## Manual commitments (MAN-003 invariant 4)
+ * This worker only ever iterates `raw_ingestion_events` → writes new `commitments` rows
+ * with a fresh deterministic UUID. Manual commitments (`source_type = 'manual'`) have no
+ * backing raw event and are therefore naturally invisible to this worker: there is no
+ * code path in this file that mutates existing commitment rows, so a user's manually-added
+ * row cannot be touched here. See `.spec/manual-commitment.spec.yml` invariant 4.
  *
  * ## Out of scope
  * - INBOX=take / SENT=give default-direction HINT interpretation: we pass the [folder] value
@@ -292,7 +299,7 @@ internal fun CommitmentDraftDto.toEmailCommitmentEntity(
     sourceType = sourceType,
     sourceRef = sourceRef,
     confidence = confidence.toDouble(),
-    commitmentState = CommitmentState.DRAFT,
+    commitmentState = CommitmentLifecycleLegacy.DRAFT,
     syncStatus = "pending",
     createdAt = now,
     updatedAt = now,

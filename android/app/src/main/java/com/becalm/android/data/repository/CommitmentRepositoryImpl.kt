@@ -7,27 +7,39 @@ import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.result.map
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
+import androidx.room.withTransaction
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.internal.MAX_BATCH_SIZE
 import com.becalm.android.data.repository.internal.toBatchItemDto
 import com.becalm.android.data.repository.internal.toDomain
 import com.becalm.android.data.repository.internal.toEntity
+import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.CommitmentStateMachine
+import com.becalm.android.domain.commitment.ManualCommitmentInput
 import com.becalm.android.domain.commitment.TransitionError
 import com.becalm.android.domain.commitment.TransitionResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,8 +56,9 @@ private const val TAG = "CommitmentRepository"
  */
 private const val HEADER_RETRY_AFTER: String = "Retry-After"
 
-/** Legal action_state values per data-model.yml:134-139 / commitment-management.spec.yml CMT-005..007. */
-private val ALLOWED_ACTION_STATES = setOf("pending", "reminded", "followed_up", "completed")
+/** Legal action_state values per data-model.yml:199-208 / commitment-management.spec.yml CMT-005..012. */
+private val ALLOWED_ACTION_STATES: Set<String> =
+    CommitmentState.entries.map { it.wireValue }.toSet()
 
 /**
  * Production implementation of [CommitmentRepository].
@@ -55,6 +68,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
     private val dao: CommitmentDao,
     private val api: RailwayApi,
     private val cursorStore: SyncCursorStore,
+    private val userPrefsStore: UserPrefsStore,
+    private val database: BeCalmDatabase,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CommitmentRepository {
@@ -69,6 +84,12 @@ public class CommitmentRepositoryImpl @Inject constructor(
 
     override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForPerson(userId, personRef)
+
+    override fun observeById(id: String): Flow<CommitmentEntity?> =
+        dao.observeById(id)
+
+    override fun observeByIdForUser(userId: String, id: String): Flow<CommitmentEntity?> =
+        dao.observeByIdForUser(userId, id)
 
     // ── Remote refresh ────────────────────────────────────────────────────────
 
@@ -144,13 +165,20 @@ public class CommitmentRepositoryImpl @Inject constructor(
         id: String,
         event: CommitmentEvent,
     ): BecalmResult<CommitmentEntity> = withContext(ioDispatcher) {
-        val entity = dao.findById(id)
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+        val entity = dao.findByIdForUser(actorId, id)
             ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
 
-        when (val result = CommitmentStateMachine.transition(entity.commitmentState, event)) {
+        val current = CommitmentState.fromWire(entity.actionState)
+        when (val result = CommitmentStateMachine.transition(current, event)) {
             is TransitionResult.Err -> BecalmResult.Failure(result.error.toBecalmError())
             is TransitionResult.Ok -> {
-                val updated = entity.copy(commitmentState = result.state)
+                val updated = entity.copy(
+                    actionState = result.state.wireValue,
+                    updatedAt = Clock.System.now(),
+                    syncStatus = "pending",
+                )
                 dao.update(updated)
                 BecalmResult.Success(updated)
             }
@@ -162,10 +190,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
         newState: String,
         updatedAt: Instant,
     ): BecalmResult<Unit> {
-        // R3-01: All state transitions must go through CommitmentStateMachine.
-        // Validate the action_state enum value, then (for transitions that imply a
-        // lifecycle event — namely "completed" → MarkDone) run it through the state
-        // machine so illegal lifecycle transitions are rejected before touching the DB.
+        // Validate the wire value against the spec enum. The spec-aligned lifecycle
+        // now lives on the action_state column directly; transitionState() is the
+        // canonical entry point for user actions, so we no longer bridge into the
+        // legacy commitment_state column here (see CommitmentEntity.commitmentState
+        // KDoc — it is a dead column as of Wave 4).
         if (newState !in ALLOWED_ACTION_STATES) {
             return BecalmResult.Failure(
                 BecalmError.Validation(
@@ -175,34 +204,15 @@ public class CommitmentRepositoryImpl @Inject constructor(
             )
         }
 
-        val entity = dao.findById(id)
+        val actorId = resolveActorId()
+            ?: return BecalmResult.Failure(BecalmError.Unauthorized)
+        val entity = dao.findByIdForUser(actorId, id)
             ?: return BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
-
-        val lifecycleEvent = actionStateToLifecycleEvent(newState)
-        val nextLifecycleState = if (lifecycleEvent != null) {
-            when (val result = CommitmentStateMachine.transition(entity.commitmentState, lifecycleEvent)) {
-                is TransitionResult.Err -> return BecalmResult.Failure(
-                    when (result.error) {
-                        is TransitionError.IllegalTransition -> BecalmError.Validation(
-                            field = "commitmentState",
-                            message = "Illegal transition: ${result.error.from} + ${result.error.event::class.simpleName} (action_state='$newState')",
-                        )
-                        TransitionError.MissingSchedule -> BecalmError.Validation(
-                            field = "at",
-                            message = "Schedule event requires a non-null future instant",
-                        )
-                    }
-                )
-                is TransitionResult.Ok -> result.state
-            }
-        } else {
-            entity.commitmentState
-        }
+        // Retained lookup guards against a caller racing updateActionState against a
+        // local deletion — we fail loudly rather than silently no-op the DAO update.
+        @Suppress("UNUSED_VARIABLE") val guard = entity
 
         dao.updateActionState(id, newState, updatedAt)
-        if (nextLifecycleState != entity.commitmentState) {
-            dao.update(entity.copy(commitmentState = nextLifecycleState, updatedAt = updatedAt))
-        }
 
         // Optimistic local write has landed. If the PATCH fails (IOException or non-2xx),
         // demote sync_status='pending' so UploadWorker.flushCommitments picks this row up
@@ -226,21 +236,275 @@ public class CommitmentRepositoryImpl @Inject constructor(
         return mapped
     }
 
-    /**
-     * Maps an action_state target to the [CommitmentEvent] that should drive the
-     * SP-36 lifecycle, or null when the action_state change has no lifecycle effect
-     * (e.g. pending → reminded tracks follow-up intensity without changing lifecycle).
-     *
-     * Mapping (derived from commitment-management.spec.yml CMT-005/6/7):
-     * - "completed" → [CommitmentEvent.MarkDone]
-     * - "pending" / "reminded" / "followed_up" → no lifecycle change
-     *   (DONE is terminal per CMT-007; reopen is not a supported transition.)
-     */
-    private fun actionStateToLifecycleEvent(actionState: String): CommitmentEvent? =
-        when (actionState) {
-            "completed" -> CommitmentEvent.MarkDone
-            else        -> null
+    // ── Edit / dispute / soft-delete / supersede ─────────────────────────────
+
+    override suspend fun editCommitment(
+        id: String,
+        patch: CommitmentEditPatch,
+    ): BecalmResult<Unit> = withContext(ioDispatcher) {
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+        val editedAt = Clock.System.now()
+
+        val rows = dao.applyEdit(
+            id = id,
+            title = patch.title,
+            dueAt = patch.dueAt,
+            dueHint = patch.dueHint,
+            approx = patch.dueIsApproximate,
+            personRef = patch.personRef,
+            direction = patch.direction,
+            actorId = actorId,
+            editedAt = editedAt,
+        )
+        if (rows == 0) {
+            return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
         }
+
+        // Best-effort server PATCH. A 2xx flips sync_status='synced'; anything
+        // else (non-2xx or IOException) leaves 'pending' so UploadWorker retries.
+        bestEffortPatch(
+            id = id,
+            dto = CommitmentPatchDto(
+                title = patch.title,
+                dueAt = patch.dueAt,
+                dueHint = patch.dueHint,
+                dueIsApproximate = patch.dueIsApproximate,
+                personRef = patch.personRef,
+                direction = patch.direction,
+                lastEditedBy = actorId,
+                lastEditedAt = editedAt,
+            ),
+            logTag = "editCommitment",
+        )
+        BecalmResult.Success(Unit)
+    }
+
+    override suspend fun markQuoteDisputed(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+            val at = Clock.System.now()
+            val rows = dao.markQuoteDisputed(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    quoteDisputed = true,
+                    quoteDisputedAt = at,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "markQuoteDisputed",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun clearQuoteDispute(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+            val at = Clock.System.now()
+            val rows = dao.clearQuoteDispute(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    quoteDisputed = false,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "clearQuoteDispute",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun softDelete(id: String): BecalmResult<Unit> =
+        withContext(ioDispatcher) {
+            val actorId = resolveActorId()
+                ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+            val at = Clock.System.now()
+            val rows = dao.softDelete(id = id, actor = actorId, at = at)
+            if (rows == 0) {
+                return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+            }
+            bestEffortPatch(
+                id = id,
+                dto = CommitmentPatchDto(
+                    deletedAt = at,
+                    lastEditedBy = actorId,
+                    lastEditedAt = at,
+                ),
+                logTag = "softDelete",
+            )
+            BecalmResult.Success(Unit)
+        }
+
+    override suspend fun supersede(
+        oldId: String,
+        newRow: CommitmentEntity,
+    ): BecalmResult<String> = withContext(ioDispatcher) {
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+        val editedAt = Clock.System.now()
+
+        // Atomic: INSERT new row + soft-delete old row. Room's withTransaction wraps
+        // both DAO calls in a single SQLite transaction so a crash between them
+        // cannot leave the table with either a dangling supersede child (new row
+        // inserted but old row not tombstoned) or an orphaned tombstone (old row
+        // tombstoned but new row not inserted).
+        val result: BecalmResult<String> = try {
+            database.withTransaction {
+                dao.insert(newRow)
+                val deletedRows = dao.softDelete(id = oldId, actor = actorId, at = editedAt)
+                if (deletedRows == 0) {
+                    BecalmResult.Failure(BecalmError.NotFound("commitment/$oldId"))
+                } else {
+                    BecalmResult.Success(newRow.id)
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(TAG, "supersede transaction failed oldId=$oldId", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "transaction failed"))
+        }
+        if (result is BecalmResult.Failure) return@withContext result
+
+        // Best-effort uploads. POST the new row via batch endpoint and PATCH the
+        // old row's tombstone. Both failures are absorbed into the retry queue.
+        runCatching {
+            api.uploadCommitmentsBatch(
+                request = CommitmentBatchRequestDto(commitments = listOf(newRow.toBatchItemDto())),
+            )
+        }.onFailure { e ->
+            if (e is IOException) {
+                logger.w(TAG, "supersede batch upload IOException newId=${newRow.id}")
+            } else {
+                logger.e(TAG, "supersede batch upload failed newId=${newRow.id}", e)
+            }
+        }
+        bestEffortPatch(
+            id = oldId,
+            dto = CommitmentPatchDto(
+                deletedAt = editedAt,
+                lastEditedBy = actorId,
+                lastEditedAt = editedAt,
+            ),
+            logTag = "supersede/tombstoneOld",
+        )
+        result
+    }
+
+    // ── Manual create (MAN-001..006) ──────────────────────────────────────────
+
+    override suspend fun saveManualCommitment(
+        input: ManualCommitmentInput,
+        supersedeOf: String?,
+    ): BecalmResult<String> = withContext(ioDispatcher) {
+        val actorId = resolveActorId()
+            ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
+        val now = Clock.System.now()
+        val newId = UUID.randomUUID().toString()
+
+        // EDIT-007 supersede: load the old row first so we can copy its quote +
+        // source fields onto the new row. The spec is explicit that supersede
+        // preserves evidentiary provenance — the new row inherits source_type,
+        // source_event_title, source_event_occurred_at, and source_ref from the
+        // old row. Only the user-editable fields come from `input`.
+        val oldRow: CommitmentEntity? = supersedeOf?.let { dao.findByIdForUser(actorId, it) }
+
+        // Build the new row. Two sources:
+        //   1. Manual create (supersedeOf == null) — spec MAN-003 invariants:
+        //      source_type='manual', confidence=1.0, source_ref=null,
+        //      source_event_title=null, source_event_occurred_at=created_at.
+        //      GREP GUARD: this branch MUST NEVER insert into raw_ingestion_events
+        //      (`rawIngestionEventDao.insert` / `rawEventDao.insert`). Manual
+        //      rows have no backing raw event per MAN-003 invariant 4.
+        //   2. Supersede (supersedeOf != null, oldRow != null) — spec EDIT-007:
+        //      quote + source_* copied verbatim from the old row to preserve
+        //      evidentiary provenance. confidence follows the old row so an
+        //      LLM-extracted commitment that gets corrected keeps its original
+        //      confidence score. user-editable fields still come from `input`.
+        //   In both cases last_edited_by/at are populated immediately so the
+        //   audit trail mirrors LLM-extracted rows (EDIT-008 parity).
+        val newRow = CommitmentEntity(
+            id = newId,
+            userId = actorId,
+            direction = input.direction,
+            counterpartyRaw = oldRow?.counterpartyRaw,
+            personRef = input.personRef,
+            title = input.title,
+            description = null,
+            quote = oldRow?.quote ?: input.quote,
+            sourceEventTitle = oldRow?.sourceEventTitle,
+            sourceEventOccurredAt = oldRow?.sourceEventOccurredAt ?: now,
+            dueAt = input.dueAt,
+            dueHint = input.dueHint,
+            dueIsApproximate = input.dueIsApproximate,
+            actionState = "pending",
+            sourceType = oldRow?.sourceType ?: SourceType.MANUAL,
+            sourceRef = oldRow?.sourceRef,
+            confidence = oldRow?.confidence ?: 1.0,
+            commitmentState = CommitmentLifecycleLegacy.DRAFT,
+            syncStatus = "pending",
+            createdAt = now,
+            updatedAt = now,
+            lastEditedBy = actorId,
+            lastEditedAt = now,
+            quoteDisputed = false,
+            quoteDisputedAt = null,
+            deletedAt = null,
+            supersedesCommitmentId = supersedeOf,
+        )
+
+        if (supersedeOf != null) {
+            if (oldRow == null) {
+                return@withContext BecalmResult.Failure(
+                    BecalmError.NotFound("commitment/$supersedeOf")
+                )
+            }
+            // EDIT-007 reuses this path: supersede() wraps INSERT + softDelete
+            // in a single Room transaction + best-effort upload of the new row.
+            return@withContext supersede(supersedeOf, newRow)
+        }
+
+        // Plain manual create — local INSERT then best-effort batch POST.
+        try {
+            dao.insert(newRow)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            logger.e(TAG, "saveManualCommitment dao.insert failed id=$newId", e)
+            return@withContext BecalmResult.Failure(BecalmError.Io(e.message ?: "dao insert failed"))
+        }
+
+        // Best-effort upload. Failure is absorbed into the standard
+        // `sync_status='pending'` retry queue (UploadWorker drains it).
+        runCatching {
+            api.uploadCommitmentsBatch(
+                request = CommitmentBatchRequestDto(commitments = listOf(newRow.toBatchItemDto())),
+            )
+        }.onSuccess { response ->
+            if (response.isSuccessful) {
+                dao.markSynced(listOf(newId))
+            } else {
+                logger.w(
+                    TAG,
+                    "saveManualCommitment upload non-2xx id=$newId http=${response.code()} — leaving pending",
+                )
+            }
+        }.onFailure { e ->
+            if (e is IOException) {
+                logger.w(TAG, "saveManualCommitment upload IOException id=$newId — leaving pending")
+            } else {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "saveManualCommitment upload failed id=$newId", e)
+            }
+        }
+        BecalmResult.Success(newId)
+    }
 
     // ── Sync helpers ──────────────────────────────────────────────────────────
 
@@ -309,6 +573,64 @@ public class CommitmentRepositoryImpl @Inject constructor(
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
+     * Resolves the acting Supabase user id from [UserPrefsStore]. Returns `null`
+     * when the user is signed out or the persisted id is blank — callers must
+     * map that to [BecalmError.Unauthorized] and short-circuit.
+     *
+     * The EDIT-003/005/006/007 audit columns (`last_edited_by`) and the
+     * supersede tombstone MUST carry a real user id per
+     * `.spec/commitment-edit.spec.yml` invariant 3 (audit trail). We refuse to
+     * write a synthetic "unknown" actor — that would silently corrupt the
+     * audit log which PIPA 제36조 정정권 (correction right) audits rely on.
+     */
+    private suspend fun resolveActorId(): String? =
+        userPrefsStore.observeCurrentUserId().firstOrNull()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Best-effort `PATCH /v1/commitments/{id}` for the Stage-5 edit /
+     * dispute / soft-delete / supersede flows.
+     *
+     * The local DAO write has already landed (caller checks rows>0). This
+     * helper is purely about the server mirror:
+     * - 2xx → flip `sync_status='synced'` so the UploadWorker does not
+     *   re-upload on the next run.
+     * - Non-2xx, IOException, or any other exception → leave `sync_status='pending'`
+     *   so [UploadWorker.flushCommitments] retries via [uploadBatch] on the
+     *   next trigger. This matches the EDIT-003 / EDIT-006 invariant 2
+     *   ("offline edits must eventually reach the server").
+     *
+     * Does NOT propagate failures back up — the caller's contract is
+     * "local write landed; server catch-up is async". Returns [Unit] to
+     * underline that intent at call sites.
+     *
+     * @param id     UUID of the commitment row being mirrored.
+     * @param dto    Partial patch body carrying only the mutated columns.
+     * @param logTag Short label used to disambiguate log lines (which flow
+     *               triggered this mirror).
+     */
+    private suspend fun bestEffortPatch(
+        id: String,
+        dto: CommitmentPatchDto,
+        logTag: String,
+    ) {
+        try {
+            val response = api.updateCommitment(id = id, request = dto)
+            if (response.isSuccessful) {
+                dao.markSynced(listOf(id))
+            } else {
+                logger.w(TAG, "$logTag PATCH non-2xx id=$id http=${response.code()} — leaving pending")
+            }
+        } catch (e: IOException) {
+            logger.w(TAG, "$logTag PATCH IOException id=$id msg=${e.message} — leaving pending")
+        } catch (e: Exception) {
+            // Preserve structured-concurrency cancellation; anything else is
+            // best-effort and absorbed into the retry queue.
+            e.rethrowIfCancellation()
+            logger.e(TAG, "$logTag PATCH unexpected error id=$id — leaving pending", e)
+        }
+    }
+
+    /**
      * refreshSince·updateActionState 두 곳의 동일한 `try { api() } catch (IOException)`
      * 블록을 통합한다. 두 호출지 모두 같은 예외 타입(IOException), 같은 로그 레벨(e),
      * 같은 에러 변환(Network(0, ...))을 쓰기 때문에 바이트-동일 패턴이 유지된다.
@@ -332,12 +654,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
      */
     private fun TransitionError.toBecalmError(): BecalmError = when (this) {
         is TransitionError.IllegalTransition -> BecalmError.Validation(
-            field = "commitmentState",
+            field = "actionState",
             message = "Illegal transition: $from + ${event::class.simpleName}",
-        )
-        TransitionError.MissingSchedule -> BecalmError.Validation(
-            field = "at",
-            message = "Schedule event requires a non-null future instant",
         )
     }
 
