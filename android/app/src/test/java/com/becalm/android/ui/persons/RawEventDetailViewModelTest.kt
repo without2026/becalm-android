@@ -5,8 +5,10 @@ import app.cash.turbine.test
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +32,7 @@ class RawEventDetailViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val emailBodyRepository: EmailBodyRepository = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
 
@@ -53,20 +56,22 @@ class RawEventDetailViewModelTest {
         val handle = SavedStateHandle(mapOf(ARG_EVENT_ID to eventId))
         return RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
+            emailBodyRepository = emailBodyRepository,
             userPrefsStore = userPrefsStore,
             savedStateHandle = handle,
             logger = logger,
         )
     }
 
-    private fun makeEntity(): RawIngestionEventEntity = RawIngestionEventEntity(
-        id = eventId,
-        userId = userId,
-        clientEventId = "client-event-abc",
-        sourceType = "voice",
-        eventTitle = "Team stand-up recording",
-        timestamp = now,
-    )
+    private fun makeEntity(sourceType: String = "voice"): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = eventId,
+            userId = userId,
+            clientEventId = "client-event-abc",
+            sourceType = sourceType,
+            eventTitle = "Team stand-up recording",
+            timestamp = now,
+        )
 
     // ─── Test 1: loads event when repository returns a match ─────────────────
 
@@ -82,7 +87,6 @@ class RawEventDetailViewModelTest {
                 var state = awaitItem()
                 while (state.loading) state = awaitItem()
 
-                // VM flattens entity fields into state — assert field-by-field.
                 assertEquals(entity.id, state.eventId)
                 assertEquals(entity.sourceType, state.sourceType)
                 assertEquals(entity.eventTitle, state.eventTitle)
@@ -92,6 +96,9 @@ class RawEventDetailViewModelTest {
 
                 cancelAndIgnoreRemainingEvents()
             }
+
+            // Non-email source must not touch the email body repository.
+            coVerify(exactly = 0) { emailBodyRepository.getByRawEventId(any()) }
         }
 
     // ─── Test 2: null event sets generic error state ──────────────────────────
@@ -109,7 +116,6 @@ class RawEventDetailViewModelTest {
             var state = awaitItem()
             while (state.loading) state = awaitItem()
 
-            // Not-found: entity fields default to empty/null; error is set.
             assertEquals("", state.eventId)
             assertNull(state.eventTitle)
             assertEquals(false, state.loading)

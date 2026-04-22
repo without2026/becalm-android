@@ -128,6 +128,47 @@
     <string name="raw_event_detail_source">출처</string>
     <string name="raw_event_detail_timestamp">기록 시각</string>
     <string name="raw_event_detail_not_found">이벤트를 찾을 수 없습니다.</string>
+    <string name="raw_event_detail_no_title">(제목 없음)</string>
+
+    <!-- Raw event detail — 이메일 분기 (S5-D ui-raw-event-email-rendering) -->
+    <string name="raw_event_attachments_count">📎 첨부 %1$d건</string>
+    <string name="raw_event_commitments_extracted">약속 추출 %1$d건</string>
+    <string name="raw_event_body_expand">전체 보기</string>
+    <string name="raw_event_body_collapse">접기</string>
+    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이라 본문 표시가 어렵습니다.</string>
+    <string name="raw_event_view_html_original">원문보기</string>
+    <string name="raw_event_view_html_original_todo_toast">원문보기는 다음 업데이트에서 제공됩니다.</string>
+
+    <!-- Raw event detail — 출처 배지 -->
+    <string name="raw_event_source_badge_gmail">Gmail</string>
+    <string name="raw_event_source_badge_outlook_mail">Outlook</string>
+    <string name="raw_event_source_badge_naver_imap">네이버 메일</string>
+    <string name="raw_event_source_badge_daum_imap">다음 메일</string>
+    <string name="raw_event_source_badge_google_calendar">구글 캘린더</string>
+    <string name="raw_event_source_badge_outlook_calendar">아웃룩 캘린더</string>
+    <string name="raw_event_source_badge_voice">음성</string>
+    <string name="raw_event_source_badge_call_recording">통화 녹음</string>
+    <string name="raw_event_source_badge_unknown">기타</string>
+
+    <!-- Today 타임라인 (S5-A / S5-B) -->
+    <string name="today_direction_badge_give">내가 약속</string>
+    <string name="today_direction_badge_take">상대가 약속</string>
+    <string name="today_direction_badge_unknown">—</string>
+    <string name="today_counterparty_unknown">미매칭</string>
+    <string name="today_since_just_now">방금 전</string>
+    <string name="today_since_minutes">%1$d분 전</string>
+    <string name="today_since_hours">%1$d시간 전</string>
+    <string name="today_since_today_at">오늘 %1$s</string>
+
+    <!-- Person 상세 헤더 (S5-C) -->
+    <string name="person_header_job_subtitle">%1$s · %2$s</string>
+    <string name="person_header_company_only">%1$s</string>
+    <string name="person_header_job_only">%1$s</string>
+    <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
+
+    <!-- Person 상세 섹션 (SRC-008) -->
+    <string name="person_detail_section_pending_fmt">미이행 약속 (%1$d)</string>
+    <string name="person_detail_section_completed_fmt">이행 완료 (%1$d)</string>
 
     <!-- Commitments -->
     <string name="commitments_title">약속 관리</string>

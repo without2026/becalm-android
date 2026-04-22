@@ -1,11 +1,11 @@
 package com.becalm.android.ui.persons
 
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,9 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.EventSourceBadge
+import com.becalm.android.ui.components.EventTitleText
+import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -35,11 +39,18 @@ import com.becalm.android.ui.theme.glassPanel
 /**
  * Raw event detail screen — extended fields loaded from Room for a single ingestion event.
  *
- * Named "Sheet" in the spec but implemented as a full screen for navigation consistency.
- * PII note: [RawIngestionEventEntity.eventSnippet] and raw [personRef] are intentionally
- * not shown in @Preview sample data.
+ * Branches by `source_type` in [RawEventDetailUiState.sourceType]:
+ * - **Email sources** ([EMAIL_SOURCE_TYPES]) → [EmailEventDetailSection] which renders
+ *   the six SRC-004 / EMAIL-003 / EMAIL-004 components (source badge, title, snippet,
+ *   body, attachments pill, commitments-extracted badge, KST timestamp).
+ * - **Non-email sources** (voice / calendar / call_recording) → a minimal common layout
+ *   (source badge + title + KST timestamp). Voice and calendar extended fields
+ *   (`duration_seconds`, `location`, `attendees_raw`) are deferred to their own plan
+ *   docs and intentionally not rendered here.
  *
- * spec: SRC-008
+ * Named "Sheet" in the spec but implemented as a full screen for navigation consistency.
+ *
+ * Spec: SRC-008, `.spec/contracts/ui-map.yml:113-118`.
  *
  * Primary VM: [RawEventDetailViewModel]
  * Navigation entry: [BecalmRoute.RawEventDetail]
@@ -53,6 +64,8 @@ public fun RawEventDetailSheet(
     viewModel: RawEventDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val viewOriginalToast = stringResource(R.string.raw_event_view_html_original_todo_toast)
 
     BecalmScaffold(
         title = stringResource(R.string.raw_event_detail_title),
@@ -84,13 +97,6 @@ public fun RawEventDetailSheet(
                 )
             }
             state.sourceType != null -> {
-                // Snapshot the delegated state properties into locals so the compiler can
-                // smart-cast them inside the block below (delegated `by` properties cannot
-                // be smart-cast across references). `sourceType` is guarded non-null by the
-                // branch condition, so `!!` is safe here.
-                val sourceType: String = state.sourceType!!
-                val timestamp = state.timestamp
-                val eventTitle = state.eventTitle
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -103,22 +109,19 @@ public fun RawEventDetailSheet(
                             .glassPanel(MaterialTheme.shapes.medium)
                             .padding(16.dp),
                     ) {
-                        DetailRow(
-                            label = stringResource(R.string.raw_event_detail_source),
-                            value = sourceType,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        DetailRow(
-                            label = stringResource(R.string.raw_event_detail_timestamp),
-                            value = timestamp?.toString() ?: "",
-                        )
-                        if (eventTitle != null) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = eventTitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                        if (state.sourceType in EMAIL_SOURCE_TYPES) {
+                            EmailEventDetailSection(
+                                state = state,
+                                onViewOriginalRequested = {
+                                    Toast.makeText(
+                                        context,
+                                        viewOriginalToast,
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
                             )
+                        } else {
+                            NonEmailEventDetailSection(state = state)
                         }
                     }
                 }
@@ -133,20 +136,32 @@ public fun RawEventDetailSheet(
     }
 }
 
+// ─── Non-email fallback layout ────────────────────────────────────────────────
+
+/**
+ * Minimal layout for voice / calendar / call_recording events — the common header
+ * (source badge + title + timestamp) only. Per-source extended fields
+ * (`duration_seconds`, `transcript`, `location`, `attendees_raw`) are intentionally
+ * out of scope for this plan; future plans (`ui-raw-event-voice-rendering`,
+ * `ui-raw-event-calendar-rendering`) will specialize each branch the same way
+ * [EmailEventDetailSection] does for email.
+ */
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Column {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+private fun NonEmailEventDetailSection(state: RawEventDetailUiState) {
+    val sourceType = state.sourceType ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        EventSourceBadge(sourceType = sourceType)
+        if (state.eventTitle != null) {
+            EventTitleText(title = state.eventTitle)
+        }
+        if (state.snippet != null) {
+            Text(
+                text = state.snippet,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        state.timestamp?.let { IngestionTimestamp(timestamp = it) }
     }
 }
 

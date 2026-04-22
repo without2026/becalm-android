@@ -36,15 +36,26 @@ public sealed class InteractionRow {
     /**
      * A raw ingestion event (voice, email, etc.) linked to this person.
      *
+     * @property id Primary-key of the raw ingestion event. Required so the row can
+     *   navigate to [com.becalm.android.ui.navigation.BecalmRoute.RawEventDetail]
+     *   on tap (SRC-004).
      * @property timestamp When the event was recorded.
      * @property source Source type string (e.g. "voice", "gmail").
-     * @property summary Event title when available; null otherwise. The raw body snippet
-     *   is intentionally excluded.
+     * @property summary Event title when available; null otherwise.
+     * @property snippet Truncated body preview from
+     *   [RawIngestionEventEntity.eventSnippet] — rendered as secondary text on
+     *   [InteractionHistoryRow] per `.spec/contracts/ui-map.yml:206-210`.
+     * @property commitmentsExtractedCount Mirror of
+     *   [RawIngestionEventEntity.commitmentsExtractedCount] — drives the
+     *   "약속 추출 N건" badge on [InteractionHistoryRow] per SRC-008.
      */
     public data class Event(
+        val id: String,
         val timestamp: Instant,
         val source: String,
         val summary: String?,
+        val snippet: String?,
+        val commitmentsExtractedCount: Int = 0,
     ) : InteractionRow()
 
     /**
@@ -53,13 +64,17 @@ public sealed class InteractionRow {
      * @property timestamp When the source event occurred.
      * @property title Commitment title.
      * @property direction "give" or "take".
-     * @property commitmentState SP-36 lifecycle state name (e.g. "DRAFT", "DONE", "DISMISSED").
+     * @property actionState v5 follow-through state. Valid values per
+     *   [CommitmentEntity.actionState]: `"pending"`, `"reminded"`,
+     *   `"followed_up"`, `"completed"`. Partition into the "completed"
+     *   section happens on this column only — the legacy `commitment_state`
+     *   column is intentionally ignored.
      */
     public data class Commitment(
         val timestamp: Instant,
         val title: String,
         val direction: String,
-        val commitmentState: String,
+        val actionState: String,
     ) : InteractionRow()
 
     /**
@@ -105,6 +120,17 @@ private const val TAG = "PersonDetailViewModel"
 internal const val ARG_PERSON_REF = "person_id"
 private const val RAW_EVENTS_LIMIT = 100
 private const val CALENDAR_EVENTS_LIMIT = 50
+
+/** v5 `action_state` terminal value that places a commitment in the "완료" section. */
+internal const val ACTION_STATE_COMPLETED: String = "completed"
+
+/**
+ * Character budget for the truncated snippet rendered on [InteractionHistoryRow]
+ * per `.spec/contracts/ui-map.yml:206-210`. Chosen to match
+ * `RawEventDetailUiState.snippet` (SRC-004) so the timeline and drill-down share a
+ * consistent "at-a-glance" preview length.
+ */
+private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -219,30 +245,15 @@ public class PersonDetailViewModel @Inject constructor(
         commitments: List<CommitmentEntity>,
         calendarEvents: List<CalendarEventEntity>,
     ): InteractionSections {
-        val eventRows: List<InteractionRow> = rawEvents.map { e ->
-            InteractionRow.Event(
-                timestamp = e.timestamp,
-                source = e.sourceType,
-                summary = e.eventTitle,
-            )
-        }
-        val commitmentRows: List<InteractionRow.Commitment> = commitments.map { c ->
-            InteractionRow.Commitment(
-                timestamp = c.sourceEventOccurredAt,
-                title = c.title,
-                direction = c.direction,
-                commitmentState = c.commitmentState.name,
-            )
-        }
-        val calendarRows: List<InteractionRow> = calendarEvents.map { m ->
-            InteractionRow.CalendarMeeting(
-                timestamp = m.startAt,
-                title = m.title,
-            )
-        }
+        val eventRows: List<InteractionRow> = rawEvents.map(::toEventRow)
+        val commitmentRows: List<InteractionRow.Commitment> = commitments.map(::toCommitmentRow)
+        val calendarRows: List<InteractionRow> = calendarEvents.map(::toCalendarMeetingRow)
+
+        // Partition on the v5 `action_state` column only — the legacy
+        // `commitment_state` column is retained for schema parity but drifts on
+        // the dispute/edit path (see CommitmentRepositoryImpl).
         val (completed, pending) = commitmentRows.partition { c ->
-            val s = c.commitmentState.uppercase()
-            s == "DONE" || s == "DISMISSED"
+            c.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true)
         }
         // history contains only Event + CalendarMeeting — commitmentRows are partitioned out
         // above. The Commitment branch is unreachable here; the else guards the invariant.
@@ -260,4 +271,28 @@ public class PersonDetailViewModel @Inject constructor(
             interactionHistory = history,
         )
     }
+
+    private fun toEventRow(e: RawIngestionEventEntity): InteractionRow.Event =
+        InteractionRow.Event(
+            id = e.id,
+            timestamp = e.timestamp,
+            source = e.sourceType,
+            summary = e.eventTitle,
+            snippet = e.eventSnippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
+            commitmentsExtractedCount = e.commitmentsExtractedCount,
+        )
+
+    private fun toCommitmentRow(c: CommitmentEntity): InteractionRow.Commitment =
+        InteractionRow.Commitment(
+            timestamp = c.sourceEventOccurredAt,
+            title = c.title,
+            direction = c.direction,
+            actionState = c.actionState,
+        )
+
+    private fun toCalendarMeetingRow(m: CalendarEventEntity): InteractionRow.CalendarMeeting =
+        InteractionRow.CalendarMeeting(
+            timestamp = m.startAt,
+            title = m.title,
+        )
 }

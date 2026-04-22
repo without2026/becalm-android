@@ -1,13 +1,9 @@
 package com.becalm.android.ui.persons
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -34,19 +30,32 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 
 /**
- * Person detail screen — 3-section body: pending commitments / completed / interaction history.
+ * Navigates from the person detail screen to a raw event drill-down. Scoped to
+ * this file so the per-branch plumbing through `interactionSection` stays
+ * readable; passed in as a parameter rather than closed-over so the recomposition
+ * key is stable.
+ */
+private typealias OnEventTap = (eventId: String) -> Unit
+
+/**
+ * Person detail screen — renders a [PersonHeader] plus a 3-section body
+ * (pending commitments / completed commitments / interaction history) per
+ * `.spec/contracts/ui-map.yml:106-111`.
  *
- * spec: SRC-003, SRC-004, SRC-005
+ * spec: SRC-003, SRC-004, SRC-005, SRC-008, ENR-006
  *
  * Primary VM: [PersonDetailViewModel]
  * Navigation entry: [BecalmRoute.PersonDetail]
@@ -71,10 +80,14 @@ public fun PersonDetailScreen(
         }
     }
 
-    val displayName = state.displayName ?: personId.take(16)
+    val onEventTap: OnEventTap = { eventId ->
+        navController.navigate(
+            BecalmRoute.RawEventDetail(personId = personId, eventId = eventId).path,
+        )
+    }
 
     BecalmScaffold(
-        title = displayName,
+        title = state.displayName ?: personId.take(16),
         navigationIcon = {
             IconButton(onClick = { navController.popBackStack() }) {
                 Icon(
@@ -106,91 +119,176 @@ public fun PersonDetailScreen(
                     modifier = Modifier.padding(padding),
                 )
             }
-            !hasAnyInteractions -> {
-                EmptyState(
-                    title = stringResource(R.string.person_detail_empty_interactions),
-                    modifier = Modifier.padding(padding),
-                )
-            }
-            else -> {
-                InteractionList(
-                    pendingCommitments = state.pendingCommitments,
-                    completedCommitments = state.completedCommitments,
-                    interactionHistory = state.interactionHistory,
-                    contentPadding = padding,
-                )
-            }
+            !hasAnyInteractions -> PersonDetailEmpty(state = state, padding = padding)
+            else -> PersonDetailList(
+                state = state,
+                padding = padding,
+                onEventTap = onEventTap,
+            )
+        }
+    }
+}
+
+// ─── Content branches ─────────────────────────────────────────────────────────
+
+@Composable
+private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues) {
+    LazyColumn(
+        contentPadding = padding,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        item(key = "header") {
+            PersonHeader(
+                displayName = state.displayName,
+                companyName = state.companyName,
+                jobTitle = state.jobTitle,
+                personRef = state.personRef,
+            )
+        }
+        item(key = "empty") {
+            EmptyState(title = stringResource(R.string.person_detail_empty_interactions))
         }
     }
 }
 
 @Composable
-private fun InteractionList(
-    pendingCommitments: List<InteractionRow.Commitment>,
-    completedCommitments: List<InteractionRow.Commitment>,
-    interactionHistory: List<InteractionRow>,
-    contentPadding: PaddingValues,
+private fun PersonDetailList(
+    state: PersonDetailUiState,
+    padding: PaddingValues,
+    onEventTap: OnEventTap,
 ) {
-    val commitmentsHeader = stringResource(R.string.person_detail_commitments_section)
+    // SRC-008 requires the "이행 완료" section to default to a collapsed state and
+    // expand on tap. `rememberSaveable` keeps the state across config changes and
+    // process death without leaking to the ViewModel.
+    var completedExpanded by rememberSaveable(state.personRef) { mutableStateOf(false) }
+
+    val pendingHeader = stringResource(
+        R.string.person_detail_section_pending_fmt,
+        state.pendingCommitments.size,
+    )
+    val completedHeader = stringResource(
+        R.string.person_detail_section_completed_fmt,
+        state.completedCommitments.size,
+    )
     val historyHeader = stringResource(R.string.person_detail_history_section)
+
     LazyColumn(
-        contentPadding = contentPadding,
+        contentPadding = padding,
         modifier = Modifier.fillMaxSize(),
     ) {
-        interactionSection(
-            header = commitmentsHeader,
-            headerKey = "header-pending",
-            rows = pendingCommitments,
-            itemKey = { row ->
-                "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-            },
+        item(key = "header") {
+            PersonHeader(
+                displayName = state.displayName,
+                companyName = state.companyName,
+                jobTitle = state.jobTitle,
+                personRef = state.personRef,
+            )
+        }
+        pendingCommitmentsSection(
+            header = pendingHeader,
+            rows = state.pendingCommitments,
+            onEventTap = onEventTap,
         )
-        interactionSection(
-            header = commitmentsHeader,
-            headerKey = "header-completed",
-            rows = completedCommitments,
-            itemKey = { row ->
-                "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-            },
+        completedCommitmentsSection(
+            header = completedHeader,
+            rows = state.completedCommitments,
+            expanded = completedExpanded,
+            onToggleExpanded = { completedExpanded = !completedExpanded },
+            onEventTap = onEventTap,
         )
-        interactionSection(
+        historySection(
             header = historyHeader,
-            headerKey = "header-history",
-            rows = interactionHistory,
-            itemKey = { row ->
-                when (row) {
-                    is InteractionRow.Event -> "e-${row.timestamp.toEpochMilliseconds()}-${row.source}"
-                    is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                    is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                }
-            },
+            rows = state.interactionHistory,
+            onEventTap = onEventTap,
+        )
+    }
+}
+
+// ─── LazyListScope section builders ───────────────────────────────────────────
+
+/**
+ * Section 1 — pending commitments. Eagerly visible. No-op when empty.
+ */
+private fun LazyListScope.pendingCommitmentsSection(
+    header: String,
+    rows: List<InteractionRow.Commitment>,
+    onEventTap: OnEventTap,
+) {
+    if (rows.isEmpty()) return
+    item(key = "header-pending") { SectionHeader(text = header) }
+    items(
+        items = rows,
+        key = { row -> "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
+    ) { row ->
+        InteractionHistoryRow(
+            row = row,
+            onEventTap = onEventTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
         )
     }
 }
 
 /**
- * Emits a `SectionHeader` + list of [InteractionRowItem]s into this [LazyListScope].
- *
- * No-op when [rows] is empty, matching the `isNotEmpty()` guard at each former call site.
- * The generic bound `<T : InteractionRow>` lets callers pass either a `List<InteractionRow.Commitment>`
- * (covariant) or the polymorphic `List<InteractionRow>` without forcing a cast.
+ * Section 2 — completed commitments. Rendered as [ExpandableSectionHeader] and
+ * default-collapsed per SRC-008 "접힌 상태 기본. 탭 시 … 펼쳐짐". No-op when empty.
  */
-private fun <T : InteractionRow> LazyListScope.interactionSection(
+private fun LazyListScope.completedCommitmentsSection(
     header: String,
-    headerKey: String,
-    rows: List<T>,
-    itemKey: (T) -> String,
+    rows: List<InteractionRow.Commitment>,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onEventTap: OnEventTap,
 ) {
     if (rows.isEmpty()) return
-    item(key = headerKey) {
-        SectionHeader(text = header)
+    item(key = "header-completed") {
+        ExpandableSectionHeader(
+            title = header,
+            expanded = expanded,
+            onToggle = onToggleExpanded,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
+    if (!expanded) return
     items(
         items = rows,
-        key = itemKey,
+        key = { row -> "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
     ) { row ->
-        InteractionRowItem(
+        InteractionHistoryRow(
             row = row,
+            onEventTap = onEventTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * Section 3 — interaction history (raw events + calendar meetings, newest first).
+ * Always visible. No-op when empty.
+ */
+private fun LazyListScope.historySection(
+    header: String,
+    rows: List<InteractionRow>,
+    onEventTap: OnEventTap,
+) {
+    if (rows.isEmpty()) return
+    item(key = "header-history") { SectionHeader(text = header) }
+    items(
+        items = rows,
+        key = { row ->
+            when (row) {
+                is InteractionRow.Event -> "e-${row.id}"
+                is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+                is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+            }
+        },
+    ) { row ->
+        InteractionHistoryRow(
+            row = row,
+            onEventTap = onEventTap,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -205,75 +303,6 @@ private fun SectionHeader(text: String) {
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-private fun InteractionRowItem(
-    row: InteractionRow,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-    ) {
-        when (row) {
-            is InteractionRow.Event -> {
-                Row {
-                    Text(
-                        text = stringResource(R.string.person_detail_source_label, row.source),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                if (row.summary != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = row.summary,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-            is InteractionRow.Commitment -> {
-                InteractionLabelAndBody(
-                    label = stringResource(R.string.person_detail_commitments_section),
-                    body = row.title,
-                )
-            }
-            is InteractionRow.CalendarMeeting -> {
-                InteractionLabelAndBody(
-                    label = stringResource(R.string.today_section_meetings),
-                    body = row.title,
-                )
-            }
-        }
-    }
-}
-
-/**
- * Label + body text pair used by [InteractionRowItem] for the Commitment and CalendarMeeting
- * branches. The Event branch intentionally inlines its own layout because it wraps the label
- * in a `Row` (preserving the original Compose tree).
- *
- * Visual parity with the former inlined forms:
- *  - Label: `labelSmall` typography, primary colour.
- *  - 4.dp spacer between label and body.
- *  - Body: `bodyMedium` typography, onSurface colour.
- */
-@Composable
-private fun InteractionLabelAndBody(label: String, body: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
-    )
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(
-        text = body,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
     )
 }
 
@@ -297,11 +326,11 @@ private fun PreviewPersonDetailScreenWithHistory() {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 item {
-                    Text(
-                        text = "Interaction History",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    PersonHeader(
+                        displayName = "Alice Kim",
+                        companyName = "Acme Corp",
+                        jobTitle = "Product Lead",
+                        personRef = "alice@acme.com",
                     )
                 }
                 items(
@@ -310,7 +339,7 @@ private fun PreviewPersonDetailScreenWithHistory() {
                             timestamp = kotlinx.datetime.Clock.System.now(),
                             title = "Send contract draft",
                             direction = "give",
-                            commitmentState = "DRAFT",
+                            actionState = "pending",
                         ),
                         InteractionRow.CalendarMeeting(
                             timestamp = kotlinx.datetime.Clock.System.now(),
@@ -318,8 +347,9 @@ private fun PreviewPersonDetailScreenWithHistory() {
                         ),
                     ),
                 ) { row ->
-                    InteractionRowItem(
+                    InteractionHistoryRow(
                         row = row,
+                        onEventTap = {},
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),

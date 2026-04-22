@@ -128,6 +128,47 @@
     <string name="raw_event_detail_source">Source</string>
     <string name="raw_event_detail_timestamp">Recorded</string>
     <string name="raw_event_detail_not_found">Event not found.</string>
+    <string name="raw_event_detail_no_title">(No title)</string>
+
+    <!-- Raw event detail — email branch (S5-D ui-raw-event-email-rendering) -->
+    <string name="raw_event_attachments_count">📎 %1$d attachments</string>
+    <string name="raw_event_commitments_extracted">Commitments extracted: %1$d</string>
+    <string name="raw_event_body_expand">Show full message</string>
+    <string name="raw_event_body_collapse">Collapse</string>
+    <string name="raw_event_body_html_only_notice">This message arrived as HTML only. Plain text is not available.</string>
+    <string name="raw_event_view_html_original">View original</string>
+    <string name="raw_event_view_html_original_todo_toast">Original view is coming in a future update.</string>
+
+    <!-- Raw event detail — source badges -->
+    <string name="raw_event_source_badge_gmail">Gmail</string>
+    <string name="raw_event_source_badge_outlook_mail">Outlook</string>
+    <string name="raw_event_source_badge_naver_imap">Naver Mail</string>
+    <string name="raw_event_source_badge_daum_imap">Daum Mail</string>
+    <string name="raw_event_source_badge_google_calendar">Google Calendar</string>
+    <string name="raw_event_source_badge_outlook_calendar">Outlook Calendar</string>
+    <string name="raw_event_source_badge_voice">Voice</string>
+    <string name="raw_event_source_badge_call_recording">Call Recording</string>
+    <string name="raw_event_source_badge_unknown">Other</string>
+
+    <!-- Today timeline (S5-A / S5-B) -->
+    <string name="today_direction_badge_give">I give</string>
+    <string name="today_direction_badge_take">I take</string>
+    <string name="today_direction_badge_unknown">—</string>
+    <string name="today_counterparty_unknown">Unknown</string>
+    <string name="today_since_just_now">Just now</string>
+    <string name="today_since_minutes">%1$d min ago</string>
+    <string name="today_since_hours">%1$d hr ago</string>
+    <string name="today_since_today_at">Today %1$s</string>
+
+    <!-- Person detail header (S5-C) -->
+    <string name="person_header_job_subtitle">%1$s @ %2$s</string>
+    <string name="person_header_company_only">%1$s</string>
+    <string name="person_header_job_only">%1$s</string>
+    <string name="person_interaction_snippet_placeholder">(No preview)</string>
+
+    <!-- Person detail sections (SRC-008) -->
+    <string name="person_detail_section_pending_fmt">Pending commitments (%1$d)</string>
+    <string name="person_detail_section_completed_fmt">Completed (%1$d)</string>
 
     <!-- Commitments -->
     <string name="commitments_title">Commitments</string>
