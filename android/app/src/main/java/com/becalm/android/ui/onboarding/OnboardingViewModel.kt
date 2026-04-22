@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -288,24 +289,33 @@ public class OnboardingViewModel @Inject constructor(
 
     // spec: ONB-PIPA per-provider (S6-D) + PIPA Article 17
     /**
-     * Persists a per-provider email PIPA consent outcome (S6-D) and marks the
-     * corresponding OAuth / credential step [StepStatus.SKIPPED] when consent is denied
-     * so the onboarding terminal gate accepts the flow without forcing the user to
-     * revisit the OAuth screen.
+     * Persists email PIPA consent outcomes for the given [providers] atomically and
+     * marks the matching OAuth / credential step [StepStatus.SKIPPED] when consent is
+     * denied, so the terminal gate accepts the flow without forcing the user back to
+     * the OAuth screen.
      *
-     * On `granted=true`, no step-status change is made here — the downstream OAuth
-     * screen marks its own step COMPLETE after a successful connection.
+     * Taking a list lets the IMAP onboarding screen — which shows a single combined
+     * disclosure but must record consent for both Naver Corp and Kakao Corp per PIPA
+     * Article 17 — update both recipients in one DataStore transaction-equivalent burst.
+     * Gmail and Outlook callers pass a single-element list.
      *
-     * Audit trail: the setter records a wall-clock timestamp alongside the flag, and
-     * emits a structured `onboarding_pipa_email_consent` observability event for
-     * downstream PIPA action-log correlation (W7 builds the full user-facing log on
-     * top of these events).
+     * Audit trail: the setter records a wall-clock timestamp alongside each flag, and
+     * one structured `onboarding_pipa_email_consent` observability event is emitted per
+     * recipient for downstream PIPA action-log correlation (W7 builds the full
+     * user-facing log on top of these events).
+     *
+     * @return true once every write has completed; callers must await this before
+     *   navigating so the consent record is durable before the user can reach a
+     *   connectable provider screen.
      */
-    public fun onEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
-        viewModelScope.launch {
-            try {
+    public suspend fun onEmailPipaConsent(
+        providers: List<EmailPipaProvider>,
+        granted: Boolean,
+    ): Boolean {
+        require(providers.isNotEmpty()) { "providers must be non-empty" }
+        return try {
+            for (provider in providers) {
                 userPrefsStore.setEmailPipaConsent(provider, granted)
-                logger.i(TAG, "pipa email consent ${provider.storageKey}=${granted}")
                 observability.captureMessage(
                     message = "onboarding_pipa_email_consent",
                     tags = mapOf(
@@ -313,25 +323,21 @@ public class OnboardingViewModel @Inject constructor(
                         "granted" to granted.toString(),
                     ),
                 )
+                logger.i(TAG, "pipa email consent ${provider.storageKey}=$granted")
                 if (!granted) {
-                    val skippedStep = skippedStepForDeniedConsent(provider)
+                    val skippedStep = linkStepFor(provider)
                     _uiState.update { state ->
                         state.copy(stepStates = state.stepStates + (skippedStep to StepStatus.SKIPPED))
                     }
                 }
-            } catch (e: Exception) {
-                logger.e(TAG, "pipa email consent write failed for ${provider.storageKey}", e)
-                _uiState.update { it.copy(error = e.message ?: "consent write failed") }
             }
+            true
+        } catch (e: Exception) {
+            logger.e(TAG, "pipa email consent write failed", e)
+            _uiState.update { it.copy(error = e.message ?: "consent write failed") }
+            false
         }
     }
-
-    private fun skippedStepForDeniedConsent(provider: EmailPipaProvider): OnboardingStep =
-        when (provider) {
-            EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
-            EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
-            EmailPipaProvider.IMAP -> OnboardingStep.LINK_IMAP
-        }
 
     // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시 Sentry 에
     // onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
@@ -370,15 +376,29 @@ public class OnboardingViewModel @Inject constructor(
      *   AuthorizationClient / MSAL interactive call.
      */
     public fun onConnectEmailProvider(provider: EmailPipaProvider, activity: Activity) {
-        require(provider != EmailPipaProvider.IMAP) {
-            "IMAP uses saveImapCredentials(), not onConnectEmailProvider()"
+        require(provider == EmailPipaProvider.GMAIL || provider == EmailPipaProvider.OUTLOOK_MAIL) {
+            "${provider.storageKey} uses saveImapCredentials(), not onConnectEmailProvider()"
         }
         viewModelScope.launch {
+            // PIPA Article 17 hard gate — the OAuth grant cannot be initiated if the
+            // disclosure screen's consent has not been persisted. This guards against a
+            // direct-navigation regression where a user lands on the OAuth screen without
+            // the consent step.
+            val consented = userPrefsStore.observeEmailPipaConsent(provider).first()
+            if (!consented) {
+                reportOnboardingStepFailed(linkStepFor(provider), "pipa_consent_missing")
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (linkStepFor(provider) to StepStatus.SKIPPED))
+                }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
+                return@launch
+            }
             val result = runCatching {
                 when (provider) {
                     EmailPipaProvider.GMAIL -> googleAuthTokenProvider.startSignIn(activity)
                     EmailPipaProvider.OUTLOOK_MAIL -> msGraphTokenProvider.startSignIn(activity)
-                    EmailPipaProvider.IMAP -> error("unreachable")
+                    EmailPipaProvider.NAVER_IMAP,
+                    EmailPipaProvider.DAUM_IMAP -> error("unreachable — filtered by require guard")
                 }
             }.getOrElse { t ->
                 logger.e(TAG, "OAuth startSignIn threw for ${provider.storageKey}", t)
@@ -429,7 +449,13 @@ public class OnboardingViewModel @Inject constructor(
     private fun linkStepFor(provider: EmailPipaProvider): OnboardingStep = when (provider) {
         EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
         EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
-        EmailPipaProvider.IMAP -> OnboardingStep.LINK_IMAP
+        EmailPipaProvider.NAVER_IMAP, EmailPipaProvider.DAUM_IMAP -> OnboardingStep.LINK_IMAP
+    }
+
+    private fun imapProviderFor(sourceType: String): EmailPipaProvider? = when (sourceType) {
+        com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP -> EmailPipaProvider.NAVER_IMAP
+        com.becalm.android.data.remote.dto.SourceType.DAUM_IMAP -> EmailPipaProvider.DAUM_IMAP
+        else -> null
     }
 
     // spec: ONB-004 + ING-011 (S6-H)
@@ -447,17 +473,44 @@ public class OnboardingViewModel @Inject constructor(
      */
     public fun saveImapCredentials(sourceType: String, credentials: ImapCredentials) {
         viewModelScope.launch {
+            val pipaProvider = imapProviderFor(sourceType)
+            if (pipaProvider == null) {
+                // Unknown sourceType — the credential store will reject it, but fail-loudly
+                // in the VM so tests and operators see a specific error_code rather than a
+                // generic save_failed coming out of the credential store.
+                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "unknown_provider")
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
+                }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(EmailPipaProvider.NAVER_IMAP, "unknown_provider"))
+                return@launch
+            }
+
+            // PIPA Article 17 hard gate — the specific recipient's consent must exist
+            // before its IMAP credentials can be persisted. The combined IMAP disclosure
+            // screen writes both naver_imap and daum_imap records on Agree, so either
+            // provider's grant suffices for this specific save.
+            val consented = userPrefsStore.observeEmailPipaConsent(pipaProvider).first()
+            if (!consented) {
+                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "pipa_consent_missing")
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
+                }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(pipaProvider, "pipa_consent_missing"))
+                return@launch
+            }
+
             val result = runCatching { imapCredentialStore.save(sourceType, credentials) }
             if (result.isSuccess) {
-                userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+                userPrefsStore.setEmailSourceConnected(pipaProvider, true)
                 _uiState.update {
                     it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
                 }
                 observability.captureMessage(
                     message = "onboarding_email_connected",
-                    tags = mapOf("provider" to EmailPipaProvider.IMAP.storageKey, "source_type" to sourceType),
+                    tags = mapOf("provider" to pipaProvider.storageKey, "source_type" to sourceType),
                 )
-                _emailConnectEvents.emit(EmailConnectEvent.Connected(EmailPipaProvider.IMAP))
+                _emailConnectEvents.emit(EmailConnectEvent.Connected(pipaProvider))
             } else {
                 val throwable = result.exceptionOrNull()
                 val errorCode = when (throwable) {
@@ -470,7 +523,7 @@ public class OnboardingViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
                 }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(EmailPipaProvider.IMAP, errorCode))
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(pipaProvider, errorCode))
             }
         }
     }

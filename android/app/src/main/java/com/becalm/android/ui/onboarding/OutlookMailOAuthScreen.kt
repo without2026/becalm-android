@@ -50,7 +50,7 @@ public fun OutlookMailOAuthScreen(
     val activity = LocalContext.current as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val downstream = BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.IMAP.storageKey).path
+    val downstream = BecalmRoute.OnboardingEmailPipa("imap").path
 
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_outlook_error_network),

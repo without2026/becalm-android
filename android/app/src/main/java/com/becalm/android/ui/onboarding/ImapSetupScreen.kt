@@ -88,7 +88,7 @@ public fun ImapSetupScreen(
 
     LaunchedEffect(viewModel) {
         viewModel.emailConnectEvents
-            .filter { it.provider == EmailPipaProvider.IMAP }
+            .filter { it.provider in EmailPipaProvider.IMAP_GROUP }
             .collect { event ->
                 when (event) {
                     is EmailConnectEvent.Connected ->

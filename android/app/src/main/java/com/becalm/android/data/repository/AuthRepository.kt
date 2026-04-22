@@ -13,6 +13,7 @@ import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
+import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -143,6 +144,12 @@ public class AuthRepositoryImpl @Inject constructor(
     // start after [com.becalm.android.BecalmApplication] calls
     // [GoogleAuthTokenProviderImpl.warmUp] (cross-account data leak).
     private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
+    // Concrete type for the same reason as [googleAuthTokenProvider] — the interface
+    // deliberately does not expose [MsGraphTokenProviderImpl.signOut] because the MSAL
+    // disk cache / [OAuthCredentialStore] wipe is an implementation concern. Without this
+    // hook, logout leaves the MS Graph grant on device and the next account inherits
+    // Outlook mailbox authorization on the same phone (PIPA cross-account leakage).
+    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
     private val logger: Logger,
 ) : AuthRepository {
 
@@ -199,6 +206,10 @@ public class AuthRepositoryImpl @Inject constructor(
             // OAuthTokenState to Unauthenticated so a subsequent account on the same device
             // cannot inherit the previous user's Gmail grant (PIPA cross-account leak guard).
             add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
+            // Analogue for Microsoft Graph — clears the MSAL single-account cache and the
+            // mirrored [OAuthCredentialStore] entry so the next user on the same device
+            // cannot inherit the previous user's Outlook mailbox authorization.
+            add(NamedStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
             add(NamedStep("sessionStoreClear") { sessionStore.clear() })
             // Drop the in-memory access-token cache in lockstep with the persisted session
             // so the next hot-path request re-consults storage and reflects the cleared state
@@ -241,6 +252,11 @@ public class AuthRepositoryImpl @Inject constructor(
             // cleared on every session-invalidate to prevent the next account from
             // inheriting it (cross-account leak guard).
             add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
+            // Outlook / MS Graph parallel — the `<provider>_connected` DataStore flag is
+            // cleared on currentUserIdClear, but the MSAL cache and the mirrored
+            // [OAuthCredentialStore] entry survive process death and must be wiped here
+            // for the same cross-account leakage reason.
+            add(NamedStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
             add(NamedStep("sessionStoreClear") { sessionStore.clear() })
             // Drop the in-memory access-token cache in lockstep with the persisted session
             // so the next hot-path request re-consults storage (Round 6A.4).

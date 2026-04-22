@@ -377,9 +377,9 @@ class OnboardingViewModelTest {
 
     @Test
     fun `onEmailPipaConsent granted persists timestamped consent and emits audit event`() = runTest {
-        viewModel.onEmailPipaConsent(EmailPipaProvider.GMAIL, granted = true)
-        testDispatcher.scheduler.advanceUntilIdle()
+        val ok = viewModel.onEmailPipaConsent(listOf(EmailPipaProvider.GMAIL), granted = true)
 
+        assertEquals(true, ok)
         coVerify(exactly = 1) {
             userPrefsStore.setEmailPipaConsent(EmailPipaProvider.GMAIL, true)
         }
@@ -401,9 +401,9 @@ class OnboardingViewModelTest {
 
     @Test
     fun `onEmailPipaConsent denied marks downstream OAuth step SKIPPED so terminal gate passes`() = runTest {
-        viewModel.onEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, granted = false)
-        testDispatcher.scheduler.advanceUntilIdle()
+        val ok = viewModel.onEmailPipaConsent(listOf(EmailPipaProvider.OUTLOOK_MAIL), granted = false)
 
+        assertEquals(true, ok)
         coVerify(exactly = 1) {
             userPrefsStore.setEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, false)
         }
@@ -415,10 +415,30 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `onEmailPipaConsent imap denial skips LINK_IMAP specifically`() = runTest {
-        viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP, granted = false)
-        testDispatcher.scheduler.advanceUntilIdle()
+    fun `onEmailPipaConsent imap grant writes BOTH recipient records atomically`() = runTest {
+        val ok = viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP_GROUP, granted = true)
 
+        assertEquals(true, ok)
+        // Per-recipient consent (PIPA Article 17): Naver Corp and Kakao Corp are distinct.
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.NAVER_IMAP, true)
+        }
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.DAUM_IMAP, true)
+        }
+    }
+
+    @Test
+    fun `onEmailPipaConsent imap denial skips LINK_IMAP and records deny on both recipients`() = runTest {
+        val ok = viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP_GROUP, granted = false)
+
+        assertEquals(true, ok)
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.NAVER_IMAP, false)
+        }
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.DAUM_IMAP, false)
+        }
         assertEquals(
             StepStatus.SKIPPED,
             viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
@@ -435,6 +455,8 @@ class OnboardingViewModelTest {
     @Test
     fun `onConnectEmailProvider success persists connected flag and marks step COMPLETE`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns
+            kotlinx.coroutines.flow.flowOf(true)
         coEvery { googleAuthTokenProvider.startSignIn(activity) } returns
             com.becalm.android.data.remote.gmail.OAuthSignInResult.Success
 
@@ -459,6 +481,8 @@ class OnboardingViewModelTest {
     @Test
     fun `onConnectEmailProvider failure emits onboarding_step_failed and marks SKIPPED`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL) } returns
+            kotlinx.coroutines.flow.flowOf(true)
         coEvery { msGraphTokenProvider.startSignIn(activity) } returns
             com.becalm.android.data.remote.gmail.OAuthSignInResult.Failure(
                 com.becalm.android.data.remote.gmail.FailureReason.NETWORK,
@@ -485,10 +509,32 @@ class OnboardingViewModelTest {
         }
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `onConnectEmailProvider rejects IMAP because it uses credential save path`() {
+    @Test
+    fun `onConnectEmailProvider is gated on persisted PIPA consent (hard fail)`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
-        viewModel.onConnectEmailProvider(EmailPipaProvider.IMAP, activity)
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns
+            kotlinx.coroutines.flow.flowOf(false)
+
+        viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, activity)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { googleAuthTokenProvider.startSignIn(activity) }
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf("step" to "LINK_GMAIL", "error_code" to "pipa_consent_missing"),
+            )
+        }
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `onConnectEmailProvider rejects IMAP recipients (they use credential save path)`() {
+        val activity = mockk<android.app.Activity>(relaxed = true)
+        viewModel.onConnectEmailProvider(EmailPipaProvider.NAVER_IMAP, activity)
     }
 
     // ─── S6-H IMAP credential save ───────────────────────────────────────────
@@ -501,6 +547,8 @@ class OnboardingViewModelTest {
             username = "alice",
             appPassword = "app-pw",
         )
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.NAVER_IMAP) } returns
+            kotlinx.coroutines.flow.flowOf(true)
         coEvery { imapCredentialStore.save(SourceType.NAVER_IMAP, creds) } returns Unit
 
         viewModel.saveImapCredentials(SourceType.NAVER_IMAP, creds)
@@ -512,7 +560,7 @@ class OnboardingViewModelTest {
             viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
         )
         coVerify(exactly = 1) {
-            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, true)
         }
     }
 
@@ -524,6 +572,8 @@ class OnboardingViewModelTest {
             username = "bob",
             appPassword = "app-pw",
         )
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.DAUM_IMAP) } returns
+            kotlinx.coroutines.flow.flowOf(true)
         coEvery {
             imapCredentialStore.save(SourceType.DAUM_IMAP, creds)
         } throws java.io.IOException("disk full")
@@ -547,16 +597,13 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `saveImapCredentials unknown provider rejected by store surfaces unknown_provider code`() = runTest {
+    fun `saveImapCredentials unknown provider surfaces unknown_provider code before any save`() = runTest {
         val creds = ImapCredentials(
             host = "mail.example.com",
             port = 993,
             username = "sam",
             appPassword = "app-pw",
         )
-        coEvery {
-            imapCredentialStore.save("bogus_source", creds)
-        } throws IllegalArgumentException("unknown IMAP sourceType: bogus_source")
 
         viewModel.saveImapCredentials("bogus_source", creds)
         testDispatcher.scheduler.advanceUntilIdle()
@@ -570,8 +617,36 @@ class OnboardingViewModelTest {
                 ),
             )
         }
+        // Unknown sourceType must short-circuit before the store sees the save call.
+        coVerify(exactly = 0) { imapCredentialStore.save(any(), creds) }
         coVerify(exactly = 0) {
-            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, true)
+        }
+        coVerify(exactly = 0) {
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.DAUM_IMAP, true)
+        }
+    }
+
+    @Test
+    fun `saveImapCredentials is gated on PIPA consent for the specific recipient`() = runTest {
+        val creds = ImapCredentials(
+            host = "imap.naver.com",
+            port = 993,
+            username = "alice",
+            appPassword = "app-pw",
+        )
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.NAVER_IMAP) } returns
+            kotlinx.coroutines.flow.flowOf(false)
+
+        viewModel.saveImapCredentials(SourceType.NAVER_IMAP, creds)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { imapCredentialStore.save(SourceType.NAVER_IMAP, creds) }
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf("step" to "LINK_IMAP", "error_code" to "pipa_consent_missing"),
+            )
         }
     }
 }

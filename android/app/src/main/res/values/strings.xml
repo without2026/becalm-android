@@ -125,6 +125,7 @@
     <string name="onb_pipa_email_opt_out_body">Declining simply skips this email provider. You can grant consent later from Settings.</string>
     <string name="onb_pipa_email_cta_agree">Agree</string>
     <string name="onb_pipa_email_cta_deny">Decline</string>
+    <string name="onb_pipa_email_error_write_failed">Couldn\'t save your consent decision. Please try again.</string>
 
     <!-- Onboarding: Notification permission (S6-E) -->
     <string name="onb_notifications_title">Notifications</string>

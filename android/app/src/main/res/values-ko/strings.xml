@@ -125,6 +125,7 @@
     <string name="onb_pipa_email_opt_out_body">거부해도 해당 이메일 제공자 연결만 건너뛰며, 나머지 기능은 정상 이용 가능합니다. 언제든 설정에서 다시 동의할 수 있습니다.</string>
     <string name="onb_pipa_email_cta_agree">동의</string>
     <string name="onb_pipa_email_cta_deny">동의 안 함</string>
+    <string name="onb_pipa_email_error_write_failed">동의 기록 저장에 실패했습니다. 다시 시도해 주세요.</string>
 
     <!-- Onboarding: Notification permission (S6-E) -->
     <string name="onb_notifications_title">알림</string>

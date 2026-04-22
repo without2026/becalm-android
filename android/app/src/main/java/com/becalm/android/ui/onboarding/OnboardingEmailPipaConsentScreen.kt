@@ -7,8 +7,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -25,24 +29,30 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
+import kotlinx.coroutines.launch
 
 /**
  * Renders the per-provider PIPA 제3자 제공 disclosure between `ContactsPermissionScreen`
  * and the downstream OAuth / credential screen (S6-D, plan
  * `docs/plans/ui-onboarding-pipa-email-consent.md`).
  *
- * Three instances are wired into the nav graph — one per email provider slug:
- * `gmail`, `outlook_mail`, `imap`. The disclosure copy is looked up by [providerSlug]
- * from the string resource bundle; the consent decision is persisted through
- * [OnboardingViewModel.onEmailPipaConsent] and an event is emitted on the
- * observability stream for the W7 PIPA action log.
+ * Three instances are wired into the nav graph — one per email disclosure slug:
+ * `gmail`, `outlook_mail`, `imap`. IMAP writes consent for both Naver Corp and Kakao
+ * Corp atomically (plan §5.1 "combined disclosure, per-recipient record"); Gmail and
+ * Outlook write a single record.
  *
- * Tapping `[동의]` always routes forward to the downstream OAuth screen. Tapping
- * `[동의 안 함]` persists the `false` flag, marks the downstream OAuth step
- * [StepStatus.SKIPPED] via the ViewModel, and then navigates to the **same**
- * downstream route — that step's composable observes the SKIPPED status and
- * auto-forwards. This keeps the nav graph linear (a user who declines Gmail
- * still lands on the Gmail screen for one frame, then skips to Outlook).
+ * Navigation contract:
+ * - **Agree**: await the consent write via [OnboardingViewModel.onEmailPipaConsent];
+ *   only navigate to the downstream OAuth / credential screen after the write returns
+ *   `true` (ensures the provider screen's hard gate sees the persisted flag).
+ * - **Decline**: same write-await pattern with `granted=false`; on completion the
+ *   ViewModel has already marked the downstream step [StepStatus.SKIPPED], so the
+ *   screen navigates to the **post-provider** route (the next PIPA disclosure or the
+ *   Google Calendar screen for IMAP) — the user never lands on a connectable
+ *   screen for a provider they declined (PIPA Article 17 defence-in-depth).
+ * - **DataStore write failure**: surfaces a Snackbar and leaves the user on-screen
+ *   so they can retry. Navigation stays gated behind a confirmed write so a transient
+ *   DataStore fault never bypasses consent.
  */
 @Composable
 public fun OnboardingEmailPipaConsentScreen(
@@ -50,6 +60,10 @@ public fun OnboardingEmailPipaConsentScreen(
     navController: NavHostController,
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val writeFailedCopy = stringResource(R.string.onb_pipa_email_error_write_failed)
+
     val copy = pipaCopyForSlug(providerSlug) ?: run {
         // Unknown slug — advance to Gmail to avoid trapping the user. An audit
         // message is logged via the ViewModel so this path is never silent.
@@ -58,7 +72,10 @@ public fun OnboardingEmailPipaConsentScreen(
         return
     }
 
-    BecalmScaffold(title = stringResource(copy.titleRes)) { padding ->
+    BecalmScaffold(
+        title = stringResource(copy.titleRes),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -93,8 +110,14 @@ public fun OnboardingEmailPipaConsentScreen(
             BecalmButton(
                 text = stringResource(R.string.onb_pipa_email_cta_agree),
                 onClick = {
-                    viewModel.onEmailPipaConsent(copy.provider, granted = true)
-                    navController.navigate(copy.downstreamRoute)
+                    scope.launch {
+                        val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = true)
+                        if (ok) {
+                            navController.navigate(copy.connectRoute)
+                        } else {
+                            snackbarHostState.showSnackbar(writeFailedCopy)
+                        }
+                    }
                 },
                 variant = BecalmButtonVariant.Primary,
                 modifier = Modifier.fillMaxWidth(),
@@ -103,8 +126,14 @@ public fun OnboardingEmailPipaConsentScreen(
             BecalmButton(
                 text = stringResource(R.string.onb_pipa_email_cta_deny),
                 onClick = {
-                    viewModel.onEmailPipaConsent(copy.provider, granted = false)
-                    navController.navigate(copy.downstreamRoute)
+                    scope.launch {
+                        val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = false)
+                        if (ok) {
+                            navController.navigate(copy.skipAheadRoute)
+                        } else {
+                            snackbarHostState.showSnackbar(writeFailedCopy)
+                        }
+                    }
                 },
                 variant = BecalmButtonVariant.Text,
             )
@@ -131,38 +160,48 @@ private fun PipaBulletLine(
 /**
  * String-resource + enum bundle for a single PIPA disclosure screen.
  *
- * Centralised here so [OnboardingEmailPipaConsentScreen] stays dumb (one
- * composable function, no conditionals across provider slugs).
+ * [recipients] is the list of concrete PIPA recipients consent is recorded for — one
+ * element for Gmail / Outlook, two for IMAP (Naver + Daum). [connectRoute] is the
+ * downstream screen the user sees on Agree; [skipAheadRoute] is the post-provider
+ * screen the user sees on Decline so no connectable provider screen is reachable
+ * without a persisted consent grant for that provider.
+ *
+ * Centralised here so [OnboardingEmailPipaConsentScreen] stays dumb (one composable
+ * function, no conditionals across provider slugs).
  */
 private data class EmailPipaCopy(
-    val provider: EmailPipaProvider,
+    val recipients: List<EmailPipaProvider>,
     @StringRes val titleRes: Int,
     @StringRes val headlineRes: Int,
     @StringRes val recipientRes: Int,
-    val downstreamRoute: String,
+    val connectRoute: String,
+    val skipAheadRoute: String,
 )
 
 private fun pipaCopyForSlug(slug: String): EmailPipaCopy? = when (slug) {
-    EmailPipaProvider.GMAIL.storageKey -> EmailPipaCopy(
-        provider = EmailPipaProvider.GMAIL,
+    "gmail" -> EmailPipaCopy(
+        recipients = listOf(EmailPipaProvider.GMAIL),
         titleRes = R.string.onb_pipa_email_title_gmail,
         headlineRes = R.string.onb_pipa_email_headline_gmail,
         recipientRes = R.string.onb_pipa_email_recipient_gmail,
-        downstreamRoute = BecalmRoute.OnboardingGmail.path,
+        connectRoute = BecalmRoute.OnboardingGmail.path,
+        skipAheadRoute = BecalmRoute.OnboardingEmailPipa("outlook_mail").path,
     )
-    EmailPipaProvider.OUTLOOK_MAIL.storageKey -> EmailPipaCopy(
-        provider = EmailPipaProvider.OUTLOOK_MAIL,
+    "outlook_mail" -> EmailPipaCopy(
+        recipients = listOf(EmailPipaProvider.OUTLOOK_MAIL),
         titleRes = R.string.onb_pipa_email_title_outlook,
         headlineRes = R.string.onb_pipa_email_headline_outlook,
         recipientRes = R.string.onb_pipa_email_recipient_outlook,
-        downstreamRoute = BecalmRoute.OnboardingOutlookMail.path,
+        connectRoute = BecalmRoute.OnboardingOutlookMail.path,
+        skipAheadRoute = BecalmRoute.OnboardingEmailPipa("imap").path,
     )
-    EmailPipaProvider.IMAP.storageKey -> EmailPipaCopy(
-        provider = EmailPipaProvider.IMAP,
+    "imap" -> EmailPipaCopy(
+        recipients = EmailPipaProvider.IMAP_GROUP,
         titleRes = R.string.onb_pipa_email_title_imap,
         headlineRes = R.string.onb_pipa_email_headline_imap,
         recipientRes = R.string.onb_pipa_email_recipient_imap,
-        downstreamRoute = BecalmRoute.OnboardingImap.path,
+        connectRoute = BecalmRoute.OnboardingImap.path,
+        skipAheadRoute = BecalmRoute.OnboardingGoogleCalendar.path,
     )
     else -> null
 }
@@ -172,7 +211,7 @@ private fun pipaCopyForSlug(slug: String): EmailPipaCopy? = when (slug) {
 private fun PreviewOnboardingEmailPipaConsentScreen() {
     BecalmTheme {
         OnboardingEmailPipaConsentScreen(
-            providerSlug = EmailPipaProvider.GMAIL.storageKey,
+            providerSlug = "gmail",
             navController = rememberNavController(),
         )
     }

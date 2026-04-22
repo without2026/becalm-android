@@ -220,7 +220,8 @@ public interface UserPrefsStore {
 
     /**
      * Emits the stored PIPA 제3자 제공 consent flag for the email [provider] (one of
-     * [EmailPipaProvider.GMAIL], [EmailPipaProvider.OUTLOOK_MAIL], [EmailPipaProvider.IMAP]).
+     * [EmailPipaProvider.GMAIL], [EmailPipaProvider.OUTLOOK_MAIL],
+     * [EmailPipaProvider.NAVER_IMAP], [EmailPipaProvider.DAUM_IMAP]).
      *
      * `false` when the user has never interacted with the consent screen or has
      * explicitly declined; `true` only after an explicit `[동의]` tap on
@@ -255,15 +256,28 @@ public interface UserPrefsStore {
  * (S6-D). Kept as an enum rather than loose strings so the consent surface cannot
  * accept a typo'd source name at compile time.
  *
- * Per `docs/plans/ui-onboarding-pipa-email-consent.md` §5.1, IMAP shares a single
- * consent record across Naver and Daum because the protocol surface is identical —
- * only the disclosure recipient varies, and that is recorded in the UI copy rather
- * than a distinct DataStore key.
+ * PIPA Article 17 requires per-recipient consent — Naver Corp and Kakao Corp are
+ * legally distinct recipients for IMAP ingestion, so [NAVER_IMAP] and [DAUM_IMAP]
+ * carry independent DataStore records even though the UI presents a single
+ * combined IMAP disclosure screen. The onboarding surface writes both records on a
+ * unified Agree tap (the user is shown both recipients in the copy) and records
+ * [DENIED] on both when the user declines so the revocation UX can target either
+ * independently later.
  */
 public enum class EmailPipaProvider(public val storageKey: String) {
     GMAIL(storageKey = "gmail"),
     OUTLOOK_MAIL(storageKey = "outlook_mail"),
-    IMAP(storageKey = "imap"),
+    NAVER_IMAP(storageKey = "naver_imap"),
+    DAUM_IMAP(storageKey = "daum_imap");
+
+    public companion object {
+        /**
+         * Providers grouped under the combined IMAP onboarding disclosure — the single
+         * "imap" screen slug collapses to both recipients at write time so the consent
+         * audit remains per-recipient per PIPA Article 17.
+         */
+        public val IMAP_GROUP: List<EmailPipaProvider> = listOf(NAVER_IMAP, DAUM_IMAP)
+    }
 }
 
 // ─── Implementation ──────────────────────────────────────────────────────────
