@@ -208,36 +208,61 @@ class OnboardingViewModelTest {
     // ─── onSkipStep (OAuth skip) ──────────────────────────────────────────────
 
     @Test
-    fun `onSkipStep marks current step as SKIPPED and advances index`() {
-        val step = viewModel.steps[viewModel.uiState.value.currentStepIndex]
-        viewModel.onSkipStep()
+    fun `onSkipStep marks the explicit step as SKIPPED regardless of currentStepIndex`() {
+        // Skip LINK_GMAIL even though currentStepIndex is still 0 (TERMS) — the ONB-008
+        // terminal gate fails if the skip path leaks back to whatever step the index
+        // happened to be pointing at.
+        viewModel.onSkipStep(OnboardingStep.LINK_GMAIL)
 
         val state = viewModel.uiState.value
-        assertEquals(StepStatus.SKIPPED, state.stepStates[step])
-        assertEquals(1, state.currentStepIndex)
+        assertEquals(StepStatus.SKIPPED, state.stepStates[OnboardingStep.LINK_GMAIL])
+        assertEquals(
+            "TERMS must remain untouched",
+            StepStatus.NOT_STARTED,
+            state.stepStates[OnboardingStep.TERMS],
+        )
     }
 
     @Test
-    fun `OAuth screen skip advances from LINK_GMAIL through to LINK_IMAP`() {
-        // Advance to LINK_GMAIL (index 5).
-        repeat(5) { viewModel.onNext() }
-        assertEquals(OnboardingStep.LINK_GMAIL, viewModel.steps[viewModel.uiState.value.currentStepIndex])
+    fun `onSkipStep advances currentStepIndex to the next step after the skipped one`() {
+        viewModel.onSkipStep(OnboardingStep.LINK_GMAIL)
 
-        viewModel.onSkipStep()
+        val index = viewModel.uiState.value.currentStepIndex
         assertEquals(
+            "index must follow the skipped step so the next screen reads it correctly",
             OnboardingStep.LINK_OUTLOOK_MAIL,
-            viewModel.steps[viewModel.uiState.value.currentStepIndex],
+            viewModel.steps[index],
         )
-        assertEquals(
-            StepStatus.SKIPPED,
-            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
-        )
+    }
 
-        viewModel.onSkipStep()
-        assertEquals(
-            OnboardingStep.LINK_IMAP,
-            viewModel.steps[viewModel.uiState.value.currentStepIndex],
-        )
+    @Test
+    fun `mixed grant and skip decisions all reach onCompleteOnboarding terminal gate`() = runTest {
+        // Realistic mixed path: grant TERMS/LOGIN/PIPA/RECORDING, grant contacts,
+        // skip Gmail, skip Outlook, skip IMAP, connect both calendars, skip
+        // notifications, grant battery, finish ColdSync. Every step has an
+        // explicit mark; none rely on the stale index. The terminal gate must
+        // accept the resulting mix (GRANTED / SKIPPED / COMPLETE) per ONB-008.
+        viewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
+        viewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
+        viewModel.onMarkStepStatus(OnboardingStep.PIPA_CONSENT, StepStatus.DENIED)
+        viewModel.onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.SKIPPED)
+        viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, StepStatus.GRANTED)
+        viewModel.onSkipStep(OnboardingStep.LINK_GMAIL)
+        viewModel.onSkipStep(OnboardingStep.LINK_OUTLOOK_MAIL)
+        viewModel.onSkipStep(OnboardingStep.LINK_IMAP)
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GOOGLE_CALENDAR, StepStatus.COMPLETE)
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK_CALENDAR, StepStatus.COMPLETE)
+        viewModel.onSkipStep(OnboardingStep.NOTIFICATION_PERM)
+        viewModel.onMarkStepStatus(OnboardingStep.BATTERY_OPT, StepStatus.COMPLETE)
+        viewModel.onMarkStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
+
+        viewModel.onCompleteOnboarding()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse("terminal gate must accept the mixed path", state.isCompleting)
+        assertEquals(null, state.error)
+        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
     }
 
     // ─── PIPA consent: denied path skips RECORDING_FOLDER ─────────────────────

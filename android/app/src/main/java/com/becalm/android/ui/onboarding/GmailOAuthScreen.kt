@@ -122,7 +122,7 @@ public fun GmailOAuthScreen(
                 }
             },
             onSkip = {
-                viewModel.onSkipStep()
+                viewModel.onSkipStep(OnboardingStep.LINK_GMAIL)
                 navController.navigate(downstream)
             },
         )

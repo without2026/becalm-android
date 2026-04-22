@@ -251,20 +251,28 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
-    // spec: ONB-003
+    // spec: ONB-003, ONB-008
     /**
-     * Marks the current step as [StepStatus.SKIPPED] and advances to the next step.
+     * Marks [step] as [StepStatus.SKIPPED] and re-anchors [OnboardingUiState.currentStepIndex]
+     * on the next entry in [steps].
      *
-     * No-op when already at the last step.
+     * Screen composables drive navigation directly (they know which step their Skip
+     * button belongs to), so accepting an explicit [step] here instead of inferring it
+     * from the index is required to keep the ONB-008 terminal gate honest. The earlier
+     * index-driven variant (no argument) relied on [currentStepIndex] staying in sync
+     * with the composable the user was viewing, which was never true: only
+     * [onNext]/[onBack]/[setPipa] write the index, so a Skip tap on Gmail would mark
+     * TERMS as SKIPPED and leave LINK_GMAIL `NOT_STARTED`, blocking
+     * [onCompleteOnboarding].
      */
-    public fun onSkipStep() {
+    public fun onSkipStep(step: OnboardingStep) {
         _uiState.update { state ->
-            val current = steps[state.currentStepIndex]
-            val next = (state.currentStepIndex + 1).coerceAtMost(steps.lastIndex)
-            logger.d(TAG, "onSkipStep: $current skipped")
+            val targetIndex = steps.indexOf(step).coerceAtLeast(0)
+            val next = (targetIndex + 1).coerceAtMost(steps.lastIndex)
+            logger.d(TAG, "onSkipStep: $step skipped")
             state.copy(
                 currentStepIndex = next,
-                stepStates = state.stepStates + (current to StepStatus.SKIPPED),
+                stepStates = state.stepStates + (step to StepStatus.SKIPPED),
                 error = null,
             )
         }

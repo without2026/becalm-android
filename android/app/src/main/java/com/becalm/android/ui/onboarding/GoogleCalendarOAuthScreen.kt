@@ -41,7 +41,7 @@ public fun GoogleCalendarOAuthScreen(
                 navController.navigate(BecalmRoute.OnboardingOutlookCalendar.path)
             },
             onSkip = {
-                viewModel.onSkipStep()
+                viewModel.onSkipStep(OnboardingStep.LINK_GOOGLE_CALENDAR)
                 navController.navigate(BecalmRoute.OnboardingOutlookCalendar.path)
             },
         )

@@ -119,7 +119,7 @@ public fun ImapSetupScreen(
                 )
             },
             onSkip = {
-                viewModel.onSkipStep()
+                viewModel.onSkipStep(OnboardingStep.LINK_IMAP)
                 navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
             },
         )

@@ -41,7 +41,7 @@ public fun OutlookCalendarOAuthScreen(
                 navController.navigate(BecalmRoute.OnboardingNotificationPerm.path)
             },
             onSkip = {
-                viewModel.onSkipStep()
+                viewModel.onSkipStep(OnboardingStep.LINK_OUTLOOK_CALENDAR)
                 navController.navigate(BecalmRoute.OnboardingNotificationPerm.path)
             },
         )

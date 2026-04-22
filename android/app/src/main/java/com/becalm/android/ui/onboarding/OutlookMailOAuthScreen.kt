@@ -102,7 +102,7 @@ public fun OutlookMailOAuthScreen(
                 }
             },
             onSkip = {
-                viewModel.onSkipStep()
+                viewModel.onSkipStep(OnboardingStep.LINK_OUTLOOK_MAIL)
                 navController.navigate(downstream)
             },
         )

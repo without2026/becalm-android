@@ -97,7 +97,7 @@ public fun ContactsPermissionScreen(
             BecalmButton(
                 text = stringResource(R.string.action_skip),
                 onClick = {
-                    viewModel.onSkipStep()
+                    viewModel.onSkipStep(OnboardingStep.CONTACTS_PERM)
                     navController.navigate(BecalmRoute.OnboardingEmailPipa(com.becalm.android.data.local.datastore.EmailPipaProvider.GMAIL.storageKey).path)
                 },
                 variant = BecalmButtonVariant.Text,

@@ -101,7 +101,7 @@ public fun RecordingFolderScreen(
             BecalmButton(
                 text = stringResource(R.string.action_skip),
                 onClick = {
-                    viewModel.onSkipStep()
+                    viewModel.onSkipStep(OnboardingStep.RECORDING_FOLDER)
                     navController.navigate(BecalmRoute.OnboardingContacts.path)
                 },
                 variant = BecalmButtonVariant.Text,

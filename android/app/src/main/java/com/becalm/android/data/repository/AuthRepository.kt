@@ -265,16 +265,24 @@ public class AuthRepositoryImpl @Inject constructor(
             // Clear the non-secret current-user-id mirror. Other UI preferences
             // (locale, notifications flag, onboarding completion) are intentionally preserved.
             add(NamedStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
-            // Release the Room file handle so the next sign-in (potentially as a
-            // different user) opens the correct per-user file without a stale
-            // [BeCalmDatabaseProvider] reference pointing at the prior user's DB (S6-A).
-            add(NamedStep("databaseClose") { databaseProvider.close() })
         }
 
         // NOTE: Intentionally NOT calling databaseProvider.current().clearAllTables(),
         // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
         // userPrefsStore.clearAll() — those belong to the full PIPA wipe in [signOut].
         // The per-user DB file is preserved on disk; sign-in as the same user re-opens it.
+        //
+        // Also intentionally NOT closing the [BeCalmDatabaseProvider]: the
+        // spec AUTH-005/AUTH-008 pair requires "same account re-login restores local
+        // data" to work without a process restart. Because `@Singleton` repositories
+        // captured their DAO references at first injection, closing the underlying
+        // [BeCalmDatabase] here would leave those references pointing at a dead file
+        // handle — a correctness regression on the most common routine sign-out →
+        // same-account sign-in path. Closing is reserved for the full-wipe [signOut]
+        // flow (which runs `clearAllTables` first so the per-user DB file is empty
+        // by the time the handle releases) plus the account-swap path where the
+        // user will restart the app anyway (alpha contract; see
+        // [BeCalmDatabaseProvider]).
 
         val stepResult = runAllSteps("invalidateSession", steps)
 

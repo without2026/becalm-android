@@ -116,7 +116,7 @@ public fun NotificationPermissionScreen(
             BecalmButton(
                 text = stringResource(R.string.action_skip),
                 onClick = {
-                    viewModel.onSkipStep()
+                    viewModel.onSkipStep(OnboardingStep.NOTIFICATION_PERM)
                     navController.navigate(BecalmRoute.OnboardingBattery.path)
                 },
                 variant = BecalmButtonVariant.Text,

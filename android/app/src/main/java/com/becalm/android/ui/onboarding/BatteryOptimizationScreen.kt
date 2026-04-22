@@ -108,7 +108,7 @@ public fun BatteryOptimizationScreen(
             BecalmButton(
                 text = stringResource(R.string.action_skip),
                 onClick = {
-                    viewModel.onSkipStep()
+                    viewModel.onSkipStep(OnboardingStep.BATTERY_OPT)
                     navController.navigate(BecalmRoute.OnboardingColdSync.path)
                 },
                 variant = BecalmButtonVariant.Text,
