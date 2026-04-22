@@ -52,9 +52,11 @@ class AuthViewModelTest {
         userPrefsStore = mockk()
         logger = mockk(relaxed = true)
 
-        // Default: no session; onboarding not completed.
+        // Default: no session; onboarding not completed. Terms default `true` matches
+        // the first-run safe default — individual tests override when they need false.
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Unauthenticated)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
+        every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
     }
 
     @After
@@ -114,28 +116,61 @@ class AuthViewModelTest {
 
     @Test
     fun `onSignOut success transitions to SignedOut via observer`() = runTest {
-        coEvery { authRepository.signOut() } returns BecalmResult.Success(Unit)
+        // A mutable upstream lets the repository mock emit a post-sign-out
+        // `Unauthenticated` after the coroutine that called `invalidateSession()`
+        // has completed, exercising the same "state driven by observer" contract
+        // the screen relies on.
+        val authStates = kotlinx.coroutines.flow.MutableStateFlow<AuthState>(
+            AuthState.Authenticated(fakeSession),
+        )
+        every { authRepository.observeAuthState() } returns authStates
+        every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
+        coEvery { authRepository.invalidateSession() } coAnswers {
+            authStates.value = AuthState.Unauthenticated
+            BecalmResult.Success(Unit)
+        }
 
         viewModel = buildViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        viewModel.uiState.test {
-            awaitItem() // current state (SignedOut from init observer)
+        viewModel.onSignOut()
+        testDispatcher.scheduler.advanceUntilIdle()
 
-            viewModel.onSignOut()
-            testDispatcher.scheduler.advanceUntilIdle()
+        val state = viewModel.uiState.value
+        assertTrue("Expected SignedOut, got $state", state is AuthUiState.SignedOut)
+    }
 
-            val states = mutableListOf<AuthUiState>()
-            while (true) {
-                val item = awaitItem()
-                states.add(item)
-                if (item is AuthUiState.SignedOut) break
-                if (states.size > 5) break
-            }
+    // spec: AUTH-005 + AuthRepository.invalidateSession KDoc
+    // ("로그아웃 시 Room DB 데이터는 삭제하지 않는다")
+    @Test
+    fun `onSignOut calls invalidateSession and never calls full-wipe signOut`() = runTest {
+        coEvery { authRepository.invalidateSession() } returns BecalmResult.Success(Unit)
 
-            assertTrue("Expected SignedOut in emissions: $states", states.any { it is AuthUiState.SignedOut })
-            cancelAndIgnoreRemainingEvents()
-        }
+        viewModel = buildViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.onSignOut()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { authRepository.invalidateSession() }
+        coVerify(exactly = 0) { authRepository.signOut() }
+    }
+
+    @Test
+    fun `onSignOut failure emits Error state with mapped message`() = runTest {
+        coEvery {
+            authRepository.invalidateSession()
+        } returns BecalmResult.Failure(BecalmError.Network(503, "Service Unavailable"))
+
+        viewModel = buildViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.onSignOut()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue("Expected Error state, got $state", state is AuthUiState.Error)
+        assertEquals("Network error (503)", (state as AuthUiState.Error).message)
     }
 
     // ─── Error states: mapped strings, not raw toString ───────────────────────

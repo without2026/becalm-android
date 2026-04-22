@@ -129,26 +129,39 @@ public class AuthViewModel @Inject constructor(
         }
     }
 
-    // spec: AUTH-005
+    // spec: AUTH-005 — routine sign-out preserves local Room data per
+    // `AuthRepository.invalidateSession` KDoc ("로그아웃 시 Room DB 데이터는 삭제하지 않는다").
     /**
-     * Signs out the current user and performs a PIPA-compliant local data wipe.
+     * Routine sign-out: revokes the active session without wiping the local Room database.
+     *
+     * Delegates to [AuthRepository.invalidateSession], which cancels running workers,
+     * clears the encrypted session / IMAP / Gmail-OAuth credential stores, and drops
+     * the in-memory token cache — but deliberately **does not** call
+     * `database.clearAllTables()`. Combined with the per-user SQLite file introduced in
+     * S6-A, this lets the user sign back in and resume from their cached commitments
+     * and person-enrichment state while guaranteeing that a different account on the
+     * same device cannot observe the prior user's data (a separate file is opened).
+     *
+     * The "로컬 데이터 전체 삭제" UX (full PIPA wipe via [AuthRepository.signOut]) is
+     * reached from Settings → Privacy and is intentionally not this method's concern.
      *
      * On success the sign-out state is driven solely by [onObserveSession] collecting
      * [AuthRepository.observeAuthState], which will emit [AuthState.Unauthenticated] once
-     * the repository completes the wipe. That collector is the single source of truth for
-     * the signed-out transition; assigning [AuthUiState.SignedOut] here would race with it.
+     * the repository completes the session-only cleanup. That collector is the single
+     * source of truth for the signed-out transition; assigning [AuthUiState.SignedOut]
+     * here would race with it.
      */
     public fun onSignOut() {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            when (val result = authRepository.signOut()) {
+            when (val result = authRepository.invalidateSession()) {
                 is BecalmResult.Success -> {
-                    logger.d(TAG, "sign-out completed")
+                    logger.d(TAG, "routine sign-out completed (Room data preserved)")
                     // State transitions to SignedOut via onObserveSession once the repository
                     // publishes AuthState.Unauthenticated.
                 }
                 is BecalmResult.Failure -> {
-                    logger.w(TAG, "sign-out failed")
+                    logger.w(TAG, "routine sign-out failed")
                     _uiState.value = AuthUiState.Error(result.error.safeMessage)
                 }
             }
