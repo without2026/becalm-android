@@ -140,8 +140,15 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          */
         public const val LEGACY_DATABASE_NAME: String = "becalm.db"
 
-        /** Prefix for per-user SQLite files produced by [databaseFilename]. */
-        private const val USER_DATABASE_PREFIX = "becalm-"
+        /**
+         * Prefix for per-user SQLite files produced by [databaseFilename].
+         *
+         * Underscore is the canonical separator in `.spec/auth.spec.yml:73` AUTH-008
+         * ("파일명 규칙 `becalm_<sha256(user_id)[:16]>.db`"). Using a dash here would
+         * drift the filename away from spec and from [UserPrefsStoreImpl]'s
+         * `user_<hash>_*` key namespace.
+         */
+        private const val USER_DATABASE_PREFIX = "becalm_"
 
         /** Suffix (file extension) for per-user SQLite files produced by [databaseFilename]. */
         private const val USER_DATABASE_SUFFIX = ".db"

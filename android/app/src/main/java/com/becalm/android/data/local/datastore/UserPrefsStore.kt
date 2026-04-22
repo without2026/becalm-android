@@ -289,41 +289,70 @@ public enum class EmailPipaProvider(public val storageKey: String) {
  * [DataStoreModule.provideUserPrefsDataStore] binding.
  *
  * ## Key scheme
+ * Global keys (shared across all users on the device):
  * | Preference                       | Key type | Key name                         | Default    |
  * |----------------------------------|----------|----------------------------------|------------|
  * | Current user ID                  | String   | `current_user_id`                | null       |
- * | Onboarding completed             | Boolean  | `onboarding_completed`           | false      |
  * | Theme mode                       | String   | `theme_mode`                     | "system"   |
  * | Locale tag                       | String   | `locale_tag`                     | null       |
  * | Doze prompt dismissed at         | Long     | `doze_whitelist_prompt_dismissed`| null       |
  * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
- * | PIPA third-party consent         | Boolean  | `pipa_third_party_consent`       | false      |
- * | PIPA consent timestamp millis    | Long     | `pipa_consent_timestamp_millis`  | null (absent when consent not currently granted) |
+ * | Terms accepted                   | Boolean  | `terms_accepted`                 | false      |
  * | IMAP store migrated (v1)         | Boolean  | `imap_credential_store_migrated_v1` | false   |
+ *
+ * User-scoped keys (AUTH-008, `.spec/auth.spec.yml:73`): namespaced as
+ * `user_<sha256(user_id)[:16]>_<base>` — a different account on the same device
+ * never observes the prior user's values. Reads return the default when
+ * `current_user_id` is null (i.e. pre-sign-in); writes silently no-op on the same
+ * precondition.
+ *
+ * | Preference                       | Base key                         | Default |
+ * |----------------------------------|----------------------------------|---------|
+ * | Onboarding completed             | `onboarding_completed`           | false   |
+ * | PIPA third-party consent (voice) | `pipa_third_party_consent`       | false   |
+ * | PIPA consent timestamp millis    | `pipa_consent_timestamp_millis`  | null    |
+ * | Per-provider PIPA consent        | `pipa_email_<provider>_consent`  | false   |
+ * | Per-provider PIPA consent at     | `pipa_email_<provider>_consent_at` | null  |
+ * | Per-provider source connected    | `<provider>_connected`           | false   |
  */
 public class UserPrefsStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
 ) : UserPrefsStore {
 
     private val currentUserIdKey = stringPreferencesKey("current_user_id")
-    private val onboardingCompletedKey = booleanPreferencesKey("onboarding_completed")
     private val themeModeKey = stringPreferencesKey("theme_mode")
     private val localeTagKey = stringPreferencesKey("locale_tag")
     private val dozePromptDismissedAtKey = longPreferencesKey("doze_whitelist_prompt_dismissed")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
-    private val pipaThirdPartyConsentKey = booleanPreferencesKey("pipa_third_party_consent")
-    private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
     private val imapCredentialStoreMigratedKey = booleanPreferencesKey("imap_credential_store_migrated_v1")
 
-    private fun emailPipaConsentKey(provider: EmailPipaProvider) =
-        booleanPreferencesKey("pipa_email_${provider.storageKey}_consent")
+    // AUTH-008 (.spec/auth.spec.yml:73) requires user-scoped DataStore namespaces for
+    // cursor/onboarding/PIPA flags so a different account on the same device never
+    // inherits the prior user's session. The helpers below derive
+    // `user_<hash>_<base>` key names where <hash> is the first 16 hex chars of the
+    // signed-in user's SHA-256 UUID — identical to the Room filename suffix
+    // [BeCalmDatabase.deriveUserIdHash] applies.
+    private fun userOnboardingCompletedKey(userId: String) =
+        booleanPreferencesKey(namespaced(userId, "onboarding_completed"))
 
-    private fun emailPipaConsentAtKey(provider: EmailPipaProvider) =
-        longPreferencesKey("pipa_email_${provider.storageKey}_consent_at")
+    private fun userPipaThirdPartyConsentKey(userId: String) =
+        booleanPreferencesKey(namespaced(userId, "pipa_third_party_consent"))
 
-    private fun emailSourceConnectedKey(provider: EmailPipaProvider) =
-        booleanPreferencesKey("${provider.storageKey}_connected")
+    private fun userPipaConsentTimestampKey(userId: String) =
+        longPreferencesKey(namespaced(userId, "pipa_consent_timestamp_millis"))
+
+    private fun emailPipaConsentKey(userId: String, provider: EmailPipaProvider) =
+        booleanPreferencesKey(namespaced(userId, "pipa_email_${provider.storageKey}_consent"))
+
+    private fun emailPipaConsentAtKey(userId: String, provider: EmailPipaProvider) =
+        longPreferencesKey(namespaced(userId, "pipa_email_${provider.storageKey}_consent_at"))
+
+    private fun emailSourceConnectedKey(userId: String, provider: EmailPipaProvider) =
+        booleanPreferencesKey(namespaced(userId, "${provider.storageKey}_connected"))
+
+    private fun namespaced(userId: String, base: String): String =
+        "user_${com.becalm.android.data.local.db.BeCalmDatabase.deriveUserIdHash(userId)}_$base"
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
@@ -332,10 +361,16 @@ public class UserPrefsStoreImpl @Inject constructor(
         dataStore.editNullable(currentUserIdKey, userId)
 
     override fun observeOnboardingCompleted(): Flow<Boolean> =
-        dataStore.data.map { it[onboardingCompletedKey] ?: false }
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[userOnboardingCompletedKey(userId)] ?: false
+        }
 
     override suspend fun setOnboardingCompleted(completed: Boolean) {
-        dataStore.edit { prefs -> prefs[onboardingCompletedKey] = completed }
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[userOnboardingCompletedKey(userId)] = completed
+        }
     }
 
     override fun observeThemeMode(): Flow<String> =
@@ -365,15 +400,19 @@ public class UserPrefsStoreImpl @Inject constructor(
     }
 
     override fun observeThirdPartyProvisionConsent(): Flow<Boolean> =
-        dataStore.data.map { it[pipaThirdPartyConsentKey] ?: false }
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[userPipaThirdPartyConsentKey(userId)] ?: false
+        }
 
     override suspend fun setThirdPartyProvisionConsent(granted: Boolean) {
         dataStore.edit { prefs ->
-            prefs[pipaThirdPartyConsentKey] = granted
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[userPipaThirdPartyConsentKey(userId)] = granted
             if (granted) {
-                prefs[pipaConsentTimestampKey] = System.currentTimeMillis()
+                prefs[userPipaConsentTimestampKey(userId)] = System.currentTimeMillis()
             } else {
-                prefs.remove(pipaConsentTimestampKey)
+                prefs.remove(userPipaConsentTimestampKey(userId))
             }
         }
     }
@@ -397,22 +436,32 @@ public class UserPrefsStoreImpl @Inject constructor(
     }
 
     override fun observeEmailSourceConnected(provider: EmailPipaProvider): Flow<Boolean> =
-        dataStore.data.map { it[emailSourceConnectedKey(provider)] ?: false }
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[emailSourceConnectedKey(userId, provider)] ?: false
+        }
 
     override suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean) {
-        dataStore.edit { prefs -> prefs[emailSourceConnectedKey(provider)] = connected }
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[emailSourceConnectedKey(userId, provider)] = connected
+        }
     }
 
     override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
-        dataStore.data.map { it[emailPipaConsentKey(provider)] ?: false }
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[emailPipaConsentKey(userId, provider)] ?: false
+        }
 
     override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
         dataStore.edit { prefs ->
-            prefs[emailPipaConsentKey(provider)] = granted
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[emailPipaConsentKey(userId, provider)] = granted
             if (granted) {
-                prefs[emailPipaConsentAtKey(provider)] = System.currentTimeMillis()
+                prefs[emailPipaConsentAtKey(userId, provider)] = System.currentTimeMillis()
             } else {
-                prefs.remove(emailPipaConsentAtKey(provider))
+                prefs.remove(emailPipaConsentAtKey(userId, provider))
             }
         }
     }

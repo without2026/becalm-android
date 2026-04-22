@@ -48,10 +48,11 @@ public class BeCalmDatabaseHashTest {
     }
 
     @Test
-    public fun databaseFilename_prefixesAndSuffixesHash() {
+    public fun databaseFilename_matchesAuth008Convention() {
+        // AUTH-008 (.spec/auth.spec.yml:73): `becalm_<sha256(user_id)[:16]>.db`.
         val hash = BeCalmDatabase.deriveUserIdHash("user-1")
         val filename = BeCalmDatabase.databaseFilename(hash)
-        assertEquals("becalm-$hash.db", filename)
+        assertEquals("becalm_$hash.db", filename)
     }
 
     @Test
