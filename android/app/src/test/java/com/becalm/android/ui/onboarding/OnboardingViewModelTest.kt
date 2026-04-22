@@ -4,6 +4,11 @@ import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -40,6 +45,9 @@ class OnboardingViewModelTest {
     private lateinit var userPrefsStore: UserPrefsStore
     private lateinit var logger: Logger
     private lateinit var observability: ObservabilityClient
+    private lateinit var googleAuthTokenProvider: GoogleAuthTokenProviderImpl
+    private lateinit var msGraphTokenProvider: MsGraphTokenProviderImpl
+    private lateinit var imapCredentialStore: ImapCredentialStore
     private lateinit var viewModel: OnboardingViewModel
 
     @Before
@@ -48,7 +56,17 @@ class OnboardingViewModelTest {
         userPrefsStore = mockk(relaxed = true)
         logger = mockk(relaxed = true)
         observability = mockk(relaxed = true)
-        viewModel = OnboardingViewModel(userPrefsStore, logger, observability)
+        googleAuthTokenProvider = mockk(relaxed = true)
+        msGraphTokenProvider = mockk(relaxed = true)
+        imapCredentialStore = mockk(relaxed = true)
+        viewModel = OnboardingViewModel(
+            userPrefsStore = userPrefsStore,
+            logger = logger,
+            observability = observability,
+            googleAuthTokenProvider = googleAuthTokenProvider,
+            msGraphTokenProvider = msGraphTokenProvider,
+            imapCredentialStore = imapCredentialStore,
+        )
     }
 
     @After
@@ -410,5 +428,150 @@ class OnboardingViewModelTest {
             StepStatus.NOT_STARTED,
             viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
         )
+    }
+
+    // ─── S6-F / S6-G email OAuth ─────────────────────────────────────────────
+
+    @Test
+    fun `onConnectEmailProvider success persists connected flag and marks step COMPLETE`() = runTest {
+        val activity = mockk<android.app.Activity>(relaxed = true)
+        coEvery { googleAuthTokenProvider.startSignIn(activity) } returns
+            com.becalm.android.data.remote.gmail.OAuthSignInResult.Success
+
+        viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, activity)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true)
+        }
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
+        )
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_email_connected",
+                tags = mapOf("provider" to "gmail"),
+            )
+        }
+    }
+
+    @Test
+    fun `onConnectEmailProvider failure emits onboarding_step_failed and marks SKIPPED`() = runTest {
+        val activity = mockk<android.app.Activity>(relaxed = true)
+        coEvery { msGraphTokenProvider.startSignIn(activity) } returns
+            com.becalm.android.data.remote.gmail.OAuthSignInResult.Failure(
+                com.becalm.android.data.remote.gmail.FailureReason.NETWORK,
+            )
+
+        viewModel.onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, activity)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_OUTLOOK_MAIL],
+        )
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_OUTLOOK_MAIL",
+                    "error_code" to "network",
+                ),
+            )
+        }
+        coVerify(exactly = 0) {
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL, true)
+        }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `onConnectEmailProvider rejects IMAP because it uses credential save path`() {
+        val activity = mockk<android.app.Activity>(relaxed = true)
+        viewModel.onConnectEmailProvider(EmailPipaProvider.IMAP, activity)
+    }
+
+    // ─── S6-H IMAP credential save ───────────────────────────────────────────
+
+    @Test
+    fun `saveImapCredentials success persists and marks LINK_IMAP COMPLETE`() = runTest {
+        val creds = ImapCredentials(
+            host = "imap.naver.com",
+            port = 993,
+            username = "alice",
+            appPassword = "app-pw",
+        )
+        coEvery { imapCredentialStore.save(SourceType.NAVER_IMAP, creds) } returns Unit
+
+        viewModel.saveImapCredentials(SourceType.NAVER_IMAP, creds)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { imapCredentialStore.save(SourceType.NAVER_IMAP, creds) }
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
+        )
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+        }
+    }
+
+    @Test
+    fun `saveImapCredentials IOException failure emits network error and SKIPPED`() = runTest {
+        val creds = ImapCredentials(
+            host = "imap.daum.net",
+            port = 993,
+            username = "bob",
+            appPassword = "app-pw",
+        )
+        coEvery {
+            imapCredentialStore.save(SourceType.DAUM_IMAP, creds)
+        } throws java.io.IOException("disk full")
+
+        viewModel.saveImapCredentials(SourceType.DAUM_IMAP, creds)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
+        )
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_IMAP",
+                    "error_code" to "network",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `saveImapCredentials unknown provider rejected by store surfaces unknown_provider code`() = runTest {
+        val creds = ImapCredentials(
+            host = "mail.example.com",
+            port = 993,
+            username = "sam",
+            appPassword = "app-pw",
+        )
+        coEvery {
+            imapCredentialStore.save("bogus_source", creds)
+        } throws IllegalArgumentException("unknown IMAP sourceType: bogus_source")
+
+        viewModel.saveImapCredentials("bogus_source", creds)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_IMAP",
+                    "error_code" to "unknown_provider",
+                ),
+            )
+        }
+        coVerify(exactly = 0) {
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+        }
     }
 }

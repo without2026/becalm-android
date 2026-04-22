@@ -86,6 +86,24 @@
     <string name="onb_outlook_cal_headline">Connect Outlook Calendar</string>
     <string name="onb_outlook_cal_body">BeCalm reads your Outlook Calendar to surface upcoming meetings. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
 
+    <!-- Onboarding: IMAP provider selector + errors (S6-H) -->
+    <string name="onb_imap_provider_naver">Naver</string>
+    <string name="onb_imap_provider_daum">Daum</string>
+    <string name="onb_imap_username_hint_naver">naver.com ID</string>
+    <string name="onb_imap_username_hint_daum">daum.net / hanmail.net ID</string>
+    <string name="onb_imap_error_save_failed">Couldn\'t save credentials. Please try again.</string>
+    <string name="onb_imap_error_network">Network error — check your connection and try again.</string>
+
+    <!-- Onboarding: Gmail OAuth errors (S6-F) -->
+    <string name="onb_gmail_error_network">Couldn\'t reach Google. Please check your connection and try again.</string>
+    <string name="onb_gmail_error_permission_denied">BeCalm needs Gmail read access. Please grant the scope to continue.</string>
+    <string name="onb_gmail_error_unknown">Gmail connection failed. Please try again or skip for now.</string>
+
+    <!-- Onboarding: Outlook OAuth errors (S6-G) -->
+    <string name="onb_outlook_error_network">Couldn\'t reach Microsoft. Please check your connection and try again.</string>
+    <string name="onb_outlook_error_permission_denied">BeCalm needs Mail.Read access. Please grant the scope to continue.</string>
+    <string name="onb_outlook_error_unknown">Outlook connection failed. Please try again or skip for now.</string>
+
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
     <string name="onb_pipa_email_title_gmail">Gmail data use</string>
     <string name="onb_pipa_email_title_outlook">Outlook Mail data use</string>

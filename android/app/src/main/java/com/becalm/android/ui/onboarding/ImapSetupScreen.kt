@@ -7,11 +7,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,25 +32,33 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
+import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
+import kotlinx.coroutines.flow.filter
 
 /**
- * Onboarding step: IMAP / App Password manual email setup.
+ * Onboarding step: IMAP provider selector (Naver / Daum) with app-password save (S6-H).
  *
- * PIPA compliance note: This screen contains a password field.
- * [PasswordVisualTransformation] is applied to mask credentials.
- * [WindowManager.LayoutParams.FLAG_SECURE] is set on the Activity window while
- * this screen is visible, per PIPA Article 29.
+ * Replaces the pre-S6-H freeform host form with a Material3
+ * [SingleChoiceSegmentedButtonRow] that binds to [ImapProvider] presets. The username
+ * placeholder swaps as the segment changes; the password field stays credential-only.
+ * `[연결]` dispatches through [OnboardingViewModel.saveImapCredentials], which writes
+ * to [com.becalm.android.data.local.secure.ImapCredentialStore] under the provider's
+ * [com.becalm.android.data.remote.dto.SourceType] namespace. Failures surface as a
+ * Snackbar and leave the user on-screen so they can retry without losing input.
  *
- * No `Log.*` calls capture user-entered credentials.
+ * PIPA compliance: credentials screen — [PasswordVisualTransformation] masks input
+ * and [WindowManager.LayoutParams.FLAG_SECURE] blocks screenshots (PIPA Article 29).
  *
- * spec: ONB-001, SMG-001
+ * spec: ONB-001, SMG-001, ING-011
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingImap]
@@ -58,7 +71,7 @@ public fun ImapSetupScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // FLAG_SECURE: credentials screen — prevent screenshot capture (PIPA Article 29)
+    // FLAG_SECURE: credentials screen — prevent screenshot capture (PIPA Article 29).
     val context = LocalContext.current
     DisposableEffect(Unit) {
         val window = (context as? android.app.Activity)?.window
@@ -68,16 +81,42 @@ public fun ImapSetupScreen(
         }
     }
 
+    val errorCopyByCode = imapErrorStringMap(
+        network = stringResource(R.string.onb_imap_error_network),
+        unknown = stringResource(R.string.onb_imap_error_save_failed),
+    )
+
+    LaunchedEffect(viewModel) {
+        viewModel.emailConnectEvents
+            .filter { it.provider == EmailPipaProvider.IMAP }
+            .collect { event ->
+                when (event) {
+                    is EmailConnectEvent.Connected ->
+                        navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+                    is EmailConnectEvent.PendingIntentRequired -> Unit // IMAP never emits this.
+                    is EmailConnectEvent.Failed -> snackbarHostState.showSnackbar(
+                        errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
+                    )
+                }
+            }
+    }
+
     BecalmScaffold(
         title = stringResource(R.string.onb_imap_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         ImapForm(
             modifier = Modifier.padding(padding),
-            onSave = {
-                // TODO(BECALM-IMAP-001): persist credentials via ImapCredentialStore — deferred to next sprint
-                viewModel.onMarkStepStatus(OnboardingStep.LINK_IMAP, StepStatus.COMPLETE)
-                navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+            onSave = { provider, username, appPassword ->
+                viewModel.saveImapCredentials(
+                    sourceType = provider.sourceType,
+                    credentials = ImapCredentials(
+                        host = provider.host,
+                        port = provider.port,
+                        username = username,
+                        appPassword = appPassword,
+                    ),
+                )
             },
             onSkip = {
                 viewModel.onSkipStep()
@@ -90,12 +129,15 @@ public fun ImapSetupScreen(
 @Composable
 private fun ImapForm(
     modifier: Modifier = Modifier,
-    onSave: () -> Unit,
+    onSave: (ImapProvider, username: String, appPassword: String) -> Unit,
     onSkip: () -> Unit,
 ) {
-    var host by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
+    var selectedProvider: ImapProvider by remember { mutableStateOf(ImapProvider.Naver) }
+    var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val canSave by remember {
+        derivedStateOf { username.isNotBlank() && password.isNotBlank() }
+    }
 
     Column(
         modifier = modifier
@@ -116,22 +158,28 @@ private fun ImapForm(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            ImapProvider.SELECTABLE.forEachIndexed { index, provider ->
+                SegmentedButton(
+                    selected = provider == selectedProvider,
+                    onClick = { selectedProvider = provider },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = ImapProvider.SELECTABLE.size,
+                    ),
+                    label = { Text(stringResource(provider.displayNameRes)) },
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
         BecalmTextField(
-            value = host,
-            onValueChange = { host = it },
-            label = stringResource(R.string.onb_imap_host_label),
-            placeholder = stringResource(R.string.onb_imap_host_placeholder),
-            keyboardType = KeyboardType.Uri,
-            imeAction = ImeAction.Next,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        BecalmTextField(
-            value = email,
-            onValueChange = { email = it },
+            value = username,
+            onValueChange = { username = it },
             label = stringResource(R.string.onb_imap_email_label),
-            placeholder = stringResource(R.string.onb_imap_email_placeholder),
+            placeholder = stringResource(selectedProvider.usernamePlaceholderRes),
             keyboardType = KeyboardType.Email,
             imeAction = ImeAction.Next,
             modifier = Modifier.fillMaxWidth(),
@@ -150,8 +198,9 @@ private fun ImapForm(
         Spacer(modifier = Modifier.height(32.dp))
         BecalmButton(
             text = stringResource(R.string.onb_imap_cta),
-            onClick = onSave,
+            onClick = { onSave(selectedProvider, username, password) },
             variant = BecalmButtonVariant.Primary,
+            enabled = canSave,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -163,16 +212,25 @@ private fun ImapForm(
     }
 }
 
+/**
+ * Maps the stable IMAP save-error codes emitted by [OnboardingViewModel] onto localised
+ * Snackbar copy. Kept outside the composable so both production and preview paths share
+ * the same defaults.
+ */
+internal fun imapErrorStringMap(
+    network: String,
+    unknown: String,
+): Map<String, String> = mapOf(
+    "network" to network,
+    "save_failed" to unknown,
+    "unknown_provider" to unknown,
+    "unknown" to unknown,
+)
+
 @PreviewLightDark
 @Composable
 private fun PreviewImapSetupScreen() {
     BecalmTheme {
-        BecalmScaffold(title = "IMAP") { padding ->
-            ImapForm(
-                modifier = Modifier.padding(padding),
-                onSave = {},
-                onSkip = {},
-            )
-        }
+        ImapSetupScreen(navController = rememberNavController())
     }
 }

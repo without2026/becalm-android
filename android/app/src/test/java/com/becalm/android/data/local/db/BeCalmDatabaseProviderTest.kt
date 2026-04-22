@@ -181,6 +181,10 @@ public class BeCalmDatabaseProviderTest {
         override fun observeEnabledSources(): Flow<Set<String>> = unused("observeEnabledSources")
         override fun observeImapMigrated(): Flow<Boolean> = unused("observeImapMigrated")
         override suspend fun setImapMigrated(value: Boolean): Unit = unused("setImapMigrated")
+        override fun observeEmailSourceConnected(provider: EmailPipaProvider): Flow<Boolean> =
+            unused("observeEmailSourceConnected")
+        override suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean): Unit =
+            unused("setEmailSourceConnected")
         override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
             unused("observeEmailPipaConsent")
         override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean): Unit =

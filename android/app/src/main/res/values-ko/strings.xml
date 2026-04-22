@@ -86,6 +86,24 @@
     <string name="onb_outlook_cal_headline">Outlook 캘린더 연결</string>
     <string name="onb_outlook_cal_body">비캄은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
+    <!-- Onboarding: IMAP provider selector + errors (S6-H) -->
+    <string name="onb_imap_provider_naver">네이버</string>
+    <string name="onb_imap_provider_daum">다음</string>
+    <string name="onb_imap_username_hint_naver">naver.com 아이디</string>
+    <string name="onb_imap_username_hint_daum">daum.net / hanmail.net 아이디</string>
+    <string name="onb_imap_error_save_failed">자격 증명 저장에 실패했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_imap_error_network">네트워크 오류 — 연결을 확인한 뒤 다시 시도해 주세요.</string>
+
+    <!-- Onboarding: Gmail OAuth errors (S6-F) -->
+    <string name="onb_gmail_error_network">구글 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="onb_gmail_error_permission_denied">비캄에는 Gmail 읽기 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_gmail_error_unknown">Gmail 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
+
+    <!-- Onboarding: Outlook OAuth errors (S6-G) -->
+    <string name="onb_outlook_error_network">Microsoft 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="onb_outlook_error_permission_denied">비캄에는 Mail.Read 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_outlook_error_unknown">Outlook 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
+
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
     <string name="onb_pipa_email_title_gmail">Gmail 정보 이용 안내</string>
     <string name="onb_pipa_email_title_outlook">Outlook 메일 정보 이용 안내</string>

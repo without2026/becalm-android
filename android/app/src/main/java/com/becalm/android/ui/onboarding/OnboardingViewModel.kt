@@ -1,11 +1,18 @@
 package com.becalm.android.ui.onboarding
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.secure.ImapCredentialStore
+import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.gmail.FailureReason
+import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.remote.gmail.OAuthSignInResult
+import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.channels.BufferOverflow
@@ -104,6 +111,44 @@ public sealed class PipaConsentEvent {
     public data class PipaConsentSaveFailed(val message: String) : PipaConsentEvent()
 }
 
+/**
+ * One-shot outcome of an email-source connection attempt (S6-F/G/H).
+ *
+ * Scoped to the onboarding surface so downstream source-management UIs can share the
+ * same [ObservabilityClient] / [GoogleAuthTokenProviderImpl] plumbing without coupling
+ * to this ViewModel — they will ship their own analog once they need it.
+ */
+public sealed class EmailConnectEvent {
+    /** Identifies which provider the event belongs to so a screen can filter on its own. */
+    public abstract val provider: EmailPipaProvider
+
+    /**
+     * Authorization completed and the credential is persisted. The caller should mark
+     * the step [StepStatus.COMPLETE] and navigate to the next onboarding route.
+     */
+    public data class Connected(override val provider: EmailPipaProvider) : EmailConnectEvent()
+
+    /**
+     * First-time consent: launch the carried intent via an Activity-result launcher and
+     * re-trigger [OnboardingViewModel.onConnectEmailProvider] once the user completes
+     * the flow. Specific to Google's AuthorizationClient first-run path.
+     */
+    public data class PendingIntentRequired(
+        override val provider: EmailPipaProvider,
+        val pendingIntent: android.app.PendingIntent,
+    ) : EmailConnectEvent()
+
+    /**
+     * Authorization failed or was cancelled. [errorCode] is a stable label
+     * (`user_cancelled`, `scope_denied`, `network`, `play_services_unavailable`,
+     * `unknown`) that already drove the `onboarding_step_failed` observability event.
+     */
+    public data class Failed(
+        override val provider: EmailPipaProvider,
+        val errorCode: String,
+    ) : EmailConnectEvent()
+}
+
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
 /**
@@ -137,6 +182,9 @@ public class OnboardingViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
     private val observability: ObservabilityClient,
+    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
+    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
+    private val imapCredentialStore: ImapCredentialStore,
 ) : ViewModel() {
 
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
@@ -159,6 +207,18 @@ public class OnboardingViewModel @Inject constructor(
     /** Collect in [com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen] to navigate
      *  only after the DataStore write is confirmed. */
     public val pipaConsentEvents: SharedFlow<PipaConsentEvent> = _pipaConsentEvents.asSharedFlow()
+
+    // One-shot events for email OAuth / IMAP save outcomes (S6-F/G/H). replay=0 so a
+    // ResolutionRequired intent is consumed exactly once; DROP_OLDEST yields the most
+    // recent outcome when a rapid double-tap queues more than one.
+    private val _emailConnectEvents: MutableSharedFlow<EmailConnectEvent> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Collect in Gmail / Outlook / IMAP onboarding screens to drive result UX. */
+    public val emailConnectEvents: SharedFlow<EmailConnectEvent> = _emailConnectEvents.asSharedFlow()
 
     // ─── Navigation actions ───────────────────────────────────────────────────
 
@@ -289,6 +349,132 @@ public class OnboardingViewModel @Inject constructor(
      * @param errorCode Vendor-neutral short code (e.g. `user_cancelled`,
      *   `msal_network`, `gis_no_credentials`) suitable for alerting / grouping.
      */
+    // spec: AUTH-002 + ONB-004 (S6-F/G/H)
+    /**
+     * Initiates an interactive OAuth sign-in for the given email [provider].
+     *
+     * Routes to either [GoogleAuthTokenProviderImpl.startSignIn] or
+     * [MsGraphTokenProviderImpl.startSignIn]; on success persists the
+     * `<provider>_connected=true` flag, marks the appropriate step
+     * [StepStatus.COMPLETE], and emits [EmailConnectEvent.Connected]. Failures emit
+     * [EmailConnectEvent.Failed] and mark the step [StepStatus.SKIPPED] so the ONB-008
+     * terminal gate accepts the flow. The Google first-run consent path surfaces a
+     * [EmailConnectEvent.PendingIntentRequired] so the screen can resolve it with a
+     * normal Activity-result launcher.
+     *
+     * [provider] must be [EmailPipaProvider.GMAIL] or [EmailPipaProvider.OUTLOOK_MAIL]
+     * — IMAP is credential-based and uses [saveImapCredentials] instead.
+     *
+     * @param provider Target email provider.
+     * @param activity The foreground activity; required by both provider SDKs for the
+     *   AuthorizationClient / MSAL interactive call.
+     */
+    public fun onConnectEmailProvider(provider: EmailPipaProvider, activity: Activity) {
+        require(provider != EmailPipaProvider.IMAP) {
+            "IMAP uses saveImapCredentials(), not onConnectEmailProvider()"
+        }
+        viewModelScope.launch {
+            val result = runCatching {
+                when (provider) {
+                    EmailPipaProvider.GMAIL -> googleAuthTokenProvider.startSignIn(activity)
+                    EmailPipaProvider.OUTLOOK_MAIL -> msGraphTokenProvider.startSignIn(activity)
+                    EmailPipaProvider.IMAP -> error("unreachable")
+                }
+            }.getOrElse { t ->
+                logger.e(TAG, "OAuth startSignIn threw for ${provider.storageKey}", t)
+                OAuthSignInResult.Failure(FailureReason.UNKNOWN, t)
+            }
+            handleOAuthResult(provider, result)
+        }
+    }
+
+    private suspend fun handleOAuthResult(
+        provider: EmailPipaProvider,
+        result: OAuthSignInResult,
+    ) {
+        when (result) {
+            is OAuthSignInResult.Success -> {
+                userPrefsStore.setEmailSourceConnected(provider, true)
+                val step = linkStepFor(provider)
+                _uiState.update { it.copy(stepStates = it.stepStates + (step to StepStatus.COMPLETE)) }
+                observability.captureMessage(
+                    message = "onboarding_email_connected",
+                    tags = mapOf("provider" to provider.storageKey),
+                )
+                _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
+            }
+            is OAuthSignInResult.ResolutionRequired -> {
+                _emailConnectEvents.emit(
+                    EmailConnectEvent.PendingIntentRequired(provider, result.pendingIntent),
+                )
+            }
+            is OAuthSignInResult.Failure -> {
+                val errorCode = failureReasonCode(result.reason)
+                val step = linkStepFor(provider)
+                reportOnboardingStepFailed(step, errorCode)
+                _uiState.update { it.copy(stepStates = it.stepStates + (step to StepStatus.SKIPPED)) }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, errorCode))
+            }
+        }
+    }
+
+    private fun failureReasonCode(reason: FailureReason): String = when (reason) {
+        FailureReason.USER_CANCELLED -> "user_cancelled"
+        FailureReason.PLAY_SERVICES_UNAVAILABLE -> "play_services_unavailable"
+        FailureReason.NETWORK -> "network"
+        FailureReason.SCOPE_DENIED -> "scope_denied"
+        FailureReason.UNKNOWN -> "unknown"
+    }
+
+    private fun linkStepFor(provider: EmailPipaProvider): OnboardingStep = when (provider) {
+        EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
+        EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
+        EmailPipaProvider.IMAP -> OnboardingStep.LINK_IMAP
+    }
+
+    // spec: ONB-004 + ING-011 (S6-H)
+    /**
+     * Persists IMAP [credentials] under the [sourceType] namespace
+     * ([com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP] or `DAUM_IMAP`) and
+     * marks [OnboardingStep.LINK_IMAP] [StepStatus.COMPLETE] on success.
+     *
+     * On failure, [EmailConnectEvent.Failed] is emitted with a short `errorCode`
+     * (`save_failed` / `network`) and the step is marked [StepStatus.SKIPPED] so the
+     * terminal gate accepts the flow; the Snackbar copy drives user retry.
+     *
+     * Invalid sourceType values fail the provider's `require` guard and are reported as
+     * `unknown_provider` without further persistence.
+     */
+    public fun saveImapCredentials(sourceType: String, credentials: ImapCredentials) {
+        viewModelScope.launch {
+            val result = runCatching { imapCredentialStore.save(sourceType, credentials) }
+            if (result.isSuccess) {
+                userPrefsStore.setEmailSourceConnected(EmailPipaProvider.IMAP, true)
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
+                }
+                observability.captureMessage(
+                    message = "onboarding_email_connected",
+                    tags = mapOf("provider" to EmailPipaProvider.IMAP.storageKey, "source_type" to sourceType),
+                )
+                _emailConnectEvents.emit(EmailConnectEvent.Connected(EmailPipaProvider.IMAP))
+            } else {
+                val throwable = result.exceptionOrNull()
+                val errorCode = when (throwable) {
+                    is IllegalArgumentException -> "unknown_provider"
+                    is java.io.IOException -> "network"
+                    else -> "save_failed"
+                }
+                logger.e(TAG, "IMAP save failed sourceType=$sourceType", throwable)
+                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, errorCode)
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
+                }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(EmailPipaProvider.IMAP, errorCode))
+            }
+        }
+    }
+
     public fun reportOnboardingStepFailed(step: OnboardingStep, errorCode: String) {
         logger.w(TAG, "onboarding_step_failed: step=$step errorCode=$errorCode")
         observability.captureMessage(

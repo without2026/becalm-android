@@ -198,6 +198,27 @@ public interface UserPrefsStore {
     public suspend fun setImapMigrated(value: Boolean)
 
     /**
+     * Emits the persisted "user has completed an interactive OAuth grant for this email
+     * provider" flag (S6-F/G/H). Backed by per-provider DataStore keys
+     * `<provider_storage>_connected` and cleared either by the full-wipe sign-out path
+     * or by the future Settings "reconnect" flow.
+     *
+     * UI layer trusts this flag for the onboarding terminal gate; the credential
+     * store is still consulted by network callers before each API request.
+     */
+    public fun observeEmailSourceConnected(provider: EmailPipaProvider): Flow<Boolean>
+
+    /**
+     * Persists the `<provider>_connected` flag (S6-F/G/H).
+     *
+     * Writes land at the tail of the OAuth / IMAP sign-in success path after the
+     * credential has been committed to the encrypted store — write order matters so
+     * a crash between the two operations leaves the app in a recoverable state
+     * (the flag-off case is interpreted as "re-connect needed").
+     */
+    public suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean)
+
+    /**
      * Emits the stored PIPA 제3자 제공 consent flag for the email [provider] (one of
      * [EmailPipaProvider.GMAIL], [EmailPipaProvider.OUTLOOK_MAIL], [EmailPipaProvider.IMAP]).
      *
@@ -287,6 +308,9 @@ public class UserPrefsStoreImpl @Inject constructor(
     private fun emailPipaConsentAtKey(provider: EmailPipaProvider) =
         longPreferencesKey("pipa_email_${provider.storageKey}_consent_at")
 
+    private fun emailSourceConnectedKey(provider: EmailPipaProvider) =
+        booleanPreferencesKey("${provider.storageKey}_connected")
+
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
 
@@ -356,6 +380,13 @@ public class UserPrefsStoreImpl @Inject constructor(
 
     override suspend fun setImapMigrated(value: Boolean) {
         dataStore.edit { prefs -> prefs[imapCredentialStoreMigratedKey] = value }
+    }
+
+    override fun observeEmailSourceConnected(provider: EmailPipaProvider): Flow<Boolean> =
+        dataStore.data.map { it[emailSourceConnectedKey(provider)] ?: false }
+
+    override suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean) {
+        dataStore.edit { prefs -> prefs[emailSourceConnectedKey(provider)] = connected }
     }
 
     override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
