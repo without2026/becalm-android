@@ -189,6 +189,8 @@ public class BeCalmDatabaseProviderTest {
             unused("observeEmailPipaConsent")
         override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean): Unit =
             unused("setEmailPipaConsent")
+        override suspend fun setEmailPipaConsents(providers: List<EmailPipaProvider>, granted: Boolean): Unit =
+            unused("setEmailPipaConsents")
         override suspend fun clearAll(): Unit = unused("clearAll")
 
         private fun <T> unused(name: String): T =

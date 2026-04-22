@@ -124,6 +124,18 @@ public class BeCalmDatabaseProvider @Inject constructor(
     }
 
     /**
+     * Returns the id-hash of the user whose database is currently open, or `null`
+     * when no database is open.
+     *
+     * Consumed by [com.becalm.android.data.repository.AuthRepositoryImpl] to detect
+     * in-process account swaps at sign-in time (a non-null prior hash that differs
+     * from the newly-signed-in user's hash triggers a forced process restart so the
+     * `@Singleton` DAO graph cannot carry the prior user's references across the
+     * swap, AUTH-008).
+     */
+    public fun currentUserIdHash(): String? = lock.withLock { currentHash }
+
+    /**
      * Closes the currently-open database (if any) and clears the provider's hash.
      *
      * Called from the sign-out step lists in

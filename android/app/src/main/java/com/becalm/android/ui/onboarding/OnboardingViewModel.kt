@@ -322,8 +322,16 @@ public class OnboardingViewModel @Inject constructor(
     ): Boolean {
         require(providers.isNotEmpty()) { "providers must be non-empty" }
         return try {
+            // One DataStore.edit transaction covers the whole recipient set so a failure
+            // on the second write cannot leave the user durably consented for one
+            // recipient and not the other — the PIPA Article 17 audit trail stays
+            // coherent for the combined IMAP (Naver + Daum) disclosure.
+            userPrefsStore.setEmailPipaConsents(providers, granted)
+            // Audit events fire only after the batched write succeeds; emitting inside
+            // the write loop would have surfaced a "consent granted" event for a
+            // recipient whose key rolled back on a later failure.
             for (provider in providers) {
-                userPrefsStore.setEmailPipaConsent(provider, granted)
+                logger.i(TAG, "pipa email consent ${provider.storageKey}=$granted")
                 observability.captureMessage(
                     message = "onboarding_pipa_email_consent",
                     tags = mapOf(
@@ -331,12 +339,11 @@ public class OnboardingViewModel @Inject constructor(
                         "granted" to granted.toString(),
                     ),
                 )
-                logger.i(TAG, "pipa email consent ${provider.storageKey}=$granted")
-                if (!granted) {
-                    val skippedStep = linkStepFor(provider)
-                    _uiState.update { state ->
-                        state.copy(stepStates = state.stepStates + (skippedStep to StepStatus.SKIPPED))
-                    }
+            }
+            if (!granted) {
+                _uiState.update { state ->
+                    val skipped = providers.map { linkStepFor(it) }.toSet()
+                    state.copy(stepStates = state.stepStates + skipped.associateWith { StepStatus.SKIPPED })
                 }
             }
             true

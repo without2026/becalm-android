@@ -7,6 +7,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.auth.ProcessRestarter
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.DeviceKeyStore
@@ -150,6 +151,7 @@ public class AuthRepositoryImpl @Inject constructor(
     // hook, logout leaves the MS Graph grant on device and the next account inherits
     // Outlook mailbox authorization on the same phone (PIPA cross-account leakage).
     private val msGraphTokenProvider: MsGraphTokenProviderImpl,
+    private val processRestarter: ProcessRestarter,
     private val logger: Logger,
 ) : AuthRepository {
 
@@ -163,26 +165,43 @@ public class AuthRepositoryImpl @Inject constructor(
         password: String,
     ): BecalmResult<SupabaseSession> =
         authClient.signInWithEmail(email, password)
-            .onSuccess { value ->
-                userPrefsStore.setCurrentUserId(value.userId)
-                // Bind the per-user SQLite file before any worker or repository touches
-                // Room (S6-A PIPA cross-account leak defence). Idempotent on the happy path
-                // when the same user signs in again.
-                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(value.userId))
-                sessionFlow.value = value
-                // Warm the token cache from persisted session so the first hot-path request
-                // avoids a disk read (Round 6A.4).
-                tokenProvider.primeCache()
-            }
+            .onSuccess { value -> applySignInState(value) }
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
         authClient.signInWithGoogleIdToken(idToken)
-            .onSuccess { value ->
-                userPrefsStore.setCurrentUserId(value.userId)
-                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(value.userId))
-                sessionFlow.value = value
-                tokenProvider.primeCache()
-            }
+            .onSuccess { value -> applySignInState(value) }
+
+    /**
+     * Shared post-authentication state update for [signInWithEmail] / [signInWithGoogle].
+     *
+     * - Records the Supabase user id so [UserPrefsStore]'s user-scoped keys resolve
+     *   to the right namespace (AUTH-008).
+     * - Binds the per-user SQLite file (S6-A PIPA cross-account leak defence).
+     * - Detects an in-process **account swap** — a new user signing in while the
+     *   provider still holds a different user's database handle — and hands off to
+     *   [ProcessRestarter]. A restart is required because `@Singleton` repositories
+     *   captured their DAO references at first injection; reusing them after the
+     *   swap reads from a closed file (see [BeCalmDatabaseProvider] class KDoc).
+     *   Same-user re-sign-in (identical hash) skips the restart so routine
+     *   sign-out → sign-back-in stays seamless.
+     * - Emits the session on [sessionFlow] and primes the auth token cache for the
+     *   first hot-path request.
+     *
+     * Must not return to the caller on the swap branch — [ProcessRestarter.restart]
+     * is declared `Nothing` so the compiler enforces that.
+     */
+    private suspend fun applySignInState(session: SupabaseSession) {
+        val newHash = BeCalmDatabase.deriveUserIdHash(session.userId)
+        val priorHash = databaseProvider.currentUserIdHash()
+        userPrefsStore.setCurrentUserId(session.userId)
+        databaseProvider.ensureOpenFor(newHash)
+        sessionFlow.value = session
+        tokenProvider.primeCache()
+        if (priorHash != null && priorHash != newHash) {
+            logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
+            processRestarter.restart()
+        }
+    }
 
     override suspend fun signOut(): BecalmResult<Unit> {
         // PIPA wipe — every step runs regardless of prior step failures.

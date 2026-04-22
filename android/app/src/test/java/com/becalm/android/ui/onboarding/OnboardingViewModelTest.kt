@@ -406,7 +406,7 @@ class OnboardingViewModelTest {
 
         assertEquals(true, ok)
         coVerify(exactly = 1) {
-            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.GMAIL, true)
+            userPrefsStore.setEmailPipaConsents(listOf(EmailPipaProvider.GMAIL), true)
         }
         verify(exactly = 1) {
             observability.captureMessage(
@@ -430,7 +430,7 @@ class OnboardingViewModelTest {
 
         assertEquals(true, ok)
         coVerify(exactly = 1) {
-            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, false)
+            userPrefsStore.setEmailPipaConsents(listOf(EmailPipaProvider.OUTLOOK_MAIL), false)
         }
         assertEquals(
             "denying outlook consent must skip LINK_OUTLOOK_MAIL so ONB-008 gate accepts the flow",
@@ -440,29 +440,57 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `onEmailPipaConsent imap grant writes BOTH recipient records atomically`() = runTest {
+    fun `onEmailPipaConsent imap grant writes both recipient records through the batch API`() = runTest {
         val ok = viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP_GROUP, granted = true)
 
         assertEquals(true, ok)
-        // Per-recipient consent (PIPA Article 17): Naver Corp and Kakao Corp are distinct.
+        // R4 fix: a single DataStore.edit transaction covers both recipients so a
+        // failure on the second write cannot leave partial consent on disk.
         coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsents(EmailPipaProvider.IMAP_GROUP, true)
+        }
+        // The legacy per-recipient overload MUST NOT be called — that path used to
+        // produce two independent DataStore.edit calls.
+        coVerify(exactly = 0) {
             userPrefsStore.setEmailPipaConsent(EmailPipaProvider.NAVER_IMAP, true)
         }
-        coVerify(exactly = 1) {
+        coVerify(exactly = 0) {
             userPrefsStore.setEmailPipaConsent(EmailPipaProvider.DAUM_IMAP, true)
         }
     }
 
     @Test
-    fun `onEmailPipaConsent imap denial skips LINK_IMAP and records deny on both recipients`() = runTest {
+    fun `onEmailPipaConsent batch failure does not emit audit events or mark steps`() = runTest {
+        coEvery {
+            userPrefsStore.setEmailPipaConsents(EmailPipaProvider.IMAP_GROUP, true)
+        } throws java.io.IOException("disk full")
+
+        val ok = viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP_GROUP, granted = true)
+
+        assertEquals("batched write failure must be signalled to the caller", false, ok)
+        // No observability event fires for a failed transaction — the audit trail
+        // cannot show "consent granted" for a recipient whose key never landed.
+        verify(exactly = 0) {
+            observability.captureMessage(
+                message = "onboarding_pipa_email_consent",
+                tags = any(),
+            )
+        }
+        // The IMAP step must not be marked COMPLETE/SKIPPED on a failed write — the
+        // user is expected to retry from the disclosure screen.
+        assertEquals(
+            StepStatus.NOT_STARTED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
+        )
+    }
+
+    @Test
+    fun `onEmailPipaConsent imap denial skips LINK_IMAP and records deny atomically`() = runTest {
         val ok = viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP_GROUP, granted = false)
 
         assertEquals(true, ok)
         coVerify(exactly = 1) {
-            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.NAVER_IMAP, false)
-        }
-        coVerify(exactly = 1) {
-            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.DAUM_IMAP, false)
+            userPrefsStore.setEmailPipaConsents(EmailPipaProvider.IMAP_GROUP, false)
         }
         assertEquals(
             StepStatus.SKIPPED,

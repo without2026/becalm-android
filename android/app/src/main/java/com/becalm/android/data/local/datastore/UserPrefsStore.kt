@@ -237,10 +237,27 @@ public interface UserPrefsStore {
      * `pipa_email_{provider}_consent_at` so audit logs can correlate the decision.
      * Writing `false` clears that timestamp.
      *
-     * @param provider One of the enumerated email providers (`GMAIL`, `OUTLOOK_MAIL`, `IMAP`).
+     * @param provider One of the enumerated email providers.
      * @param granted  `true` on [동의] tap, `false` on [동의 안 함] tap.
      */
     public suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean)
+
+    /**
+     * Persists the per-recipient email PIPA consent flag for **every** entry in
+     * [providers] inside a single [DataStore.edit] transaction (S6-D, R4 fix).
+     *
+     * Required by the combined IMAP onboarding disclosure: the UI presents a single
+     * all-or-none Agree tap covering Naver Corp and Kakao Corp, so the durable record
+     * must also be all-or-none — PIPA Article 17's per-recipient audit trail is only
+     * coherent when both keys move together. The single-provider
+     * [setEmailPipaConsent] overload remains for Gmail / Outlook disclosures where
+     * there is only one recipient and batching adds no value.
+     *
+     * @param providers Non-empty list of recipients the consent decision applies to.
+     * @param granted   `true` on a combined Agree tap; `false` on a combined Decline.
+     * @throws IllegalArgumentException when [providers] is empty.
+     */
+    public suspend fun setEmailPipaConsents(providers: List<EmailPipaProvider>, granted: Boolean)
 
     /**
      * Atomically clears all preferences stored in this DataStore file.
@@ -455,13 +472,21 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
 
     override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
+        setEmailPipaConsents(listOf(provider), granted)
+    }
+
+    override suspend fun setEmailPipaConsents(providers: List<EmailPipaProvider>, granted: Boolean) {
+        require(providers.isNotEmpty()) { "providers must be non-empty" }
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
-            prefs[emailPipaConsentKey(userId, provider)] = granted
-            if (granted) {
-                prefs[emailPipaConsentAtKey(userId, provider)] = System.currentTimeMillis()
-            } else {
-                prefs.remove(emailPipaConsentAtKey(userId, provider))
+            val now = System.currentTimeMillis()
+            for (provider in providers) {
+                prefs[emailPipaConsentKey(userId, provider)] = granted
+                if (granted) {
+                    prefs[emailPipaConsentAtKey(userId, provider)] = now
+                } else {
+                    prefs.remove(emailPipaConsentAtKey(userId, provider))
+                }
             }
         }
     }
