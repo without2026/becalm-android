@@ -22,6 +22,7 @@ import com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen
 import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
+import com.becalm.android.ui.onboarding.NotificationPermissionScreen
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.OutlookMailOAuthScreen
 import com.becalm.android.ui.onboarding.RecordingFolderScreen
@@ -128,6 +129,10 @@ public fun BecalmNavHost(
 
         composable(route = BecalmRoute.OnboardingOutlookCalendar.path) {
             OutlookCalendarOAuthScreen(navController = navController)
+        }
+
+        composable(route = BecalmRoute.OnboardingNotificationPerm.path) {
+            NotificationPermissionScreen(navController = navController)
         }
 
         composable(route = BecalmRoute.OnboardingBattery.path) {

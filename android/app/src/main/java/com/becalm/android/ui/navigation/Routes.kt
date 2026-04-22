@@ -84,6 +84,16 @@ public sealed class BecalmRoute(public val path: String) {
     public data object OnboardingOutlookCalendar : BecalmRoute("onboarding/outlook-calendar")
 
     /**
+     * Onboarding step (S6-E): POST_NOTIFICATIONS runtime permission for Android 13+.
+     *
+     * On API 32 and below the permission is implicitly granted at install time, so the
+     * screen self-skips in a single recomposition and navigates straight to
+     * [OnboardingBattery]. The screen is registered unconditionally so the onboarding
+     * flow has a stable step count across SDK levels.
+     */
+    public data object OnboardingNotificationPerm : BecalmRoute("onboarding/notifications")
+
+    /**
      * Onboarding step: battery optimisation exemption (ONB-005).
      * 2-step: standard REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + Samsung sleeping-apps guide.
      */

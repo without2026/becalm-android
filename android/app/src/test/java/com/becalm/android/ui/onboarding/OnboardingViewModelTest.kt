@@ -1,9 +1,11 @@
 package com.becalm.android.ui.onboarding
 
+import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -19,14 +21,14 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Unit tests for [OnboardingViewModel] against the canonical 12-step onboarding flow
- * defined in `.spec/onboarding.spec.yml` (invariant line 110).
+ * Unit tests for [OnboardingViewModel] against the canonical 13-step onboarding flow
+ * (post-S6-E: NOTIFICATION_PERM inserted between LINK_OUTLOOK_CALENDAR and BATTERY_OPT).
  *
  * Step ordering (1-indexed):
  * 1 TERMS → 2 LOGIN → 3 PIPA_CONSENT → 4 RECORDING_FOLDER → 5 CONTACTS_PERM
  *   → 6 LINK_GMAIL → 7 LINK_OUTLOOK_MAIL → 8 LINK_IMAP
  *   → 9 LINK_GOOGLE_CALENDAR → 10 LINK_OUTLOOK_CALENDAR
- *   → 11 BATTERY_OPT → 12 COLD_SYNC
+ *   → 11 NOTIFICATION_PERM → 12 BATTERY_OPT → 13 COLD_SYNC
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class OnboardingViewModelTest {
@@ -35,6 +37,7 @@ class OnboardingViewModelTest {
 
     private lateinit var userPrefsStore: UserPrefsStore
     private lateinit var logger: Logger
+    private lateinit var observability: ObservabilityClient
     private lateinit var viewModel: OnboardingViewModel
 
     @Before
@@ -42,7 +45,8 @@ class OnboardingViewModelTest {
         Dispatchers.setMain(testDispatcher)
         userPrefsStore = mockk(relaxed = true)
         logger = mockk(relaxed = true)
-        viewModel = OnboardingViewModel(userPrefsStore, logger)
+        observability = mockk(relaxed = true)
+        viewModel = OnboardingViewModel(userPrefsStore, logger, observability)
     }
 
     @After
@@ -53,9 +57,9 @@ class OnboardingViewModelTest {
     // ─── Enum shape & ordering ────────────────────────────────────────────────
 
     @Test
-    fun `canonical onboarding has exactly 12 steps`() {
-        assertEquals(12, OnboardingStep.entries.size)
-        assertEquals(12, viewModel.steps.size)
+    fun `canonical onboarding has exactly 13 steps`() {
+        assertEquals(13, OnboardingStep.entries.size)
+        assertEquals(13, viewModel.steps.size)
     }
 
     @Test
@@ -77,6 +81,7 @@ class OnboardingViewModelTest {
             OnboardingStep.LINK_IMAP,
             OnboardingStep.LINK_GOOGLE_CALENDAR,
             OnboardingStep.LINK_OUTLOOK_CALENDAR,
+            OnboardingStep.NOTIFICATION_PERM,
             OnboardingStep.BATTERY_OPT,
             OnboardingStep.COLD_SYNC,
         )
@@ -113,10 +118,10 @@ class OnboardingViewModelTest {
     }
 
     @Test
-    fun `onNext advances sequentially through all 12 steps`() {
-        // From index 0 (TERMS), 11 onNext() calls should land at COLD_SYNC (index 11).
-        repeat(11) { viewModel.onNext() }
-        assertEquals(11, viewModel.uiState.value.currentStepIndex)
+    fun `onNext advances sequentially through all 13 steps`() {
+        // From index 0 (TERMS), 12 onNext() calls should land at COLD_SYNC (index 12).
+        repeat(12) { viewModel.onNext() }
+        assertEquals(12, viewModel.uiState.value.currentStepIndex)
         assertEquals(OnboardingStep.COLD_SYNC, viewModel.steps[viewModel.uiState.value.currentStepIndex])
     }
 
@@ -143,18 +148,18 @@ class OnboardingViewModelTest {
         assertEquals(lastIndex, viewModel.uiState.value.currentStepIndex)
     }
 
-    // ─── Progress arithmetic ("N/12" display) ─────────────────────────────────
+    // ─── Progress arithmetic ("N/13" display, post-S6-E) ──────────────────────
 
     @Test
-    fun `progress index plus one over steps size displays as one-based N over 12`() {
-        assertEquals(12, viewModel.steps.size)
-        // Step 1 of 12 at first render
+    fun `progress index plus one over steps size displays as one-based N over 13`() {
+        assertEquals(13, viewModel.steps.size)
+        // Step 1 of 13 at first render
         assertEquals(1, viewModel.uiState.value.currentStepIndex + 1)
         viewModel.onNext()
         assertEquals(2, viewModel.uiState.value.currentStepIndex + 1)
         // Skip ahead to the terminal step
         repeat(viewModel.steps.lastIndex) { viewModel.onNext() }
-        assertEquals(12, viewModel.uiState.value.currentStepIndex + 1)
+        assertEquals(13, viewModel.uiState.value.currentStepIndex + 1)
     }
 
     // ─── onMarkStepStatus ─────────────────────────────────────────────────────
@@ -293,6 +298,7 @@ class OnboardingViewModelTest {
             OnboardingStep.LINK_IMAP to StepStatus.SKIPPED,
             OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.SKIPPED,
             OnboardingStep.LINK_OUTLOOK_CALENDAR to StepStatus.SKIPPED,
+            OnboardingStep.NOTIFICATION_PERM to StepStatus.SKIPPED,
             OnboardingStep.BATTERY_OPT to StepStatus.COMPLETE,
             // COLD_SYNC starts NOT_STARTED in this setup — gate must reject here.
         )
@@ -321,5 +327,29 @@ class OnboardingViewModelTest {
             state.stepStates[OnboardingStep.COLD_SYNC],
         )
         coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
+    }
+
+    // ─── Sentry observability (S6-E, spec ONB-007) ────────────────────────────
+
+    @Test
+    fun `reportOnboardingStepFailed emits onboarding_step_failed with step and error_code tags`() {
+        viewModel.reportOnboardingStepFailed(OnboardingStep.LINK_GMAIL, "user_cancelled")
+
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_GMAIL",
+                    "error_code" to "user_cancelled",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `reportOnboardingStepFailed does not emit captureException`() {
+        viewModel.reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "invalid_credentials")
+
+        verify(exactly = 0) { observability.captureException(any(), any()) }
     }
 }

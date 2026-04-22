@@ -2,6 +2,7 @@ package com.becalm.android.ui.onboarding
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,9 +62,18 @@ public enum class OnboardingStep {
     LINK_GOOGLE_CALENDAR,
     /** Step 10 — [OutlookCalendarOAuthScreen]. */
     LINK_OUTLOOK_CALENDAR,
-    /** Step 11 — [BatteryOptimizationScreen] (ONB-005). */
+    /**
+     * Step 11 — [NotificationPermissionScreen] (S6-E).
+     *
+     * Requests POST_NOTIFICATIONS on API 33+ so commitment / reminder notifications
+     * actually reach the user. On API 32 and below the screen is terminal
+     * ([StepStatus.SKIPPED]) because the permission is implicitly granted at install time.
+     * Inserted between [BATTERY_OPT] and [COLD_SYNC] in the canonical flow.
+     */
+    NOTIFICATION_PERM,
+    /** Step 12 — [BatteryOptimizationScreen] (ONB-005). */
     BATTERY_OPT,
-    /** Step 12 (terminal) — [ColdSyncScreen] (TDY-010, ONB-008). */
+    /** Step 13 (terminal) — [ColdSyncScreen] (TDY-010, ONB-008). */
     COLD_SYNC,
 }
 
@@ -125,6 +135,7 @@ private const val TAG = "OnboardingViewModel"
 public class OnboardingViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
+    private val observability: ObservabilityClient,
 ) : ViewModel() {
 
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
@@ -212,6 +223,33 @@ public class OnboardingViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(stepStates = state.stepStates + (step to status), error = null)
         }
+    }
+
+    // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시 Sentry 에
+    // onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
+    /**
+     * Emits the `onboarding_step_failed` observability event used by downstream onboarding
+     * screens (Gmail / Outlook / IMAP plans S6-F/G/H) when an OAuth launcher reports a
+     * permission denial or transport failure.
+     *
+     * Tags carry only the step name and a compact [errorCode] — raw exception messages,
+     * user emails, and OAuth tokens must be scrubbed upstream before calling this
+     * method; [com.becalm.android.core.observability.LoggerObservabilityClient] performs
+     * a second scrub as defence-in-depth.
+     *
+     * @param step      The onboarding step whose OAuth / permission launcher failed.
+     * @param errorCode Vendor-neutral short code (e.g. `user_cancelled`,
+     *   `msal_network`, `gis_no_credentials`) suitable for alerting / grouping.
+     */
+    public fun reportOnboardingStepFailed(step: OnboardingStep, errorCode: String) {
+        logger.w(TAG, "onboarding_step_failed: step=$step errorCode=$errorCode")
+        observability.captureMessage(
+            message = "onboarding_step_failed",
+            tags = mapOf(
+                "step" to step.name,
+                "error_code" to errorCode,
+            ),
+        )
     }
 
     // spec: ONB-PIPA / ONB-PIPA invariant: "동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화"

@@ -84,6 +84,12 @@
     <string name="onb_outlook_cal_headline">Connect Outlook Calendar</string>
     <string name="onb_outlook_cal_body">BeCalm reads your Outlook Calendar to surface upcoming meetings. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
 
+    <!-- Onboarding: Notification permission (S6-E) -->
+    <string name="onb_notifications_title">Notifications</string>
+    <string name="onb_notifications_headline">Get reminded before a commitment is due</string>
+    <string name="onb_notifications_body">BeCalm posts a heads-up notification 30 minutes before each commitment so you never miss a follow-through. Notifications stay on-device and never leave your phone.</string>
+    <string name="onb_notifications_rationale">You can change this any time from Android Settings → Apps → BeCalm → Notifications.</string>
+
     <!-- Onboarding: Battery optimization -->
     <string name="onb_battery_title">Background Activity</string>
     <string name="onb_battery_headline">Keep BeCalm active</string>

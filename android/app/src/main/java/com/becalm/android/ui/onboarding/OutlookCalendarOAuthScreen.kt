@@ -22,7 +22,7 @@ import com.becalm.android.ui.theme.BecalmTheme
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingOutlookCalendar]
- * Navigation exit: [BecalmRoute.OnboardingBattery]
+ * Navigation exit: [BecalmRoute.OnboardingNotificationPerm]
  */
 @Composable
 public fun OutlookCalendarOAuthScreen(
@@ -38,11 +38,11 @@ public fun OutlookCalendarOAuthScreen(
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Outlook Calendar OAuth via MSAL
                 viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK_CALENDAR, StepStatus.COMPLETE)
-                navController.navigate(BecalmRoute.OnboardingBattery.path)
+                navController.navigate(BecalmRoute.OnboardingNotificationPerm.path)
             },
             onSkip = {
                 viewModel.onSkipStep()
-                navController.navigate(BecalmRoute.OnboardingBattery.path)
+                navController.navigate(BecalmRoute.OnboardingNotificationPerm.path)
             },
         )
     }
