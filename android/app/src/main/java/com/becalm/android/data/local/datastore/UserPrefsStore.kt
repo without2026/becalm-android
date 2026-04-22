@@ -198,12 +198,51 @@ public interface UserPrefsStore {
     public suspend fun setImapMigrated(value: Boolean)
 
     /**
+     * Emits the stored PIPA 제3자 제공 consent flag for the email [provider] (one of
+     * [EmailPipaProvider.GMAIL], [EmailPipaProvider.OUTLOOK_MAIL], [EmailPipaProvider.IMAP]).
+     *
+     * `false` when the user has never interacted with the consent screen or has
+     * explicitly declined; `true` only after an explicit `[동의]` tap on
+     * [com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen]. The
+     * companion timestamp is stored under `pipa_email_{provider}_consent_at`.
+     */
+    public fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean>
+
+    /**
+     * Persists the per-provider email PIPA consent [granted] flag (S6-D).
+     *
+     * Writing `true` also records a wall-clock epoch-millis timestamp under
+     * `pipa_email_{provider}_consent_at` so audit logs can correlate the decision.
+     * Writing `false` clears that timestamp.
+     *
+     * @param provider One of the enumerated email providers (`GMAIL`, `OUTLOOK_MAIL`, `IMAP`).
+     * @param granted  `true` on [동의] tap, `false` on [동의 안 함] tap.
+     */
+    public suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean)
+
+    /**
      * Atomically clears all preferences stored in this DataStore file.
      *
      * Call during sign-out to ensure the next sign-in starts from default preference
      * values rather than inheriting a previous user's settings.
      */
     public suspend fun clearAll()
+}
+
+/**
+ * Email PIPA provider namespaces recognised by [UserPrefsStore.setEmailPipaConsent]
+ * (S6-D). Kept as an enum rather than loose strings so the consent surface cannot
+ * accept a typo'd source name at compile time.
+ *
+ * Per `docs/plans/ui-onboarding-pipa-email-consent.md` §5.1, IMAP shares a single
+ * consent record across Naver and Daum because the protocol surface is identical —
+ * only the disclosure recipient varies, and that is recorded in the UI copy rather
+ * than a distinct DataStore key.
+ */
+public enum class EmailPipaProvider(public val storageKey: String) {
+    GMAIL(storageKey = "gmail"),
+    OUTLOOK_MAIL(storageKey = "outlook_mail"),
+    IMAP(storageKey = "imap"),
 }
 
 // ─── Implementation ──────────────────────────────────────────────────────────
@@ -241,6 +280,12 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val pipaConsentTimestampKey = longPreferencesKey("pipa_consent_timestamp_millis")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
     private val imapCredentialStoreMigratedKey = booleanPreferencesKey("imap_credential_store_migrated_v1")
+
+    private fun emailPipaConsentKey(provider: EmailPipaProvider) =
+        booleanPreferencesKey("pipa_email_${provider.storageKey}_consent")
+
+    private fun emailPipaConsentAtKey(provider: EmailPipaProvider) =
+        longPreferencesKey("pipa_email_${provider.storageKey}_consent_at")
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
@@ -311,6 +356,20 @@ public class UserPrefsStoreImpl @Inject constructor(
 
     override suspend fun setImapMigrated(value: Boolean) {
         dataStore.edit { prefs -> prefs[imapCredentialStoreMigratedKey] = value }
+    }
+
+    override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
+        dataStore.data.map { it[emailPipaConsentKey(provider)] ?: false }
+
+    override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[emailPipaConsentKey(provider)] = granted
+            if (granted) {
+                prefs[emailPipaConsentAtKey(provider)] = System.currentTimeMillis()
+            } else {
+                prefs.remove(emailPipaConsentAtKey(provider))
+            }
+        }
     }
 
     override suspend fun clearAll() {

@@ -68,6 +68,27 @@ public sealed class BecalmRoute(public val path: String) {
      */
     public data object OnboardingContacts : BecalmRoute("onboarding/contacts")
 
+    /**
+     * PIPA 제3자 제공 disclosure shown immediately before the email-provider OAuth /
+     * credential screen (S6-D). `provider` is one of `gmail`, `outlook_mail`, `imap`
+     * and matches [com.becalm.android.data.local.datastore.EmailPipaProvider.storageKey].
+     *
+     * Usage:
+     * ```kotlin
+     * navController.navigate(BecalmRoute.OnboardingEmailPipa("gmail").path)
+     * ```
+     */
+    public data class OnboardingEmailPipa(public val provider: String) :
+        BecalmRoute("onboarding/pipa-email/$provider") {
+        public companion object {
+            /** NavHost destination template. */
+            public const val PATH: String = "onboarding/pipa-email/{provider}"
+
+            /** `navArgument` key for the provider storage slug. */
+            public const val ARG_PROVIDER: String = "provider"
+        }
+    }
+
     /** Onboarding step: Gmail OAuth connection. */
     public data object OnboardingGmail : BecalmRoute("onboarding/gmail")
 

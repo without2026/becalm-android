@@ -2,7 +2,9 @@ package com.becalm.android.ui.onboarding
 
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.verify
@@ -351,5 +353,62 @@ class OnboardingViewModelTest {
         viewModel.reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "invalid_credentials")
 
         verify(exactly = 0) { observability.captureException(any(), any()) }
+    }
+
+    // ─── S6-D email PIPA consent (plan docs/plans/ui-onboarding-pipa-email-consent.md) ─
+
+    @Test
+    fun `onEmailPipaConsent granted persists timestamped consent and emits audit event`() = runTest {
+        viewModel.onEmailPipaConsent(EmailPipaProvider.GMAIL, granted = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.GMAIL, true)
+        }
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_pipa_email_consent",
+                tags = mapOf(
+                    "provider" to "gmail",
+                    "granted" to "true",
+                ),
+            )
+        }
+        // Step-status stays NOT_STARTED on grant — the OAuth screen owns the final COMPLETE.
+        assertEquals(
+            StepStatus.NOT_STARTED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
+        )
+    }
+
+    @Test
+    fun `onEmailPipaConsent denied marks downstream OAuth step SKIPPED so terminal gate passes`() = runTest {
+        viewModel.onEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, granted = false)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userPrefsStore.setEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL, false)
+        }
+        assertEquals(
+            "denying outlook consent must skip LINK_OUTLOOK_MAIL so ONB-008 gate accepts the flow",
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_OUTLOOK_MAIL],
+        )
+    }
+
+    @Test
+    fun `onEmailPipaConsent imap denial skips LINK_IMAP specifically`() = runTest {
+        viewModel.onEmailPipaConsent(EmailPipaProvider.IMAP, granted = false)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_IMAP],
+        )
+        // Unrelated email steps must remain untouched.
+        assertEquals(
+            StepStatus.NOT_STARTED,
+            viewModel.uiState.value.stepStates[OnboardingStep.LINK_GMAIL],
+        )
     }
 }

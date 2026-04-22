@@ -23,6 +23,7 @@ import com.becalm.android.ui.onboarding.GoogleCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
 import com.becalm.android.ui.onboarding.NotificationPermissionScreen
+import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.OutlookMailOAuthScreen
 import com.becalm.android.ui.onboarding.RecordingFolderScreen
@@ -109,6 +110,21 @@ public fun BecalmNavHost(
 
         composable(route = BecalmRoute.OnboardingContacts.path) {
             ContactsPermissionScreen(navController = navController)
+        }
+
+        composable(
+            route = BecalmRoute.OnboardingEmailPipa.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.OnboardingEmailPipa.ARG_PROVIDER) {
+                    type = NavType.StringType
+                },
+            ),
+        ) { entry ->
+            val slug = entry.stringArg(BecalmRoute.OnboardingEmailPipa.ARG_PROVIDER) ?: ""
+            OnboardingEmailPipaConsentScreen(
+                providerSlug = slug,
+                navController = navController,
+            )
         }
 
         composable(route = BecalmRoute.OnboardingGmail.path) {

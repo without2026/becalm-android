@@ -37,7 +37,8 @@ import com.becalm.android.ui.theme.glassPanel
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingContacts]
- * Navigation exit: [BecalmRoute.OnboardingGmail]
+ * Navigation exit: [BecalmRoute.OnboardingEmailPipa] (gmail slug) — per S6-D the email
+ *   PIPA disclosure is shown before the OAuth screen.
  */
 @Composable
 public fun ContactsPermissionScreen(
@@ -49,7 +50,7 @@ public fun ContactsPermissionScreen(
     ) { granted ->
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
         viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
-        navController.navigate(BecalmRoute.OnboardingGmail.path)
+        navController.navigate(BecalmRoute.OnboardingEmailPipa(com.becalm.android.data.local.datastore.EmailPipaProvider.GMAIL.storageKey).path)
     }
 
     BecalmScaffold(title = stringResource(R.string.onb_contacts_title)) { padding ->
@@ -97,7 +98,7 @@ public fun ContactsPermissionScreen(
                 text = stringResource(R.string.action_skip),
                 onClick = {
                     viewModel.onSkipStep()
-                    navController.navigate(BecalmRoute.OnboardingGmail.path)
+                    navController.navigate(BecalmRoute.OnboardingEmailPipa(com.becalm.android.data.local.datastore.EmailPipaProvider.GMAIL.storageKey).path)
                 },
                 variant = BecalmButtonVariant.Text,
             )

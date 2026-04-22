@@ -86,6 +86,28 @@
     <string name="onb_outlook_cal_headline">Outlook 캘린더 연결</string>
     <string name="onb_outlook_cal_body">비캄은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
+    <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
+    <string name="onb_pipa_email_title_gmail">Gmail 정보 이용 안내</string>
+    <string name="onb_pipa_email_title_outlook">Outlook 메일 정보 이용 안내</string>
+    <string name="onb_pipa_email_title_imap">IMAP 메일 정보 이용 안내</string>
+    <string name="onb_pipa_email_headline_gmail">비캄에 Gmail 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_outlook">비캄에 Outlook 메일 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_imap">비캄에 IMAP 메일함 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_recipient">제공받는 자</string>
+    <string name="onb_pipa_email_recipient_gmail">Google LLC (미국)</string>
+    <string name="onb_pipa_email_recipient_outlook">Microsoft Corporation (미국)</string>
+    <string name="onb_pipa_email_recipient_imap">Naver Corp / Kakao Corp (대한민국)</string>
+    <string name="onb_pipa_email_purpose">이용 목적</string>
+    <string name="onb_pipa_email_purpose_body">메일 본문과 메타데이터에서 약속 정보를 추출해 기기 내에서 표시합니다. 본문은 서버로 전송되지 않습니다.</string>
+    <string name="onb_pipa_email_items">수집 항목</string>
+    <string name="onb_pipa_email_items_body">제목, 발신자/수신자, 시각, 본문 텍스트. 첨부 파일 바이트는 다운로드하지 않습니다.</string>
+    <string name="onb_pipa_email_retention">보유 기간</string>
+    <string name="onb_pipa_email_retention_body">최대 30일 동안 기기에만 저장되며 이후 자동 삭제됩니다.</string>
+    <string name="onb_pipa_email_opt_out">동의 거부 시</string>
+    <string name="onb_pipa_email_opt_out_body">거부해도 해당 이메일 제공자 연결만 건너뛰며, 나머지 기능은 정상 이용 가능합니다. 언제든 설정에서 다시 동의할 수 있습니다.</string>
+    <string name="onb_pipa_email_cta_agree">동의</string>
+    <string name="onb_pipa_email_cta_deny">동의 안 함</string>
+
     <!-- Onboarding: Notification permission (S6-E) -->
     <string name="onb_notifications_title">알림</string>
     <string name="onb_notifications_headline">약속 30분 전 미리 알려드려요</string>

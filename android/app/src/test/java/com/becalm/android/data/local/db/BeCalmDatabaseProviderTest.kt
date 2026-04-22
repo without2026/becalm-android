@@ -2,6 +2,7 @@ package com.becalm.android.data.local.db
 
 import android.app.Application
 import com.becalm.android.core.util.RecordingLogger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,6 +181,10 @@ public class BeCalmDatabaseProviderTest {
         override fun observeEnabledSources(): Flow<Set<String>> = unused("observeEnabledSources")
         override fun observeImapMigrated(): Flow<Boolean> = unused("observeImapMigrated")
         override suspend fun setImapMigrated(value: Boolean): Unit = unused("setImapMigrated")
+        override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
+            unused("observeEmailPipaConsent")
+        override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean): Unit =
+            unused("setEmailPipaConsent")
         override suspend fun clearAll(): Unit = unused("clearAll")
 
         private fun <T> unused(name: String): T =

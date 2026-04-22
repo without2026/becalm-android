@@ -17,6 +17,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
@@ -36,7 +37,8 @@ import com.becalm.android.ui.theme.glassPanel
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingGmail]
- * Navigation exit: [BecalmRoute.OnboardingOutlookMail]
+ * Navigation exit: [BecalmRoute.OnboardingEmailPipa] (outlook_mail slug) — per S6-D the
+ *   PIPA disclosure for the next provider is shown before its OAuth screen.
  */
 @Composable
 public fun GmailOAuthScreen(
@@ -52,11 +54,11 @@ public fun GmailOAuthScreen(
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Gmail OAuth
                 viewModel.onMarkStepStatus(OnboardingStep.LINK_GMAIL, StepStatus.COMPLETE)
-                navController.navigate(BecalmRoute.OnboardingOutlookMail.path)
+                navController.navigate(BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.OUTLOOK_MAIL.storageKey).path)
             },
             onSkip = {
                 viewModel.onSkipStep()
-                navController.navigate(BecalmRoute.OnboardingOutlookMail.path)
+                navController.navigate(BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.OUTLOOK_MAIL.storageKey).path)
             },
         )
     }

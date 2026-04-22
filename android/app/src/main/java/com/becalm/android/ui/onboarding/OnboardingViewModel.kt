@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -224,6 +225,53 @@ public class OnboardingViewModel @Inject constructor(
             state.copy(stepStates = state.stepStates + (step to status), error = null)
         }
     }
+
+    // spec: ONB-PIPA per-provider (S6-D) + PIPA Article 17
+    /**
+     * Persists a per-provider email PIPA consent outcome (S6-D) and marks the
+     * corresponding OAuth / credential step [StepStatus.SKIPPED] when consent is denied
+     * so the onboarding terminal gate accepts the flow without forcing the user to
+     * revisit the OAuth screen.
+     *
+     * On `granted=true`, no step-status change is made here — the downstream OAuth
+     * screen marks its own step COMPLETE after a successful connection.
+     *
+     * Audit trail: the setter records a wall-clock timestamp alongside the flag, and
+     * emits a structured `onboarding_pipa_email_consent` observability event for
+     * downstream PIPA action-log correlation (W7 builds the full user-facing log on
+     * top of these events).
+     */
+    public fun onEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
+        viewModelScope.launch {
+            try {
+                userPrefsStore.setEmailPipaConsent(provider, granted)
+                logger.i(TAG, "pipa email consent ${provider.storageKey}=${granted}")
+                observability.captureMessage(
+                    message = "onboarding_pipa_email_consent",
+                    tags = mapOf(
+                        "provider" to provider.storageKey,
+                        "granted" to granted.toString(),
+                    ),
+                )
+                if (!granted) {
+                    val skippedStep = skippedStepForDeniedConsent(provider)
+                    _uiState.update { state ->
+                        state.copy(stepStates = state.stepStates + (skippedStep to StepStatus.SKIPPED))
+                    }
+                }
+            } catch (e: Exception) {
+                logger.e(TAG, "pipa email consent write failed for ${provider.storageKey}", e)
+                _uiState.update { it.copy(error = e.message ?: "consent write failed") }
+            }
+        }
+    }
+
+    private fun skippedStepForDeniedConsent(provider: EmailPipaProvider): OnboardingStep =
+        when (provider) {
+            EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
+            EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
+            EmailPipaProvider.IMAP -> OnboardingStep.LINK_IMAP
+        }
 
     // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시 Sentry 에
     // onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"

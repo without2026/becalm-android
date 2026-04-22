@@ -9,6 +9,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
@@ -22,7 +23,8 @@ import com.becalm.android.ui.theme.BecalmTheme
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingOutlookMail]
- * Navigation exit: [BecalmRoute.OnboardingImap]
+ * Navigation exit: [BecalmRoute.OnboardingEmailPipa] (imap slug) — per S6-D the IMAP
+ *   PIPA disclosure is shown before the provider selector.
  */
 @Composable
 public fun OutlookMailOAuthScreen(
@@ -38,11 +40,11 @@ public fun OutlookMailOAuthScreen(
             onConnect = {
                 // TODO(BECALM-OAUTH-001): wire real Outlook Mail OAuth via MSAL
                 viewModel.onMarkStepStatus(OnboardingStep.LINK_OUTLOOK_MAIL, StepStatus.COMPLETE)
-                navController.navigate(BecalmRoute.OnboardingImap.path)
+                navController.navigate(BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.IMAP.storageKey).path)
             },
             onSkip = {
                 viewModel.onSkipStep()
-                navController.navigate(BecalmRoute.OnboardingImap.path)
+                navController.navigate(BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.IMAP.storageKey).path)
             },
         )
     }

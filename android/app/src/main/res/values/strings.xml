@@ -86,6 +86,28 @@
     <string name="onb_outlook_cal_headline">Connect Outlook Calendar</string>
     <string name="onb_outlook_cal_body">BeCalm reads your Outlook Calendar to surface upcoming meetings. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
 
+    <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
+    <string name="onb_pipa_email_title_gmail">Gmail data use</string>
+    <string name="onb_pipa_email_title_outlook">Outlook Mail data use</string>
+    <string name="onb_pipa_email_title_imap">IMAP mail data use</string>
+    <string name="onb_pipa_email_headline_gmail">Grant BeCalm permission to read your Gmail</string>
+    <string name="onb_pipa_email_headline_outlook">Grant BeCalm permission to read your Outlook Mail</string>
+    <string name="onb_pipa_email_headline_imap">Grant BeCalm permission to read your IMAP inbox</string>
+    <string name="onb_pipa_email_recipient">Third party</string>
+    <string name="onb_pipa_email_recipient_gmail">Google LLC (United States)</string>
+    <string name="onb_pipa_email_recipient_outlook">Microsoft Corporation (United States)</string>
+    <string name="onb_pipa_email_recipient_imap">Naver Corp / Kakao Corp (Korea)</string>
+    <string name="onb_pipa_email_purpose">Purpose</string>
+    <string name="onb_pipa_email_purpose_body">Extract upcoming commitments from mail metadata and body text. Processing stays on your device; messages are never uploaded.</string>
+    <string name="onb_pipa_email_items">Items collected</string>
+    <string name="onb_pipa_email_items_body">Subject, sender / recipient, timestamps, body text. Attachment bytes are never downloaded.</string>
+    <string name="onb_pipa_email_retention">Retention</string>
+    <string name="onb_pipa_email_retention_body">Stored on-device only for up to 30 days, then automatically deleted.</string>
+    <string name="onb_pipa_email_opt_out">Opt-out</string>
+    <string name="onb_pipa_email_opt_out_body">Declining simply skips this email provider. You can grant consent later from Settings.</string>
+    <string name="onb_pipa_email_cta_agree">Agree</string>
+    <string name="onb_pipa_email_cta_deny">Decline</string>
+
     <!-- Onboarding: Notification permission (S6-E) -->
     <string name="onb_notifications_title">Notifications</string>
     <string name="onb_notifications_headline">Get reminded before a commitment is due</string>
