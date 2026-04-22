@@ -1,7 +1,7 @@
 package com.becalm.android.core.di
 
-import android.content.Context
 import com.becalm.android.data.local.db.BeCalmDatabase
+import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
@@ -10,7 +10,6 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
@@ -18,9 +17,15 @@ import javax.inject.Singleton
  * Hilt module providing the [BeCalmDatabase] singleton and all DAO bindings.
  *
  * ## Scoping
- * [BeCalmDatabase] is `@Singleton` because Room caches prepared statements and
- * the WAL journal internally. Multiple instances sharing the same file would risk
- * write contention and cache invalidation bugs.
+ * [BeCalmDatabase] is resolved through the `@Singleton` [BeCalmDatabaseProvider] so that
+ * the on-disk SQLite file is keyed on the signed-in user's identity (S6-A, PIPA
+ * cross-account leak defence). `provideBeCalmDatabase` itself is **not** `@Singleton`
+ * — it proxies to [BeCalmDatabaseProvider.current] on every injection so that a
+ * downstream user-scope swap routed through [BeCalmDatabaseProvider.ensureOpenFor]
+ * is observable without rebuilding Hilt's graph. For alpha, repositories scoped
+ * `@Singleton` still cache the reference they receive at construction time; the
+ * recommended UX is a process restart on user swap and a follow-up refactor will
+ * migrate repos to `Provider<Dao>` injection.
  *
  * DAOs are **not** scoped to `@Singleton`. Room generates DAO implementations as
  * lightweight wrappers that delegate directly to the database instance; they carry
@@ -37,20 +42,20 @@ import javax.inject.Singleton
 public object DatabaseModule {
 
     /**
-     * Provides the application-scoped [BeCalmDatabase] instance.
+     * Provides the currently-open user-scoped [BeCalmDatabase] instance.
      *
-     * Delegates construction to [BeCalmDatabase.build] which configures migrations,
-     * downgrade fallback, and the WAL journal mode. The [ApplicationContext]-qualified
-     * [Context] prevents Activity context leaks.
+     * Delegates to [BeCalmDatabaseProvider.current], which lazily builds the SQLite
+     * file keyed on the signed-in user's id hash and throws if no user is authenticated.
+     * Intentionally unscoped so that each injection observes the provider's latest
+     * instance — see the module-level KDoc for the alpha user-swap caveat.
      *
-     * @param context Application context supplied by Hilt.
-     * @return The singleton [BeCalmDatabase].
+     * @param provider Application-scoped [BeCalmDatabaseProvider] supplied by Hilt.
+     * @return The user-scoped [BeCalmDatabase] currently held by the provider.
      */
     @Provides
-    @Singleton
     public fun provideBeCalmDatabase(
-        @ApplicationContext context: Context,
-    ): BeCalmDatabase = BeCalmDatabase.build(context)
+        provider: BeCalmDatabaseProvider,
+    ): BeCalmDatabase = provider.current()
 
     /** Provides [RawIngestionEventDao] from the singleton [BeCalmDatabase]. */
     @Provides

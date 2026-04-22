@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.BeCalmDatabase
+import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.receiver.ReminderBroadcastReceiver
@@ -14,6 +17,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import timber.log.Timber
@@ -75,6 +79,24 @@ public class BecalmApplication : Application(), Configuration.Provider {
      */
     @Inject
     public lateinit var syncCursorStore: SyncCursorStore
+
+    /**
+     * Persisted-preferences façade — queried at cold start to discover whether a
+     * previous sign-in is still active, so that [databaseProvider] can bind to the
+     * correct per-user SQLite file before any worker or Hilt-injected repository
+     * accesses a DAO (S6-A PIPA cross-account leak defence).
+     */
+    @Inject
+    public lateinit var userPrefsStore: UserPrefsStore
+
+    /**
+     * Application-scoped holder of the user-scoped Room database (S6-A). On cold start
+     * this is primed from the persisted `current_user_id` so downstream DAO injections
+     * hit the right file on first access instead of tripping the lazy-bootstrap
+     * `error("signed-in user required")` guard inside [BeCalmDatabaseProvider.current].
+     */
+    @Inject
+    public lateinit var databaseProvider: BeCalmDatabaseProvider
 
     /**
      * Unstructured scope for startup fire-and-forget work that must outlive individual
@@ -168,6 +190,23 @@ public class BecalmApplication : Application(), Configuration.Provider {
         applicationScope.launch {
             runCatching { syncCursorStore.runImapCursorMigrationV2() }
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
+        }
+
+        // Bind the per-user Room file before any other startup job lands on a DAO
+        // injection path (S6-A). When `current_user_id` is present (signed-in cold start)
+        // this pre-opens the correct file; when it is null (pre-login boot) the provider
+        // stays unopened so the lazy-bootstrap guard throws if a misbehaving worker
+        // sneaks past the auth gate. Wrapped in runCatching for the same reason as the
+        // other startup migrations — a rare DataStore corruption must not crash the
+        // process before the UI can drive recovery; the worker-level sign-in path will
+        // re-attempt [BeCalmDatabaseProvider.ensureOpenFor] on the next successful auth.
+        applicationScope.launch {
+            runCatching {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (!userId.isNullOrBlank()) {
+                    databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+                }
+            }.onFailure { Timber.e(it, "BecalmApplication: database warm-open failed") }
         }
 
         // Enroll the daily 30-day retention sweep (EMAIL-006, unchanged below).

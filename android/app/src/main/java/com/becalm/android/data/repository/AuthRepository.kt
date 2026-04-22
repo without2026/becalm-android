@@ -8,6 +8,7 @@ import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
+import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
@@ -130,7 +131,7 @@ public class AuthRepositoryImpl @Inject constructor(
     private val deviceKeyStore: DeviceKeyStore,
     private val syncCursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
-    private val database: BeCalmDatabase,
+    private val databaseProvider: BeCalmDatabaseProvider,
     private val workScheduler: WorkScheduler,
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
@@ -157,6 +158,10 @@ public class AuthRepositoryImpl @Inject constructor(
         authClient.signInWithEmail(email, password)
             .onSuccess { value ->
                 userPrefsStore.setCurrentUserId(value.userId)
+                // Bind the per-user SQLite file before any worker or repository touches
+                // Room (S6-A PIPA cross-account leak defence). Idempotent on the happy path
+                // when the same user signs in again.
+                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(value.userId))
                 sessionFlow.value = value
                 // Warm the token cache from persisted session so the first hot-path request
                 // avoids a disk read (Round 6A.4).
@@ -167,6 +172,7 @@ public class AuthRepositoryImpl @Inject constructor(
         authClient.signInWithGoogleIdToken(idToken)
             .onSuccess { value ->
                 userPrefsStore.setCurrentUserId(value.userId)
+                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(value.userId))
                 sessionFlow.value = value
                 tokenProvider.primeCache()
             }
@@ -201,7 +207,10 @@ public class AuthRepositoryImpl @Inject constructor(
             add(NamedStep("deviceKeyClear") { deviceKeyStore.clear() })
             add(NamedStep("syncCursorClear") { syncCursorStore.clearAll() })
             add(NamedStep("userPrefsClearAll") { userPrefsStore.clearAll() })
-            add(NamedStep("databaseClearAll") { database.clearAllTables() })
+            add(NamedStep("databaseClearAll") { databaseProvider.current().clearAllTables() })
+            // Release the Room file handle so the next sign-in opens a fresh per-user file
+            // without a lingering WAL lock (S6-A).
+            add(NamedStep("databaseClose") { databaseProvider.close() })
         }
 
         val stepResult = runAllSteps("signOut", steps)
@@ -240,11 +249,16 @@ public class AuthRepositoryImpl @Inject constructor(
             // Clear the non-secret current-user-id mirror. Other UI preferences
             // (locale, notifications flag, onboarding completion) are intentionally preserved.
             add(NamedStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
+            // Release the Room file handle so the next sign-in (potentially as a
+            // different user) opens the correct per-user file without a stale
+            // [BeCalmDatabaseProvider] reference pointing at the prior user's DB (S6-A).
+            add(NamedStep("databaseClose") { databaseProvider.close() })
         }
 
-        // NOTE: Intentionally NOT calling database.clearAllTables(),
+        // NOTE: Intentionally NOT calling databaseProvider.current().clearAllTables(),
         // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
         // userPrefsStore.clearAll() — those belong to the full PIPA wipe in [signOut].
+        // The per-user DB file is preserved on disk; sign-in as the same user re-opens it.
 
         val stepResult = runAllSteps("invalidateSession", steps)
 

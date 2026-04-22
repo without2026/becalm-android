@@ -129,8 +129,32 @@ public abstract class BeCalmDatabase : RoomDatabase() {
 
     public companion object {
 
-        /** File name of the SQLite database on disk, located in the app's internal data directory. */
-        public const val DATABASE_NAME: String = "becalm.db"
+        /**
+         * Pre-user-scoping (pre-S6-A) single-file database name.
+         *
+         * Retained as a `const` only so that [BeCalmDatabaseProvider] can call
+         * `context.deleteDatabase(LEGACY_DATABASE_NAME)` exactly once when it first opens a
+         * per-user file on a device that still has the alpha single-file residue. Post-S6-A
+         * code must never pass this string to [Room.databaseBuilder] — build callers must
+         * supply the user-scoped [databaseFilename] instead.
+         */
+        public const val LEGACY_DATABASE_NAME: String = "becalm.db"
+
+        /** Prefix for per-user SQLite files produced by [databaseFilename]. */
+        private const val USER_DATABASE_PREFIX = "becalm-"
+
+        /** Suffix (file extension) for per-user SQLite files produced by [databaseFilename]. */
+        private const val USER_DATABASE_SUFFIX = ".db"
+
+        /**
+         * Length (in hex characters) of the userId hash embedded in per-user database file names.
+         *
+         * 16 hex characters = 8 bytes = 64 bits of SHA-256 output, giving a birthday-collision
+         * probability of ~2^-32 — vanishingly small at the per-device user counts BeCalm can
+         * ever reach, while keeping the file name short enough to fit well under any filesystem
+         * path-length limit. Longer than 16 yields no practical security benefit.
+         */
+        private const val USER_ID_HASH_LENGTH_CHARS: Int = 16
 
         /**
          * Current schema version. Increment this integer whenever the schema changes and add
@@ -139,9 +163,48 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         public const val DATABASE_VERSION: Int = 6
 
         /**
-         * Creates and opens the [BeCalmDatabase] using the standard Room builder.
+         * Returns the per-user SQLite filename for the given [userIdHash].
+         *
+         * The hash MUST be the output of [deriveUserIdHash] — callers pass already-hashed
+         * values so the raw Supabase userId never reaches a file name (PIPA defence-in-depth
+         * against filesystem-snapshot attacks).
+         *
+         * @param userIdHash 16-character lowercase hex prefix returned by [deriveUserIdHash].
+         * @return The SQLite file name (e.g. `becalm-8b1a…f2.db`) to pass to Room's builder.
+         */
+        public fun databaseFilename(userIdHash: String): String =
+            "$USER_DATABASE_PREFIX$userIdHash$USER_DATABASE_SUFFIX"
+
+        /**
+         * Derives the per-user filename hash from a raw Supabase userId.
+         *
+         * Returns the first [USER_ID_HASH_LENGTH_CHARS] hex characters of SHA-256(userId) —
+         * deterministic so a given user always resolves to the same filename across sign-ins,
+         * and one-way so the file name does not leak the plaintext userId.
+         *
+         * @param userId Raw Supabase user UUID.
+         * @return Lowercase hex string of length [USER_ID_HASH_LENGTH_CHARS].
+         * @throws IllegalArgumentException when [userId] is blank.
+         */
+        public fun deriveUserIdHash(userId: String): String {
+            require(userId.isNotBlank()) { "userId must not be blank" }
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(userId.toByteArray(Charsets.UTF_8))
+            val hex = StringBuilder(USER_ID_HASH_LENGTH_CHARS)
+            for (i in 0 until (USER_ID_HASH_LENGTH_CHARS / 2)) {
+                val b = digest[i].toInt() and 0xFF
+                hex.append(b.toString(16).padStart(2, '0'))
+            }
+            return hex.toString()
+        }
+
+        /**
+         * Creates and opens a user-scoped [BeCalmDatabase] using the standard Room builder.
          *
          * Configuration decisions:
+         * - File name comes from [databaseFilename] keyed on [userIdHash] — a different user on
+         *   the same device gets a physically distinct SQLite file, eliminating the
+         *   cross-account Room data-leakage surface (see `docs/plans/db-auth-user-scoped-database.md`).
          * - `addMigrations(*MIGRATIONS)` — Room applies the registered migrations in order when
          *   upgrading from an older schema version. See [MIGRATIONS] for the rationale.
          * - No destructive-downgrade fallback is registered. If the installed APK's
@@ -150,15 +213,16 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          *   mirrored to Railway). Downgrades must be handled explicitly by a forward migration
          *   or by uninstalling the app.
          *
-         * @param context Application context. Pass [android.app.Application] or a
+         * @param context     Application context. Pass [android.app.Application] or a
          *   `@ApplicationContext`-qualified [Context] from a Hilt module — never an Activity.
+         * @param userIdHash  Output of [deriveUserIdHash] for the signed-in user.
          * @return A fully configured [BeCalmDatabase] ready for DAO access.
          */
-        public fun build(context: Context): BeCalmDatabase =
+        public fun build(context: Context, userIdHash: String): BeCalmDatabase =
             Room.databaseBuilder(
                 context,
                 BeCalmDatabase::class.java,
-                DATABASE_NAME,
+                databaseFilename(userIdHash),
             )
                 .addMigrations(*MIGRATIONS)
                 .build()

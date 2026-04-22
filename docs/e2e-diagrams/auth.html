@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auth — E2E Wiring Diagrams</title>
+  <link rel="stylesheet" href="_styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar">
+      <h1>E2E Diagrams</h1>
+      <a href="index.html">Overview</a>
+      <h2>Modules</h2>
+      <a href="auth.html" class="active">01 · Auth</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">02 · Onboarding</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">03 · Today Timeline</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">04 · Voice Pipeline</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">05 · Data Ingestion</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">06 · Backend Sync</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">07 · Commitment Mgmt</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">08 · Person Enrichment</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">09 · Source Management</a>
+      <a href="#" style="opacity:.4; cursor:not-allowed">10 · Source Viewer</a>
+      <h2>This page</h2>
+      <a href="#email-success">Email · 성공</a>
+      <a href="#email-failure">Email · 실패</a>
+      <a href="#google-success">Google · 성공</a>
+      <a href="#google-failure">Google · 실패</a>
+      <a href="#observations">공통 관찰</a>
+      <a href="#files">관여 파일 목록</a>
+    </nav>
+
+    <main>
+      <h1 class="page-title">01 · Auth — Login Flow Wiring</h1>
+      <p class="subtitle">Email / Google OAuth 로그인의 성공·실패 경로. <code>feat/wave-1-impl</code> 기준 · spec <code>AUTH-001 / 002 / 003</code></p>
+
+      <div class="callout">
+        <b>중요 — Google sign-in UI 미배선</b>:
+        <code>ui/auth/LoginScreen.kt:177-181</code> 의 <code>R.string.login_google_cta</code> 는 clickable 버튼이 아니라 <code>Text</code> 라벨입니다.
+        <code>AuthViewModel.onGoogleSignIn</code> 을 호출하는 composable 이 현재 프로젝트에 <b>없음</b> (<code>grep onGoogleSignIn</code> 결과 = 정의만 존재).
+        아래 Google 다이어그램은 "계약상 의도된 경로" 이며 실제로는 Wave 6 의 <code>ui-auth-google-signin-wiring</code> 이 구현 예정.
+      </div>
+
+      <!-- ================= EMAIL SUCCESS ================= -->
+      <section class="flow" id="email-success">
+        <h2><span class="badge ok">성공</span> Email/Password 로그인</h2>
+        <p class="flow-subtitle">spec: AUTH-001 · User 가 유효한 자격증명을 입력하고 로그인 버튼 탭</p>
+
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as LoginScreen.kt
+  participant VM as AuthViewModel.kt
+  participant Repo as AuthRepositoryImpl
+  participant Client as SupabaseAuthClientImpl
+  participant SDK as supabase-kt auth
+  participant Store as EncryptedTokenStore<br/>(SupabaseSessionStore)
+  participant Prefs as UserPrefsStore
+  participant Tok as DefaultAuthTokenProvider
+  participant Nav as NavController
+
+  U->>UI: 로그인 버튼 탭
+  Note over UI: LoginForm onClick L165-170<br/>공란 검사 후 onSignIn
+  UI->>VM: viewModel.onEmailSignIn(email,pw) L116
+  Note over VM: onEmailSignIn L94
+  VM->>VM: _uiState = Loading L96
+  VM->>Repo: authRepository.signInWithEmail(...) L97
+  Note over Repo: AuthRepositoryImpl.signInWithEmail L145-156
+  Repo->>Client: authClient.signInWithEmail(...) L149
+  Note over Client: SupabaseAuthClientImpl.signInWithEmail L124-135
+  Client->>SDK: client.auth.signInWith(Email) L128
+  SDK-->>Client: UserSession
+  Client->>Client: requireCurrentSession() L132, L199
+  Client->>Store: sessionStore.save(session) L133
+  Note over Store: EncryptedTokenStore.save L135<br/>EncryptedSharedPreferences 쓰기<br/>+ sessionChanges emit
+  Client-->>Repo: Success(SupabaseSession)
+  Repo->>Prefs: userPrefsStore.setCurrentUserId(userId) L151
+  Repo->>Repo: sessionFlow.value = session L152
+  Repo->>Tok: tokenProvider.primeCache() L155
+  Repo-->>VM: Success
+  VM->>VM: log "email sign-in succeeded" L99<br/>(uiState 변경 없음 — observer 가 주도)
+  Note over VM: onObserveSession L165-183 collect<br/>sessionFlow → Authenticated → SignedIn
+  VM-->>UI: uiState = SignedIn(userId, onboardingCompleted)
+  Note over UI: LaunchedEffect(state) L83
+  UI->>Nav: navigate(PipaConsent or Today) L97-99
+        </div>
+
+        <details>
+          <summary>단계별 파일:라인 표</summary>
+          <table>
+            <thead><tr><th>#</th><th>계층</th><th>파일 : 라인</th><th>심볼</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>UI</td><td><span class="file-ref">ui/auth/LoginScreen.kt<span class="line">:165-170</span></span></td><td><code>BecalmButton onClick</code> → <code>onSignIn(email, password)</code></td></tr>
+              <tr><td>2</td><td>VM</td><td><span class="file-ref">ui/auth/AuthViewModel.kt<span class="line">:94</span></span></td><td><code>onEmailSignIn(email, password)</code></td></tr>
+              <tr><td>3</td><td>Repo</td><td><span class="file-ref">data/repository/AuthRepository.kt<span class="line">:145</span></span></td><td><code>AuthRepositoryImpl.signInWithEmail</code></td></tr>
+              <tr><td>4</td><td>Remote</td><td><span class="file-ref">data/remote/supabase/SupabaseAuthClient.kt<span class="line">:124</span></span></td><td><code>SupabaseAuthClientImpl.signInWithEmail</code> → <code>client.auth.signInWith(Email)</code></td></tr>
+              <tr><td>5</td><td>Persist</td><td><span class="file-ref">data/local/secure/EncryptedTokenStore.kt<span class="line">:135</span></span></td><td><code>save(session)</code> (EncryptedSharedPreferences)</td></tr>
+              <tr><td>6</td><td>Post-success</td><td><span class="file-ref">AuthRepository.kt<span class="line">:150-156</span></span></td><td><code>onSuccess { setCurrentUserId → sessionFlow.value = session → tokenProvider.primeCache() }</code></td></tr>
+              <tr><td>7</td><td>Observer</td><td><span class="file-ref">AuthRepository.kt<span class="line">:280</span></span></td><td><code>observeAuthState()</code> emits <code>Authenticated</code></td></tr>
+              <tr><td>8</td><td>VM collect</td><td><span class="file-ref">AuthViewModel.kt<span class="line">:165-183</span></span></td><td><code>onObserveSession</code> → <code>uiState = SignedIn</code></td></tr>
+              <tr><td>9</td><td>Nav</td><td><span class="file-ref">LoginScreen.kt<span class="line">:83-100</span></span></td><td><code>LaunchedEffect(state)</code> → <code>navController.navigate(...)</code></td></tr>
+            </tbody>
+          </table>
+        </details>
+
+        <div class="callout ok">
+          <b>invariant</b> — VM 은 성공 시 <code>SignedIn</code> 으로 직접 전이하지 않음. <code>AuthRepositoryImpl.sessionFlow</code> (L143) 에 값 쓰면 <code>observeAuthState()</code> 가 emit → <code>onObserveSession</code> collector 가 변환. 단일 상태 전이 출처.
+        </div>
+      </section>
+
+      <!-- ================= EMAIL FAILURE ================= -->
+      <section class="flow" id="email-failure">
+        <h2><span class="badge err">실패</span> Email/Password 로그인 — 잘못된 비밀번호 / 네트워크 오류</h2>
+        <p class="flow-subtitle">spec: AUTH-001 (negative) · Supabase 가 <code>RestException(400/401)</code> 또는 <code>IOException</code> 반환</p>
+
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as LoginScreen.kt
+  participant VM as AuthViewModel.kt
+  participant Repo as AuthRepositoryImpl
+  participant Client as SupabaseAuthClientImpl
+  participant SDK as supabase-kt auth
+
+  U->>UI: 잘못된 자격 입력 후 로그인 탭
+  UI->>VM: onEmailSignIn L116
+  VM->>Repo: signInWithEmail L97
+  Repo->>Client: signInWithEmail L149
+  Client->>SDK: client.auth.signInWith(Email) L128
+  SDK-->>Client: throw RestException(400/401)
+  Note over Client: runCatchingAuth L213-228<br/>catch RestException → mapRestException L230-235<br/>401 → Unauthorized<br/>429 → RateLimited<br/>5xx → ServerError<br/>else → Network(code,msg)
+  Client-->>Repo: Failure(BecalmError)
+  Note over Repo: onSuccess 체인 스킵<br/>session 저장 안 함<br/>primeCache 호출 안 함
+  Repo-->>VM: Failure
+  Note over VM: onEmailSignIn when Failure L102-105
+  VM->>VM: _uiState = AuthUiState.Error(error.safeMessage) L104
+  VM-->>UI: state = Error
+  Note over UI: LaunchedEffect(state) L101-107
+  UI->>UI: snackbarHostState.showSnackbar(msg) L103
+  UI->>VM: viewModel.onErrorDismissed() L104
+  Note over VM: onErrorDismissed L189-191<br/>_uiState = SignedOut()
+        </div>
+
+        <table>
+          <thead><tr><th>예외 타입</th><th>매핑 위치</th><th>→ BecalmError</th></tr></thead>
+          <tbody>
+            <tr><td><code>RestException(401)</code></td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:231</span></span></td><td><code>Unauthorized</code></td></tr>
+            <tr><td><code>RestException(429)</code></td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:232</span></span></td><td><code>RateLimited(retryAfterSeconds=null)</code></td></tr>
+            <tr><td><code>RestException(5xx)</code></td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:233</span></span></td><td><code>ServerError(code, body)</code></td></tr>
+            <tr><td><code>RestException(other)</code></td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:234</span></span></td><td><code>Network(code, message)</code></td></tr>
+            <tr><td><code>IOException</code></td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:222-224</span></span></td><td><code>Network(code=-1, msg)</code></td></tr>
+            <tr><td><code>Exception</code> (기타)</td><td><span class="file-ref">SupabaseAuthClient.kt<span class="line">:225-227</span></span></td><td><code>Unknown(e)</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <b>실패 경로가 건드리지 않는 것</b>:
+          <code>AuthRepositoryImpl.signInWithEmail</code> L149-156 은 <code>.onSuccess { ... }</code> 만 정의.
+          실패 시 <code>setCurrentUserId</code> / <code>sessionFlow.value</code> / <code>tokenProvider.primeCache()</code> <b>전부 실행되지 않음</b> — 부분 오염 없음.
+        </div>
+
+        <div class="callout info">
+          <b>invariant</b> — <code>LoginScreen</code> 은 raw exception message 를 그대로 노출하지 않음. <code>result.error.safeMessage</code> 로 사용자용 문자열 변환 필수 (<code>AuthViewModel.kt:104</code>).
+        </div>
+      </section>
+
+      <!-- ================= GOOGLE SUCCESS ================= -->
+      <section class="flow" id="google-success">
+        <h2><span class="badge ok">성공</span> <span class="badge warn">미배선</span> Google OAuth 로그인</h2>
+        <p class="flow-subtitle">spec: AUTH-003 · 계약상 경로. Wave 6 <code>ui-auth-google-signin-wiring</code> 에서 UI 연결 예정.</p>
+
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as LoginScreen.kt<br/>[미배선]
+  participant GSDK as Google Sign-In SDK<br/>[미배선]
+  participant VM as AuthViewModel.kt
+  participant Repo as AuthRepositoryImpl
+  participant Client as SupabaseAuthClientImpl
+  participant SDK as supabase-kt auth
+  participant Store as EncryptedTokenStore
+  participant Prefs as UserPrefsStore
+  participant Tok as DefaultAuthTokenProvider
+  participant Nav as NavController
+
+  U->>UI: "Google 로 로그인" 탭 (현재 Text L177-181 만 존재)
+  Note over UI,GSDK: 의도된 래퍼 부재<br/>GoogleSignIn / CredentialManager 호출 코드 없음
+  GSDK-->>UI: idToken (JWT)
+  UI->>VM: viewModel.onGoogleSignIn(idToken) L116
+  Note over VM: onGoogleSignIn L116-129
+  VM->>VM: _uiState = Loading L118
+  VM->>Repo: authRepository.signInWithGoogle(idToken) L119
+  Note over Repo: AuthRepositoryImpl.signInWithGoogle L158-164
+  Repo->>Client: authClient.signInWithGoogleIdToken(idToken) L159
+  Note over Client: SupabaseAuthClientImpl L137-147
+  Client->>SDK: client.auth.signInWith(IDToken){provider=Google; idToken=...} L140-143
+  SDK-->>Client: UserSession
+  Client->>Client: requireCurrentSession() L144
+  Client->>Store: sessionStore.save(session) L145
+  Client-->>Repo: Success
+  Repo->>Prefs: setCurrentUserId L161
+  Repo->>Repo: sessionFlow.value = session L162
+  Repo->>Tok: tokenProvider.primeCache() L163
+  Repo-->>VM: Success
+  VM->>VM: log "google sign-in succeeded" L121
+  Note over VM: onObserveSession collector → SignedIn
+  VM-->>UI: uiState = SignedIn
+  UI->>Nav: navigate(...) L97-99
+        </div>
+
+        <div class="callout">
+          <b>배선 TODO</b> (Wave 6 <code>ui-auth-google-signin-wiring</code>):
+          <ul class="bullets">
+            <li><code>LoginScreen.kt:177-181</code> 의 Text → clickable <code>BecalmButton(Secondary)</code> 교체</li>
+            <li>onClick 에서 Google SDK (CredentialManager) 호출 → idToken 획득</li>
+            <li>얻은 idToken 을 <code>viewModel.onGoogleSignIn(idToken)</code> 에 전달</li>
+            <li>Google client_id 는 <code>core/di/NetworkModule.kt</code> + <code>strings.xml</code> / BuildConfig 에서 주입</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================= GOOGLE FAILURE ================= -->
+      <section class="flow" id="google-failure">
+        <h2><span class="badge err">실패</span> <span class="badge warn">미배선</span> Google OAuth 로그인</h2>
+        <p class="flow-subtitle">두 갈래 실패: (A) Google SDK 단계 실패 (B) idToken 획득 후 Supabase 거절</p>
+
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant UI as LoginScreen.kt [미배선]
+  participant GSDK as Google SDK
+  participant VM as AuthViewModel
+  participant Repo as AuthRepositoryImpl
+  participant Client as SupabaseAuthClientImpl
+  participant SDK as supabase-kt auth
+
+  alt (A) Google SDK 단계 실패 — 사용자 취소 / 네트워크
+    U->>GSDK: Google 계정 선택 취소
+    GSDK-->>UI: ApiException / cancellation
+    Note over UI: 래퍼 부재 — 현재 매핑 경로 미정<br/>구현 시 VM 에 Error 주입 예상
+  else (B) idToken 획득 후 Supabase 거절
+    GSDK-->>UI: idToken
+    UI->>VM: onGoogleSignIn(idToken) L116
+    VM->>Repo: signInWithGoogle L119
+    Repo->>Client: signInWithGoogleIdToken L159
+    Client->>SDK: signInWith(IDToken) L140-143
+    SDK-->>Client: throw RestException(400 invalid_grant / 401)
+    Note over Client: runCatchingAuth L213-228<br/>mapRestException L230
+    Client-->>Repo: Failure(Unauthorized or Network)
+    Note over Repo: onSuccess 스킵 — session 저장 안 함, primeCache 호출 안 함
+    Repo-->>VM: Failure
+    VM->>VM: _uiState = Error(error.safeMessage) L125
+    VM-->>UI: state = Error<br/>LaunchedEffect snackbar L101-107
+  end
+        </div>
+      </section>
+
+      <!-- ================= OBSERVATIONS ================= -->
+      <section class="flow" id="observations">
+        <h2>공통 관찰 · invariant</h2>
+        <ul class="bullets">
+          <li>
+            <b>상태 전이의 단일 출처</b>: <code>onEmailSignIn</code> / <code>onGoogleSignIn</code> 은 성공 시 <code>SignedIn</code> 으로 직접 전이하지 않음.
+            <code>sessionFlow</code> (<span class="file-ref">AuthRepository.kt:143</span>) → <code>observeAuthState()</code> (<span class="file-ref">L280</span>) → <code>onObserveSession</code> collector (<span class="file-ref">AuthViewModel.kt:165-183</span>) 가 담당.
+            VM 주석 L90-92, L135-139 에 "uiState will update via onObserveSession" 로 invariant 명시.
+          </li>
+          <li>
+            <b>실패 시 비오염</b>: <code>signInWithEmail</code> / <code>signInWithGoogle</code> 의 <code>.onSuccess { ... }</code> 체인 (<span class="file-ref">L150, L160</span>) 은 실패 시 실행되지 않음.
+            <code>setCurrentUserId</code> / <code>sessionFlow.value</code> / <code>primeCache</code> 모두 건너뜀.
+          </li>
+          <li>
+            <b>토큰 저장 invariant</b>: 모든 토큰은 <code>EncryptedSharedPreferences</code> (Android Keystore 기반) 에만 저장.
+            <code>SupabaseClientFactory</code> 에서 <code>autoLoadFromStorage = false</code> / <code>alwaysAutoRefresh = false</code> 로 SDK 의 plaintext prefs 사용 차단 (<span class="file-ref">SupabaseAuthClient.kt:98-107</span> 주석 참조).
+          </li>
+          <li>
+            <b>토큰 캐시 프라이밍</b>: 성공 시 <code>tokenProvider.primeCache()</code> 호출 (<span class="file-ref">L155, L163</span>) 로 다음 hot-path 요청이 디스크 읽기 없이 Bearer 헤더 구성 가능. Round 6A.4 성능 개선.
+          </li>
+          <li>
+            <b>에러 메시지 sanitize</b>: UI 는 raw exception 을 노출 금지. <code>BecalmError.safeMessage</code> 통과 필수 (<span class="file-ref">AuthViewModel.kt:104, 125</span>).
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= FILE INDEX ================= -->
+      <section class="flow" id="files">
+        <h2>관여 파일 (auth 로그인 흐름 한정)</h2>
+        <table>
+          <thead><tr><th>계층</th><th>파일</th><th>핵심 심볼 · 라인</th></tr></thead>
+          <tbody>
+            <tr><td>UI</td><td><code>ui/auth/LoginScreen.kt</code></td><td>Composable <code>LoginScreen</code> L62, <code>LoginForm</code> L121, onClick L165-170, LaunchedEffect L83-107</td></tr>
+            <tr><td>VM</td><td><code>ui/auth/AuthViewModel.kt</code></td><td><code>onEmailSignIn</code> L94, <code>onGoogleSignIn</code> L116, <code>onObserveSession</code> L165, <code>onErrorDismissed</code> L189</td></tr>
+            <tr><td>Repo · 계약</td><td><code>data/repository/AuthRepository.kt</code></td><td>interface L48, <code>AuthRepositoryImpl</code> L125</td></tr>
+            <tr><td>Repo · 구현</td><td><code>data/repository/AuthRepository.kt</code></td><td><code>signInWithEmail</code> L145, <code>signInWithGoogle</code> L158, <code>sessionFlow</code> L143, <code>observeAuthState</code> L280</td></tr>
+            <tr><td>Remote · 계약</td><td><code>data/remote/supabase/SupabaseAuthClient.kt</code></td><td>interface L32</td></tr>
+            <tr><td>Remote · 구현</td><td><code>data/remote/supabase/SupabaseAuthClient.kt</code></td><td><code>signInWithEmail</code> L124, <code>signInWithGoogleIdToken</code> L137, <code>runCatchingAuth</code> L213, <code>mapRestException</code> L230</td></tr>
+            <tr><td>Session store · 계약</td><td><code>data/remote/supabase/SupabaseSessionStore.kt</code></td><td><code>save</code> L30, <code>load</code> L37, <code>clear</code> L45, <code>observe</code> L58</td></tr>
+            <tr><td>Session store · 구현</td><td><code>data/local/secure/EncryptedTokenStore.kt</code></td><td><code>save</code> L135, <code>load</code> L109, <code>clear</code> L155, <code>observe</code> L165</td></tr>
+            <tr><td>Prefs</td><td><code>data/local/datastore/UserPrefsStore.kt</code></td><td><code>setCurrentUserId</code>, <code>observeOnboardingCompleted</code>, <code>observeTermsAccepted</code></td></tr>
+            <tr><td>Token provider</td><td><code>data/remote/interceptor/AuthTokenProvider.kt</code></td><td>interface L20 (<code>currentAccessToken</code> L28, <code>refresh</code> L51, <code>primeCache</code>, <code>invalidate</code>)</td></tr>
+            <tr><td>Nav</td><td><code>ui/navigation/BecalmNavHost.kt</code></td><td><code>BecalmRoute.Login</code>, <code>Today</code>, <code>OnboardingPipaConsent</code></td></tr>
+            <tr><td>DI</td><td><code>core/di/NetworkModule.kt</code></td><td>Retrofit + <code>AuthInterceptor</code> + Supabase client 바인딩</td></tr>
+            <tr><td>DI</td><td><code>core/di/RepositoryModule.kt</code></td><td><code>AuthRepository</code> 바인딩</td></tr>
+            <tr><td>DI</td><td><code>core/di/DataStoreModule.kt</code></td><td><code>UserPrefsStore</code> 바인딩</td></tr>
+            <tr><td>Tests</td><td><code>test/.../ui/auth/AuthViewModelTest.kt</code></td><td>AUTH-001 / 002 / 003 / 005 상태 전이</td></tr>
+            <tr><td>Tests</td><td><code>test/.../data/remote/interceptor/AuthInterceptorTest.kt</code></td><td>AUTH-004 / 007 401 재시도</td></tr>
+            <tr><td>Tests</td><td><code>test/.../core/di/DefaultAuthTokenProviderTest.kt</code></td><td>token provider 캐시</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="_mermaid-init.js"></script>
+</body>
+</html>
