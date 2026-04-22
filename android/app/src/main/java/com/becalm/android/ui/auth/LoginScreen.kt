@@ -6,10 +6,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -106,6 +104,26 @@ public fun LoginScreen(
         }
     }
 
+    // Google sign-in: CredentialManager + GetGoogleIdOption issues the OIDC id-token
+    // that Supabase expects at signInWithGoogleIdToken. Gmail API scopes (gmail.readonly)
+    // are acquired separately in S6-F through AuthorizationClient — the two APIs coexist.
+    val googleErrorUnknown = stringResource(R.string.login_google_error_unknown)
+    val googleErrorNoCreds = stringResource(R.string.login_google_error_no_credentials)
+    val googleLauncher = rememberGoogleSignInLauncher(
+        onResult = { result ->
+            when (result) {
+                is GoogleSignInResult.Success -> viewModel.onGoogleSignIn(result.idToken)
+                is GoogleSignInResult.UserCancelled -> Unit // User dismissed the picker — silent.
+                is GoogleSignInResult.NoCredentials -> scope.launch {
+                    snackbarHostState.showSnackbar(googleErrorNoCreds)
+                }
+                is GoogleSignInResult.Error -> scope.launch {
+                    snackbarHostState.showSnackbar(googleErrorUnknown)
+                }
+            }
+        },
+    )
+
     BecalmScaffold(
         title = stringResource(R.string.login_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -113,7 +131,9 @@ public fun LoginScreen(
         LoginForm(
             modifier = Modifier.padding(padding),
             isLoading = state is AuthUiState.Loading,
+            googleSignInEnabled = googleLauncher.isConfigured,
             onSignIn = { email, password -> viewModel.onEmailSignIn(email, password) },
+            onGoogleSignIn = { googleLauncher.launch() },
         )
     }
 }
@@ -122,7 +142,9 @@ public fun LoginScreen(
 private fun LoginForm(
     modifier: Modifier = Modifier,
     isLoading: Boolean,
+    googleSignInEnabled: Boolean,
     onSignIn: (String, String) -> Unit,
+    onGoogleSignIn: () -> Unit,
 ) {
     // Local UI state only — no PII stored in remembered state
     var email by remember { mutableStateOf("") }
@@ -174,10 +196,12 @@ private fun LoginForm(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
+        BecalmButton(
             text = stringResource(R.string.login_google_cta),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            onClick = onGoogleSignIn,
+            variant = BecalmButtonVariant.Secondary,
+            enabled = googleSignInEnabled && !isLoading,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
@@ -193,7 +217,9 @@ private fun PreviewLoginScreen() {
             LoginForm(
                 modifier = Modifier.padding(padding),
                 isLoading = false,
+                googleSignInEnabled = true,
                 onSignIn = { _, _ -> },
+                onGoogleSignIn = {},
             )
         }
     }

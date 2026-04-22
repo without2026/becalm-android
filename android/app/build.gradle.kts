@@ -57,6 +57,18 @@ android {
             "MSAL_CLIENT_ID",
             "\"${findProperty("msal.client.id") ?: "00000000-0000-0000-0000-000000000000"}\"",
         )
+        // Google Web OAuth 2.0 Client ID registered against the Supabase project's
+        // Google provider (S6-C). Developer overrides via Gradle property
+        // `google.web.client.id` (typically in ~/.gradle/gradle.properties or
+        // local.properties); CI supplies the production value. An empty string is a
+        // valid placeholder for debug builds that never attempt Google sign-in — the
+        // LoginScreen CTA disables itself when this field is blank so a misconfigured
+        // build cannot launch CredentialManager into a broken state.
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            "\"${findProperty("google.web.client.id") ?: ""}\"",
+        )
     }
 
     buildTypes {

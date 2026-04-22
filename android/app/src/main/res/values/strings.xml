@@ -39,6 +39,8 @@
     <string name="login_password_placeholder">Your password</string>
     <string name="login_cta">Sign In</string>
     <string name="login_google_cta">Continue with Google</string>
+    <string name="login_google_error_no_credentials">No Google account found on this device. Add one from Settings → Accounts and try again.</string>
+    <string name="login_google_error_unknown">Google sign-in failed. Please try again or use email.</string>
     <string name="login_error_empty_fields">Please enter your email and password.</string>
 
     <!-- Onboarding: recording folder -->
