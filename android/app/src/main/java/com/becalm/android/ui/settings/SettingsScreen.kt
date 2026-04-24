@@ -32,20 +32,22 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSignOut
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
@@ -67,29 +69,54 @@ import kotlinx.coroutines.launch
 @Composable
 public fun SettingsScreen(
     navController: NavHostController,
-    viewModel: SettingsViewModel = hiltViewModel(),
+    viewModel: SettingsViewModel? = null,
+    stateOverride: SettingsUiState? = null,
+    signedOutOverride: Boolean? = null,
+    onNavigateAfterSignOut: (() -> Unit)? = null,
+    onErrorDismissed: (() -> Unit)? = null,
+    onToggleNotifications: ((Boolean) -> Unit)? = null,
+    onTogglePipaConsent: ((Boolean) -> Unit)? = null,
+    onOpenSources: (() -> Unit)? = null,
+    onOpenPrivacy: (() -> Unit)? = null,
+    onSignOut: (() -> Unit)? = null,
+    onWipeLocalData: (() -> Unit)? = null,
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val settingsViewModel = if (
+        stateOverride == null ||
+            onErrorDismissed == null ||
+            onToggleNotifications == null ||
+            onTogglePipaConsent == null ||
+            onOpenSources == null ||
+            onOpenPrivacy == null ||
+            onSignOut == null ||
+            onWipeLocalData == null
+    ) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<SettingsViewModel>()
+    } else {
+        viewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(settingsViewModel).uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    val signedOut = signedOutOverride ?: state.signedOut
+    val navigateAfterSignOut = onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() }
 
     // Navigate to auth graph after successful sign-out so the user isn't left on a dead session.
-    LaunchedEffect(state.signedOut) {
-        if (state.signedOut) {
-            navController.navigate(BecalmRoute.Splash.path) {
-                popUpTo(0) { inclusive = true }
-            }
+    LaunchedEffect(signedOut) {
+        if (signedOut) {
+            navigateAfterSignOut()
         }
     }
 
-    LaunchedEffect(state.error) {
-        state.error?.let { err ->
-            scope.launch {
-                snackbarHostState.showSnackbar(err)
-                viewModel.onErrorDismissed()
-            }
-        }
-    }
+    HandleSnackbarMessage(
+        state.error,
+        snackbarHostState,
+        onErrorDismissed ?: requireNotNull(settingsViewModel)::onErrorDismissed,
+    )
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showWipeDialog by remember { mutableStateOf(false) }
@@ -104,7 +131,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showSignOutDialog = false
-                viewModel.onSignOut()
+                (onSignOut ?: requireNotNull(settingsViewModel)::onSignOut)()
             },
             onDismiss = { showSignOutDialog = false },
         ) {
@@ -119,7 +146,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showWipeDialog = false
-                viewModel.onWipeLocalData()
+                (onWipeLocalData ?: requireNotNull(settingsViewModel)::onWipeLocalData)()
             },
             onDismiss = { showWipeDialog = false },
         ) {
@@ -135,7 +162,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showPipaEnableDialog = false
-                viewModel.onTogglePipaConsent(true)
+                (onTogglePipaConsent ?: requireNotNull(settingsViewModel)::onTogglePipaConsent)(true)
             },
             onDismiss = { showPipaEnableDialog = false },
             primaryConfirm = true,
@@ -154,7 +181,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showPipaDisableDialog = false
-                viewModel.onTogglePipaConsent(false)
+                (onTogglePipaConsent ?: requireNotNull(settingsViewModel)::onTogglePipaConsent)(false)
             },
             onDismiss = { showPipaDisableDialog = false },
         ) {
@@ -162,10 +189,40 @@ public fun SettingsScreen(
         }
     }
 
+    SettingsScreenContent(
+        state = state,
+        snackbarHostState = snackbarHostState,
+        onBack = navController::popBackStack,
+        onToggleNotifications = onToggleNotifications ?: requireNotNull(settingsViewModel)::onToggleNotifications,
+        onTogglePipa = { wantsEnabled ->
+            if (wantsEnabled) showPipaEnableDialog = true
+            else showPipaDisableDialog = true
+        },
+        onSourcesClick = onOpenSources ?: { navController.navigate(BecalmRoute.SettingsSources.path) },
+        onPrivacyClick = onOpenPrivacy ?: { navController.navigate(BecalmRoute.PrivacyManagement.path) },
+        onRequestSignOut = { showSignOutDialog = true },
+        onRequestWipe = { showWipeDialog = true },
+    )
+}
+
+@Composable
+public fun SettingsScreenContent(
+    state: SettingsUiState,
+    snackbarHostState: SnackbarHostState,
+    onBack: () -> Unit,
+    onToggleNotifications: (Boolean) -> Unit,
+    onTogglePipa: (Boolean) -> Unit,
+    onSourcesClick: () -> Unit,
+    onPrivacyClick: () -> Unit,
+    onRequestSignOut: () -> Unit,
+    onRequestWipe: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     BecalmScaffold(
+        modifier = modifier,
         title = stringResource(R.string.settings_title),
         navigationIcon = {
-            IconButton(onClick = { navController.popBackStack() }) {
+            IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.action_back),
@@ -191,9 +248,15 @@ public fun SettingsScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 16.dp),
             ) {
+                if (state.processingPaused) {
+                    SettingsStatusBanner(
+                        message = stringResource(R.string.processing_paused_banner),
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
                 SettingsAccountSection(
                     userEmail = state.userEmail,
-                    onSignOutClick = { showSignOutDialog = true },
+                    onSignOutClick = onRequestSignOut,
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -201,22 +264,35 @@ public fun SettingsScreen(
                 SettingsPipaSection(
                     notificationsEnabled = state.notificationsEnabled,
                     pipaConsentEnabled = state.pipaConsentEnabled,
-                    onToggleNotifications = viewModel::onToggleNotifications,
-                    onTogglePipa = { wantsEnabled ->
-                        if (wantsEnabled) showPipaEnableDialog = true
-                        else showPipaDisableDialog = true
-                    },
+                    onToggleNotifications = onToggleNotifications,
+                    onTogglePipa = onTogglePipa,
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 SettingsSourcesSection(
-                    onSourcesClick = { navController.navigate(BecalmRoute.SettingsSources.path) },
-                    onWipeClick = { showWipeDialog = true },
+                    onSourcesClick = onSourcesClick,
+                    onPrivacyClick = onPrivacyClick,
+                    onWipeClick = onRequestWipe,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun SettingsStatusBanner(
+    message: String,
+) {
+    Text(
+        text = message,
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(12.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
 }
 
 @Composable
@@ -233,6 +309,7 @@ internal fun SettingsToggleRow(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    toggleTestTag: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -247,7 +324,11 @@ internal fun SettingsToggleRow(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = if (toggleTestTag != null) Modifier.testTag(toggleTestTag) else Modifier,
+        )
     }
 }
 
@@ -255,10 +336,12 @@ internal fun SettingsToggleRow(
 internal fun SettingsNavigationRow(
     label: String,
     onClick: () -> Unit,
+    rowTestTag: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
+            .then(if (rowTestTag != null) Modifier.testTag(rowTestTag) else Modifier)
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp)

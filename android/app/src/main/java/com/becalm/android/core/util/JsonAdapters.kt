@@ -1,9 +1,13 @@
 package com.becalm.android.core.util
 
 import com.squareup.moshi.FromJson
+import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.JsonQualifier
+import com.squareup.moshi.JsonReader
+import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.ToJson
+import java.lang.reflect.Type
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlinx.datetime.Instant
@@ -60,29 +64,44 @@ private val KST_OFFSET: ZoneOffset = ZoneOffset.ofHours(9)
  *
  * Spec refs: `.spec/contracts/api-contract.yml:32`.
  */
-public class KstInstantAdapter {
-    @ToJson
-    @KstInstant
-    public fun toJson(value: Instant): String {
-        // ISO_OFFSET_DATE_TIME preserves sub-second precision when non-zero
-        // (millis/micros/nanos) and omits the fractional component entirely
-        // when nanosOfSecond == 0 — exactly the wire shape api-contract.yml:32
-        // requires. Delegating to the formatter also guarantees the literal
-        // `+09:00` offset via a fixed ZoneOffset (never `Z`, never named-zone).
-        return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
-            value.toJavaInstant().atOffset(KST_OFFSET),
-        )
-    }
+public object KstInstantAdapterFactory : JsonAdapter.Factory {
+    override fun create(
+        type: Type,
+        annotations: Set<Annotation>,
+        moshi: Moshi,
+    ): JsonAdapter<*>? {
+        if (type != Instant::class.java) {
+            return null
+        }
 
-    /**
-     * Tolerant parser — accepts any ISO-8601 offset (commonly `+09:00` or `Z`)
-     * and normalises to UTC [Instant]. Internal storage never leaves UTC, so
-     * round-tripping a server-echoed payload must not lose information even if
-     * the server replies in UTC rather than KST.
-     */
-    @FromJson
-    @KstInstant
-    public fun fromJson(value: String): Instant = Instant.parse(value)
+        val delegateAnnotations = annotations.filterNot { it is KstInstant }.toSet()
+        if (delegateAnnotations.size == annotations.size) {
+            return null
+        }
+
+        val delegate = moshi.adapter<String>(String::class.java, delegateAnnotations)
+        return object : JsonAdapter<Instant>() {
+            override fun toJson(writer: JsonWriter, value: Instant?) {
+                if (value == null) {
+                    writer.nullValue()
+                    return
+                }
+
+                writer.value(
+                    DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
+                        value.toJavaInstant().atOffset(KST_OFFSET),
+                    ),
+                )
+            }
+
+            override fun fromJson(reader: JsonReader): Instant? {
+                if (reader.peek() == JsonReader.Token.NULL) {
+                    return reader.nextNull()
+                }
+                return Instant.parse(delegate.fromJson(reader)!!)
+            }
+        }
+    }
 }
 
 /**
@@ -92,6 +111,6 @@ public class KstInstantAdapter {
  */
 public fun Moshi.Builder.addBecalmAdapters(): Moshi.Builder =
     this
+        .add(KstInstantAdapterFactory)
         .add(InstantAdapter())
         .add(LocalDateAdapter())
-        .add(KstInstantAdapter())

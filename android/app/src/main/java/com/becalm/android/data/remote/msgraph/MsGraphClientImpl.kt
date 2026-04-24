@@ -6,8 +6,10 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.getOrElse
 import com.squareup.moshi.Json
+import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -97,8 +99,14 @@ public class MsGraphClientImpl @Inject constructor(
 ) : MsGraphClient {
 
     // Single adapter instance — both message and event endpoints share the same envelope shape.
-    private val deltaListAdapter by lazy {
-        moshi.adapter(GraphListDto::class.java)
+    private val deltaListAdapter: JsonAdapter<GraphListDto<Map<String, Any?>>> by lazy {
+        val mapType = Types.newParameterizedType(
+            Map::class.java,
+            String::class.java,
+            Any::class.java,
+        )
+        val envelopeType = Types.newParameterizedType(GraphListDto::class.java, mapType)
+        moshi.adapter<GraphListDto<Map<String, Any?>>>(envelopeType)
     }
 
     @Suppress("DEPRECATION")

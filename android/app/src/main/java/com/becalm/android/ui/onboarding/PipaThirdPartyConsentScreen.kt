@@ -16,10 +16,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -145,7 +146,9 @@ internal fun PipaThirdPartyConsentContent(
                 text = stringResource(R.string.onb_pipa_button_agree),
                 onClick = onConsentedClick,
                 variant = BecalmButtonVariant.Primary,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onb-pipa-agree"),
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -155,7 +158,9 @@ internal fun PipaThirdPartyConsentContent(
                 text = stringResource(R.string.onb_pipa_button_decline),
                 onClick = onDeclinedClick,
                 variant = BecalmButtonVariant.Text,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onb-pipa-decline"),
             )
         }
     }

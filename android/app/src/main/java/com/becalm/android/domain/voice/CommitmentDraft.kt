@@ -14,10 +14,13 @@ public enum class Direction {
 }
 
 /**
- * A single commitment extracted from a voice recording via Railway `POST /v1/voice/transcribe_extract`.
+ * A single action-commitment projection extracted from a voice recording via Railway
+ * `POST /v1/voice/transcribe_extract`.
  *
- * [CommitmentDraft] is the intermediate domain representation produced by parsing
- * [com.becalm.android.data.remote.dto.CommitmentDraftDto] and consumed by
+ * The voice endpoint's source-of-truth contract is now `items[]` with `type=action|schedule|decision`.
+ * [CommitmentDraft] remains the intermediate domain representation for the current action-only
+ * compatibility layer: Android projects `type=action` items into
+ * [com.becalm.android.data.remote.dto.CommitmentDraftDto], then consumes them in
  * [com.becalm.android.worker.VoiceUploadWorker] to build
  * [com.becalm.android.data.local.db.entity.CommitmentEntity] rows.
  *

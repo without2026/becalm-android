@@ -71,10 +71,14 @@ public class RetentionSweepWorker @AssistedInject constructor(
     private val emailBodyDao: EmailBodyDao,
     private val clock: Clock,
     private val db: BeCalmDatabase,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
         val cutoffInstant = clock.nowInstant() - RETENTION_WINDOW
         val cutoffMillis = cutoffInstant.toEpochMilliseconds()
 

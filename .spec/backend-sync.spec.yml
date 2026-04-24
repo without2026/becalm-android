@@ -3,6 +3,7 @@
 module: backend-sync
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: SYNC-001
@@ -10,7 +11,7 @@ behaviors:
     description: "UploadWorker가 Room의 pending raw_ingestion_events + commitments를 Railway batch 엔드포인트에 한 번에 업로드하고 sync_status를 synced로 업데이트한다"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "Room에 sync_status='pending' raw_ingestion_events 1건 이상, Supabase JWT 유효, 네트워크 연결됨"
-    expected: "HTTP 200, {acknowledged: N, failed: []} — N건 모두 Room sync_status='synced'로 UPDATE됨. failed[]가 비어있음"
+    expected: "HTTP 200, {results:[...], failed: []} — results[]에 포함된 client_event_id 행만 Room sync_status='synced'로 UPDATE됨. 각 result는 이미 durable commit 완료된 row를 뜻한다"
     source: phase2-acceptance
     tests: []
 
@@ -19,7 +20,7 @@ behaviors:
     description: "batch upload는 client_event_id 기준으로 멱등(idempotent)하다 — 동일 client_event_id 재업로드 시 중복 INSERT되지 않는다"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "동일 client_event_id를 가진 이벤트 1건을 두 번 연속 POST"
-    expected: "HTTP 200, {acknowledged: 1, failed: []} — Supabase에 레코드 1건만 존재 (중복 없음)"
+    expected: "HTTP 200, {results:[{client_event_id, disposition:'duplicate'|'inserted'}], failed: []} — Supabase에 레코드 1건만 존재 (중복 없음)"
     source: phase2-acceptance
     tests: []
 
@@ -60,7 +61,7 @@ behaviors:
     tests: []
 
 invariants:
-  - "raw_ingestion_events 도달률 100% — Railway ack(sync_status='synced') 확인 전까지 Room 레코드 유지"
+  - "raw_ingestion_events 도달률 100% — Railway durable result(sync_status='synced') 확인 전까지 Room 레코드 유지"
   - "Railway 업로드 대상: raw_ingestion_events batch, commitments. transcripts·email_bodies는 절대 업로드 안 됨"
   - "모든 Railway 호출 실패는 Room sync_status·retry_count·last_attempt_at에 기록된다 — 무음 실패 금지"
   - "foreground 진입 시 즉시 업로드(SYNC-006)는 주기적 WorkManager를 대체하지 않는다 — 양쪽 모두 작동한다"

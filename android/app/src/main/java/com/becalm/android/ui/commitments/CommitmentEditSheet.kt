@@ -36,12 +36,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
+import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -83,18 +84,53 @@ import kotlinx.datetime.toLocalDateTime
 public fun CommitmentEditSheet(
     @Suppress("UNUSED_PARAMETER") commitmentId: String,
     onDismiss: () -> Unit,
-    viewModel: CommitmentEditViewModel = hiltViewModel(),
+    viewModel: CommitmentEditViewModel? = null,
+    stateOverride: EditUiState? = null,
+    dismissEventsOverride: Flow<Unit>? = null,
+    onTitleChange: ((String) -> Unit)? = null,
+    onDueAtMillisChange: ((Long?) -> Unit)? = null,
+    onDueIsApproximateChange: ((Boolean) -> Unit)? = null,
+    onDueHintChange: ((String) -> Unit)? = null,
+    onPersonRefChange: ((String) -> Unit)? = null,
+    onDirectionChange: ((String) -> Unit)? = null,
+    onToggleDispute: (() -> Unit)? = null,
+    onSave: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
+    onConfirmDelete: (() -> Unit)? = null,
 ) {
     // `commitmentId` is consumed by the Hilt-injected [CommitmentEditViewModel]
     // via its SavedStateHandle; the parameter stays on this signature so the nav
     // host can pass it explicitly at call time (see BecalmNavHost wiring).
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val editViewModel = if (
+        stateOverride == null ||
+            dismissEventsOverride == null ||
+            onTitleChange == null ||
+            onDueAtMillisChange == null ||
+            onDueIsApproximateChange == null ||
+            onDueHintChange == null ||
+            onPersonRefChange == null ||
+            onDirectionChange == null ||
+            onToggleDispute == null ||
+            onSave == null ||
+            onCancel == null ||
+            onConfirmDelete == null
+    ) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentEditViewModel>()
+    } else {
+        viewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(editViewModel).uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     // Consume one-shot dismiss events from the VM (saved / deleted / cancelled).
     // All three events map to the same outcome here — pop the sheet.
-    LaunchedEffect(viewModel) {
-        viewModel.dismiss.collect { onDismiss() }
+    LaunchedEffect(dismissEventsOverride, editViewModel) {
+        (dismissEventsOverride ?: requireNotNull(editViewModel).dismiss).collect { onDismiss() }
     }
 
     // NotFound short-circuit — the row was deleted between detail-sheet open
@@ -125,16 +161,16 @@ public fun CommitmentEditSheet(
             else -> {
                 EditSheetContent(
                     state = state,
-                    onTitleChange = viewModel::onTitleChange,
-                    onDueAtMillisChange = viewModel::onDueAtMillisChange,
-                    onDueIsApproximateChange = viewModel::onDueIsApproximateChange,
-                    onDueHintChange = viewModel::onDueHintChange,
-                    onPersonRefChange = viewModel::onPersonRefChange,
-                    onDirectionChange = viewModel::onDirectionChange,
-                    onToggleDispute = viewModel::onToggleDispute,
-                    onSave = viewModel::onSave,
-                    onCancel = viewModel::onCancel,
-                    onConfirmDelete = viewModel::onConfirmDelete,
+                    onTitleChange = onTitleChange ?: requireNotNull(editViewModel)::onTitleChange,
+                    onDueAtMillisChange = onDueAtMillisChange ?: requireNotNull(editViewModel)::onDueAtMillisChange,
+                    onDueIsApproximateChange = onDueIsApproximateChange ?: requireNotNull(editViewModel)::onDueIsApproximateChange,
+                    onDueHintChange = onDueHintChange ?: requireNotNull(editViewModel)::onDueHintChange,
+                    onPersonRefChange = onPersonRefChange ?: requireNotNull(editViewModel)::onPersonRefChange,
+                    onDirectionChange = onDirectionChange ?: requireNotNull(editViewModel)::onDirectionChange,
+                    onToggleDispute = onToggleDispute ?: requireNotNull(editViewModel)::onToggleDispute,
+                    onSave = onSave ?: requireNotNull(editViewModel)::onSave,
+                    onCancel = onCancel ?: requireNotNull(editViewModel)::onCancel,
+                    onConfirmDelete = onConfirmDelete ?: requireNotNull(editViewModel)::onConfirmDelete,
                 )
             }
         }
@@ -145,7 +181,7 @@ public fun CommitmentEditSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditSheetContent(
+internal fun EditSheetContent(
     state: EditUiState,
     onTitleChange: (String) -> Unit,
     onDueAtMillisChange: (Long?) -> Unit,
@@ -182,6 +218,14 @@ private fun EditSheetContent(
         // invariant 1). Do not change this to an editable control.
         val readOnly = state.readOnly
         if (readOnly != null) {
+            SectionLabel(text = stringResource(R.string.commitment_edit_readonly_source_label))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = readOnly.sourceLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
             SectionLabel(text = stringResource(R.string.commitment_edit_readonly_quote_label))
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -340,7 +384,9 @@ private fun EditSheetContent(
             OutlinedButton(
                 onClick = { showDeleteConfirm = true },
                 enabled = !state.saving,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("commitment-edit-delete"),
             ) {
                 Text(
                     text = stringResource(R.string.commitment_edit_delete),
@@ -350,7 +396,9 @@ private fun EditSheetContent(
             Button(
                 onClick = onSave,
                 enabled = !state.saving,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("commitment-edit-save"),
             ) {
                 if (state.saving) {
                     CircularProgressIndicator(
@@ -408,6 +456,7 @@ private fun EditSheetContent(
                         showDeleteConfirm = false
                         onConfirmDelete()
                     },
+                    modifier = Modifier.testTag("commitment-edit-delete-confirm-ok"),
                 ) {
                     Text(
                         text = stringResource(R.string.commitment_edit_delete_confirm_ok),

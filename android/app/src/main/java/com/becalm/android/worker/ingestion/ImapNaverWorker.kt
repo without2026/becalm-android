@@ -36,6 +36,8 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.hasExceededMaxRetries
 import com.squareup.moshi.Moshi
@@ -103,6 +105,7 @@ public class ImapNaverWorker @AssistedInject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
+    private val processingPauseGate: ProcessingPauseGate,
     private val moshi: Moshi,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -118,7 +121,11 @@ public class ImapNaverWorker @AssistedInject constructor(
     }
 
     public override suspend fun doWork(): Result {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, SINCE_DAYS)
 
         // ── 0. Ensure legacy-tuple migration has completed ───────────────────
         // The Application.onCreate fire-and-forget launch of [migrateIfNeeded] is not a
@@ -173,6 +180,7 @@ public class ImapNaverWorker @AssistedInject constructor(
                 imapEmail = imapEmail,
                 imapPassword = imapPassword,
                 userId = userId,
+                lookbackDays = lookbackDays,
             )
             if (outcome is PassOutcome.Terminal) return outcome.result
         }
@@ -187,6 +195,7 @@ public class ImapNaverWorker @AssistedInject constructor(
                 imapEmail = imapEmail,
                 imapPassword = imapPassword,
                 userId = userId,
+                lookbackDays = lookbackDays,
             )
             if (outcome is PassOutcome.Terminal) return outcome.result
         }
@@ -235,6 +244,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         imapEmail: String,
         imapPassword: String,
         userId: String,
+        lookbackDays: Int,
     ): PassOutcome {
         val storedCursor: ImapCursorState? =
             syncCursorStore.observeImapState(mailboxKey).first()
@@ -254,7 +264,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             mailbox = imapFolderName,
             uidValidity = storedUidValidity,
             uidNext = fetchFromUid,
-            sinceDays = SINCE_DAYS,
+            sinceDays = lookbackDays,
         )
 
         if (fetchResult is BecalmResult.Failure) {

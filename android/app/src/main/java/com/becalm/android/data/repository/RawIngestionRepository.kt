@@ -64,6 +64,9 @@ public interface RawIngestionRepository {
      */
     public fun observeTimelineForUser(userId: String, limit: Int = 200): Flow<List<RawIngestionEventEntity>>
 
+    /** Emits every event with a non-null `person_ref` for [userId], newest-first. */
+    public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
+
     /**
      * Emits a live list of the most recent events for a specific [personRef] owned by [userId],
      * newest-first.
@@ -71,6 +74,26 @@ public interface RawIngestionRepository {
      * @param limit Maximum list size per emission.
      */
     public fun observeForPerson(userId: String, personRef: String, limit: Int = 100): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits a live list of the most recent events for a specific [sourceType] owned by [userId],
+     * newest-first.
+     *
+     * @param limit Maximum list size per emission.
+     */
+    public fun observeForSourceType(userId: String, sourceType: String, limit: Int = 100): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits the count of events for [userId] whose source is in [sourceTypes] and whose
+     * timestamp is on or after [since].
+     *
+     * Used by cold-sync Stage 2 progress to project real local row counts from Room.
+     */
+    public fun observeCountForSourceTypesSince(
+        userId: String,
+        sourceTypes: List<String>,
+        since: Instant,
+    ): Flow<Int>
 
     /**
      * Returns the event matching [userId] + [clientEventId], or null if it does not exist locally.
@@ -223,12 +246,29 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         // A future DAO method backed by idx_raw_events_user_time will replace this path.
         dao.observeUnassignedRecent(userId, limit)
 
+    override fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>> =
+        dao.observeAssignedForUser(userId)
+
     override fun observeForPerson(
         userId: String,
         personRef: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>> =
         dao.observeRecentForPerson(userId, personRef, limit)
+
+    override fun observeForSourceType(
+        userId: String,
+        sourceType: String,
+        limit: Int,
+    ): Flow<List<RawIngestionEventEntity>> =
+        dao.observeRecentForSourceType(userId, sourceType, limit)
+
+    override fun observeCountForSourceTypesSince(
+        userId: String,
+        sourceTypes: List<String>,
+        since: Instant,
+    ): Flow<Int> =
+        dao.observeCountForSourceTypesSince(userId, sourceTypes, since)
 
     override suspend fun findByClientEventId(
         userId: String,

@@ -20,6 +20,27 @@ package com.becalm.android.data.remote.interceptor
 public interface AuthTokenProvider {
 
     /**
+     * Outcome of a refresh attempt triggered from [AuthInterceptor].
+     *
+     * Keeping this sealed result at the auth boundary lets the interceptor distinguish
+     * between:
+     * - a successful refresh that should retry the request once,
+     * - a permanently-lost session that should collapse the app back to signed-out, and
+     * - a transient failure where the original 401 should be surfaced without wiping the
+     *   local session.
+     */
+    public sealed interface RefreshResult {
+        /** Refresh succeeded; retry the failed request with [accessToken]. */
+        public data class Refreshed(val accessToken: String) : RefreshResult
+
+        /** No valid session remains locally or the refresh token was rejected by Supabase. */
+        public data object Unauthenticated : RefreshResult
+
+        /** Refresh could not be completed for a transient reason (network/server error). */
+        public data object Failed : RefreshResult
+    }
+
+    /**
      * Returns the current access token without suspending.
      *
      * Called on the OkHttp dispatcher thread; must not block for network I/O.
@@ -28,12 +49,10 @@ public interface AuthTokenProvider {
     public fun currentAccessToken(): String?
 
     /**
-     * Attempts to refresh the session and returns the new access token.
+     * Attempts to refresh the session and returns a typed outcome.
      *
      * Called via `runBlocking` inside [com.becalm.android.data.remote.interceptor.AuthInterceptor]
-     * on an HTTP 401 response (AUTH-007). Returns the new access token on success,
-     * or `null` if the refresh itself fails (expired refresh token, network error, etc.).
-     * When `null` is returned the interceptor propagates the original 401 to the caller.
+     * on an HTTP 401 response (AUTH-007).
      *
      * ## Refresh coalescing
      * Under a burst of parallel 401s the implementation is expected to serialize refresh
@@ -48,7 +67,7 @@ public interface AuthTokenProvider {
      *   returned 401. Used only for the coalescing double-check; never sent to Supabase.
      *   Pass an empty string when the caller had no token (first call with no session).
      */
-    public suspend fun refresh(previousAccessToken: String): String?
+    public suspend fun refresh(previousAccessToken: String): RefreshResult
 
     /**
      * Warms the in-memory access-token cache from persisted storage so the first

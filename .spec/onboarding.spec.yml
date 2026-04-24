@@ -2,6 +2,7 @@
 module: onboarding
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: ONB-001
@@ -16,7 +17,7 @@ behaviors:
 
   - id: ONB-PIPA
     type: consent
-    description: "PIPA 제3자 제공 + 국외 이전 동의 화면 — 음성 파이프라인이 Google LLC Vertex AI(미국 법인, 데이터 처리 리전 asia-northeast3 서울)에 오디오를 전송한다는 사실을 명시 고지하고 [동의] / [동의 안 함] 두 버튼을 제공한다. 온보딩 12단계 중 3번째 단계 (로그인 직후, 녹음 폴더 설정 직전)"
+    description: "PIPA 제3자 제공 + 국외 이전 동의 화면 — 음성 파이프라인이 Google LLC Vertex AI(미국 법인, 데이터 처리 리전 asia-northeast3 서울)에 오디오를 전송한다는 사실을 명시 고지하고 [동의] / [동의 안 함] 두 버튼을 제공한다. 로그인 직후에 나타나며, 이후 recording-folder 분기 여부를 결정하는 조건부 단계다"
     screen: "PipaThirdPartyConsentScreen"
     interaction: "[동의] 또는 [동의 안 함] 버튼 탭"
     precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore pipa_third_party_consent 미설정"
@@ -45,10 +46,10 @@ behaviors:
 
   - id: ONB-CONTACTS
     type: permission
-    description: "연락처 권한 요청 화면 — PIPA 사유 고지 후 [허용] / [나중에] 선택. 온보딩 11단계 중 4번째 단계"
+    description: "연락처 권한 요청 화면 — PIPA 사유 고지 후 [허용] / [나중에] 선택. PIPA 동의 분기 이후의 조건부 단계이며 recording-folder step 수행 여부와 무관하게 진입 가능해야 한다"
     screen: "ContactsPermissionScreen"
     interaction: "[허용] 또는 [나중에] 버튼 탭"
-    precondition: "ONB-003 완료 후, READ_CONTACTS 미부여"
+    precondition: "ONB-002/003 완료 또는 ONB-PIPA 거부로 recording-folder step이 스킵된 후, READ_CONTACTS 미부여"
     expected: "ContactsPermissionScreen 표시됨. 고지문: '연락처 접근은 약속 상대방의 이름·회사·직함을 앱 안에서만 표시하는 데 사용되며 서버로 전송되지 않습니다'. [허용] 탭 시 시스템 READ_CONTACTS 권한 다이얼로그 표시됨. 승인 또는 거부 후 다음 단계(ONB-004) 진행됨. [나중에] 탭 시 다음 단계 즉시 진행됨. DataStore contacts_permission_asked=true 저장됨"
     source: phase2-acceptance
     tests: []
@@ -107,4 +108,4 @@ invariants:
   - "DataStore onboarding_completed=true는 ColdSyncScreen 완료 또는 [나중에 하기] 후에 기록된다 — 온보딩 step 완료 시점이 아님"
   - "CONTACTS 권한 거부는 온보딩을 중단시키지 않는다 — graceful skip"
   - "PIPA 제3자 제공 + 국외 이전 동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화되고 Settings에서 추후 변경 가능"
-  - "총 12단계: 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"
+  - "온보딩은 고정 12-step 선형 플로우가 아니라 조건부 step graph다: 약관 → 로그인 → PIPA제3자제공 → (동의 시 녹음폴더, 거부 시 스킵) → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"

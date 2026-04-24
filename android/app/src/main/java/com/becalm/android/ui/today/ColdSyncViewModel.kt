@@ -2,15 +2,23 @@ package com.becalm.android.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 // ─── UI types ─────────────────────────────────────────────────────────────────
@@ -29,7 +37,15 @@ public data class ColdSyncUiState(
     val overallProgress: Float = 0f,
     val perSourceProgress: Map<String, Float> = emptyMap(),
     val done: Boolean = false,
+    val skipEnabled: Boolean = false,
+    val transitioning: Boolean = false,
+    val lastTransition: ColdSyncTransitionSnapshot? = null,
 )
+
+/** One-shot effects emitted by [ColdSyncViewModel]. */
+public sealed interface ColdSyncEffect {
+    public data object NavigateToToday : ColdSyncEffect
+}
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
@@ -48,39 +64,90 @@ private const val TAG = "ColdSyncViewModel"
 @HiltViewModel
 public class ColdSyncViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
+    private val lifecycleCoordinator: ColdSyncLifecycleCoordinator,
+    private val runtimeCoordinator: ColdSyncRuntimeCoordinator,
     private val logger: Logger,
 ) : ViewModel() {
+
+    private val skipEnabledFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val transitioningFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val transitionSnapshotFlow: MutableStateFlow<ColdSyncTransitionSnapshot?> = MutableStateFlow(null)
+    private val _effects: MutableSharedFlow<ColdSyncEffect> = MutableSharedFlow(extraBufferCapacity = 1)
+    private val backingState: MutableStateFlow<ColdSyncUiState> = MutableStateFlow(ColdSyncUiState())
+    private var skipTimerStarted: Boolean = false
+    private var stage1Started: Boolean = false
+
+    /** One-shot navigation emitted after persistence/scheduling succeeds. */
+    public val effects: SharedFlow<ColdSyncEffect> = _effects.asSharedFlow()
 
     /**
      * Observable state consumed by the cold-sync composable.
      */
-    public val state: StateFlow<ColdSyncUiState> = sourceStatusRepository.observeAll()
-        .map { statuses ->
-            if (statuses.isEmpty()) {
-                return@map ColdSyncUiState()
+    public val state: StateFlow<ColdSyncUiState> = backingState.asStateFlow()
+
+    /** Starts the skip countdown once the cold-sync screen becomes visible. */
+    public fun onScreenVisible() {
+        ensureSkipTimerStarted()
+        if (stage1Started) return
+        stage1Started = true
+        viewModelScope.launch {
+            when (val result = runtimeCoordinator.startStage1(Instant.fromEpochMilliseconds(System.currentTimeMillis()))) {
+                is BecalmResult.Success -> logger.d(TAG, "Stage 1 started")
+                is BecalmResult.Failure -> logger.w(TAG, "Stage 1 start failed: ${result.error}")
             }
-            val perSource = statuses.associate { s ->
-                s.sourceType to sourceProgress(s.status)
-            }
-            val overall = perSource.values.average().toFloat()
-            ColdSyncUiState(
-                overallProgress = overall,
-                perSourceProgress = perSource,
-                done = perSource.values.all { it >= 1f },
-            )
+        }
+    }
+
+    private val derivedState = combine(
+        sourceStatusRepository.observeAll(),
+        runtimeCoordinator.observeUserProfileReady(),
+        skipEnabledFlow,
+        transitioningFlow,
+        transitionSnapshotFlow,
+    ) { statuses, userProfileReady, skipEnabled, transitioning, lastTransition ->
+            buildUiState(statuses, userProfileReady, skipEnabled, transitioning, lastTransition)
         }
         .catch { e ->
             logger.e(TAG, "source status observation failed", e as? Exception ?: Exception(e))
             emit(ColdSyncUiState())
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = ColdSyncUiState(),
-        )
 
     init {
         logger.d(TAG, "init")
+        viewModelScope.launch {
+            derivedState.collect { backingState.value = it }
+        }
+    }
+
+    /** COLD-003 / COLD-008 transition after Stage 1 reaches a terminal state. */
+    public fun onStage1Completed(at: Instant = Instant.fromEpochMilliseconds(System.currentTimeMillis())) {
+        viewModelScope.launch {
+            transitioningFlow.value = true
+            when (val result = lifecycleCoordinator.completeStage1(at)) {
+                is BecalmResult.Success -> {
+                    transitionSnapshotFlow.value = result.value
+                    _effects.tryEmit(ColdSyncEffect.NavigateToToday)
+                }
+                is BecalmResult.Failure -> logger.w(TAG, "completeStage1 failed: ${result.error}")
+            }
+            transitioningFlow.value = false
+        }
+    }
+
+    /** COLD-006 / COLD-008 "[나중에 하기]" branch. */
+    public fun onSkipForNow(at: Instant = Instant.fromEpochMilliseconds(System.currentTimeMillis())) {
+        if (!skipEnabledFlow.value) return
+        viewModelScope.launch {
+            transitioningFlow.value = true
+            when (val result = lifecycleCoordinator.deferStage1(at)) {
+                is BecalmResult.Success -> {
+                    transitionSnapshotFlow.value = result.value
+                    _effects.tryEmit(ColdSyncEffect.NavigateToToday)
+                }
+                is BecalmResult.Failure -> logger.w(TAG, "deferStage1 failed: ${result.error}")
+            }
+            transitioningFlow.value = false
+        }
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
@@ -100,5 +167,55 @@ public class ColdSyncViewModel @Inject constructor(
         SourceConnectionStatus.CONNECTED,
         SourceConnectionStatus.ERROR,
         -> 1f
+    }
+
+    private fun buildUiState(
+        statuses: List<com.becalm.android.data.repository.SourceStatus>,
+        userProfileReady: Boolean,
+        skipEnabled: Boolean,
+        transitioning: Boolean,
+        lastTransition: ColdSyncTransitionSnapshot?,
+    ): ColdSyncUiState {
+        val sourceProgress = statuses
+            .asSequence()
+            .filter { it.sourceType in STAGE1_TRACKED_SOURCES }
+            .associate { status -> status.sourceType to sourceProgress(status.status) }
+        val trackedProgress = linkedMapOf<String, Float>().apply {
+            putAll(sourceProgress)
+            put(
+                DefaultColdSyncRuntimeCoordinator.USER_PROFILE_SOURCE_ID,
+                if (userProfileReady) 1f else 0f,
+            )
+        }
+        val overall = if (trackedProgress.isEmpty()) 0f else trackedProgress.values.average().toFloat()
+        return ColdSyncUiState(
+            overallProgress = overall,
+            perSourceProgress = trackedProgress,
+            done = trackedProgress.isNotEmpty() && trackedProgress.values.all { it >= 1f },
+            skipEnabled = skipEnabled,
+            transitioning = transitioning,
+            lastTransition = lastTransition,
+        )
+    }
+
+    private companion object {
+        private const val SKIP_ENABLE_DELAY_MS: Long = 5_000L
+        private val STAGE1_TRACKED_SOURCES: Set<String> = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
+    }
+
+    private fun ensureSkipTimerStarted() {
+        if (skipTimerStarted) return
+        skipTimerStarted = true
+        viewModelScope.launch {
+            delay(SKIP_ENABLE_DELAY_MS)
+            skipEnabledFlow.value = true
+        }
     }
 }

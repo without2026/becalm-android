@@ -1,0 +1,461 @@
+package com.becalm.android.unit.ui.commitments
+
+import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.domain.commitment.CommitmentEvent
+import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.domain.reminder.ReminderScheduler
+import com.becalm.android.ui.commitments.CommitmentFilter
+import com.becalm.android.ui.commitments.CommitmentManagementViewModel
+import com.becalm.android.ui.commitments.CommitmentUndoSnapshot
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.runs
+import io.mockk.verify
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlin.reflect.full.memberProperties
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class CommitmentManagementViewModelSpecTest {
+
+    private val testDispatcher = StandardTestDispatcher()
+    private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
+    private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
+    private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
+    private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val logger: Logger = mockk(relaxed = true)
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(testDispatcher)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `CMT-001 counterparty display resolution follows enrichment precedence`() = runTest {
+        val displayNameEntity = entity(id = "a", direction = "give", personRef = "lee@corp.com")
+        val nicknameEntity = entity(id = "b", direction = "take", personRef = "kim@corp.com")
+        val fallbackPersonRefEntity = entity(id = "c", direction = "give", personRef = "park@corp.com")
+        val legacyRawEntity = entity(id = "d", direction = "take", personRef = null, counterpartyRaw = "Legacy Raw Name")
+
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
+            listOf(displayNameEntity, nicknameEntity, fallbackPersonRefEntity, legacyRawEntity),
+        )
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
+            mapOf(
+                "lee@corp.com" to enrichment("lee@corp.com", displayName = "이대리", nickname = "lee"),
+                "kim@corp.com" to enrichment("kim@corp.com", displayName = null, nickname = "김팀장"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+            assertEquals(4, settled.items.size)
+            assertEquals("이대리", settled.items.single { it.id == "a" }.counterpartyDisplayName)
+            assertEquals("김팀장", settled.items.single { it.id == "b" }.counterpartyDisplayName)
+            assertEquals("park@corp.com", settled.items.single { it.id == "c" }.counterpartyDisplayName)
+            assertEquals("Legacy Raw Name", settled.items.single { it.id == "d" }.counterpartyDisplayName)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `CMT-002 filter tabs isolate give take and all commitments`() = runTest {
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
+            listOf(
+                entity(id = "give-1", direction = "give"),
+                entity(id = "give-2", direction = "give"),
+                entity(id = "take-1", direction = "take"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val initial = awaitItem()
+            assertEquals(CommitmentFilter.ALL, initial.filter)
+            assertEquals(listOf("give-1", "give-2", "take-1"), initial.items.map { it.id })
+
+            viewModel.onFilterChange(CommitmentFilter.GIVE)
+            val giveOnly = awaitItem()
+            assertEquals(CommitmentFilter.GIVE, giveOnly.filter)
+            assertEquals(listOf("give-1", "give-2"), giveOnly.items.map { it.id })
+            assertTrue(giveOnly.items.all { it.direction == "give" })
+
+            viewModel.onFilterChange(CommitmentFilter.TAKE)
+            val takeOnly = awaitItem()
+            assertEquals(CommitmentFilter.TAKE, takeOnly.filter)
+            assertEquals(listOf("take-1"), takeOnly.items.map { it.id })
+            assertTrue(takeOnly.items.all { it.direction == "take" })
+
+            viewModel.onFilterChange(CommitmentFilter.ALL)
+            val allAgain = awaitItem()
+            assertEquals(CommitmentFilter.ALL, allAgain.filter)
+            assertEquals(listOf("give-1", "give-2", "take-1"), allAgain.items.map { it.id })
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `CMT-003 card selection emits detail navigation with tapped commitment id`() = runTest {
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.navigation.test {
+            viewModel.onCommitmentSelected("detail-1")
+
+            val navigation = awaitItem()
+            assertEquals("detail-1", propertyValue(navigation, "commitmentId"))
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `CMT-009 completed and cancelled sections stay collapsed by default and toggle independently`() = runTest {
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
+            listOf(
+                entity(id = "pending-1", actionState = "pending"),
+                entity(id = "completed-1", actionState = "completed"),
+                entity(id = "completed-2", actionState = "completed"),
+                entity(id = "cancelled-1", actionState = "cancelled"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val initial = viewModel.uiState.value
+        assertEquals(listOf("pending-1"), initial.activeItems.map { it.id })
+        assertEquals(2, initial.completedSection.count)
+        assertEquals(listOf("completed-1", "completed-2"), initial.completedSection.items.map { it.id })
+        assertEquals(false, initial.completedSection.expanded)
+        assertEquals(true, initial.completedSection.dimmed)
+        assertEquals(1, initial.cancelledSection.count)
+        assertEquals(listOf("cancelled-1"), initial.cancelledSection.items.map { it.id })
+        assertEquals(false, initial.cancelledSection.expanded)
+        assertEquals(true, initial.cancelledSection.dimmed)
+
+        viewModel.onToggleCompletedSection()
+        val completedExpanded = viewModel.uiState.value
+        assertEquals(true, completedExpanded.completedSection.expanded)
+        assertEquals(false, completedExpanded.cancelledSection.expanded)
+
+        viewModel.onToggleCancelledSection()
+        val cancelledExpanded = viewModel.uiState.value
+        assertEquals(true, cancelledExpanded.completedSection.expanded)
+        assertEquals(true, cancelledExpanded.cancelledSection.expanded)
+    }
+
+    @Test
+    fun `MAN-004 manual rows keep manual badge projection separate from lifecycle state`() = runTest {
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
+            listOf(
+                entity(id = "manual-1", actionState = "pending", sourceType = "manual"),
+                entity(id = "voice-1", actionState = "pending", sourceType = "voice"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val items = viewModel.uiState.value.items.associateBy { it.id }
+        assertEquals(true, items.getValue("manual-1").isManual)
+        assertEquals(false, items.getValue("voice-1").isManual)
+        assertEquals("PENDING", items.getValue("manual-1").derivedStatus.toString())
+    }
+
+    @Test
+    fun `CMT-010 pull refresh uses current user and surfaces repository failure`() = runTest {
+        coEvery { commitmentRepository.refreshSince("user-1", since = null) } returns
+            BecalmResult.Failure(BecalmError.Io("boom"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        assertEquals(false, viewModel.uiState.value.refreshing)
+        assertTrue(viewModel.uiState.value.error?.contains("boom") == true)
+        coVerify(exactly = 1) { commitmentRepository.refreshSince("user-1", since = null) }
+    }
+
+    @Test
+    fun `CMT-005 remind success schedules reminder when dueAt is present`() = runTest {
+        val dueAt = Instant.parse("2026-04-20T03:00:00Z")
+        val pending = entity(id = "remind-1", dueAt = dueAt)
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
+        coEvery { commitmentRepository.transitionState("remind-1", CommitmentEvent.Remind) } returns
+            BecalmResult.Success(pending.copy(actionState = "reminded"))
+        every { reminderScheduler.schedule(any(), any()) } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onRemind("remind-1")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.schedule("remind-1", dueAt) }
+    }
+
+    @Test
+    fun `CMT-005 remind forwards null dueAt to scheduler which owns alarm gating`() = runTest {
+        val pending = entity(id = "remind-2", dueAt = null)
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
+        coEvery { commitmentRepository.transitionState("remind-2", CommitmentEvent.Remind) } returns
+            BecalmResult.Success(pending.copy(actionState = "reminded"))
+        every { reminderScheduler.schedule(any(), any()) } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onRemind("remind-2")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 1) { reminderScheduler.schedule("remind-2", null) }
+    }
+
+    @Test
+    fun `CMT-005 remind failure surfaces error and skips reminder scheduling`() = runTest {
+        coEvery { commitmentRepository.transitionState("remind-3", CommitmentEvent.Remind) } returns
+            BecalmResult.Failure(BecalmError.Validation("actionState", "illegal"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onRemind("remind-3")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.error?.contains("illegal") == true)
+        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+    }
+
+    @Test
+    fun `CMT-006 follow up success changes state without reminder side effects`() = runTest {
+        coEvery { commitmentRepository.transitionState("follow-1", CommitmentEvent.FollowUp) } returns
+            BecalmResult.Success(entity(id = "follow-1", actionState = "followed_up"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onFollowUp("follow-1")
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.error)
+        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        verify(exactly = 0) { reminderScheduler.cancel(any()) }
+    }
+
+    @Test
+    fun `CMT-007 complete cancels reminder and emits undo snapshot with prior state`() = runTest {
+        val item = entity(id = "complete-1", actionState = "reminded")
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(item))
+        coEvery { commitmentRepository.transitionState("complete-1", CommitmentEvent.Complete) } returns
+            BecalmResult.Success(item.copy(actionState = "completed"))
+        every { reminderScheduler.cancel("complete-1") } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.undoFlow.test {
+            viewModel.onComplete("complete-1")
+            advanceUntilIdle()
+
+            assertEquals(
+                CommitmentUndoSnapshot.Completed("complete-1", CommitmentState.REMINDED),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        verifyCancel("complete-1")
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `CMT-012 cancel without cached entity still succeeds but emits no undo snapshot`() = runTest {
+        coEvery { commitmentRepository.transitionState("cancel-1", CommitmentEvent.Cancel) } returns
+            BecalmResult.Success(entity(id = "cancel-1", actionState = "cancelled"))
+        every { reminderScheduler.cancel("cancel-1") } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.undoFlow.test {
+            viewModel.onCancel("cancel-1")
+            advanceUntilIdle()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        verifyCancel("cancel-1")
+    }
+
+    @Test
+    fun `CMT-012 cancel from overdue remains legal and captures overdue as undo prior state`() = runTest {
+        val overdue = entity(id = "cancel-overdue", actionState = "overdue")
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(overdue))
+        coEvery { commitmentRepository.transitionState("cancel-overdue", CommitmentEvent.Cancel) } returns
+            BecalmResult.Success(overdue.copy(actionState = "cancelled"))
+        every { reminderScheduler.cancel("cancel-overdue") } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.undoFlow.test {
+            viewModel.onCancel("cancel-overdue")
+            advanceUntilIdle()
+
+            assertEquals(
+                CommitmentUndoSnapshot.Cancelled("cancel-overdue", CommitmentState.OVERDUE),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        verifyCancel("cancel-overdue")
+    }
+
+    @Test
+    fun `CMT-013 undo writes prior action state and surfaces failure`() = runTest {
+        coEvery {
+            commitmentRepository.updateActionState(
+                id = "undo-1",
+                newState = "pending",
+                updatedAt = any(),
+            )
+        } returns BecalmResult.Failure(BecalmError.Io("undo failed"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onUndo(CommitmentUndoSnapshot.Completed("undo-1", CommitmentState.PENDING))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.error?.contains("undo failed") == true)
+        coVerify(exactly = 1) {
+            commitmentRepository.updateActionState(
+                id = "undo-1",
+                newState = "pending",
+                updatedAt = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `CMT-013 undo does not re-register reminder alarms`() = runTest {
+        coEvery {
+            commitmentRepository.updateActionState(
+                id = "undo-2",
+                newState = "reminded",
+                updatedAt = any(),
+            )
+        } returns BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onUndo(CommitmentUndoSnapshot.Completed("undo-2", CommitmentState.REMINDED))
+        advanceUntilIdle()
+
+        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+    }
+
+    private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(
+        commitmentRepository = commitmentRepository,
+        personEnrichmentRepository = personEnrichmentRepository,
+        reminderScheduler = reminderScheduler,
+        userPrefsStore = userPrefsStore,
+        logger = logger,
+    )
+
+    private fun verifyCancel(id: String) = io.mockk.verify(exactly = 1) { reminderScheduler.cancel(id) }
+
+    private fun propertyValue(instance: Any, name: String): Any? =
+        instance::class.memberProperties.first { it.name == name }.getter.call(instance)
+
+    private fun enrichment(
+        personRef: String,
+        displayName: String?,
+        nickname: String?,
+    ): PersonEnrichmentEntity = PersonEnrichmentEntity(
+        personRef = personRef,
+        displayName = displayName,
+        nickname = nickname,
+        company = null,
+        title = null,
+        sourceContactId = null,
+        lastSyncedAt = Clock.System.now(),
+    )
+
+    private fun entity(
+        id: String,
+        direction: String = "give",
+        actionState: String = "pending",
+        personRef: String? = null,
+        counterpartyRaw: String? = null,
+        dueAt: Instant? = null,
+        sourceType: String = "voice",
+    ): CommitmentEntity = CommitmentEntity(
+        id = id,
+        userId = "user-1",
+        direction = direction,
+        counterpartyRaw = counterpartyRaw,
+        personRef = personRef,
+        title = "title-$id",
+        description = null,
+        quote = "quote",
+        sourceEventTitle = null,
+        sourceEventOccurredAt = Instant.parse("2026-04-18T00:00:00Z"),
+        dueAt = dueAt,
+        dueHint = null,
+        dueIsApproximate = false,
+        actionState = actionState,
+        sourceType = sourceType,
+        sourceRef = null,
+        confidence = 1.0,
+        commitmentState = CommitmentLifecycleLegacy.DRAFT,
+        syncStatus = "synced",
+        createdAt = Instant.parse("2026-04-18T00:00:00Z"),
+        updatedAt = Instant.parse("2026-04-18T00:00:00Z"),
+    )
+}

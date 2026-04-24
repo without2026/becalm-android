@@ -394,6 +394,18 @@ public interface CommitmentDao {
     )
     public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
 
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+        ORDER BY created_at DESC
+        """,
+    )
+    public suspend fun findAllForUser(userId: String): List<CommitmentEntity>
+
+    @Query("SELECT COUNT(*) FROM commitments WHERE user_id = :userId")
+    public suspend fun countForUser(userId: String): Int
+
     /**
      * Emits all live pending commitments for [userId] that are either undated or due
      * on/before end-of-today in Asia/Seoul.
@@ -417,6 +429,7 @@ public interface CommitmentDao {
         """
         SELECT * FROM commitments
         WHERE user_id      = :userId
+          AND item_type    = 'action'
           AND action_state = 'pending'
           AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs)
           AND deleted_at IS NULL
@@ -447,6 +460,26 @@ public interface CommitmentDao {
         """
     )
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
+
+    /**
+     * Returns all live commitment quotes whose originating source event matches [sourceRef].
+     *
+     * Used by the raw-event detail projection owner to render the evidence quotes extracted
+     * from a specific source event.
+     */
+    @Query(
+        """
+        SELECT quote FROM commitments
+        WHERE user_id = :userId
+          AND source_ref = :sourceRef
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC, created_at DESC
+        """
+    )
+    public suspend fun findQuotesBySourceRefForUser(
+        userId: String,
+        sourceRef: String,
+    ): List<String>
 
     // ─── Sync helpers ──────────────────────────────────────────────────────────
 
@@ -482,4 +515,58 @@ public interface CommitmentDao {
         """
     )
     public suspend fun findPendingSync(userId: String, limit: Int): List<CommitmentEntity>
+
+    /**
+     * Returns up to [limit] live commitments for [userId] that have exceeded the
+     * 24-hour overdue grace period from CMT-011.
+     *
+     * Eligibility:
+     * - `due_at IS NOT NULL`
+     * - `due_at < :cutoff`
+     * - `action_state IN ('pending', 'reminded', 'followed_up')`
+     * - `deleted_at IS NULL`
+     *
+     * Ordered oldest-due first so repeated worker batches advance deterministically.
+     */
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+          AND due_at IS NOT NULL
+          AND item_type = 'action'
+          AND due_at < :cutoff
+          AND action_state IN ('pending', 'reminded', 'followed_up')
+          AND deleted_at IS NULL
+        ORDER BY due_at ASC
+        LIMIT :limit
+        """
+    )
+    public suspend fun findOverdueCandidates(
+        userId: String,
+        cutoff: Instant,
+        limit: Int,
+    ): List<CommitmentEntity>
+
+    /**
+     * Marks the rows identified by [ids] as `action_state='overdue'`, preserving the
+     * same eligibility guard used by [findOverdueCandidates].
+     *
+     * Rows that no longer satisfy the guard at write time are skipped.
+     *
+     * @return Number of rows updated.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET action_state = 'overdue',
+            updated_at = :updatedAt,
+            sync_status = 'pending'
+        WHERE id IN (:ids)
+          AND due_at IS NOT NULL
+          AND item_type = 'action'
+          AND action_state IN ('pending', 'reminded', 'followed_up')
+          AND deleted_at IS NULL
+        """
+    )
+    public suspend fun markOverdue(ids: List<String>, updatedAt: Instant): Int
 }

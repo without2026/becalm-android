@@ -58,13 +58,9 @@
 
     <!--
         API 33+ (TIRAMISU): POST_NOTIFICATIONS is a runtime permission.
-        The only runtime touch-point today lives in ReminderBroadcastReceiver, which
-        performs a checkSelfPermission guard and silently skips posting when denied
-        (see receiver/ReminderBroadcastReceiver.kt:37-48).
-        TODO(R10-02): there is currently NO UI site that actually *requests* this
-        permission (ActivityResultContracts.RequestPermission). Add a request during
-        onboarding or first reminder scheduling so users on API 33+ can opt in;
-        without it reminders will never surface on fresh installs.
+        NotificationPermissionScreen requests it during onboarding on API 33+ and
+        ReminderBroadcastReceiver still performs a defensive checkSelfPermission guard
+        before posting.
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

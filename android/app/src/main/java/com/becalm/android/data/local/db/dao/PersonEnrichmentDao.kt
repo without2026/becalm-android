@@ -96,4 +96,7 @@ public interface PersonEnrichmentDao {
      */
     @Query("DELETE FROM persons_enrichment")
     public suspend fun deleteAll(): Int
+
+    @Query("SELECT COUNT(*) FROM persons_enrichment")
+    public suspend fun countAll(): Int
 }

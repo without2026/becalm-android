@@ -2,6 +2,7 @@
 module: source-viewer
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: SRC-001
@@ -26,7 +27,7 @@ behaviors:
 
   - id: SRC-003
     type: ui_interaction
-    description: "인물 검색 — 이름·이메일·전화번호 substring으로 필터링됨 (서버측 GET /v1/persons?q= 또는 Room 캐시 클라이언트 필터)"
+    description: "인물 검색 — 이름·이메일·전화번호 substring으로 Room 기반 목록을 클라이언트 필터링한다"
     screen: "PersonsScreen"
     interaction: "검색창에 'lee' 입력"
     precondition: "Room에 person_ref='lee@corp.com' 1건 + person_ref='+821012345678'(display_name='김철수') 1건 존재"
@@ -36,11 +37,11 @@ behaviors:
 
   - id: SRC-004
     type: ui_interaction
-    description: "이벤트 항목 탭 시 원시 이벤트 상세 시트가 표시된다 — 소스 타입별 상세: voice(event_title, duration_seconds, transcript, commitments_extracted_count), email(subject=event_title, event_snippet, EmailBody 전문), calendar(title=event_title, location, attendees_raw), 수집 타임스탬프"
+    description: "이벤트 항목 탭 시 원시 이벤트 상세 시트가 표시된다 — 소스 타입별 상세: voice(event_title, duration_seconds, commitments_extracted_count, commitment별 verbatim quote), email(subject=event_title, event_snippet, EmailBody 전문), calendar(title=event_title, location, attendees_raw), 수집 타임스탬프"
     screen: "RawEventDetailSheet"
     interaction: "PersonDetailScreen 상호작용 히스토리의 이벤트 항목 탭"
     precondition: "PersonDetailScreen에 source_type='voice' 이벤트 1건 표시됨(event_title='팀 회의', duration_seconds=1800, commitments_extracted_count=2)"
-    expected: "바텀 시트 열림. '팀 회의' 제목, '30분', transcript.text 전문, '약속 추출 2건' 표시됨. ingestion timestamp 표시됨"
+    expected: "바텀 시트 열림. '팀 회의' 제목, '30분', '약속 추출 2건' 표시됨. commitment 2건 각각에 대해 verbatim quote(각 <=100 chars)가 전부 표시됨. full transcript 뷰는 없음. ingestion timestamp 표시됨"
     source: phase2-acceptance
     tests: []
 
@@ -56,11 +57,11 @@ behaviors:
 
   - id: SRC-006
     type: gesture
-    description: "pull-to-refresh 시 Railway GET /v1/persons를 재요청하고 Room 캐시를 갱신한다"
+    description: "pull-to-refresh 시 PersonsScreen은 Room 그룹핑 쿼리를 즉시 재실행하고, 동시에 foreground catch-up(ING-011) + 연락처 enrichment 재동기화(ENR-005)를 트리거한다. 서버 GET으로 persons 목록을 역갱신하지 않는다"
     gesture: "pull-to-refresh"
     screen: "PersonsScreen"
     precondition: "PersonsScreen 표시됨, 네트워크 연결됨"
-    expected: "GET /v1/persons 호출됨. Room 데이터 갱신됨. 인물 목록 업데이트됨"
+    expected: "pull-to-refresh 즉시 Room 기반 person grouping 쿼리가 재실행된다. 동시에 ING-011로 신규 raw event가 로컬 수집되고, ENR-005가 연락처 변경을 반영한다. 둘 중 하나라도 Room 데이터를 바꾸면 인물 목록이 자동 갱신된다"
     source: phase2-acceptance
     tests: []
 
@@ -84,7 +85,8 @@ behaviors:
     tests: []
 
 invariants:
-  - "원문보기(PersonDetailScreen) 데이터는 Room에서 primary 조회한다. Railway GET /v1/persons는 새로고침 시에만 호출됨"
+  - "원문보기(PersonDetailScreen)와 PersonsScreen 목록은 모두 Room에서 primary 조회한다 — 서버 GET으로 Room을 역갱신하지 않는다"
   - "person_ref 그룹핑은 Room 쿼리 레벨에서 수행됨 — 별도 persons 테이블 없음 (MVP)"
   - "persons_enrichment 조인은 순수 온디바이스 Room LEFT JOIN — Railway/Supabase로 연락처 정보 전송 없음"
   - "enrichment 없는 person_ref는 원본값(전화번호/이메일/표시이름)으로 fallback 표시됨 — 크래시 없음"
+  - "voice detail은 transcript viewer가 아니라 commitment evidence viewer다 — full transcript는 저장/표시하지 않는다"

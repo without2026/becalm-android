@@ -18,9 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -53,13 +51,32 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 public fun NotificationPermissionScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    sdkIntOverride: Int? = null,
+    onAdvance: (() -> Unit)? = null,
+    onMarkStepStatus: ((StepStatus) -> Unit)? = null,
+    onGrantPermission: (() -> Unit)? = null,
+    onSkip: (() -> Unit)? = null,
 ) {
+    val onboardingViewModel = if (
+        onMarkStepStatus == null ||
+            onGrantPermission == null ||
+            onSkip == null
+    ) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        viewModel
+    }
+    val sdkInt = sdkIntOverride ?: Build.VERSION.SDK_INT
+    val advance = onAdvance ?: { navController.navigate(BecalmRoute.OnboardingBattery.path) }
+
     // API 32 and below — permission is implicit; self-skip to keep the flow linear.
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+    if (sdkInt < Build.VERSION_CODES.TIRAMISU) {
         LaunchedEffect(Unit) {
-            viewModel.onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, StepStatus.SKIPPED)
-            navController.navigate(BecalmRoute.OnboardingBattery.path)
+            (onMarkStepStatus
+                ?: { status -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
+                )(StepStatus.SKIPPED)
+            advance()
         }
         return
     }
@@ -68,60 +85,78 @@ public fun NotificationPermissionScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
-        viewModel.onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status)
-        navController.navigate(BecalmRoute.OnboardingBattery.path)
+        (onMarkStepStatus
+            ?: { stepStatus -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, stepStatus) }
+            )(status)
+        advance()
+    }
+    val requestPermission = onGrantPermission ?: { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+    val skip = onSkip ?: {
+        (onMarkStepStatus
+            ?: { status -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
+            )(StepStatus.SKIPPED)
+        advance()
     }
 
     BecalmScaffold(title = stringResource(R.string.onb_notifications_title)) { padding ->
+        NotificationPermissionContent(
+            onGrant = requestPermission,
+            onSkip = skip,
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+@Composable
+internal fun NotificationPermissionContent(
+    onGrant: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 24.dp)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.onb_notifications_headline),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         Column(
             modifier = Modifier
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 24.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxWidth()
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(16.dp),
         ) {
             Text(
-                text = stringResource(R.string.onb_notifications_headline),
-                style = MaterialTheme.typography.headlineSmall,
+                text = stringResource(R.string.onb_notifications_body),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(16.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.onb_notifications_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.onb_notifications_rationale),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-            BecalmButton(
-                text = stringResource(R.string.action_grant),
-                onClick = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                variant = BecalmButtonVariant.Primary,
-                modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(12.dp))
-            BecalmButton(
-                text = stringResource(R.string.action_skip),
-                onClick = {
-                    viewModel.onSkipStep(OnboardingStep.NOTIFICATION_PERM)
-                    navController.navigate(BecalmRoute.OnboardingBattery.path)
-                },
-                variant = BecalmButtonVariant.Text,
+            Text(
+                text = stringResource(R.string.onb_notifications_rationale),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Spacer(modifier = Modifier.height(32.dp))
+        BecalmButton(
+            text = stringResource(R.string.action_grant),
+            onClick = onGrant,
+            variant = BecalmButtonVariant.Primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        BecalmButton(
+            text = stringResource(R.string.action_skip),
+            onClick = onSkip,
+            variant = BecalmButtonVariant.Text,
+        )
     }
 }
 
@@ -129,6 +164,9 @@ public fun NotificationPermissionScreen(
 @Composable
 private fun PreviewNotificationPermissionScreen() {
     BecalmTheme {
-        NotificationPermissionScreen(navController = rememberNavController())
+        NotificationPermissionContent(
+            onGrant = {},
+            onSkip = {},
+        )
     }
 }

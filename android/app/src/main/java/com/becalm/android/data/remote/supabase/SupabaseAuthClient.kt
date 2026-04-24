@@ -124,7 +124,10 @@ public class SupabaseAuthClientImpl @Inject constructor(
     override suspend fun signInWithEmail(
         email: String,
         password: String,
-    ): BecalmResult<SupabaseSession> = runCatchingAuth("signInWithEmail") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth(
+        tag = "signInWithEmail",
+        restExceptionMapper = ::mapEmailSignInRestException,
+    ) {
         client.auth.signInWith(Email) {
             this.email = email
             this.password = password
@@ -136,7 +139,10 @@ public class SupabaseAuthClientImpl @Inject constructor(
 
     override suspend fun signInWithGoogleIdToken(
         idToken: String,
-    ): BecalmResult<SupabaseSession> = runCatchingAuth("signInWithGoogleIdToken") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth(
+        tag = "signInWithGoogleIdToken",
+        restExceptionMapper = ::mapDefaultRestException,
+    ) {
         client.auth.signInWith(IDToken) {
             provider = Google
             this.idToken = idToken
@@ -148,7 +154,10 @@ public class SupabaseAuthClientImpl @Inject constructor(
 
     override suspend fun refresh(
         refreshToken: String,
-    ): BecalmResult<SupabaseSession> = runCatchingAuth("refresh") {
+    ): BecalmResult<SupabaseSession> = runCatchingAuth(
+        tag = "refresh",
+        restExceptionMapper = ::mapDefaultRestException,
+    ) {
         // supabase-kt 2.6.0: with autoLoadFromStorage=false the client holds no in-memory
         // session after process restart or a cold 401. We must import a minimal UserSession
         // so that refreshCurrentSession() knows which refresh token to exchange.
@@ -174,6 +183,15 @@ public class SupabaseAuthClientImpl @Inject constructor(
         // Best-effort: a network failure during sign-out must not block the local wipe
         // orchestrated by AuthRepository (SP-16).
         return try {
+            client.auth.importSession(
+                UserSession(
+                    accessToken = accessToken,
+                    refreshToken = "",
+                    expiresIn = 0L,
+                    tokenType = "bearer",
+                    user = null,
+                )
+            )
             client.auth.signOut(scope = SignOutScope.LOCAL)
             logger.d(TAG, "server sign-out succeeded")
             BecalmResult.Success(Unit)
@@ -212,11 +230,12 @@ public class SupabaseAuthClientImpl @Inject constructor(
      */
     private suspend fun <T> runCatchingAuth(
         tag: String,
+        restExceptionMapper: (RestException) -> BecalmError,
         block: suspend () -> T,
     ): BecalmResult<T> = try {
         BecalmResult.Success(block())
     } catch (e: RestException) {
-        val error = mapRestException(e)
+        val error = restExceptionMapper(e)
         logger.e(TAG, "[$tag] RestException ${e.statusCode}: ${e.message}")
         BecalmResult.Failure(error)
     } catch (e: IOException) {
@@ -227,7 +246,12 @@ public class SupabaseAuthClientImpl @Inject constructor(
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
 
-    private fun mapRestException(e: RestException): BecalmError = when (e.statusCode) {
+    private fun mapEmailSignInRestException(e: RestException): BecalmError = when (e.statusCode) {
+        400, 401 -> BecalmError.Unauthorized
+        else -> mapDefaultRestException(e)
+    }
+
+    private fun mapDefaultRestException(e: RestException): BecalmError = when (e.statusCode) {
         401 -> BecalmError.Unauthorized
         429 -> BecalmError.RateLimited(retryAfterSeconds = null)
         in 500..599 -> BecalmError.ServerError(code = e.statusCode, body = e.message)

@@ -45,13 +45,14 @@ public data class VoiceErrorEnvelope(
  * Response body for a successful POST /v1/voice/transcribe_extract (HTTP 200).
  *
  * Wire format (api-contract.yml):
- *   { raw_event_id, commitments: CommitmentDraft[], model, region }
+ *   { raw_event_id, items: VoiceExtractItem[], model, region, raw_model_text? }
  *
  * @property rawEventId Server-side UUID of the raw_ingestion_event row that was updated.
- * @property commitments List of extracted commitment drafts; may be empty when no
- *   commitments were detected in the audio.
+ * @property items List of extracted business-call items; may be empty when no
+ *   trackable items were detected in the audio.
  * @property model LLM model identifier used for extraction (e.g. "gemini-2.5-flash").
- * @property region Vertex AI region used for the call (e.g. "asia-northeast3").
+ * @property region Vertex AI region used for the call (e.g. "us-central1").
+ * @property rawModelText Raw JSON text returned by the model for debug/inspection.
  *
  * Spec refs: VOI-001, VOI-002, VOI-003.
  */
@@ -60,20 +61,100 @@ public data class TranscribeExtractResponse(
     /** Server-assigned UUID of the updated raw_ingestion_event row. */
     @field:Json(name = "raw_event_id") val rawEventId: String,
 
-    /** Commitments extracted from the audio by the LLM. Empty list when none detected. */
-    @field:Json(name = "commitments") val commitments: List<CommitmentDraftDto>,
+    /** Extracted structured items from the audio by the LLM. Empty list when none detected. */
+    @field:Json(name = "items") val items: List<VoiceExtractItemDto>,
 
     /** Model identifier used for extraction, e.g. "gemini-2.5-flash". */
     @field:Json(name = "model") val model: String,
 
-    /** Vertex AI region, e.g. "asia-northeast3". */
+    /** Vertex AI region, e.g. "us-central1". */
     @field:Json(name = "region") val region: String,
-)
+
+    /** Raw model JSON text for diagnostics. Optional because older backends omit it. */
+    @field:Json(name = "raw_model_text") val rawModelText: String? = null,
+) {
+    /** Source-of-truth action subset used by the current Room commitment pipeline. */
+    public val actionItems: List<VoiceExtractItemDto>
+        get() = items.filter { it.type == VoiceItemType.ACTION }
+
+    /**
+     * Compatibility projection for legacy callers that still only persist actionable commitments.
+     * Only `type=action` items are projected.
+     */
+    public val commitments: List<CommitmentDraftDto>
+        get() = actionItems.mapNotNull { it.toCommitmentDraftOrNull() }
+}
+
+public object VoiceItemType {
+    public const val ACTION: String = "action"
+    public const val SCHEDULE: String = "schedule"
+    public const val DECISION: String = "decision"
+}
+
+public object ScheduleStatus {
+    public const val CONFIRMED: String = "confirmed"
+    public const val CHANGED: String = "changed"
+    public const val POSTPONED: String = "postponed"
+    public const val CANCELLED: String = "cancelled"
+    public const val FOLLOW_UP: String = "follow_up"
+}
+
+public object DecisionStatus {
+    public const val APPROVED: String = "approved"
+    public const val REJECTED: String = "rejected"
+    public const val CHOSEN: String = "chosen"
+    public const val DEFERRED: String = "deferred"
+    public const val ONGOING: String = "ongoing"
+}
 
 /**
- * Wire-level DTO for a single commitment extracted from audio.
+ * Wire-level DTO for a single extracted business-call item.
+ */
+@JsonClass(generateAdapter = true)
+public data class VoiceExtractItemDto(
+    @field:Json(name = "type") val type: String,
+    @field:Json(name = "text") val text: String,
+    @field:Json(name = "quote") val quote: String,
+    @field:Json(name = "person_ref") val personRef: String?,
+    @field:KstInstant @field:Json(name = "due_at") val dueAt: Instant?,
+    @field:Json(name = "due_hint") val dueHint: String? = null,
+    @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean = false,
+    @field:Json(name = "confidence") val confidence: Float,
+    @field:Json(name = "direction") val direction: String? = null,
+    @field:Json(name = "schedule_status") val scheduleStatus: String? = null,
+    @field:Json(name = "decision_status") val decisionStatus: String? = null,
+) {
+    /**
+     * Legacy projection for current Room commitment persistence. Non-action items are ignored.
+     */
+    public fun toCommitmentDraftOrNull(): CommitmentDraftDto? {
+        if (type != VoiceItemType.ACTION) return null
+        val resolvedDirection = when (direction?.lowercase()) {
+            "take" -> "take"
+            "give" -> "give"
+            else -> return null
+        }
+        return CommitmentDraftDto(
+            direction = resolvedDirection,
+            text = text,
+            quote = quote,
+            personRef = personRef,
+            dueAt = dueAt,
+            dueHint = dueHint,
+            dueIsApproximate = dueIsApproximate,
+            confidence = confidence,
+        )
+    }
+}
+
+/**
+ * Legacy action-projection DTO shared by the current voice compatibility layer and
+ * on-device email extraction.
  *
- * Mirrors the `CommitmentDraft` shared type in api-contract.yml.
+ * This is no longer the primary Railway wire shape for voice. The source-of-truth
+ * contract is `items[]` + `type`, and only `type=action` items are projected into this
+ * DTO so the existing Room commitment pipeline can remain stable while the richer
+ * voice schema rolls out.
  *
  * @property direction Commitment direction: "give" (user owes) or "take" (counterparty owes).
  * @property text Short summary of the commitment (1–2 sentences).

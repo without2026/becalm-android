@@ -9,12 +9,11 @@ import com.becalm.android.ui.components.SourceStatusChip
 /**
  * Source-type display order for the TDY-003 strip.
  *
- * Exactly six entries per CTO Q7 (voice excluded). Order matches the spec precondition
- * listing in `.spec/today-timeline.spec.yml` TDY-003:
- * `voice/gmail/outlook_mail/imap/google_calendar/outlook_calendar` with `imap` expanded
- * to the two concrete IMAP sources (naver, daum) and `voice` dropped.
+ * Seven user-facing entries in current spec order:
+ * `voice/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar`.
  */
 internal val CHIP_ORDER: List<String> = listOf(
+    SourceType.VOICE,
     SourceType.GMAIL,
     SourceType.OUTLOOK_MAIL,
     SourceType.NAVER_IMAP,
@@ -24,7 +23,7 @@ internal val CHIP_ORDER: List<String> = listOf(
 )
 
 /**
- * Projects the per-source map from [TodayUiState] into six [SourceStatusChip] rows
+ * Projects the per-source map from [TodayUiState] into seven [SourceStatusChip] rows
  * in display order (pure function; covered by `TodayChipsTest`).
  *
  * Mapping priority per TDY-003:
@@ -36,7 +35,7 @@ internal val CHIP_ORDER: List<String> = listOf(
  * 5. All other cases (including CONNECTED without a timestamp, NEVER_CONNECTED)
  *    → [ChipState.Idle] (neutral gray).
  *
- * Voice is never emitted — [CHIP_ORDER] filters it out per CTO Q7.
+ * [SourceType.CALL_RECORDING] is never emitted — it remains schema-only for wave 0.
  */
 internal fun buildChips(sourceStatus: Map<String, SourceStatusUi>): List<SourceStatusChip> =
     CHIP_ORDER.map { sourceType ->

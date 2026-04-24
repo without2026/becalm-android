@@ -17,12 +17,14 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.email.EmailPromptBuilder
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.QuotedBlockSplitter
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.domain.extractor.GeminiNanoExtractor
+import com.becalm.android.worker.ProcessingPauseGate
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -97,10 +99,14 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
     private val promptBuilder: EmailPromptBuilder,
     private val quotedBlockSplitter: QuotedBlockSplitter,
     private val geminiNanoExtractor: GeminiNanoExtractor,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
         val rawEventId = inputData.getString(KEY_RAW_EVENT_ID)
         if (rawEventId.isNullOrBlank()) {
             logger.e(TAG, "missing rawEventId input — failing")
@@ -242,6 +248,13 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG: String = "CommitmentExtractionWorker"
+
+        /**
+         * MAN-006 test seam: extraction workers only accept sources that can appear on
+         * raw_ingestion_events. `manual` has no backing raw row, so this returns false.
+         */
+        public fun supportsRawEventSource(sourceType: String): Boolean =
+            SourceType.isRawIngestionSource(sourceType)
 
         /** WorkManager input [androidx.work.Data] key — UUID of the raw ingestion event. */
         public const val KEY_RAW_EVENT_ID: String = "rawEventId"

@@ -22,7 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
@@ -96,41 +96,51 @@ public fun RawEventDetailSheet(
                     modifier = Modifier.padding(padding),
                 )
             }
-            state.sourceType != null -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(padding)
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .glassPanel(MaterialTheme.shapes.medium)
-                            .padding(16.dp),
-                    ) {
-                        if (state.sourceType in EMAIL_SOURCE_TYPES) {
-                            EmailEventDetailSection(
-                                state = state,
-                                onViewOriginalRequested = {
-                                    Toast.makeText(
-                                        context,
-                                        viewOriginalToast,
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                },
-                            )
-                        } else {
-                            NonEmailEventDetailSection(state = state)
-                        }
-                    }
-                }
-            }
+            state.sourceType != null -> RawEventDetailContent(
+                state = state,
+                onViewOriginalRequested = {
+                    Toast.makeText(
+                        context,
+                        viewOriginalToast,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                modifier = Modifier.padding(padding),
+            )
             else -> {
                 EmptyState(
                     title = stringResource(R.string.raw_event_detail_not_found),
                     modifier = Modifier.padding(padding),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun RawEventDetailContent(
+    state: RawEventDetailUiState,
+    onViewOriginalRequested: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(16.dp),
+        ) {
+            if (state.sourceType in EMAIL_SOURCE_TYPES) {
+                EmailEventDetailSection(
+                    state = state,
+                    onViewOriginalRequested = onViewOriginalRequested,
+                )
+            } else {
+                NonEmailEventDetailSection(state = state)
             }
         }
     }

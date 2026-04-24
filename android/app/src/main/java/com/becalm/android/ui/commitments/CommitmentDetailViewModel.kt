@@ -6,14 +6,17 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -22,6 +25,38 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+
+public enum class CommitmentSheetAction {
+    REMIND,
+    FOLLOW_UP,
+    COMPLETE,
+    CANCEL,
+}
+
+public data class CommitmentDetailActionState(
+    val availableActions: Set<CommitmentSheetAction> = emptySet(),
+    val editEnabled: Boolean = false,
+)
+
+public data class CommitmentSourcePresentation(
+    val isManual: Boolean = false,
+    val sourceTitle: String? = null,
+    val sourceOccurredAt: Instant? = null,
+    val sourceLabel: String = "",
+)
+
+public data class CommitmentHistoryPresentation(
+    val lastEditedAt: Instant? = null,
+    val lastEditedLabel: String? = null,
+    val disputeRaisedAt: Instant? = null,
+    val disputedLabel: String? = null,
+    val showSupersedeLink: Boolean = false,
+)
+
+public sealed interface CommitmentDetailEffect {
+    public data class OpenEdit(val commitmentId: String) : CommitmentDetailEffect
+}
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
@@ -41,8 +76,12 @@ import kotlinx.coroutines.launch
  */
 public data class DetailUiState(
     val entity: CommitmentEntity? = null,
+    val quote: String = "",
     val counterpartyDisplayName: String? = null,
     val actionState: CommitmentState = CommitmentState.PENDING,
+    val source: CommitmentSourcePresentation = CommitmentSourcePresentation(),
+    val actionButtons: CommitmentDetailActionState = CommitmentDetailActionState(),
+    val history: CommitmentHistoryPresentation = CommitmentHistoryPresentation(),
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -50,7 +89,6 @@ public data class DetailUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "CommitmentDetailVM"
-private const val COUNTERPARTY_DISPLAY_MAX = 30
 
 /**
  * ViewModel for [CommitmentDetailSheet] (CMT-003 + EDIT-008 + MAN-004).
@@ -88,6 +126,14 @@ public class CommitmentDetailViewModel @Inject constructor(
     /** Current UI state; starts loading and settles on the first Room emission. */
     public val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
 
+    private val _effects: MutableSharedFlow<CommitmentDetailEffect> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    public val effects: SharedFlow<CommitmentDetailEffect> = _effects.asSharedFlow()
+
     init {
         if (id.isEmpty()) {
             _uiState.update {
@@ -95,6 +141,12 @@ public class CommitmentDetailViewModel @Inject constructor(
             }
         } else {
             observe()
+        }
+    }
+
+    public fun onEditClick() {
+        if (_uiState.value.actionButtons.editEnabled) {
+            _effects.tryEmit(CommitmentDetailEffect.OpenEdit(id))
         }
     }
 
@@ -123,50 +175,11 @@ public class CommitmentDetailViewModel @Inject constructor(
                 }
                 .collect { (entity, enrichment) ->
                     if (entity == null) {
-                        // Row absent or soft-deleted — surface the "삭제된 약속" empty
-                        // state per plan §5.3. Loading flips to false so the sheet
-                        // swaps out the spinner for the empty message immediately.
-                        _uiState.update {
-                            it.copy(
-                                entity = null,
-                                counterpartyDisplayName = null,
-                                loading = false,
-                                error = EMPTY_ERROR_KEY,
-                            )
-                        }
+                        _uiState.value = CommitmentDetailProjector.buildMissingState()
                     } else {
-                        _uiState.update {
-                            it.copy(
-                                entity = entity,
-                                counterpartyDisplayName =
-                                    resolveCounterpartyDisplay(entity, enrichment),
-                                actionState = CommitmentState.fromWire(entity.actionState),
-                                loading = false,
-                                error = null,
-                            )
-                        }
+                        _uiState.value = CommitmentDetailProjector.buildLoadedState(entity, enrichment)
                     }
                 }
-        }
-    }
-
-    /**
-     * CMT-001 counterparty display resolution — mirrors the fallback chain used by
-     * [CommitmentManagementViewModel.resolveCounterpartyDisplay] so the detail sheet
-     * and the card show the same label. Intentionally duplicated rather than shared
-     * via a UseCase because the rule is 8 lines and the two VMs will diverge as
-     * edit-flow-specific logic lands.
-     */
-    private fun resolveCounterpartyDisplay(
-        commitment: CommitmentEntity,
-        enrichment: Map<String, PersonEnrichmentEntity>,
-    ): String? {
-        val ref = commitment.personRef
-        return if (ref != null) {
-            val hit = enrichment[ref]
-            hit?.displayName ?: hit?.nickname ?: ref
-        } else {
-            commitment.counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)
         }
     }
 

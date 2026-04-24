@@ -2,6 +2,7 @@ package com.becalm.android.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
@@ -11,7 +12,10 @@ import com.becalm.android.data.repository.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -50,12 +54,18 @@ public sealed class AuthUiState {
      *
      * @param message Human-readable description of the error.
      */
-    public data class Error(val message: String) : AuthUiState()
+public data class Error(val message: String) : AuthUiState()
+}
+
+/** One-shot effects emitted by [AuthViewModel]. */
+public sealed interface AuthEffect {
+    public data object FinishApp : AuthEffect
 }
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "AuthViewModel"
+private const val INVALID_EMAIL_PASSWORD_MESSAGE = "Invalid email or password"
 
 /**
  * ViewModel for the authentication flow.
@@ -74,9 +84,13 @@ public class AuthViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<AuthUiState> = MutableStateFlow(AuthUiState.Loading)
+    private val _effects: MutableSharedFlow<AuthEffect> = MutableSharedFlow(extraBufferCapacity = 1)
 
     /** Current authentication UI state. Never null; starts as [AuthUiState.Loading]. */
     public val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
+
+    /** One-shot authentication effects such as AUTH-006 app finish. */
+    public val effects: SharedFlow<AuthEffect> = _effects.asSharedFlow()
 
     init {
         onObserveSession()
@@ -102,7 +116,11 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-in failed")
-                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
+                    val message = when (result.error) {
+                        is BecalmError.Unauthorized -> INVALID_EMAIL_PASSWORD_MESSAGE
+                        else -> result.error.safeMessage
+                    }
+                    _uiState.value = AuthUiState.Error(message)
                 }
             }
         }
@@ -166,6 +184,17 @@ public class AuthViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    // spec: AUTH-006
+    /**
+     * Explicit decline path from the Terms screen.
+     *
+     * Emits a one-shot [AuthEffect.FinishApp] so the screen layer can close the
+     * current activity without baking `finish()` calls into the composable itself.
+     */
+    public fun onDeclineTerms() {
+        _effects.tryEmit(AuthEffect.FinishApp)
     }
 
     // spec: AUTH-003, AUTH-004, AUTH-006, AUTH-007

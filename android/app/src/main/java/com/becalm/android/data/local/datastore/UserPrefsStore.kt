@@ -6,8 +6,13 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.becalm.android.data.remote.dto.SourceType
+import kotlinx.datetime.Instant
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 
 // ─── Interface ───────────────────────────────────────────────────────────────
@@ -68,6 +73,42 @@ public interface UserPrefsStore {
      * @param completed `true` when the user has finished onboarding; `false` to reset.
      */
     public suspend fun setOnboardingCompleted(completed: Boolean)
+
+    /** Emits the epoch-millisecond timestamp when Stage 1 first completed, or null. */
+    public fun observeColdSyncStage1CompletedAt(): Flow<Long?>
+
+    /** Persists the Stage 1 completion timestamp, or clears it with null. */
+    public suspend fun setColdSyncStage1CompletedAt(epochMs: Long?)
+
+    /** Emits whether Stage 1 was deferred via [나중에 하기]. */
+    public fun observeColdSyncStage1Deferred(): Flow<Boolean>
+
+    /** Persists the Stage 1 deferred flag. */
+    public suspend fun setColdSyncStage1Deferred(deferred: Boolean)
+
+    /** Emits the epoch-millisecond timestamp when Stage 1 was deferred, or null. */
+    public fun observeColdSyncDeferredAt(): Flow<Long?>
+
+    /** Persists the Stage 1 deferred timestamp, or clears it with null. */
+    public suspend fun setColdSyncDeferredAt(epochMs: Long?)
+
+    /** Emits the epoch-millisecond timestamp when Stage 2 completed, or null. */
+    public fun observeColdSyncStage2CompletedAt(): Flow<Long?>
+
+    /** Persists the Stage 2 completion timestamp, or clears it with null. */
+    public suspend fun setColdSyncStage2CompletedAt(epochMs: Long?)
+
+    /** Emits whether Stage 2 was explicitly deferred by the user. */
+    public fun observeColdSyncStage2Deferred(): Flow<Boolean>
+
+    /** Persists the Stage 2 deferred flag. */
+    public suspend fun setColdSyncStage2Deferred(deferred: Boolean)
+
+    /** Emits the persistable SAF tree URI granted for the Recordings folder, or null. */
+    public fun observeRecordingFolderTreeUri(): Flow<String?>
+
+    /** Persists or clears the Recordings SAF tree URI grant. */
+    public suspend fun setRecordingFolderTreeUri(uri: String?)
 
     /**
      * Emits the current theme mode preference.
@@ -155,6 +196,24 @@ public interface UserPrefsStore {
      */
     public suspend fun setThirdPartyProvisionConsent(granted: Boolean)
 
+    /** Emits whether all background processing is temporarily paused (PIPA-004). */
+    public fun observeProcessingPaused(): Flow<Boolean>
+
+    /** Persists the processing-paused flag (PIPA-004). */
+    public suspend fun setProcessingPaused(paused: Boolean)
+
+    /** Emits the epoch-millisecond timestamp when processing was paused, or null. */
+    public fun observePauseStartedAt(): Flow<Long?>
+
+    /** Persists the processing-paused start time, or clears it with null. */
+    public suspend fun setPauseStartedAt(epochMs: Long?)
+
+    /** Emits the append-only local PIPA action log, newest-first. */
+    public fun observePipaActionLog(): Flow<List<PipaActionLogEntry>>
+
+    /** Appends a local-only PIPA activity-log entry. */
+    public suspend fun appendPipaActionLog(entry: PipaActionLogEntry)
+
     /**
      * Emits whether the user has accepted the terms of service.
      *
@@ -168,12 +227,24 @@ public interface UserPrefsStore {
      */
     public suspend fun setTermsAccepted(accepted: Boolean)
 
-    /**
-     * Emits the set of source-type strings the user has enabled for ingestion.
-     *
-     * Stub (SP-14.1): always emits an empty set until the full source-enable UI is built.
-     */
+    /** Emits the set of source-type strings the user has enabled for foreground ingestion. */
     public fun observeEnabledSources(): Flow<Set<String>>
+
+    /**
+     * Emits whether the non-email [sourceType] is enabled for ingestion.
+     *
+     * Supported values: `voice`, `google_calendar`, `outlook_calendar`.
+     * Email sources continue to use [observeEmailSourceConnected].
+     */
+    public fun observeSourceEnabled(sourceType: String): Flow<Boolean>
+
+    /**
+     * Persists whether the non-email [sourceType] is enabled for ingestion.
+     *
+     * Supported values: `voice`, `google_calendar`, `outlook_calendar`.
+     * Email sources continue to use [setEmailSourceConnected].
+     */
+    public suspend fun setSourceEnabled(sourceType: String, enabled: Boolean)
 
     /**
      * Emits `true` once the one-shot legacy-to-namespaced [ImapCredentialStore]
@@ -297,6 +368,13 @@ public enum class EmailPipaProvider(public val storageKey: String) {
     }
 }
 
+/** Local-only activity-log row for PIPA rights execution (PIPA-007). */
+public data class PipaActionLogEntry(
+    val action: String,
+    val timestampIso: String,
+    val details: Map<String, String> = emptyMap(),
+)
+
 // ─── Implementation ──────────────────────────────────────────────────────────
 
 /**
@@ -328,6 +406,9 @@ public enum class EmailPipaProvider(public val storageKey: String) {
  * | Onboarding completed             | `onboarding_completed`           | false   |
  * | PIPA third-party consent (voice) | `pipa_third_party_consent`       | false   |
  * | PIPA consent timestamp millis    | `pipa_consent_timestamp_millis`  | null    |
+ * | Processing paused                | `processing_paused`              | false   |
+ * | Processing pause started at      | `pause_started_at`               | null    |
+ * | PIPA action log (JSON array)     | `pipa_action_log`                | []      |
  * | Per-provider PIPA consent        | `pipa_email_<provider>_consent`  | false   |
  * | Per-provider PIPA consent at     | `pipa_email_<provider>_consent_at` | null  |
  * | Per-provider source connected    | `<provider>_connected`           | false   |
@@ -350,26 +431,48 @@ public class UserPrefsStoreImpl @Inject constructor(
     // `user_<hash>_<base>` key names where <hash> is the first 16 hex chars of the
     // signed-in user's SHA-256 UUID — identical to the Room filename suffix
     // [BeCalmDatabase.deriveUserIdHash] applies.
-    private fun userOnboardingCompletedKey(userId: String) =
-        booleanPreferencesKey(namespaced(userId, "onboarding_completed"))
-
-    private fun userPipaThirdPartyConsentKey(userId: String) =
-        booleanPreferencesKey(namespaced(userId, "pipa_third_party_consent"))
-
-    private fun userPipaConsentTimestampKey(userId: String) =
-        longPreferencesKey(namespaced(userId, "pipa_consent_timestamp_millis"))
-
-    private fun emailPipaConsentKey(userId: String, provider: EmailPipaProvider) =
-        booleanPreferencesKey(namespaced(userId, "pipa_email_${provider.storageKey}_consent"))
-
-    private fun emailPipaConsentAtKey(userId: String, provider: EmailPipaProvider) =
-        longPreferencesKey(namespaced(userId, "pipa_email_${provider.storageKey}_consent_at"))
-
-    private fun emailSourceConnectedKey(userId: String, provider: EmailPipaProvider) =
-        booleanPreferencesKey(namespaced(userId, "${provider.storageKey}_connected"))
+    private fun userScoped(userId: String): UserScopedPrefsKeys = UserScopedPrefsKeys(userId)
 
     private fun namespaced(userId: String, base: String): String =
         "user_${com.becalm.android.data.local.db.BeCalmDatabase.deriveUserIdHash(userId)}_$base"
+
+    private fun observeUserBoolean(
+        default: Boolean,
+        keyFor: UserScopedPrefsKeys.() -> Preferences.Key<Boolean>,
+    ): Flow<Boolean> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map default
+            prefs[userScoped(userId).keyFor()] ?: default
+        }
+
+    private fun observeUserLong(
+        keyFor: UserScopedPrefsKeys.() -> Preferences.Key<Long>,
+    ): Flow<Long?> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map null
+            prefs[userScoped(userId).keyFor()]
+        }
+
+    private suspend fun editUserBoolean(
+        value: Boolean,
+        keyFor: UserScopedPrefsKeys.() -> Preferences.Key<Boolean>,
+    ) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[userScoped(userId).keyFor()] = value
+        }
+    }
+
+    private suspend fun editUserLong(
+        value: Long?,
+        keyFor: UserScopedPrefsKeys.() -> Preferences.Key<Long>,
+    ) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).keyFor()
+            if (value == null) prefs.remove(key) else prefs[key] = value
+        }
+    }
 
     override fun observeCurrentUserId(): Flow<String?> =
         dataStore.data.map { it[currentUserIdKey] }
@@ -378,15 +481,55 @@ public class UserPrefsStoreImpl @Inject constructor(
         dataStore.editNullable(currentUserIdKey, userId)
 
     override fun observeOnboardingCompleted(): Flow<Boolean> =
-        dataStore.data.map { prefs ->
-            val userId = prefs[currentUserIdKey] ?: return@map false
-            prefs[userOnboardingCompletedKey(userId)] ?: false
-        }
+        observeUserBoolean(default = false) { onboardingCompletedKey }
 
     override suspend fun setOnboardingCompleted(completed: Boolean) {
+        editUserBoolean(completed) { onboardingCompletedKey }
+    }
+
+    override fun observeColdSyncStage1CompletedAt(): Flow<Long?> =
+        observeUserLong { coldSyncStage1CompletedAtKey }
+
+    override suspend fun setColdSyncStage1CompletedAt(epochMs: Long?) =
+        editUserLong(epochMs) { coldSyncStage1CompletedAtKey }
+
+    override fun observeColdSyncStage1Deferred(): Flow<Boolean> =
+        observeUserBoolean(default = false) { coldSyncStage1DeferredKey }
+
+    override suspend fun setColdSyncStage1Deferred(deferred: Boolean) {
+        editUserBoolean(deferred) { coldSyncStage1DeferredKey }
+    }
+
+    override fun observeColdSyncDeferredAt(): Flow<Long?> =
+        observeUserLong { coldSyncDeferredAtKey }
+
+    override suspend fun setColdSyncDeferredAt(epochMs: Long?) =
+        editUserLong(epochMs) { coldSyncDeferredAtKey }
+
+    override fun observeColdSyncStage2CompletedAt(): Flow<Long?> =
+        observeUserLong { coldSyncStage2CompletedAtKey }
+
+    override suspend fun setColdSyncStage2CompletedAt(epochMs: Long?) =
+        editUserLong(epochMs) { coldSyncStage2CompletedAtKey }
+
+    override fun observeColdSyncStage2Deferred(): Flow<Boolean> =
+        observeUserBoolean(default = false) { coldSyncStage2DeferredKey }
+
+    override suspend fun setColdSyncStage2Deferred(deferred: Boolean) {
+        editUserBoolean(deferred) { coldSyncStage2DeferredKey }
+    }
+
+    override fun observeRecordingFolderTreeUri(): Flow<String?> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map null
+            prefs[userScoped(userId).recordingFolderTreeUriKey]
+        }
+
+    override suspend fun setRecordingFolderTreeUri(uri: String?) {
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
-            prefs[userOnboardingCompletedKey(userId)] = completed
+            val key = userScoped(userId).recordingFolderTreeUriKey
+            if (uri == null) prefs.remove(key) else prefs[key] = uri
         }
     }
 
@@ -417,20 +560,47 @@ public class UserPrefsStoreImpl @Inject constructor(
     }
 
     override fun observeThirdPartyProvisionConsent(): Flow<Boolean> =
-        dataStore.data.map { prefs ->
-            val userId = prefs[currentUserIdKey] ?: return@map false
-            prefs[userPipaThirdPartyConsentKey(userId)] ?: false
-        }
+        observeUserBoolean(default = false) { pipaThirdPartyConsentKey }
 
     override suspend fun setThirdPartyProvisionConsent(granted: Boolean) {
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
-            prefs[userPipaThirdPartyConsentKey(userId)] = granted
+            val keys = userScoped(userId)
+            prefs[keys.pipaThirdPartyConsentKey] = granted
             if (granted) {
-                prefs[userPipaConsentTimestampKey(userId)] = System.currentTimeMillis()
+                prefs[keys.pipaConsentTimestampKey] = System.currentTimeMillis()
             } else {
-                prefs.remove(userPipaConsentTimestampKey(userId))
+                prefs.remove(keys.pipaConsentTimestampKey)
             }
+        }
+    }
+
+    override fun observeProcessingPaused(): Flow<Boolean> =
+        observeUserBoolean(default = false) { processingPausedKey }
+
+    override suspend fun setProcessingPaused(paused: Boolean) {
+        editUserBoolean(paused) { processingPausedKey }
+    }
+
+    override fun observePauseStartedAt(): Flow<Long?> =
+        observeUserLong { pauseStartedAtKey }
+
+    override suspend fun setPauseStartedAt(epochMs: Long?) =
+        editUserLong(epochMs) { pauseStartedAtKey }
+
+    override fun observePipaActionLog(): Flow<List<PipaActionLogEntry>> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map emptyList()
+            decodePipaActionLog(prefs[userScoped(userId).pipaActionLogKey])
+        }
+
+    override suspend fun appendPipaActionLog(entry: PipaActionLogEntry) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).pipaActionLogKey
+            val existing = decodePipaActionLog(prefs[key]).toMutableList()
+            existing.add(0, entry)
+            prefs[key] = encodePipaActionLog(existing)
         }
     }
 
@@ -441,9 +611,42 @@ public class UserPrefsStoreImpl @Inject constructor(
         dataStore.edit { prefs -> prefs[termsAcceptedKey] = accepted }
     }
 
-    // Stub (SP-14.1): always emits empty set until the source-enable UI lands.
     override fun observeEnabledSources(): Flow<Set<String>> =
-        kotlinx.coroutines.flow.flowOf(emptySet())
+        combine(
+            observeSourceEnabled(SourceType.VOICE),
+            observeEmailSourceConnected(EmailPipaProvider.GMAIL),
+            observeEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL),
+            observeEmailSourceConnected(EmailPipaProvider.NAVER_IMAP),
+            observeEmailSourceConnected(EmailPipaProvider.DAUM_IMAP),
+            observeSourceEnabled(SourceType.GOOGLE_CALENDAR),
+            observeSourceEnabled(SourceType.OUTLOOK_CALENDAR),
+        ) { values ->
+            buildSet {
+                if (values[0]) add(SourceType.VOICE)
+                if (values[1]) add(SourceType.GMAIL)
+                if (values[2]) add(SourceType.OUTLOOK_MAIL)
+                if (values[3]) add(SourceType.NAVER_IMAP)
+                if (values[4]) add(SourceType.DAUM_IMAP)
+                if (values[5]) add(SourceType.GOOGLE_CALENDAR)
+                if (values[6]) add(SourceType.OUTLOOK_CALENDAR)
+            }
+        }
+
+    override fun observeSourceEnabled(sourceType: String): Flow<Boolean> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[userScoped(userId).sourceEnabledKey(sourceType)] ?: false
+        }
+
+    override suspend fun setSourceEnabled(sourceType: String, enabled: Boolean) {
+        require(sourceType in SUPPORTED_NON_EMAIL_SOURCES) {
+            "setSourceEnabled only supports $SUPPORTED_NON_EMAIL_SOURCES, got '$sourceType'"
+        }
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[userScoped(userId).sourceEnabledKey(sourceType)] = enabled
+        }
+    }
 
     override fun observeImapMigrated(): Flow<Boolean> =
         dataStore.data.map { it[imapCredentialStoreMigratedKey] ?: false }
@@ -455,20 +658,20 @@ public class UserPrefsStoreImpl @Inject constructor(
     override fun observeEmailSourceConnected(provider: EmailPipaProvider): Flow<Boolean> =
         dataStore.data.map { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@map false
-            prefs[emailSourceConnectedKey(userId, provider)] ?: false
+            prefs[userScoped(userId).emailSourceConnectedKey(provider)] ?: false
         }
 
     override suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean) {
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
-            prefs[emailSourceConnectedKey(userId, provider)] = connected
+            prefs[userScoped(userId).emailSourceConnectedKey(provider)] = connected
         }
     }
 
     override fun observeEmailPipaConsent(provider: EmailPipaProvider): Flow<Boolean> =
         dataStore.data.map { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@map false
-            prefs[emailPipaConsentKey(userId, provider)] ?: false
+            prefs[userScoped(userId).emailPipaConsentKey(provider)] ?: false
         }
 
     override suspend fun setEmailPipaConsent(provider: EmailPipaProvider, granted: Boolean) {
@@ -479,13 +682,14 @@ public class UserPrefsStoreImpl @Inject constructor(
         require(providers.isNotEmpty()) { "providers must be non-empty" }
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
+            val keys = userScoped(userId)
             val now = System.currentTimeMillis()
             for (provider in providers) {
-                prefs[emailPipaConsentKey(userId, provider)] = granted
+                prefs[keys.emailPipaConsentKey(provider)] = granted
                 if (granted) {
-                    prefs[emailPipaConsentAtKey(userId, provider)] = now
+                    prefs[keys.emailPipaConsentAtKey(provider)] = now
                 } else {
-                    prefs.remove(emailPipaConsentAtKey(userId, provider))
+                    prefs.remove(keys.emailPipaConsentAtKey(provider))
                 }
             }
         }
@@ -493,5 +697,102 @@ public class UserPrefsStoreImpl @Inject constructor(
 
     override suspend fun clearAll() {
         dataStore.edit { it.clear() }
+    }
+
+    private inner class UserScopedPrefsKeys(userId: String) {
+        private val scopedUserId: String = userId
+
+        private fun booleanKey(base: String) = booleanPreferencesKey(namespaced(scopedUserId, base))
+        private fun longKey(base: String) = longPreferencesKey(namespaced(scopedUserId, base))
+
+        val onboardingCompletedKey: Preferences.Key<Boolean> =
+            booleanKey("onboarding_completed")
+        val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =
+            longKey("cold_sync_stage1_completed_at")
+        val coldSyncStage1DeferredKey: Preferences.Key<Boolean> =
+            booleanKey("cold_sync_stage1_deferred")
+        val coldSyncDeferredAtKey: Preferences.Key<Long> =
+            longKey("cold_sync_deferred_at")
+        val coldSyncStage2CompletedAtKey: Preferences.Key<Long> =
+            longKey("cold_sync_stage2_completed_at")
+        val coldSyncStage2DeferredKey: Preferences.Key<Boolean> =
+            booleanKey("cold_sync_stage2_deferred")
+        val recordingFolderTreeUriKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "recording_folder_tree_uri"))
+        val pipaThirdPartyConsentKey: Preferences.Key<Boolean> =
+            booleanKey("pipa_third_party_consent")
+        val pipaConsentTimestampKey: Preferences.Key<Long> =
+            longKey("pipa_consent_timestamp_millis")
+        val processingPausedKey: Preferences.Key<Boolean> =
+            booleanKey("processing_paused")
+        val pauseStartedAtKey: Preferences.Key<Long> =
+            longKey("pause_started_at")
+        val pipaActionLogKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "pipa_action_log"))
+
+        fun emailPipaConsentKey(provider: EmailPipaProvider): Preferences.Key<Boolean> =
+            booleanKey("pipa_email_${provider.storageKey}_consent")
+
+        fun emailPipaConsentAtKey(provider: EmailPipaProvider): Preferences.Key<Long> =
+            longKey("pipa_email_${provider.storageKey}_consent_at")
+
+        fun emailSourceConnectedKey(provider: EmailPipaProvider): Preferences.Key<Boolean> =
+            booleanKey("${provider.storageKey}_connected")
+
+        fun sourceEnabledKey(sourceType: String): Preferences.Key<Boolean> =
+            booleanKey("${sourceType}_enabled")
+    }
+
+    private fun encodePipaActionLog(entries: List<PipaActionLogEntry>): String =
+        JSONArray().apply {
+            entries.forEach { entry ->
+                put(
+                    JSONObject().apply {
+                        put("action", entry.action)
+                        put("timestamp_iso", entry.timestampIso)
+                        put(
+                            "details",
+                            JSONObject().apply {
+                                entry.details.forEach { (key, value) -> put(key, value) }
+                            },
+                        )
+                    },
+                )
+            }
+        }.toString()
+
+    private fun decodePipaActionLog(raw: String?): List<PipaActionLogEntry> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    val detailsObject = item.optJSONObject("details") ?: JSONObject()
+                    val details = buildMap {
+                        val keys = detailsObject.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            put(key, detailsObject.optString(key))
+                        }
+                    }
+                    add(
+                        PipaActionLogEntry(
+                            action = item.optString("action"),
+                            timestampIso = item.optString("timestamp_iso"),
+                            details = details,
+                        ),
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private companion object {
+        val SUPPORTED_NON_EMAIL_SOURCES: Set<String> = setOf(
+            SourceType.VOICE,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
     }
 }

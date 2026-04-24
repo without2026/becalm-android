@@ -2,6 +2,7 @@
 module: auth
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: AUTH-001
@@ -45,7 +46,7 @@ behaviors:
     description: "로그아웃 시 Supabase Auth 세션이 종료되고 로컬 토큰 및 해당 user의 in-memory Room 연결이 해제된다. Room DB 파일(AUTH-008 규칙으로 user-scoped)은 디스크에 유지되어 동일 계정으로 재로그인 시 데이터가 복원된다. DataStore에서 사용자별 cursor·온보딩 플래그도 보존 — 단 글로벌 키(PIPA 동의 timestamp 등 current session state)는 초기화"
     endpoint: "POST /auth/v1/logout"
     precondition: "유효한 access_token"
-    expected: "HTTP 204 — EncryptedSharedPreferences의 access_token/refresh_token 삭제됨, 현재 user의 Room DB 연결은 close()되지만 DB 파일(becalm_<user_id_hash>.db)은 삭제되지 않음, DataStore의 user-scoped key들은 보존됨. TermsScreen → LoginScreen 순으로 복귀"
+    expected: "HTTP 204 — EncryptedSharedPreferences의 access_token/refresh_token 삭제됨, 현재 user의 Room DB 연결은 close()되지만 DB 파일(becalm_<user_id_hash>.db)은 삭제되지 않음, DataStore의 user-scoped key들은 보존됨. terms_accepted는 유지되므로 앱은 LoginScreen으로 직접 복귀한다"
     source: phase2-acceptance
     tests: []
 

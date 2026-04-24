@@ -22,22 +22,22 @@ import javax.inject.Singleton
 public interface ForegroundWorkScheduler : WorkSchedulerCompat {
 
     /** Enqueues an expedited one-shot GmailWorker. */
-    public fun enqueueGmailOneShotNow()
+    public fun enqueueGmailOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot ImapNaverWorker. */
-    public fun enqueueImapNaverOneShotNow()
+    public fun enqueueImapNaverOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot ImapDaumWorker. */
-    public fun enqueueImapDaumOneShotNow()
+    public fun enqueueImapDaumOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot OutlookMailWorker. */
-    public fun enqueueOutlookMailOneShotNow()
+    public fun enqueueOutlookMailOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot GCalWorker. */
-    public fun enqueueGCalOneShotNow()
+    public fun enqueueGCalOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot OutlookCalWorker. */
-    public fun enqueueOutlookCalOneShotNow()
+    public fun enqueueOutlookCalOneShotNow(lookbackDays: Int? = null)
 }
 
 /**
@@ -93,6 +93,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     // expose a ForegroundWorkScheduler implementation (or adapter) to satisfy this injection.
     private val workScheduler: ForegroundWorkScheduler,
     private val userPrefsStore: UserPrefsStore,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : DefaultLifecycleObserver {
 
@@ -121,6 +122,10 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     public fun triggerCatchUp() {
         scope.launch {
             try {
+                if (processingPauseGate.isPaused()) {
+                    logger.d(TAG, "triggerCatchUp: processing paused — skipping")
+                    return@launch
+                }
                 val enabledSources: Set<String> = userPrefsStore.observeEnabledSources().first()
 
                 if (enabledSources.isEmpty()) {
@@ -149,6 +154,10 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     override fun onStart(owner: LifecycleOwner) {
         scope.launch {
             try {
+                if (processingPauseGate.isPaused()) {
+                    logger.d(TAG, "onStart: processing paused — skipping catch-up enqueue")
+                    return@launch
+                }
                 val enabledSources: Set<String> = userPrefsStore.observeEnabledSources().first()
 
                 if (enabledSources.isEmpty()) {
@@ -210,8 +219,13 @@ public class ForegroundCatchUpScheduler @Inject constructor(
                 continue
             }
             val (logMessage, enqueue) = entry
-            logger.d(TAG, logMessage)
-            enqueue()
+            try {
+                logger.d(TAG, logMessage)
+                enqueue()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger.w(TAG, "onStart: failed to enqueue catch-up for source='$sourceType'", e)
+            }
         }
     }
 

@@ -60,6 +60,34 @@ public interface CalendarEventDao {
         rangeEnd: Instant,
     ): Flow<List<CalendarEventEntity>>
 
+    /**
+     * Returns the single calendar event owned by [userId] that matches [sourceType] + [sourceRef],
+     * or null when no such row exists.
+     */
+    @Query(
+        """
+        SELECT * FROM calendar_events
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND source_ref = :sourceRef
+        LIMIT 1
+        """
+    )
+    public suspend fun findBySourceRefForUser(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+    ): CalendarEventEntity?
+
+    @Query(
+        """
+        SELECT * FROM calendar_events
+        WHERE user_id = :userId
+        ORDER BY start_at ASC
+        """,
+    )
+    public suspend fun findAllForUser(userId: String): List<CalendarEventEntity>
+
     // ── Deletion ─────────────────────────────────────────────────────────────
 
     /**

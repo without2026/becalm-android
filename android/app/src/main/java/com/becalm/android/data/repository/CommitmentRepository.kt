@@ -124,6 +124,34 @@ public interface CommitmentRepository {
         updatedAt: Instant,
     ): BecalmResult<Unit>
 
+    /**
+     * Returns up to [limit] commitments eligible for the CMT-011 overdue sweep.
+     *
+     * Eligibility is defined as:
+     * - `due_at IS NOT NULL`
+     * - `due_at < cutoff`
+     * - `action_state IN ('pending', 'reminded', 'followed_up')`
+     * - `deleted_at IS NULL`
+     */
+    public suspend fun findOverdueCandidates(
+        userId: String,
+        cutoff: Instant,
+        limit: Int,
+    ): List<CommitmentEntity>
+
+    /**
+     * Applies the system-derived CMT-011 overdue transition to the rows in [ids].
+     *
+     * The write is local-first and leaves `sync_status='pending'` so the existing
+     * upload path can mirror the state to Railway when network is available.
+     *
+     * @return Updated-row count on success.
+     */
+    public suspend fun markOverdue(
+        ids: List<String>,
+        updatedAt: Instant,
+    ): BecalmResult<Int>
+
     // ── Edit / dispute / soft-delete / supersede (EDIT-001..008) ────────────
 
     /**

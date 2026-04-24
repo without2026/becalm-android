@@ -13,11 +13,14 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
@@ -79,17 +82,11 @@ import kotlinx.datetime.Clock
  * one-shot triggered by [com.becalm.android.worker.ContentObserverBootstrap]'s voice
  * observer (pending `refactor/worker/voice/ingestion-realign`).
  *
- * ## Known gap (follow-up)
- * The full SAF tree URI migration required by `.spec/onboarding.spec.yml:37-44` (ONB-003)
- * — `ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission` + `DocumentsContract`
- * child traversal rooted at Samsung One UI 6.x `/storage/emulated/0/Recordings/` — is
- * deferred to a Wave 6 onboarding PR tracked by `refactor/ui/onboarding/saf-tree`. See
- * `docs/plans/worker-voice-ingestion-realign.md` (finding PR #14) for the full design and
- * `docs/plans/worker-voice-ingestion-saf-tree-followup.md` for the deferred sub-scope.
- * The recorder-folder LIKE patterns were realigned to Samsung One UI 6.x's
- * space-separated `"Voice Recorder/"` in PR #14, and the Call/ subtree is now wired
- * through via [VoiceMediaStoreProbe.ingestCallRecordings] in
- * `feat/worker/voice/call-recording` (finding PR #15).
+ * ## SAF grant contract
+ * ONB-003 now requires a persisted Recordings-tree SAF URI grant before voice ingestion
+ * is enabled. This worker still discovers files through MediaStore, but it refuses to
+ * run unless that persisted Recordings tree grant exists. Full `DocumentsContract`
+ * subtree traversal remains out of scope for the current local-owner implementation.
  */
 @HiltWorker
 public class MediaStoreWorker @AssistedInject constructor(
@@ -99,7 +96,8 @@ public class MediaStoreWorker @AssistedInject constructor(
     sourceStatusRepository: SourceStatusRepository,
     rawIngestionEventDao: RawIngestionEventDao,
     workScheduler: WorkScheduler,
-    userPrefsStore: UserPrefsStore,
+    private val userPrefsStore: UserPrefsStore,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -115,6 +113,9 @@ public class MediaStoreWorker @AssistedInject constructor(
     )
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         // VOI-005: READ_MEDIA_AUDIO on API 33+; READ_EXTERNAL_STORAGE on API 28-32.
@@ -124,15 +125,23 @@ public class MediaStoreWorker @AssistedInject constructor(
             android.Manifest.permission.READ_EXTERNAL_STORAGE
         }
         val audioMissing = isMissing(audioPermission)
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
+            .takeIf { it > 0 }
 
         if (audioMissing) {
             logger.w(TAG, "audio permission missing — retrying")
             return@withContext Result.retry()
         }
 
+        val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
+        if (recordingsTreeUri.isNullOrBlank()) {
+            logger.w(TAG, "recordings tree grant missing — retrying")
+            return@withContext Result.retry()
+        }
+
         val now = Clock.System.now()
-        val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now)
-        val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now)
+        val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
+        val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
 
         // A ContentResolver query failure in the `Recordings/Call/` scan is recorded in
         // SourceStatusRepository but does not advance any cursor — returning
@@ -174,6 +183,7 @@ public class MediaStoreWorker @AssistedInject constructor(
          * subtrees, so an independent cursor per kind is the correctness-preserving choice.
          */
         public const val KIND_CALL_RECORDING: String = "call_recording"
+        private const val NO_LOOKBACK: Int = -1
 
         /**
          * Samsung Voice Recorder default relative folder name (ONB-002 / ONB-003 spec

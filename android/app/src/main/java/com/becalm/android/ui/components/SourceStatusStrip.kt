@@ -25,6 +25,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -60,7 +61,7 @@ public sealed interface ChipState {
  * `@Immutable` + stable parameter types so Compose skips recomposition when parent
  * state changes but the chip list did not (rubric D7 stable parameters).
  *
- * @param sourceType One of the six [SourceType] constants used in the strip (voice excluded).
+ * @param sourceType One of the seven user-facing [SourceType] constants used in the strip.
  * @param state      Current visual state of this chip.
  */
 @Immutable
@@ -74,14 +75,14 @@ public data class SourceStatusChip(
 private val ChipShape = RoundedCornerShape(100.dp)
 
 /**
- * Horizontal strip of six per-source status chips (TDY-003).
+ * Horizontal strip of seven per-source status chips (TDY-003).
  *
  * Renders exactly [sources].size chips in order. The strip is read-only per spec —
  * "칩 탭 인터랙션 없음". Catch-up recovery is driven by pull-to-refresh on the Today
  * screen (TDY-009), not by tapping chips. Error recovery is routed through the
  * settings screen.
  *
- * @param sources Chip list in display order. Caller is expected to pass exactly 6 entries.
+ * @param sources Chip list in display order. Caller is expected to pass exactly 7 entries.
  * @param modifier Optional [Modifier] applied to the outer [LazyRow].
  */
 @Composable
@@ -91,6 +92,7 @@ public fun SourceStatusStrip(
 ) {
     LazyRow(
         modifier = modifier
+            .testTag("source-status-strip")
             .semantics { contentDescription = STRIP_A11Y_LABEL },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -174,20 +176,20 @@ private fun ChipStateIndicator(state: ChipState) {
 }
 
 /**
- * Display name for the six ingestion sources shown on the Today strip.
+ * Display name for the seven user-facing ingestion sources shown on the Today strip.
  *
- * Voice is intentionally not listed — the strip is 6 items per TDY-003 / CTO Q7.
- * Any source type not in the six is routed to a defensive default so the UI stays
+ * Any source type not in the seven is routed to a defensive default so the UI stays
  * renderable even if the server adds a new wire type before the Android client
  * ships an update.
  */
 private fun sourceDisplayName(sourceType: String): String = when (sourceType) {
+    SourceType.VOICE -> "Voice"
     SourceType.GMAIL -> "Gmail"
     SourceType.OUTLOOK_MAIL -> "Outlook Mail"
-    SourceType.NAVER_IMAP -> "네이버"
-    SourceType.DAUM_IMAP -> "다음"
-    SourceType.GOOGLE_CALENDAR -> "Google Cal"
-    SourceType.OUTLOOK_CALENDAR -> "Outlook Cal"
+    SourceType.NAVER_IMAP -> "Naver Email"
+    SourceType.DAUM_IMAP -> "Daum Email"
+    SourceType.GOOGLE_CALENDAR -> "Google Calendar"
+    SourceType.OUTLOOK_CALENDAR -> "Outlook Calendar"
     else -> sourceType
 }
 
@@ -209,6 +211,7 @@ private fun PreviewSourceStatusStripMixed() {
         Box(modifier = Modifier.background(Color.DarkGray).padding(8.dp)) {
             SourceStatusStrip(
                 sources = listOf(
+                    SourceStatusChip(SourceType.VOICE, ChipState.Syncing),
                     SourceStatusChip(SourceType.GMAIL, ChipState.Synced(Instant.fromEpochMilliseconds(1_713_430_200_000L))),
                     SourceStatusChip(SourceType.OUTLOOK_MAIL, ChipState.Error("auth expired")),
                     SourceStatusChip(SourceType.NAVER_IMAP, ChipState.Syncing),

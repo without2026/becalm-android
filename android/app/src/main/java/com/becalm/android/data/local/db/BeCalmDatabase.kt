@@ -10,11 +10,13 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.becalm.android.data.local.db.migration.MIGRATIONS
 
 /**
@@ -28,6 +30,7 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  * | [CalendarEventEntity]       | calendar_events       | SP-11     | no        |
  * | [PersonEnrichmentEntity]    | persons_enrichment    | SP-12     | no        |
  * | [EmailBodyEntity]           | email_body            | SP-TBD    | yes       |
+ * | [UserProfileEntity]         | user_profile          | COLD-001  | no        |
  *
  * ## Schema version history
  * - v5: commitments gains `last_edited_by`, `last_edited_at`, `quote_disputed`,
@@ -43,6 +46,13 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   per EMAIL-006 — body_plain / body_html / attachments_meta / raw_headers MUST NEVER
  *   leave the device. Spec refs: `.spec/contracts/data-model.yml:327-390`,
  *   `.spec/email-pipeline.spec.yml:15-18,58-64`.
+ * - v7: introduces the `user_profile` local mirror table used by Cold Sync Stage 1
+ *   bootstrap. Android creates this row from the authenticated session plus default
+ *   timezone / locale before any external `PATCH /v1/user_profile` mirror runs.
+ * - v8: expands `commitments` into a persisted trackable-item table by adding
+ *   `item_type`, `schedule_status`, and `decision_status`, and by relaxing
+ *   `direction` to nullable for non-action rows. Action-only queries now filter
+ *   `item_type='action'`; person-detail flows can read `action + schedule + decision`.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -84,8 +94,9 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         CalendarEventEntity::class,
         PersonEnrichmentEntity::class,
         EmailBodyEntity::class,
+        UserProfileEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -95,8 +106,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 6) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 6) literal"
+        require(DATABASE_VERSION == 8) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 8) literal"
         }
     }
 
@@ -126,6 +137,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
      * promoted to `public` in the PR that adds the first real caller.
      */
     internal abstract fun emailBodyDao(): EmailBodyDao
+
+    /** Returns the DAO for the `user_profile` local bootstrap table (v7+). */
+    public abstract fun userProfileDao(): UserProfileDao
 
     public companion object {
 
@@ -167,7 +181,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 6
+        public const val DATABASE_VERSION: Int = 8
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

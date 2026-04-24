@@ -353,10 +353,137 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+// ─── Migration 6 → 7 (user_profile bootstrap table) ────────────────────────
+//
+// Introduces the local `user_profile` table required by cold-sync Stage 1 bootstrap.
+// Android owns the initial row creation from auth session + default timezone/locale;
+// Railway mirror remains a separate concern.
+private val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `user_profile` (
+                `user_id` TEXT NOT NULL,
+                `display_name_override` TEXT,
+                `phone_e164_self` TEXT,
+                `timezone` TEXT NOT NULL DEFAULT 'Asia/Seoul',
+                `preferred_locale` TEXT NOT NULL DEFAULT 'ko',
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`user_id`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
+// ─── Migration 7 → 8 (commitments trackable item types) ─────────────────────
+//
+// Expands `commitments` from action-only rows into a generic trackable-item table by:
+//   1. adding `item_type` (default/action backfill),
+//   2. adding nullable `schedule_status` / `decision_status`,
+//   3. relaxing `direction` from NOT NULL to NULL so non-action rows can persist cleanly,
+//   4. widening the primary action index to `(user_id, item_type, action_state, due_at)`.
+//
+// SQLite cannot alter existing column nullability in place, so we rebuild only the
+// `commitments` table. Existing rows are backfilled as `item_type='action'`.
+private val MIGRATION_7_8 = object : Migration(7, 8) {
+    private val V8_COLUMN_LIST_SQL = listOf(
+        "`id`", "`user_id`", "`item_type`", "`direction`", "`schedule_status`", "`decision_status`",
+        "`counterparty_raw`", "`person_ref`", "`title`", "`description`", "`quote`",
+        "`source_event_title`", "`source_event_occurred_at`", "`due_at`", "`due_hint`",
+        "`due_is_approximate`", "`action_state`", "`source_type`", "`source_ref`",
+        "`confidence`", "`commitment_state`", "`sync_status`", "`created_at`", "`updated_at`",
+        "`last_edited_by`", "`last_edited_at`", "`quote_disputed`", "`quote_disputed_at`",
+        "`deleted_at`", "`supersedes_commitment_id`",
+    ).joinToString(", ")
+
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE `commitments_new` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `item_type` TEXT NOT NULL DEFAULT 'action',
+                `direction` TEXT,
+                `schedule_status` TEXT,
+                `decision_status` TEXT,
+                `counterparty_raw` TEXT,
+                `person_ref` TEXT,
+                `title` TEXT NOT NULL,
+                `description` TEXT,
+                `quote` TEXT NOT NULL,
+                `source_event_title` TEXT,
+                `source_event_occurred_at` INTEGER NOT NULL,
+                `due_at` INTEGER,
+                `due_hint` TEXT,
+                `due_is_approximate` INTEGER NOT NULL DEFAULT 0,
+                `action_state` TEXT NOT NULL DEFAULT 'pending',
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT,
+                `confidence` REAL NOT NULL DEFAULT 0.0,
+                `commitment_state` TEXT NOT NULL DEFAULT 'DRAFT',
+                `sync_status` TEXT NOT NULL DEFAULT 'pending',
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                `last_edited_by` TEXT,
+                `last_edited_at` INTEGER,
+                `quote_disputed` INTEGER NOT NULL DEFAULT 0,
+                `quote_disputed_at` INTEGER,
+                `deleted_at` INTEGER,
+                `supersedes_commitment_id` TEXT,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+
+        db.execSQL(
+            """
+            INSERT INTO `commitments_new` ($V8_COLUMN_LIST_SQL)
+            SELECT
+                `id`, `user_id`, 'action' AS `item_type`, `direction`, NULL AS `schedule_status`,
+                NULL AS `decision_status`, `counterparty_raw`, `person_ref`, `title`, `description`,
+                `quote`, `source_event_title`, `source_event_occurred_at`, `due_at`, `due_hint`,
+                `due_is_approximate`, `action_state`, `source_type`, `source_ref`, `confidence`,
+                `commitment_state`, `sync_status`, `created_at`, `updated_at`, `last_edited_by`,
+                `last_edited_at`, `quote_disputed`, `quote_disputed_at`, `deleted_at`,
+                `supersedes_commitment_id`
+            FROM `commitments`
+            """.trimIndent(),
+        )
+
+        db.execSQL("DROP TABLE `commitments`")
+        db.execSQL("ALTER TABLE `commitments_new` RENAME TO `commitments`")
+
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_action_due` " +
+                "ON `commitments` (`user_id`, `item_type`, `action_state`, `due_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_commitments_user_id_sync_status` " +
+                "ON `commitments` (`user_id`, `sync_status`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_person_due` " +
+                "ON `commitments` (`user_id`, `person_ref`, `due_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_deleted` " +
+                "ON `commitments` (`user_id`, `deleted_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_supersedes` " +
+                "ON `commitments` (`supersedes_commitment_id`)",
+        )
+    }
+}
+
 public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
     MIGRATION_4_5,
     MIGRATION_5_6,
+    MIGRATION_6_7,
+    MIGRATION_7_8,
 )

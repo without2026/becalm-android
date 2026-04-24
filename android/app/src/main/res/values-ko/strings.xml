@@ -47,6 +47,12 @@
     <string name="onb_recording_folder_title">녹음 폴더</string>
     <string name="onb_recording_folder_headline">녹음 파일 접근 허용</string>
     <string name="onb_recording_folder_body">비캄은 약속 추출을 위해 음성 녹음 파일을 읽습니다. 파일은 기기에서만 처리되며, 추출된 약속 텍스트만 서버로 전송됩니다.</string>
+    <string name="onb_recording_folder_detected_path_fmt">감지된 경로: %1$s</string>
+    <string name="onb_recording_folder_voice_status_fmt">음성 메모 폴더: %1$s</string>
+    <string name="onb_recording_folder_call_status_fmt">통화 녹음 폴더: %1$s</string>
+    <string name="onb_recording_folder_status_detected">감지됨</string>
+    <string name="onb_recording_folder_status_missing">미감지</string>
+    <string name="onb_recording_folder_manual_picker_fallback">자동 탐색에 실패했습니다. picker에서 상위 Recordings 폴더를 선택해 주세요.</string>
 
     <!-- Onboarding: contacts -->
     <string name="onb_contacts_title">연락처 접근</string>
@@ -165,6 +171,11 @@
     <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
     <string name="persons_unassigned_empty_message">모든 이벤트가 특정 사람과 연결되었습니다.</string>
     <string name="persons_interactions_count">%d회 상호작용</string>
+    <string name="persons_pending_commitments_fmt">미이행 %1$d건</string>
+    <string name="persons_offline_badge_fmt">오프라인 - 마지막 동기화 %1$s</string>
+    <string name="persons_offline_badge_no_sync">오프라인</string>
+    <string name="sources_contacts_title">연락처</string>
+    <string name="sources_contacts_enriched_fmt">%1$d명 보강됨</string>
 
     <!-- Person detail -->
     <string name="person_detail_commitments_section">약속</string>

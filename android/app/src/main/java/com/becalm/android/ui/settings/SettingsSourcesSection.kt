@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
@@ -25,6 +26,7 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 internal fun SettingsSourcesSection(
     onSourcesClick: () -> Unit,
+    onPrivacyClick: () -> Unit,
     onWipeClick: () -> Unit,
 ) {
     SettingsSectionLabel(stringResource(R.string.settings_data_section))
@@ -38,13 +40,22 @@ internal fun SettingsSourcesSection(
         SettingsNavigationRow(
             label = stringResource(R.string.settings_sources_label),
             onClick = onSourcesClick,
+            rowTestTag = "settings-sources-row",
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingsNavigationRow(
+            label = stringResource(R.string.settings_privacy_label),
+            onClick = onPrivacyClick,
+            rowTestTag = "settings-privacy-row",
         )
         Spacer(modifier = Modifier.height(12.dp))
         BecalmButton(
             text = stringResource(R.string.action_wipe_data),
             onClick = onWipeClick,
             variant = BecalmButtonVariant.Secondary,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("settings-wipe-button"),
         )
     }
 }

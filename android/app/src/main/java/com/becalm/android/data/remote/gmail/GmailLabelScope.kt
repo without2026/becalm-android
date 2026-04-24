@@ -33,4 +33,13 @@ public enum class GmailLabelScope(public val queryString: String) {
      * direction hint during EMAIL-002 person_ref derivation.
      */
     SENT("label:sent -in:trash -in:drafts"),
+
+    ;
+
+    public fun withLookbackDays(days: Int?): String =
+        if (days == null) {
+            queryString
+        } else {
+            "$queryString newer_than:${days}d"
+        }
 }

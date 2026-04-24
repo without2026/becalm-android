@@ -13,6 +13,8 @@ import com.becalm.android.data.remote.gmail.FailureReason
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.data.remote.gmail.OAuthSignInResult
 import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.channels.BufferOverflow
@@ -150,6 +152,31 @@ public sealed class EmailConnectEvent {
     ) : EmailConnectEvent()
 }
 
+/** One-shot outcome of a calendar-source connection attempt. */
+public sealed class CalendarConnectEvent {
+    public abstract val provider: CalendarOAuthProvider
+
+    public data class Connected(
+        override val provider: CalendarOAuthProvider,
+    ) : CalendarConnectEvent()
+
+    public data class Failed(
+        override val provider: CalendarOAuthProvider,
+        val errorCode: String,
+    ) : CalendarConnectEvent()
+}
+
+/** One-shot navigation events for onboarding/auth bridge steps. */
+public sealed interface OnboardingNavigationEvent {
+    public data object NavigateToLogin : OnboardingNavigationEvent
+}
+
+/** One-shot effects for the contacts permission step (ENR-001 / ENR-002). */
+public sealed interface ContactsPermissionEffect {
+    public data object RequestSystemPermission : ContactsPermissionEffect
+    public data class NavigateToEmailPipa(val provider: EmailPipaProvider) : ContactsPermissionEffect
+}
+
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
 /**
@@ -186,7 +213,18 @@ public class OnboardingViewModel @Inject constructor(
     private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
     private val msGraphTokenProvider: MsGraphTokenProviderImpl,
     private val imapCredentialStore: ImapCredentialStore,
+    private val calendarOAuthConnector: CalendarOAuthConnector,
+    private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
 ) : ViewModel() {
+
+    private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
+        userPrefsStore = userPrefsStore,
+        googleAuthTokenProvider = googleAuthTokenProvider,
+        msGraphTokenProvider = msGraphTokenProvider,
+        imapCredentialStore = imapCredentialStore,
+        observability = observability,
+        logger = logger,
+    )
 
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
     public val steps: List<OnboardingStep> = OnboardingStep.entries
@@ -221,6 +259,36 @@ public class OnboardingViewModel @Inject constructor(
     /** Collect in Gmail / Outlook / IMAP onboarding screens to drive result UX. */
     public val emailConnectEvents: SharedFlow<EmailConnectEvent> = _emailConnectEvents.asSharedFlow()
 
+    private val _calendarConnectEvents: MutableSharedFlow<CalendarConnectEvent> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Collect in calendar onboarding screens to drive connect / failure UX. */
+    public val calendarConnectEvents: SharedFlow<CalendarConnectEvent> =
+        _calendarConnectEvents.asSharedFlow()
+
+    private val _navigationEvents: MutableSharedFlow<OnboardingNavigationEvent> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Collected by bridge screens like TermsScreen to react after persistence completes. */
+    public val navigationEvents: SharedFlow<OnboardingNavigationEvent> =
+        _navigationEvents.asSharedFlow()
+
+    private val _contactsPermissionEffects: MutableSharedFlow<ContactsPermissionEffect> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Collect in [ContactsPermissionScreen] to request the system dialog or navigate next. */
+    public val contactsPermissionEffects: SharedFlow<ContactsPermissionEffect> =
+        _contactsPermissionEffects.asSharedFlow()
+
     // ─── Navigation actions ───────────────────────────────────────────────────
 
     // spec: ONB-001
@@ -233,7 +301,7 @@ public class OnboardingViewModel @Inject constructor(
         _uiState.update { state ->
             val next = (state.currentStepIndex + 1).coerceAtMost(steps.lastIndex)
             logger.d(TAG, "onNext: ${steps[state.currentStepIndex]} -> ${steps[next]}")
-            state.copy(currentStepIndex = next, error = null)
+            OnboardingStateReducer.next(state, steps)
         }
     }
 
@@ -247,7 +315,7 @@ public class OnboardingViewModel @Inject constructor(
         _uiState.update { state ->
             val prev = (state.currentStepIndex - 1).coerceAtLeast(0)
             logger.d(TAG, "onBack: ${steps[state.currentStepIndex]} -> ${steps[prev]}")
-            state.copy(currentStepIndex = prev, error = null)
+            OnboardingStateReducer.previous(state, steps)
         }
     }
 
@@ -267,14 +335,8 @@ public class OnboardingViewModel @Inject constructor(
      */
     public fun onSkipStep(step: OnboardingStep) {
         _uiState.update { state ->
-            val targetIndex = steps.indexOf(step).coerceAtLeast(0)
-            val next = (targetIndex + 1).coerceAtMost(steps.lastIndex)
             logger.d(TAG, "onSkipStep: $step skipped")
-            state.copy(
-                currentStepIndex = next,
-                stepStates = state.stepStates + (step to StepStatus.SKIPPED),
-                error = null,
-            )
+            OnboardingStateReducer.skipStep(state, step, steps)
         }
     }
 
@@ -291,8 +353,103 @@ public class OnboardingViewModel @Inject constructor(
     public fun onMarkStepStatus(step: OnboardingStep, status: StepStatus) {
         logger.d(TAG, "onMarkStepStatus: $step -> $status")
         _uiState.update { state ->
-            state.copy(stepStates = state.stepStates + (step to status), error = null)
+            OnboardingStateReducer.markStepStatus(state, step, status)
         }
+    }
+
+    /**
+     * Persists the current voice-source availability and records the recording-folder step
+     * result using the same public state machine as the rest of onboarding.
+     */
+    public fun onRecordingFolderPermissionResult(granted: Boolean) {
+        if (granted) return
+        viewModelScope.launch {
+            userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
+            userPrefsStore.setRecordingFolderTreeUri(null)
+            onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.DENIED)
+            appRuntimeSyncCoordinator.refresh()
+        }
+    }
+
+    /** Persists the SAF tree grant for the shared Recordings folder and enables voice capture. */
+    public fun onRecordingFolderTreeGranted(uri: String) {
+        viewModelScope.launch {
+            userPrefsStore.setRecordingFolderTreeUri(uri)
+            userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
+            onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
+            appRuntimeSyncCoordinator.refresh()
+        }
+    }
+
+    /** Explicit graceful-skip branch for the recording-folder step. */
+    public fun onSkipRecordingFolder() {
+        viewModelScope.launch {
+            userPrefsStore.setRecordingFolderTreeUri(null)
+            userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
+            onSkipStep(OnboardingStep.RECORDING_FOLDER)
+            appRuntimeSyncCoordinator.refresh()
+        }
+    }
+
+    /** Records an explicit skip for a calendar step and moves the flow forward. */
+    public fun onSkipCalendarSource(provider: CalendarOAuthProvider) {
+        viewModelScope.launch {
+            userPrefsStore.setSourceEnabled(provider.sourceType, false)
+            onSkipStep(provider.step)
+        }
+    }
+
+    /**
+     * Initiates an interactive calendar OAuth sign-in for [provider].
+     *
+     * The current production connector intentionally fails closed until the real provider SDK
+     * is wired. This removes the previous fake-success path while keeping a stable unit-testable
+     * contract for future external integration.
+     */
+    public fun onConnectCalendarProvider(provider: CalendarOAuthProvider, activity: Activity) {
+        viewModelScope.launch {
+            when (val result = calendarOAuthConnector.startSignIn(provider, activity)) {
+                CalendarOAuthResult.Connected -> {
+                    userPrefsStore.setSourceEnabled(provider.sourceType, true)
+                    onMarkStepStatus(provider.step, StepStatus.COMPLETE)
+                    _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
+                }
+                is CalendarOAuthResult.Failed -> {
+                    reportOnboardingStepFailed(provider.step, result.errorCode)
+                    _calendarConnectEvents.emit(
+                        CalendarConnectEvent.Failed(
+                            provider = provider,
+                            errorCode = result.errorCode,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    // spec: ONB-003, ENR-001, ENR-002
+    /** Emits a one-shot request for the system READ_CONTACTS permission dialog. */
+    public fun onAllowContacts() {
+        _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.RequestSystemPermission)
+    }
+
+    /** Records the system permission result and advances to the email PIPA step. */
+    public fun onContactsPermissionResult(granted: Boolean) {
+        val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
+        onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
+        appRuntimeSyncCoordinator.refresh()
+        _contactsPermissionEffects.tryEmit(
+            ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
+        )
+    }
+
+    /** Explicit graceful-skip branch for contacts permission. */
+    public fun onSkipContacts() {
+        onSkipStep(OnboardingStep.CONTACTS_PERM)
+        appRuntimeSyncCoordinator.refresh()
+        _contactsPermissionEffects.tryEmit(
+            ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
+        )
     }
 
     // spec: ONB-PIPA per-provider (S6-D) + PIPA Article 17
@@ -319,40 +476,12 @@ public class OnboardingViewModel @Inject constructor(
     public suspend fun onEmailPipaConsent(
         providers: List<EmailPipaProvider>,
         granted: Boolean,
-    ): Boolean {
-        require(providers.isNotEmpty()) { "providers must be non-empty" }
-        return try {
-            // One DataStore.edit transaction covers the whole recipient set so a failure
-            // on the second write cannot leave the user durably consented for one
-            // recipient and not the other — the PIPA Article 17 audit trail stays
-            // coherent for the combined IMAP (Naver + Daum) disclosure.
-            userPrefsStore.setEmailPipaConsents(providers, granted)
-            // Audit events fire only after the batched write succeeds; emitting inside
-            // the write loop would have surfaced a "consent granted" event for a
-            // recipient whose key rolled back on a later failure.
-            for (provider in providers) {
-                logger.i(TAG, "pipa email consent ${provider.storageKey}=$granted")
-                observability.captureMessage(
-                    message = "onboarding_pipa_email_consent",
-                    tags = mapOf(
-                        "provider" to provider.storageKey,
-                        "granted" to granted.toString(),
-                    ),
-                )
-            }
-            if (!granted) {
-                _uiState.update { state ->
-                    val skipped = providers.map { linkStepFor(it) }.toSet()
-                    state.copy(stepStates = state.stepStates + skipped.associateWith { StepStatus.SKIPPED })
-                }
-            }
-            true
-        } catch (e: Exception) {
-            logger.e(TAG, "pipa email consent write failed", e)
-            _uiState.update { it.copy(error = e.message ?: "consent write failed") }
-            false
-        }
-    }
+    ): Boolean = emailActionHandler.persistEmailPipaConsent(
+        providers = providers,
+        granted = granted,
+        updateState = _uiState::update,
+        setError = { message -> _uiState.update { it.copy(error = message) } },
+    )
 
     // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시 Sentry 에
     // onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
@@ -395,82 +524,14 @@ public class OnboardingViewModel @Inject constructor(
             "${provider.storageKey} uses saveImapCredentials(), not onConnectEmailProvider()"
         }
         viewModelScope.launch {
-            // PIPA Article 17 hard gate — the OAuth grant cannot be initiated if the
-            // disclosure screen's consent has not been persisted. This guards against a
-            // direct-navigation regression where a user lands on the OAuth screen without
-            // the consent step.
-            val consented = userPrefsStore.observeEmailPipaConsent(provider).first()
-            if (!consented) {
-                reportOnboardingStepFailed(linkStepFor(provider), "pipa_consent_missing")
-                _uiState.update {
-                    it.copy(stepStates = it.stepStates + (linkStepFor(provider) to StepStatus.SKIPPED))
-                }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
-                return@launch
-            }
-            val result = runCatching {
-                when (provider) {
-                    EmailPipaProvider.GMAIL -> googleAuthTokenProvider.startSignIn(activity)
-                    EmailPipaProvider.OUTLOOK_MAIL -> msGraphTokenProvider.startSignIn(activity)
-                    EmailPipaProvider.NAVER_IMAP,
-                    EmailPipaProvider.DAUM_IMAP -> error("unreachable — filtered by require guard")
-                }
-            }.getOrElse { t ->
-                logger.e(TAG, "OAuth startSignIn threw for ${provider.storageKey}", t)
-                OAuthSignInResult.Failure(FailureReason.UNKNOWN, t)
-            }
-            handleOAuthResult(provider, result)
+            emailActionHandler.connectEmailProvider(
+                provider = provider,
+                activity = activity,
+                updateState = _uiState::update,
+                emitEvent = { event -> _emailConnectEvents.emit(event) },
+                reportStepFailed = ::reportOnboardingStepFailed,
+            )
         }
-    }
-
-    private suspend fun handleOAuthResult(
-        provider: EmailPipaProvider,
-        result: OAuthSignInResult,
-    ) {
-        when (result) {
-            is OAuthSignInResult.Success -> {
-                userPrefsStore.setEmailSourceConnected(provider, true)
-                val step = linkStepFor(provider)
-                _uiState.update { it.copy(stepStates = it.stepStates + (step to StepStatus.COMPLETE)) }
-                observability.captureMessage(
-                    message = "onboarding_email_connected",
-                    tags = mapOf("provider" to provider.storageKey),
-                )
-                _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
-            }
-            is OAuthSignInResult.ResolutionRequired -> {
-                _emailConnectEvents.emit(
-                    EmailConnectEvent.PendingIntentRequired(provider, result.pendingIntent),
-                )
-            }
-            is OAuthSignInResult.Failure -> {
-                val errorCode = failureReasonCode(result.reason)
-                val step = linkStepFor(provider)
-                reportOnboardingStepFailed(step, errorCode)
-                _uiState.update { it.copy(stepStates = it.stepStates + (step to StepStatus.SKIPPED)) }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, errorCode))
-            }
-        }
-    }
-
-    private fun failureReasonCode(reason: FailureReason): String = when (reason) {
-        FailureReason.USER_CANCELLED -> "user_cancelled"
-        FailureReason.PLAY_SERVICES_UNAVAILABLE -> "play_services_unavailable"
-        FailureReason.NETWORK -> "network"
-        FailureReason.SCOPE_DENIED -> "scope_denied"
-        FailureReason.UNKNOWN -> "unknown"
-    }
-
-    private fun linkStepFor(provider: EmailPipaProvider): OnboardingStep = when (provider) {
-        EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
-        EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
-        EmailPipaProvider.NAVER_IMAP, EmailPipaProvider.DAUM_IMAP -> OnboardingStep.LINK_IMAP
-    }
-
-    private fun imapProviderFor(sourceType: String): EmailPipaProvider? = when (sourceType) {
-        com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP -> EmailPipaProvider.NAVER_IMAP
-        com.becalm.android.data.remote.dto.SourceType.DAUM_IMAP -> EmailPipaProvider.DAUM_IMAP
-        else -> null
     }
 
     // spec: ONB-004 + ING-011 (S6-H)
@@ -488,58 +549,13 @@ public class OnboardingViewModel @Inject constructor(
      */
     public fun saveImapCredentials(sourceType: String, credentials: ImapCredentials) {
         viewModelScope.launch {
-            val pipaProvider = imapProviderFor(sourceType)
-            if (pipaProvider == null) {
-                // Unknown sourceType — the credential store will reject it, but fail-loudly
-                // in the VM so tests and operators see a specific error_code rather than a
-                // generic save_failed coming out of the credential store.
-                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "unknown_provider")
-                _uiState.update {
-                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
-                }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(EmailPipaProvider.NAVER_IMAP, "unknown_provider"))
-                return@launch
-            }
-
-            // PIPA Article 17 hard gate — the specific recipient's consent must exist
-            // before its IMAP credentials can be persisted. The combined IMAP disclosure
-            // screen writes both naver_imap and daum_imap records on Agree, so either
-            // provider's grant suffices for this specific save.
-            val consented = userPrefsStore.observeEmailPipaConsent(pipaProvider).first()
-            if (!consented) {
-                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, "pipa_consent_missing")
-                _uiState.update {
-                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
-                }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(pipaProvider, "pipa_consent_missing"))
-                return@launch
-            }
-
-            val result = runCatching { imapCredentialStore.save(sourceType, credentials) }
-            if (result.isSuccess) {
-                userPrefsStore.setEmailSourceConnected(pipaProvider, true)
-                _uiState.update {
-                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
-                }
-                observability.captureMessage(
-                    message = "onboarding_email_connected",
-                    tags = mapOf("provider" to pipaProvider.storageKey, "source_type" to sourceType),
-                )
-                _emailConnectEvents.emit(EmailConnectEvent.Connected(pipaProvider))
-            } else {
-                val throwable = result.exceptionOrNull()
-                val errorCode = when (throwable) {
-                    is IllegalArgumentException -> "unknown_provider"
-                    is java.io.IOException -> "network"
-                    else -> "save_failed"
-                }
-                logger.e(TAG, "IMAP save failed sourceType=$sourceType", throwable)
-                reportOnboardingStepFailed(OnboardingStep.LINK_IMAP, errorCode)
-                _uiState.update {
-                    it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
-                }
-                _emailConnectEvents.emit(EmailConnectEvent.Failed(pipaProvider, errorCode))
-            }
+            emailActionHandler.saveImapCredentials(
+                sourceType = sourceType,
+                credentials = credentials,
+                updateState = _uiState::update,
+                emitEvent = { event -> _emailConnectEvents.emit(event) },
+                reportStepFailed = ::reportOnboardingStepFailed,
+            )
         }
     }
 
@@ -599,30 +615,13 @@ public class OnboardingViewModel @Inject constructor(
         granted: Boolean,
         caller: String,
     ): OnboardingUiState {
-        val pipaIndex = steps.indexOf(OnboardingStep.PIPA_CONSENT)
-        return if (granted) {
-            val recordingFolderIndex = steps.indexOf(OnboardingStep.RECORDING_FOLDER)
-            logger.d(TAG, "$caller: advancing to RECORDING_FOLDER (index=$recordingFolderIndex)")
-            state.copy(
-                currentStepIndex = recordingFolderIndex.coerceAtLeast(pipaIndex + 1),
-                stepStates = state.stepStates + (OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED),
-                error = null,
-            )
+        val nextState = OnboardingStateReducer.applyPipaConsent(state, granted, steps)
+        if (granted) {
+            logger.d(TAG, "$caller: advancing to RECORDING_FOLDER (index=${nextState.currentStepIndex})")
         } else {
-            // Skip RECORDING_FOLDER — go straight to CONTACTS_PERM. Mark RECORDING_FOLDER
-            // as SKIPPED so the onCompleteOnboarding() terminal-status gate doesn't lock
-            // the user out (PIPA compliance fix).
-            val contactsIndex = steps.indexOf(OnboardingStep.CONTACTS_PERM)
-            val targetIndex = if (contactsIndex >= 0) contactsIndex else pipaIndex + 2
-            logger.d(TAG, "$caller: skipping RECORDING_FOLDER, advancing to index=$targetIndex")
-            state.copy(
-                currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
-                stepStates = state.stepStates +
-                    (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
-                    (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
-                error = null,
-            )
+            logger.d(TAG, "$caller: skipping RECORDING_FOLDER, advancing to index=${nextState.currentStepIndex}")
         }
+        return nextState
     }
 
     /**
@@ -648,12 +647,28 @@ public class OnboardingViewModel @Inject constructor(
      * Called by [com.becalm.android.ui.auth.TermsScreen] before navigating to Login.
      */
     public fun onAcceptTerms() {
+        onAcceptTermsAndContinue()
+    }
+
+    /**
+     * ONB-001 single-intent contract: persist terms acceptance, mark the Terms step granted,
+     * then emit a one-shot navigation to Login only after the write succeeds.
+     */
+    public fun onAcceptTermsAndContinue() {
         viewModelScope.launch {
             try {
                 userPrefsStore.setTermsAccepted(true)
                 logger.i(TAG, "terms acceptance persisted")
+                _uiState.update { state ->
+                    state.copy(
+                        stepStates = state.stepStates + (OnboardingStep.TERMS to StepStatus.GRANTED),
+                        error = null,
+                    )
+                }
+                _navigationEvents.tryEmit(OnboardingNavigationEvent.NavigateToLogin)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist terms acceptance", e)
+                _uiState.update { it.copy(error = e.message ?: "terms acceptance failed") }
             }
         }
     }
@@ -708,13 +723,6 @@ public class OnboardingViewModel @Inject constructor(
      * (post-Round 6B.4), so there is no screenless escape hatch.
      */
     private fun isTerminalGatePassed(stepStates: Map<OnboardingStep, StepStatus>): Boolean {
-        val terminalStatuses = setOf(
-            StepStatus.GRANTED,
-            StepStatus.COMPLETE,
-            StepStatus.SKIPPED,
-            StepStatus.DENIED,
-        )
-        return OnboardingStep.entries
-            .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
+        return OnboardingStateReducer.isTerminalGatePassed(stepStates)
     }
 }

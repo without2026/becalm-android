@@ -34,13 +34,21 @@ import com.becalm.android.R
 @Composable
 internal fun PersonHeader(
     displayName: String?,
+    nickname: String?,
     companyName: String?,
     jobTitle: String?,
     personRef: String,
+    eventCount: Int = 0,
+    pendingCommitmentCount: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personRef
     val subtitle = composeSubtitle(jobTitle = jobTitle, companyName = companyName)
+    val metaLine = composeMetaLine(
+        nickname = nickname,
+        eventCount = eventCount,
+        pendingCommitmentCount = pendingCommitmentCount,
+    )
 
     Column(
         modifier = modifier
@@ -65,6 +73,15 @@ internal fun PersonHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (metaLine != null) {
+            Text(
+                text = metaLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -79,4 +96,17 @@ private fun composeSubtitle(jobTitle: String?, companyName: String?): String? {
         company != null -> stringResource(R.string.person_header_company_only, company)
         else -> null
     }
+}
+
+private fun composeMetaLine(
+    nickname: String?,
+    eventCount: Int,
+    pendingCommitmentCount: Int,
+): String? {
+    val parts = buildList {
+        nickname?.takeIf { it.isNotBlank() }?.let { add("($it)") }
+        if (eventCount > 0) add("이벤트 ${eventCount}건")
+        if (pendingCommitmentCount > 0) add("미이행 약속 ${pendingCommitmentCount}건")
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }

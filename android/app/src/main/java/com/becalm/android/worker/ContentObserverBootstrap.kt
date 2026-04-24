@@ -1,5 +1,8 @@
 package com.becalm.android.worker
 
+import android.database.ContentObserver
+import android.net.Uri
+import android.provider.MediaStore
 import android.content.Context
 import com.becalm.android.core.util.Logger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -9,15 +12,15 @@ import javax.inject.Singleton
 /**
  * Registers content observers for ingestion URIs at application process start.
  *
- * Currently a no-op shell: SMS/call-log observers were removed as dead code
- * (spec forbids SMS/CallLog access — `.spec/person-enrichment.spec.yml:87`,
- * `.spec/contracts/data-model.yml:28-32`). A voice SAF tree URI observer will
- * land in `refactor/worker/voice/ingestion-realign`. The class is retained
- * because [com.becalm.android.data.repository.AuthRepository] wires [start] /
- * [stop] into the sign-in / sign-out lifecycle.
+ * Watches [MediaStore.Audio.Media.EXTERNAL_CONTENT_URI] and nudges a one-shot
+ * [com.becalm.android.worker.ingestion.MediaStoreWorker] whenever the media table changes.
+ *
+ * The worker remains the correctness owner for folder filtering, deduplication, and
+ * permission / PIPA gating. The observer is intentionally broad: any audio-table mutation
+ * results in a catch-up enqueue, and the worker decides whether there is new work.
  *
  * @param context Application context, used to obtain the [android.content.ContentResolver]
- *                once a real observer is re-introduced.
+ *                and register/unregister the observer.
  * @param workScheduler Scheduler used to enqueue one-shot sync work on change.
  * @param logger Structured log sink.
  */
@@ -28,23 +31,59 @@ public class ContentObserverBootstrap @Inject constructor(
     // ForegroundCatchUpScheduler.kt) extends WorkSchedulerCompat; both components share
     // one Hilt binding so SP-32 only needs to provide a single implementation.
     private val workScheduler: ForegroundWorkScheduler,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) {
+    private var audioObserver: ContentObserver? = null
 
     /**
-     * No-op until the voice SAF observer is wired in `refactor/worker/voice/ingestion-realign`.
-     * Safe to call repeatedly.
+     * Registers a broad MediaStore audio observer. Safe to call repeatedly.
      */
     public fun start() {
-        logger.d(TAG, "start() no-op — voice SAF observer pending refactor/worker/voice/ingestion-realign")
+        if (audioObserver != null) {
+            logger.d(TAG, "start() ignored — observer already registered")
+            return
+        }
+
+        val observer = object : ContentObserver(null) {
+            override fun onChange(selfChange: Boolean) {
+                handleObservedMediaStoreChange(null)
+            }
+
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                handleObservedMediaStoreChange(uri)
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer,
+        )
+        audioObserver = observer
+        logger.d(TAG, "registered MediaStore audio observer")
     }
 
     /**
-     * No-op until the voice SAF observer is wired. Safe to call even when no
-     * observers are currently registered.
+     * Unregisters the observer if present. Safe to call even when nothing is registered.
      */
     public fun stop() {
-        // No observers to unregister while the class is a shell.
+        val observer = audioObserver ?: return
+        context.contentResolver.unregisterContentObserver(observer)
+        audioObserver = null
+        logger.d(TAG, "unregistered MediaStore audio observer")
+    }
+
+    /**
+     * Test-visible seam for a MediaStore change callback. The worker owns folder-level
+     * filtering, so every observed change simply schedules an expedited catch-up scan.
+     */
+    public fun handleObservedMediaStoreChange(uri: Uri?) {
+        if (processingPauseGate.isPausedBlocking()) {
+            logger.d(TAG, "MediaStore audio changed uri=$uri — ignored while processing is paused")
+            return
+        }
+        logger.d(TAG, "MediaStore audio changed uri=$uri — enqueueing catch-up")
+        workScheduler.enqueueMediaStoreOneShotNow()
     }
 
     private companion object {

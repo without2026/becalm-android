@@ -18,26 +18,23 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.ExpandableSectionHeader
+import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
@@ -69,16 +66,7 @@ public fun PersonDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(state.error) {
-        state.error?.let { err ->
-            scope.launch {
-                snackbarHostState.showSnackbar(err)
-                viewModel.onErrorDismissed()
-            }
-        }
-    }
+    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
 
     val onEventTap: OnEventTap = { eventId ->
         navController.navigate(
@@ -86,10 +74,31 @@ public fun PersonDetailScreen(
         )
     }
 
-    BecalmScaffold(
+    PersonDetailScreenContent(
+        state = state,
         title = state.displayName ?: personId.take(16),
+        snackbarHostState = snackbarHostState,
+        onBack = navController::popBackStack,
+        onEventTap = onEventTap,
+        onToggleCompletedExpanded = viewModel::onToggleCompletedExpanded,
+    )
+}
+
+@Composable
+public fun PersonDetailScreenContent(
+    state: PersonDetailUiState,
+    title: String,
+    snackbarHostState: SnackbarHostState,
+    onBack: () -> Unit,
+    onEventTap: (String) -> Unit,
+    onToggleCompletedExpanded: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BecalmScaffold(
+        modifier = modifier,
+        title = title,
         navigationIcon = {
-            IconButton(onClick = { navController.popBackStack() }) {
+            IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.action_back),
@@ -124,6 +133,7 @@ public fun PersonDetailScreen(
                 state = state,
                 padding = padding,
                 onEventTap = onEventTap,
+                onToggleCompletedExpanded = onToggleCompletedExpanded,
             )
         }
     }
@@ -135,14 +145,19 @@ public fun PersonDetailScreen(
 private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues) {
     LazyColumn(
         contentPadding = padding,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("person-detail-list"),
     ) {
         item(key = "header") {
             PersonHeader(
                 displayName = state.displayName,
+                nickname = state.nickname,
                 companyName = state.companyName,
                 jobTitle = state.jobTitle,
                 personRef = state.personRef,
+                eventCount = state.eventCount,
+                pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
         item(key = "empty") {
@@ -155,13 +170,9 @@ private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues
 private fun PersonDetailList(
     state: PersonDetailUiState,
     padding: PaddingValues,
-    onEventTap: OnEventTap,
+    onEventTap: (String) -> Unit,
+    onToggleCompletedExpanded: () -> Unit,
 ) {
-    // SRC-008 requires the "이행 완료" section to default to a collapsed state and
-    // expand on tap. `rememberSaveable` keeps the state across config changes and
-    // process death without leaking to the ViewModel.
-    var completedExpanded by rememberSaveable(state.personRef) { mutableStateOf(false) }
-
     val pendingHeader = stringResource(
         R.string.person_detail_section_pending_fmt,
         state.pendingCommitments.size,
@@ -179,9 +190,12 @@ private fun PersonDetailList(
         item(key = "header") {
             PersonHeader(
                 displayName = state.displayName,
+                nickname = state.nickname,
                 companyName = state.companyName,
                 jobTitle = state.jobTitle,
                 personRef = state.personRef,
+                eventCount = state.eventCount,
+                pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
         pendingCommitmentsSection(
@@ -192,8 +206,8 @@ private fun PersonDetailList(
         completedCommitmentsSection(
             header = completedHeader,
             rows = state.completedCommitments,
-            expanded = completedExpanded,
-            onToggleExpanded = { completedExpanded = !completedExpanded },
+            expanded = state.completedExpanded,
+            onToggleExpanded = onToggleCompletedExpanded,
             onEventTap = onEventTap,
         )
         historySection(
@@ -328,9 +342,12 @@ private fun PreviewPersonDetailScreenWithHistory() {
                 item {
                     PersonHeader(
                         displayName = "Alice Kim",
+                        nickname = "Alice",
                         companyName = "Acme Corp",
                         jobTitle = "Product Lead",
                         personRef = "alice@acme.com",
+                        eventCount = 2,
+                        pendingCommitmentCount = 1,
                     )
                 }
                 items(

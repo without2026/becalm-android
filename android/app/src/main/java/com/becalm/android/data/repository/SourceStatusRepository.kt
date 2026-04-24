@@ -2,10 +2,7 @@ package com.becalm.android.data.repository
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
@@ -77,10 +74,7 @@ public interface SourceStatusRepository {
     /**
      * Emits the status list for every [SourceType.PRODUCT_SOURCES] entry whenever any
      * source's cursor or prefs change. Order follows [SourceType.PRODUCT_SOURCES] iteration
-     * order.
-     *
-     * `VOICE` and `CALL_RECORDING` are deliberately excluded — voice is captured locally
-     * (no OAuth connect) and call_recording is a wave-0 schema-only carve-out.
+     * order. Current product-facing set includes `VOICE` and excludes `CALL_RECORDING`.
      */
     public fun observeAll(): Flow<List<SourceStatus>>
 
@@ -104,8 +98,9 @@ public interface SourceStatusRepository {
      * Pulls the authoritative per-source state from Railway `GET /v1/source_status`
      * and merges it into the local DataStore-backed cache.
      *
-     * Exactly six items are returned (voice excluded per TDY-003 / CTO Q7); any `voice`
-     * entry the server sends is ignored and any missing source_type is left untouched.
+     * The product-facing status projection covers the seven user-facing sources
+     * (`voice + gmail + outlook_mail + naver_imap + daum_imap + google_calendar +
+     * outlook_calendar`). `call_recording` remains schema-only and is ignored.
      *
      * On non-2xx or network error the local cache is left intact so the offline fallback
      * remains authoritative. [BecalmResult.Failure] is returned so callers can surface
@@ -149,6 +144,14 @@ public interface SourceStatusRepository {
     public suspend fun recordSyncStart(sourceType: String): BecalmResult<Unit>
 
     /**
+     * Clears the locally derived status metadata for a single [sourceType].
+     *
+     * Used by source-disconnect flows so the UI returns to the idle / never-connected
+     * state without disturbing sibling sources.
+     */
+    public suspend fun clear(sourceType: String): BecalmResult<Unit>
+
+    /**
      * Atomically clears all source-status metadata for every source.
      *
      * Call during sign-out alongside cursor and preference wipes.
@@ -187,32 +190,16 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     private val logger: Logger,
 ) : SourceStatusRepository {
 
-    // ─── Key scheme ──────────────────────────────────────────────────────────
-    // All keys are namespaced under "source_status.<source>." to avoid collisions
-    // with the existing UserPrefsStore keys in the same DataStore file.
-
-    private companion object Keys {
-        fun lastSyncedAt(source: String) =
-            longPreferencesKey("source_status.$source.last_synced_at")
-
-        fun lastError(source: String) =
-            stringPreferencesKey("source_status.$source.last_error")
-
-        fun inProgress(source: String) =
-            booleanPreferencesKey("source_status.$source.in_progress")
-    }
-
     // ─── Observation ─────────────────────────────────────────────────────────
 
     override fun observeAll(): Flow<List<SourceStatus>> {
-        // PRODUCT_SOURCES (6 external product sources) — NOT the schema-level ALL set.
-        // ALL includes VOICE and CALL_RECORDING which either have no product tile
-        // (CALL_RECORDING wave-0 carve-out) or are captured locally (VOICE), so they
-        // must not appear in the Sources strip or the Today aggregate banner.
+        // PRODUCT_SOURCES (7 user-facing sources) — NOT the schema-level ALL set.
+        // ALL still includes CALL_RECORDING, but that remains a schema-only carve-out
+        // and must not appear in the Sources strip or Today aggregate banner.
         val flows: List<Flow<SourceStatus>> = SourceType.PRODUCT_SOURCES.map { source ->
             observeFor(source)
         }
-        // combine(List<Flow>) requires at least one flow; PRODUCT_SOURCES always has 6 entries.
+        // combine(List<Flow>) requires at least one flow; PRODUCT_SOURCES is non-empty.
         return combine(flows) { statuses -> statuses.toList() }
     }
 
@@ -221,10 +208,10 @@ public class SourceStatusRepositoryImpl @Inject constructor(
 
     override fun observeFor(sourceType: String): Flow<SourceStatus> =
         userPrefs.data.map { prefs ->
-            val lastSyncedAtMs = prefs[lastSyncedAt(sourceType)]
-            val lastError = prefs[lastError(sourceType)]
-            val isInProgress = prefs[inProgress(sourceType)] ?: false
-            deriveStatus(sourceType, lastSyncedAtMs, lastError, isInProgress)
+            val lastSyncedAtMs = prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)]
+            val lastError = prefs[SourceStatusPrefsKeys.lastError(sourceType)]
+            val isInProgress = prefs[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false
+            SourceStatusDeriver.derive(sourceType, lastSyncedAtMs, lastError, isInProgress)
         }
 
     // ─── Server refresh (TDY-006 / TDY-008) ──────────────────────────────────
@@ -249,9 +236,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 userPrefs = userPrefs,
                 items = body.sources,
                 logger = logger,
-                lastSyncedAt = Keys::lastSyncedAt,
-                lastError = Keys::lastError,
-                inProgress = Keys::inProgress,
+                lastSyncedAt = SourceStatusPrefsKeys::lastSyncedAt,
+                lastError = SourceStatusPrefsKeys::lastError,
+                inProgress = SourceStatusPrefsKeys::inProgress,
             )
             logger.d(TAG, "refreshFromServer merged=${body.sources.size}")
             BecalmResult.Success(Unit)
@@ -272,9 +259,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         at: Instant,
     ): BecalmResult<Unit> = runOp(sourceType, "recordSyncSuccess") {
         userPrefs.edit { prefs ->
-            prefs[lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
-            prefs.remove(lastError(sourceType))
-            prefs.remove(inProgress(sourceType))
+            prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
+            prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
+            prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
         }
         logger.d(TAG, "syncSuccess source=$sourceType at=$at")
     }
@@ -285,9 +272,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         at: Instant,
     ): BecalmResult<Unit> = runOp(sourceType, "recordSyncError") {
         userPrefs.edit { prefs ->
-            prefs[lastError(sourceType)] = error
-            prefs[lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
-            prefs.remove(inProgress(sourceType))
+            prefs[SourceStatusPrefsKeys.lastError(sourceType)] = error
+            prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)] = at.toEpochMilliseconds()
+            prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
         }
         logger.d(TAG, "syncError source=$sourceType error=$error at=$at")
     }
@@ -295,9 +282,19 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     override suspend fun recordSyncStart(sourceType: String): BecalmResult<Unit> =
         runOp(sourceType, "recordSyncStart") {
             userPrefs.edit { prefs ->
-                prefs[inProgress(sourceType)] = true
+                prefs[SourceStatusPrefsKeys.inProgress(sourceType)] = true
             }
             logger.d(TAG, "syncStart source=$sourceType")
+        }
+
+    override suspend fun clear(sourceType: String): BecalmResult<Unit> =
+        runOp(sourceType, "clear") {
+            userPrefs.edit { prefs ->
+                prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(sourceType))
+                prefs.remove(SourceStatusPrefsKeys.lastError(sourceType))
+                prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
+            }
+            logger.d(TAG, "clear source=$sourceType")
         }
 
     override suspend fun clearAll(): BecalmResult<Unit> = try {
@@ -306,9 +303,9 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             // wipes any stale keys written for VOICE/CALL_RECORDING in an earlier build —
             // leaving them behind would leak per-user sync metadata across accounts.
             SourceType.ALL.forEach { source ->
-                prefs.remove(lastSyncedAt(source))
-                prefs.remove(lastError(source))
-                prefs.remove(inProgress(source))
+                prefs.remove(SourceStatusPrefsKeys.lastSyncedAt(source))
+                prefs.remove(SourceStatusPrefsKeys.lastError(source))
+                prefs.remove(SourceStatusPrefsKeys.inProgress(source))
             }
         }
         logger.d(TAG, "clearAll completed")
@@ -323,27 +320,6 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
-
-    private fun deriveStatus(
-        sourceType: String,
-        lastSyncedAtMs: Long?,
-        lastError: String?,
-        isInProgress: Boolean,
-    ): SourceStatus {
-        val lastSyncedAt = lastSyncedAtMs?.let { Instant.fromEpochMilliseconds(it) }
-        val status = when {
-            lastSyncedAt == null && lastError.isNullOrBlank() -> SourceConnectionStatus.NEVER_CONNECTED
-            isInProgress -> SourceConnectionStatus.SYNCING
-            !lastError.isNullOrBlank() -> SourceConnectionStatus.ERROR
-            else -> SourceConnectionStatus.CONNECTED
-        }
-        return SourceStatus(
-            sourceType = sourceType,
-            status = status,
-            lastSyncedAt = lastSyncedAt,
-            errorMessage = lastError?.takeIf { it.isNotBlank() },
-        )
-    }
 
     /**
      * try/catch wrapper replacing the previous `runCatching`-style helper. Re-throws
@@ -366,4 +342,3 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         BecalmResult.Failure(BecalmError.Unknown(e))
     }
 }
-

@@ -29,6 +29,8 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.hasExceededMaxRetries
 import com.squareup.moshi.Moshi
@@ -83,6 +85,7 @@ public class OutlookMailWorker @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
+    private val processingPauseGate: ProcessingPauseGate,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -99,9 +102,14 @@ public class OutlookMailWorker @AssistedInject constructor(
     }
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         val now = Clock.System.now()
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
+            .takeIf { it > 0 }
         logger.d(TAG, "doWork started runAttemptCount=$runAttemptCount")
 
         val userId = authRepository.currentSession()?.userId
@@ -123,6 +131,7 @@ public class OutlookMailWorker @AssistedInject constructor(
             cursorKey = OUTLOOK_MAIL_INBOX_CURSOR_KEY,
             userId = userId,
             now = now,
+            lookbackDays = lookbackDays,
         )
         if (inboxOutcome is SyncOutcome.Terminal) {
             return@withContext inboxOutcome.result
@@ -134,6 +143,7 @@ public class OutlookMailWorker @AssistedInject constructor(
             cursorKey = OUTLOOK_MAIL_SENT_CURSOR_KEY,
             userId = userId,
             now = now,
+            lookbackDays = lookbackDays,
         )
         if (sentOutcome is SyncOutcome.Terminal) {
             return@withContext sentOutcome.result
@@ -160,8 +170,10 @@ public class OutlookMailWorker @AssistedInject constructor(
         cursorKey: String,
         userId: String,
         now: Instant,
+        lookbackDays: Int?,
     ): SyncOutcome {
         var cursor = syncCursorStore.observeCursor(cursorKey).first()
+        val boundedInitialSync = cursor == null && lookbackDays != null
         var totalFetched = 0
 
         while (true) {
@@ -179,7 +191,12 @@ public class OutlookMailWorker @AssistedInject constructor(
                 is BecalmResult.Success -> result.value
             }
 
-            val inserted = insertPageMessages(page.value, userId, folder)
+            val pageMessages = if (boundedInitialSync) {
+                page.value.filter { it.receivedDateTime >= daysAgo(now, lookbackDays) }
+            } else {
+                page.value
+            }
+            val inserted = insertPageMessages(pageMessages, userId, folder)
                 ?: return SyncOutcome.Terminal(Result.retry())
             totalFetched += inserted
             if (inserted > 0) {
@@ -432,5 +449,9 @@ public class OutlookMailWorker @AssistedInject constructor(
 
         /** Maximum number of WorkManager retry attempts before failing permanently. */
         public const val MAX_RETRIES: Int = 5
+        private const val NO_LOOKBACK: Int = -1
     }
 }
+
+private fun daysAgo(now: Instant, days: Int): Instant =
+    Instant.fromEpochMilliseconds(now.toEpochMilliseconds() - days * 86_400_000L)

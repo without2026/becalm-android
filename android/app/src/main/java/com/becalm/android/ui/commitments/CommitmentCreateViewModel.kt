@@ -211,19 +211,10 @@ public class CommitmentCreateViewModel @Inject constructor(
      */
     public fun onSave() {
         val snap = _uiState.value
-        val effectiveDraft = when (snap.mode) {
-            CommitmentCreateMode.MANUAL -> snap.draft
-            CommitmentCreateMode.SUPERSEDE -> {
-                val source = snap.supersedeSource
-                if (source == null) {
-                    _uiState.update {
-                        it.copy(saveError = "원문 commitment를 찾지 못했습니다")
-                    }
-                    return
-                }
-                // Preserve evidentiary quote verbatim (EDIT-007 invariant 1).
-                snap.draft.copy(quote = source.quote)
-            }
+        val effectiveDraft = CommitmentCreateProjector.effectiveDraft(snap)
+        if (effectiveDraft == null) {
+            _uiState.update { it.copy(saveError = "원문 commitment를 찾지 못했습니다") }
+            return
         }
         when (val v = CommitmentManualValidator.validate(effectiveDraft)) {
             is ValidationResult.Err -> {
@@ -248,7 +239,9 @@ public class CommitmentCreateViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "saveManualCommitment failed error=${result.error}")
-                    _uiState.update { it.copy(saveError = result.error.toSaveError()) }
+                    _uiState.update {
+                        it.copy(saveError = CommitmentCreateProjector.saveError(result.error))
+                    }
                 }
             }
         }
@@ -278,25 +271,8 @@ public class CommitmentCreateViewModel @Inject constructor(
                 // quote card and onSave surfaces the explicit error.
                 return@launch
             }
-            _uiState.update {
-                it.copy(
-                    supersedeSource = entity,
-                    // EDIT-007: only `quote` + `source_*` are pre-filled from the old
-                    // row (read-only in the UI, forwarded verbatim by the repository).
-                    // Editable fields (title / direction / person_ref / due_at /
-                    // due_hint / approx) start at manual defaults so the user's
-                    // supersede action describes the new commitment, not the old one.
-                    draft = it.draft.copy(quote = entity.quote),
-                )
-            }
+            _uiState.update { state -> CommitmentCreateProjector.applySupersedeSource(state, entity) }
         }
-    }
-
-    private fun BecalmError.toSaveError(): String = when (this) {
-        is BecalmError.Unauthorized -> "로그인이 필요합니다"
-        is BecalmError.NotFound -> "삭제된 약속입니다"
-        is BecalmError.Validation -> message
-        else -> "저장 실패 — 다시 시도해주세요"
     }
 
     private fun hashId(id: String): String = "%08x".format(id.hashCode())

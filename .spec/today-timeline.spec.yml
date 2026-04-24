@@ -26,39 +26,39 @@ behaviors:
 
   - id: TDY-003
     type: ui_interaction
-    description: "SourceStatusStrip은 읽기 전용 진단 표시다. 6개 칩(voice/gmail/outlook_mail/imap/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
+    description: "SourceStatusStrip은 읽기 전용 진단 표시다. 7개 칩(voice/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "Gmail 어댑터 synced 상태, Outlook 어댑터 error 상태, voice/imap/google_calendar/outlook_calendar idle"
-    expected: "Gmail 칩: 초록 체크 + 마지막 sync 시각 표시됨. Outlook 칩: 빨간 점 표시됨. 나머지 4개 칩: 회색 idle. 어떤 칩도 탭 시 네비게이션 없음"
+    precondition: "Gmail 어댑터 synced 상태, Outlook 어댑터 error 상태, voice/naver_email/daum_email/google_calendar/outlook_calendar idle"
+    expected: "Gmail 칩: 초록 체크 + 마지막 sync 시각 표시됨. Outlook 칩: 빨간 점 표시됨. 나머지 5개 칩: 회색 idle. 어떤 칩도 탭 시 네비게이션 없음"
     source: phase2-acceptance
     tests: []
 
   - id: TDY-004
-    type: api
-    description: "Railway GET /v1/commitments에서 오늘 due인 항목을 조회한다"
-    endpoint: "GET /v1/commitments"
-    precondition: "Supabase JWT Bearer 토큰 유효, query: since={today_start}, direction 생략(전체)"
-    expected: "HTTP 200, {data: Commitment[], cursor: string|null} — 서버 측 user 격리 적용됨"
+    type: lifecycle
+    description: "TodayTimelineScreen은 Room commitments에서 오늘 due인 항목을 KST 기준으로 조회한다"
+    trigger: "TodayTimelineScreen 진입 또는 Room invalidation"
+    precondition: "Room commitments 테이블 접근 가능"
+    expected: "today_start..today_end KST 범위에 속하는 due_at commitment만 로컬 쿼리 결과에 포함된다. 서버 GET은 사용하지 않으며, source adapter가 Room을 갱신하면 타임라인이 자동 갱신된다"
     source: phase2-acceptance
     tests: []
 
   - id: TDY-005
-    type: api
-    description: "Railway GET /v1/calendar_events에서 오늘 이벤트를 조회한다"
-    endpoint: "GET /v1/calendar_events"
-    precondition: "Supabase JWT Bearer 토큰 유효, query: since={today_start}"
-    expected: "HTTP 200, {data: CalendarEvent[], cursor: string|null} — 서버 측 user 격리 적용됨"
+    type: lifecycle
+    description: "TodayTimelineScreen은 Room calendar_events에서 오늘 이벤트를 KST 기준으로 조회한다"
+    trigger: "TodayTimelineScreen 진입 또는 Room invalidation"
+    precondition: "Room calendar_events 테이블 접근 가능"
+    expected: "today_start..today_end KST 범위의 calendar_events가 로컬 쿼리로 로드된다. status='cancelled' row도 함께 반환되어 strike-through 렌더링된다. 서버 GET은 사용하지 않는다"
     source: phase2-acceptance
     tests: []
 
   - id: TDY-006
     type: gesture
-    description: "타임라인을 아래로 당겨 새로고침하면 Room 데이터가 갱신된다"
+    description: "타임라인을 아래로 당겨 새로고침하면 Room 데이터를 즉시 재조회하고, 동시에 foreground catch-up(ING-011) + 즉시 업로드(SYNC-006)를 트리거한다"
     gesture: "pull-to-refresh"
     screen: "TodayTimelineScreen"
     precondition: "TodayTimelineScreen 표시됨"
-    expected: "Room에서 CalendarEvent + Commitment 재조회됨. 리스트 갱신됨"
+    expected: "pull-to-refresh 즉시 Room에서 CalendarEvent + Commitment 재조회됨. 기존 캐시로 리스트가 먼저 렌더링되고, 이후 ING-011 결과가 Room에 반영되면 리스트가 다시 갱신됨"
     source: phase2-acceptance
     tests: []
 
@@ -74,21 +74,21 @@ behaviors:
 
   - id: TDY-008
     type: ui_interaction
-    description: "OverallSyncIndicator가 6개 어댑터 상태를 집계하여 4가지 상태 중 하나를 표시한다: idle(전체 idle) / 'syncing N/6'(1개 이상 syncing) / 'synced HH:mm'(전체 synced, 오류 없음, min(last_sync_at) 표시) / '일부 소스 실패 — 설정에서 확인'(1개 이상 error, 경고색)"
+    description: "OverallSyncIndicator가 7개 사용자-facing source 상태를 집계하여 4가지 상태 중 하나를 표시한다: idle(전체 idle) / 'syncing N/7'(1개 이상 syncing) / 'synced HH:mm'(전체 synced, 오류 없음, min(last_sync_at) 표시) / '일부 소스 실패 — 설정에서 확인'(1개 이상 error, 경고색)"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "6개 어댑터 중 gmail=synced(10:30), voice=syncing, 나머지 idle"
-    expected: "OverallSyncIndicator가 'syncing 1/6' 상태로 표시됨. voice 어댑터 완료 후 'synced 10:30'으로 변경됨"
+    precondition: "7개 source 중 gmail=synced(10:30), voice=syncing, 나머지 idle"
+    expected: "OverallSyncIndicator가 'syncing 1/7' 상태로 표시됨. voice 어댑터 완료 후 'synced 10:30'으로 변경됨"
     source: phase2-acceptance
     tests: []
 
   - id: TDY-009
     type: gesture
-    description: "TodayTimeline pull-to-refresh가 ING-011 병렬 6소스 catch-up + SYNC-006 즉시 업로드를 트리거한다. 동기화 중에도 TodayTimeline은 Room 캐시로 즉시 렌더링된다 — 블로킹 없음"
+    description: "TodayTimeline pull-to-refresh가 ING-011 병렬 7소스 catch-up + SYNC-006 즉시 업로드를 트리거한다. 동기화 중에도 TodayTimeline은 Room 캐시로 즉시 렌더링된다 — 블로킹 없음"
     gesture: "pull-to-refresh"
     screen: "TodayTimelineScreen"
     precondition: "TodayTimelineScreen 표시됨, Room에 CalendarEvent 2건 캐시됨"
-    expected: "pull-to-refresh 즉시 TodayTimeline이 Room 캐시로 렌더링됨. 동시에 ING-011 병렬 어댑터 실행 시작됨. OverallSyncIndicator가 'syncing N/6'으로 전환됨. 어댑터 완료 후 Room 신규 데이터로 TodayTimeline 갱신됨"
+    expected: "pull-to-refresh 즉시 TodayTimeline이 Room 캐시로 렌더링됨. 동시에 ING-011 병렬 어댑터 실행 시작됨. OverallSyncIndicator가 'syncing N/7'으로 전환됨. 어댑터 완료 후 Room 신규 데이터로 TodayTimeline 갱신됨"
     source: phase2-acceptance
     tests: []
 
@@ -104,7 +104,7 @@ behaviors:
 
 invariants:
   - "TodayTimelineScreen은 Room(로컬) 데이터를 primary source로 사용한다"
-  - "Supabase REST에 직접 쿼리하지 않는다 — 모든 서버 조회는 Railway API를 통한다"
+  - "Supabase는 mirror이며 TodayTimelineScreen은 서버 GET으로 Room을 역갱신하지 않는다 — 새 데이터 유입은 source adapter와 foreground catch-up이 담당한다"
   - "SourceStatusStrip 칩은 탭 인터랙션이 없다 — 읽기 전용 진단 표시"
   - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 TodayTimelineScreen (cold-sync.spec.yml COLD-008이 onboarding_completed 전환 시점을 정의)"
   - "TodayTimelineScreen에는 사이드 드로어(HamburgerMenu)가 없다 — 설정 접근은 우상단 아이콘 탭"

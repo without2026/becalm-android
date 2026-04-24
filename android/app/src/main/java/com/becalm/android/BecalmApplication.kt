@@ -12,6 +12,8 @@ import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.receiver.ReminderBroadcastReceiver
+import com.becalm.android.worker.AppRuntimeSyncCoordinator
+import com.becalm.android.worker.VoiceFailureNotifier
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +49,9 @@ public class BecalmApplication : Application(), Configuration.Provider {
      */
     @Inject
     public lateinit var workScheduler: WorkScheduler
+
+    @Inject
+    public lateinit var appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator
 
     /**
      * One-shot migrator that promotes the pre-wave-2 single-tuple IMAP credential
@@ -130,6 +135,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // so repeat cold starts are safe no-ops. ReminderBroadcastReceiver posts to
         // this channel after re-querying Room for the commitment's live state.
         registerCommitmentDueSoonChannel()
+        VoiceFailureNotifier.ensureChannel(this)
         // Fire-and-forget upgrade compat: cancel WorkManager unique-work under the pre-#13
         // `ingest.sms_call` name so devices upgrading from that build don't run duplicate
         // MediaStore scans alongside the new `ingest.media_store` key. Idempotent — cancelling
@@ -209,8 +215,10 @@ public class BecalmApplication : Application(), Configuration.Provider {
             }.onFailure { Timber.e(it, "BecalmApplication: database warm-open failed") }
         }
 
-        // Enroll the daily 30-day retention sweep (EMAIL-006, unchanged below).
+        appRuntimeSyncCoordinator.start()
 
+        // Enroll background lifecycle sweeps that must survive process restarts.
+        enrollOverdueSweep()
         enrollRetentionSweep()
     }
 
@@ -242,5 +250,11 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // never reset the period timer, so invoking it unconditionally here is the
         // simplest single-entry-point guarantee that the sweep stays scheduled.
         workScheduler.scheduleRetentionSweep()
+    }
+
+    private fun enrollOverdueSweep() {
+        // Enroll the CMT-011 overdue lifecycle sweep. KEEP semantics on the
+        // scheduler side make this cold-start call idempotent.
+        workScheduler.scheduleOverdueSweep()
     }
 }

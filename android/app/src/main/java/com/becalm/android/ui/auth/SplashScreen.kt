@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
@@ -44,52 +43,58 @@ import com.becalm.android.ui.theme.becalmColors
 @Composable
 public fun SplashScreen(
     navController: NavHostController,
-    viewModel: AuthViewModel = hiltViewModel(),
+    viewModel: AuthViewModel? = null,
+    stateOverride: AuthUiState? = null,
+    onNavigate: ((String) -> Unit)? = null,
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val authViewModel = viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
+        val collectedState by authViewModel.uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     var navigated by rememberSaveable { mutableStateOf(false) }
+    val navigate = onNavigate ?: { destination: String ->
+        navController.navigate(destination) {
+            popUpTo(BecalmRoute.Splash.path) { inclusive = true }
+        }
+    }
 
     LaunchedEffect(state, navigated) {
         if (navigated) return@LaunchedEffect
-        when (state) {
-            is AuthUiState.SignedIn -> {
+        when (val destination = splashDestinationFor(state)) {
+            null -> Unit
+            else -> {
                 navigated = true
-                val signedIn = state as AuthUiState.SignedIn
-                val destination = if (signedIn.onboardingCompleted) {
-                    BecalmRoute.Today.path
-                } else {
-                    BecalmRoute.OnboardingPipaConsent.path
-                }
-                navController.navigate(destination) {
-                    popUpTo(BecalmRoute.Splash.path) { inclusive = true }
-                }
+                navigate(destination)
             }
-            is AuthUiState.SignedOut -> {
-                navigated = true
-                val destination = if ((state as AuthUiState.SignedOut).termsAccepted) {
-                    BecalmRoute.Login.path
-                } else {
-                    BecalmRoute.Terms.path
-                }
-                navController.navigate(destination) {
-                    popUpTo(BecalmRoute.Splash.path) { inclusive = true }
-                }
-            }
-            is AuthUiState.Error -> {
-                navigated = true
-                navController.navigate(BecalmRoute.Terms.path) {
-                    popUpTo(BecalmRoute.Splash.path) { inclusive = true }
-                }
-            }
-            is AuthUiState.Loading -> Unit // wait
         }
     }
 
     SplashContent()
 }
 
+internal fun splashDestinationFor(state: AuthUiState): String? =
+    when (state) {
+        is AuthUiState.SignedIn ->
+            if (state.onboardingCompleted) {
+                BecalmRoute.Today.path
+            } else {
+                BecalmRoute.OnboardingPipaConsent.path
+            }
+        is AuthUiState.SignedOut ->
+            if (state.termsAccepted) {
+                BecalmRoute.Login.path
+            } else {
+                BecalmRoute.Terms.path
+            }
+        is AuthUiState.Error -> BecalmRoute.Terms.path
+        is AuthUiState.Loading -> null
+    }
+
 @Composable
-private fun SplashContent() {
+internal fun SplashContent() {
     Box(
         modifier = Modifier
             .fillMaxSize()

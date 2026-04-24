@@ -15,14 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
@@ -45,12 +44,23 @@ import kotlinx.coroutines.launch
 @Composable
 public fun OutlookMailOAuthScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    eventsOverride: Flow<EmailConnectEvent>? = null,
+    onConnect: (() -> Unit)? = null,
+    onSkip: (() -> Unit)? = null,
+    onNavigateDownstream: (() -> Unit)? = null,
+    onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
     val activity = LocalContext.current as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val downstream = BecalmRoute.OnboardingEmailPipa("imap").path
+    val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        viewModel
+    }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
 
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_outlook_error_network),
@@ -61,17 +71,18 @@ public fun OutlookMailOAuthScreen(
     val pendingIntentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) {
-        activity?.let { viewModel.onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, it) }
+        activity?.let { requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, it) }
     }
+    val launchPendingIntent = onLaunchPendingIntent ?: { request -> pendingIntentLauncher.launch(request) }
 
-    LaunchedEffect(viewModel) {
-        viewModel.emailConnectEvents
+    LaunchedEffect(eventsOverride, onboardingViewModel) {
+        (eventsOverride ?: requireNotNull(onboardingViewModel).emailConnectEvents)
             .filter { it.provider == EmailPipaProvider.OUTLOOK_MAIL }
             .collect { event ->
                 when (event) {
-                    is EmailConnectEvent.Connected -> navController.navigate(downstream)
+                    is EmailConnectEvent.Connected -> navigateDownstream()
                     is EmailConnectEvent.PendingIntentRequired -> {
-                        pendingIntentLauncher.launch(IntentSenderRequest.Builder(event.pendingIntent).build())
+                        launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
                     is EmailConnectEvent.Failed -> {
                         if (event.errorCode != "user_cancelled") {
@@ -88,31 +99,49 @@ public fun OutlookMailOAuthScreen(
         title = stringResource(R.string.onb_outlook_mail_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        OAuthPlaceholderContent(
+        OutlookMailOAuthContent(
             modifier = Modifier.padding(padding),
-            headline = stringResource(R.string.onb_outlook_mail_headline),
-            body = stringResource(R.string.onb_outlook_mail_body),
-            connectLabel = stringResource(R.string.action_connect),
-            onConnect = {
+            onConnect = onConnect ?: {
                 val hostActivity = activity
                 if (hostActivity == null) {
                     scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
                 } else {
-                    viewModel.onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, hostActivity)
+                    requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, hostActivity)
                 }
+                Unit
             },
-            onSkip = {
-                viewModel.onSkipStep(OnboardingStep.LINK_OUTLOOK_MAIL)
-                navController.navigate(downstream)
+            onSkip = onSkip ?: {
+                requireNotNull(onboardingViewModel).onSkipStep(OnboardingStep.LINK_OUTLOOK_MAIL)
+                navigateDownstream()
+                Unit
             },
         )
     }
+}
+
+@Composable
+internal fun OutlookMailOAuthContent(
+    onConnect: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OAuthPlaceholderContent(
+        modifier = modifier,
+        headline = stringResource(R.string.onb_outlook_mail_headline),
+        body = stringResource(R.string.onb_outlook_mail_body),
+        connectLabel = stringResource(R.string.action_connect),
+        onConnect = onConnect,
+        onSkip = onSkip,
+    )
 }
 
 @PreviewLightDark
 @Composable
 private fun PreviewOutlookMailOAuthScreen() {
     BecalmTheme {
-        OutlookMailOAuthScreen(navController = rememberNavController())
+        OutlookMailOAuthContent(
+            onConnect = {},
+            onSkip = {},
+        )
     }
 }

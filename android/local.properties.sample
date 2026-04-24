@@ -16,3 +16,7 @@ SUPABASE_URL=https://xxxxxxxxxxxxxxxxxxxx.supabase.co
 # Supabase anonymous (public) key — safe to use in the client, still keep out of VCS.
 # Example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 SUPABASE_ANON_KEY=eyJ...
+
+# Google Web OAuth 2.0 Client ID used by Credential Manager for Supabase sign-in.
+# Example: 1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com
+google.web.client.id=

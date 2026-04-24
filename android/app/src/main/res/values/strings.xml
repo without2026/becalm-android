@@ -12,9 +12,17 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_sign_out">Sign Out</string>
     <string name="action_wipe_data">Wipe Local Data</string>
+    <string name="action_delete_account">Delete Account</string>
     <string name="action_reconnect">Reconnect</string>
+    <string name="action_sync_now">Sync Now</string>
     <string name="action_disconnect">Disconnect</string>
+    <string name="action_revoke_permission">Revoke Permission</string>
     <string name="label_settings">Settings</string>
+    <string name="voice_failure_channel_name">Voice Processing Issues</string>
+    <string name="voice_failure_channel_desc">Alerts when BeCalm cannot process a voice recording.</string>
+    <string name="voice_failure_notification_title">Voice processing failed</string>
+    <string name="voice_failure_notification_body_generic">%1$s could not be processed. Open BeCalm to review or retry.</string>
+    <string name="voice_failure_notification_body_output_truncated">%1$s was too long to process. Try a shorter recording.</string>
 
     <!-- Error / empty states -->
     <string name="error_generic_title">Something went wrong</string>
@@ -47,6 +55,12 @@
     <string name="onb_recording_folder_title">Recording Folder</string>
     <string name="onb_recording_folder_headline">Allow access to recordings</string>
     <string name="onb_recording_folder_body">BeCalm reads your voice recording files to extract commitments. Files are processed locally; only extracted commitment text is ever sent to our servers.</string>
+    <string name="onb_recording_folder_detected_path_fmt">Detected path: %1$s</string>
+    <string name="onb_recording_folder_voice_status_fmt">Voice Recorder folder: %1$s</string>
+    <string name="onb_recording_folder_call_status_fmt">Call folder: %1$s</string>
+    <string name="onb_recording_folder_status_detected">detected</string>
+    <string name="onb_recording_folder_status_missing">not detected</string>
+    <string name="onb_recording_folder_manual_picker_fallback">Automatic detection failed. Choose the top-level Recordings folder in the picker.</string>
 
     <!-- Onboarding: contacts -->
     <string name="onb_contacts_title">Contacts Access</string>
@@ -103,6 +117,10 @@
     <string name="onb_outlook_error_network">Couldn\'t reach Microsoft. Please check your connection and try again.</string>
     <string name="onb_outlook_error_permission_denied">BeCalm needs Mail.Read access. Please grant the scope to continue.</string>
     <string name="onb_outlook_error_unknown">Outlook connection failed. Please try again or skip for now.</string>
+    <string name="onb_gcal_error_unavailable">Google Calendar connection is not available in this build yet. Skip for now.</string>
+    <string name="onb_gcal_error_unknown">Google Calendar connection failed. Please try again or skip for now.</string>
+    <string name="onb_outlook_cal_error_unavailable">Outlook Calendar connection is not available in this build yet. Skip for now.</string>
+    <string name="onb_outlook_cal_error_unknown">Outlook Calendar connection failed. Please try again or skip for now.</string>
 
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
     <string name="onb_pipa_email_title_gmail">Gmail data use</string>
@@ -146,6 +164,7 @@
     <string name="onb_cold_sync_body">BeCalm is importing your existing data for the first time. This may take a few minutes.</string>
     <string name="onb_cold_sync_done">All done! Tap to continue.</string>
     <string name="onb_cold_sync_cta">Go to Today</string>
+    <string name="onb_cold_sync_skip_cta">Skip for now</string>
 
     <!-- Today Timeline -->
     <string name="today_title">Today</string>
@@ -165,12 +184,24 @@
     <string name="persons_unassigned_empty_title">No unassigned events</string>
     <string name="persons_unassigned_empty_message">All events have been matched to a person.</string>
     <string name="persons_interactions_count">%d interactions</string>
+    <string name="persons_pending_commitments_fmt">Pending %1$d</string>
+    <string name="persons_offline_badge_fmt">Offline - last sync %1$s</string>
+    <string name="persons_offline_badge_no_sync">Offline</string>
+    <string name="contacts_source_connection_state_fmt">Status: %1$s</string>
+    <string name="contacts_source_enriched_count_fmt">Enriched contacts: %1$d</string>
+    <string name="sources_contacts_title">Contacts</string>
+    <string name="sources_contacts_enriched_fmt">%1$d contacts enriched</string>
 
     <!-- Person detail -->
     <string name="person_detail_commitments_section">Commitments</string>
     <string name="person_detail_history_section">Interaction History</string>
     <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
     <string name="person_detail_source_label">Source: %s</string>
+    <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
+    <string name="source_detail_events_synced_fmt">%1$d synced items</string>
+    <string name="source_detail_last_error_fmt">Last error: %1$s</string>
+    <string name="source_detail_disconnect_confirm_title">Disconnect source?</string>
+    <string name="source_detail_disconnect_confirm_body">This removes the current source connection. Existing imported data stays on device.</string>
 
     <!-- Raw event detail -->
     <string name="raw_event_detail_title">Event Detail</string>
@@ -292,6 +323,7 @@
     <string name="commitment_edit_field_direction">방향</string>
     <string name="commitment_edit_field_direction_give">내가 한 약속</string>
     <string name="commitment_edit_field_direction_take">상대가 한 약속</string>
+    <string name="commitment_edit_readonly_source_label">출처 정보</string>
     <string name="commitment_edit_readonly_quote_label">원문 (수정 불가 — 법적 증거)</string>
     <string name="commitment_edit_readonly_quote_disputed">이의 제기됨</string>
     <string name="commitment_edit_toggle_dispute">원문 이의 제기 토글</string>
@@ -336,10 +368,12 @@
     <string name="settings_data_section">Data</string>
     <string name="settings_notifications_label">Notifications</string>
     <string name="settings_sources_label">Data Sources</string>
+    <string name="settings_privacy_label">Privacy Management</string>
     <string name="settings_sign_out_confirm_title">Sign out?</string>
     <string name="settings_sign_out_confirm_message">You will be signed out of BeCalm. Local data remains until you wipe it.</string>
     <string name="settings_wipe_confirm_title">Wipe all data?</string>
     <string name="settings_wipe_confirm_message">This will permanently delete all locally stored personal data and sign you out. This action cannot be undone.</string>
+    <string name="settings_sign_out_pipa_note">Sign out does not delete local data. For permanent deletion, use Privacy Management → Delete Account.</string>
 
     <!-- Sources list -->
     <string name="sources_title">Data Sources</string>
@@ -392,4 +426,31 @@
     <string name="source_detail_recent_events_section">Recent Events</string>
     <string name="source_detail_empty_events">No events recorded from this source yet.</string>
     <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
+
+    <!-- Privacy management -->
+    <string name="privacy_management_title">Privacy Management</string>
+    <string name="privacy_export_title">내 데이터 다운로드 — 열람권(제35조)</string>
+    <string name="privacy_export_subtitle">Save the current on-device BeCalm data as a ZIP file.</string>
+    <string name="privacy_withdraw_title">동의 철회 — 동의철회권(제39조)</string>
+    <string name="privacy_withdraw_subtitle">Withdraw consent source-by-source and stop future automatic processing.</string>
+    <string name="privacy_pause_title">데이터 처리 일시중단 — 처리정지권(제37조)</string>
+    <string name="privacy_pause_subtitle">Temporarily pause background processing and resume with a catch-up sync later.</string>
+    <string name="privacy_delete_title">계정 삭제 — 삭제권(제36조)</string>
+    <string name="privacy_delete_subtitle_fmt">Deletes local account data. Current local summary: commitments %1$d, contact enrichment %2$d, email rows %3$d.</string>
+    <string name="privacy_activity_log_title">활동 내역</string>
+    <string name="privacy_activity_log_subtitle">Review local-only PIPA rights activity history.</string>
+    <string name="privacy_correction_guidance">정정은 각 상세 편집 화면에서 처리됩니다. 약속 수정은 편집 화면, 연락처 보강은 원본 이벤트 또는 연락처 경로를 이용하세요.</string>
+    <string name="privacy_export_cancelled">Export was cancelled.</string>
+    <string name="privacy_export_failed">Could not write the export ZIP.</string>
+    <string name="privacy_export_confirm_body">데이터를 ZIP 파일로 저장하시겠습니까?</string>
+    <string name="privacy_pause_description">When processing is paused, BeCalm keeps your local data but skips all background ingestion and upload work until you resume it.</string>
+    <string name="privacy_pause_switch_label">Pause all processing</string>
+    <string name="privacy_pause_started_fmt">Pause started at: %1$s</string>
+    <string name="privacy_pause_confirm_body">처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다.</string>
+    <string name="privacy_delete_warning_fmt">This action cannot be undone. Commitments %1$d, contact enrichment %2$d, and email rows %3$d will be removed from this device.</string>
+    <string name="privacy_delete_email_label">Re-enter your account email</string>
+    <string name="privacy_delete_keyword_label">Type “삭제” to confirm</string>
+    <string name="privacy_delete_confirm">Delete account locally</string>
+    <string name="privacy_activity_log_empty">No PIPA activity has been recorded yet.</string>
+    <string name="processing_paused_banner">처리 일시중단 중</string>
 </resources>

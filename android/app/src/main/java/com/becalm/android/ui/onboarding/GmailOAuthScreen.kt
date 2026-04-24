@@ -23,9 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmButton
@@ -34,6 +32,7 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
@@ -62,12 +61,23 @@ import kotlinx.coroutines.launch
 @Composable
 public fun GmailOAuthScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    eventsOverride: Flow<EmailConnectEvent>? = null,
+    onConnect: (() -> Unit)? = null,
+    onSkip: (() -> Unit)? = null,
+    onNavigateDownstream: (() -> Unit)? = null,
+    onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
     val activity = LocalContext.current as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val downstream = BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.OUTLOOK_MAIL.storageKey).path
+    val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        viewModel
+    }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
 
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_gmail_error_network),
@@ -81,17 +91,18 @@ public fun GmailOAuthScreen(
         // AuthorizationClient's first-run flow completes asynchronously — re-run the
         // sign-in so the provider observes the now-granted scope. A cancelled dialog
         // surfaces as USER_CANCELLED on the second call, which the VM handles.
-        activity?.let { viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, it) }
+        activity?.let { requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.GMAIL, it) }
     }
+    val launchPendingIntent = onLaunchPendingIntent ?: { request -> pendingIntentLauncher.launch(request) }
 
-    LaunchedEffect(viewModel) {
-        viewModel.emailConnectEvents
+    LaunchedEffect(eventsOverride, onboardingViewModel) {
+        (eventsOverride ?: requireNotNull(onboardingViewModel).emailConnectEvents)
             .filter { it.provider == EmailPipaProvider.GMAIL }
             .collect { event ->
                 when (event) {
-                    is EmailConnectEvent.Connected -> navController.navigate(downstream)
+                    is EmailConnectEvent.Connected -> navigateDownstream()
                     is EmailConnectEvent.PendingIntentRequired -> {
-                        pendingIntentLauncher.launch(IntentSenderRequest.Builder(event.pendingIntent).build())
+                        launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
                     is EmailConnectEvent.Failed -> {
                         if (event.errorCode != "user_cancelled") {
@@ -108,32 +119,50 @@ public fun GmailOAuthScreen(
         title = stringResource(R.string.onb_gmail_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        OAuthPlaceholderContent(
+        GmailOAuthContent(
             modifier = Modifier.padding(padding),
-            headline = stringResource(R.string.onb_gmail_headline),
-            body = stringResource(R.string.onb_gmail_body),
-            connectLabel = stringResource(R.string.action_connect),
-            onConnect = {
+            onConnect = onConnect ?: {
                 val hostActivity = activity
                 if (hostActivity == null) {
                     scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
                 } else {
-                    viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, hostActivity)
+                    requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.GMAIL, hostActivity)
                 }
+                Unit
             },
-            onSkip = {
-                viewModel.onSkipStep(OnboardingStep.LINK_GMAIL)
-                navController.navigate(downstream)
+            onSkip = onSkip ?: {
+                requireNotNull(onboardingViewModel).onSkipStep(OnboardingStep.LINK_GMAIL)
+                navigateDownstream()
+                Unit
             },
         )
     }
+}
+
+@Composable
+internal fun GmailOAuthContent(
+    onConnect: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OAuthPlaceholderContent(
+        modifier = modifier,
+        headline = stringResource(R.string.onb_gmail_headline),
+        body = stringResource(R.string.onb_gmail_body),
+        connectLabel = stringResource(R.string.action_connect),
+        onConnect = onConnect,
+        onSkip = onSkip,
+    )
 }
 
 @PreviewLightDark
 @Composable
 private fun PreviewGmailOAuthScreen() {
     BecalmTheme {
-        GmailOAuthScreen(navController = rememberNavController())
+        GmailOAuthContent(
+            onConnect = {},
+            onSkip = {},
+        )
     }
 }
 

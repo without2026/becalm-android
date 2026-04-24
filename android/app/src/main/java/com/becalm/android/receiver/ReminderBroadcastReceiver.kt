@@ -25,6 +25,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+public data class ReminderNotificationSpec(
+    val commitmentId: String,
+    val channelId: String,
+    val deepLinkUri: String,
+    val title: String,
+    val body: String,
+)
+
 /**
  * Receives alarm broadcasts from [com.becalm.android.domain.reminder.ReminderScheduler]
  * and posts a `commitment_due_soon` notification — after re-querying Room to confirm the
@@ -133,7 +141,15 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             return
         }
 
-        postNotification(context, commitmentId, entity.title, entity.direction)
+        postNotification(
+            context = context,
+            spec = buildNotificationSpec(
+                context = context,
+                commitmentId = commitmentId,
+                title = entity.title,
+                direction = requireNotNull(entity.direction) { "Reminder notifications require action direction" },
+            ),
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -146,13 +162,11 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
      */
     internal open fun postNotification(
         context: Context,
-        commitmentId: String,
-        title: String,
-        direction: String,
+        spec: ReminderNotificationSpec,
     ) {
-        val notificationId = commitmentIdToNotificationId(commitmentId)
+        val notificationId = commitmentIdToNotificationId(spec.commitmentId)
 
-        val deepLink = Uri.parse("becalm://commitments/$commitmentId")
+        val deepLink = Uri.parse(spec.deepLinkUri)
         val tapIntent = Intent(Intent.ACTION_VIEW, deepLink).apply {
             setPackage(context.packageName)
             setClass(context, MainActivity::class.java)
@@ -165,16 +179,10 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val bodyResId = when (direction) {
-            "give" -> R.string.commitment_alarm_body_give_fmt
-            else -> R.string.commitment_alarm_body_take_fmt
-        }
-        val body = context.getString(bodyResId, title)
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, spec.channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(context.getString(R.string.commitment_alarm_title))
-            .setContentText(body)
+            .setContentTitle(spec.title)
+            .setContentText(spec.body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(tapPendingIntent)
@@ -229,5 +237,25 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             } catch (_: IllegalArgumentException) {
                 commitmentId.hashCode() and 0x7FFFFFFF
             }
+
+        /** Pure builder for CMT-008 receiver unit tests. */
+        public fun buildNotificationSpec(
+            context: Context,
+            commitmentId: String,
+            title: String,
+            direction: String,
+        ): ReminderNotificationSpec {
+            val bodyResId = when (direction) {
+                "give" -> R.string.commitment_alarm_body_give_fmt
+                else -> R.string.commitment_alarm_body_take_fmt
+            }
+            return ReminderNotificationSpec(
+                commitmentId = commitmentId,
+                channelId = CHANNEL_ID,
+                deepLinkUri = "becalm://commitments/$commitmentId",
+                title = context.getString(R.string.commitment_alarm_title),
+                body = context.getString(bodyResId, title),
+            )
+        }
     }
 }

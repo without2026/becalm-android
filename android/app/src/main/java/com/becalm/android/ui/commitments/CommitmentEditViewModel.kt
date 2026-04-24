@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,9 @@ public data class EditReadOnly(
     val quote: String,
     val quoteDisputed: Boolean,
     val sourceLabel: String,
+    val sourceTitle: String? = null,
+    val sourceOccurredAt: Instant? = null,
+    val isManual: Boolean = false,
 )
 
 /**
@@ -191,7 +195,7 @@ public class CommitmentEditViewModel @Inject constructor(
     /** EDIT-003: validate, normalise, and persist the form via [CommitmentRepository.editCommitment]. */
     public fun onSave() {
         val snap = _uiState.value
-        val draft = snap.toDraft()
+        val draft = CommitmentEditProjector.toDraft(snap)
         when (val v = CommitmentEditValidator.validate(draft)) {
             is ValidationResult.Err -> {
                 _uiState.update { it.copy(fieldErrors = v.fieldErrors) }
@@ -209,7 +213,7 @@ public class CommitmentEditViewModel @Inject constructor(
                 is BecalmResult.Success -> _dismiss.tryEmit(EditDismissEvent.Saved)
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "editCommitment failed id=${hashId(id)} error=${result.error}")
-                    _uiState.update { it.copy(saveError = result.error.toSaveError()) }
+                    _uiState.update { it.copy(saveError = CommitmentEditProjector.toSaveError(result.error)) }
                 }
             }
         }
@@ -240,7 +244,10 @@ public class CommitmentEditViewModel @Inject constructor(
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "toggleDispute failed id=${hashId(id)} error=${result.error}")
                     _uiState.update {
-                        it.copy(saving = false, saveError = result.error.toSaveError())
+                        it.copy(
+                            saving = false,
+                            saveError = CommitmentEditProjector.toSaveError(result.error),
+                        )
                     }
                 }
             }
@@ -257,7 +264,9 @@ public class CommitmentEditViewModel @Inject constructor(
                 is BecalmResult.Success -> _dismiss.tryEmit(EditDismissEvent.Deleted)
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "softDelete failed id=${hashId(id)} error=${result.error}")
-                    _uiState.update { it.copy(saveError = result.error.toSaveError()) }
+                    _uiState.update {
+                        it.copy(saveError = CommitmentEditProjector.toSaveError(result.error))
+                    }
                 }
             }
         }
@@ -290,43 +299,8 @@ public class CommitmentEditViewModel @Inject constructor(
                 _uiState.update { it.copy(loading = false, notFound = true) }
                 return@launch
             }
-            _uiState.update { seed(entity) }
+            _uiState.update { CommitmentEditProjector.seed(entity) }
         }
-    }
-
-    private fun seed(entity: CommitmentEntity): EditUiState = EditUiState(
-        loading = false,
-        saving = false,
-        notFound = false,
-        readOnly = EditReadOnly(
-            quote = entity.quote,
-            quoteDisputed = entity.quoteDisputed,
-            sourceLabel = entity.sourceType,
-        ),
-        title = entity.title,
-        dueAtMillis = entity.dueAt?.toEpochMilliseconds(),
-        dueIsApproximate = entity.dueIsApproximate,
-        dueHint = entity.dueHint.orEmpty(),
-        personRef = entity.personRef.orEmpty(),
-        direction = entity.direction,
-        fieldErrors = emptyMap(),
-        saveError = null,
-    )
-
-    private fun EditUiState.toDraft(): CommitmentEditDraft = CommitmentEditDraft(
-        title = title,
-        dueAtMillis = dueAtMillis,
-        dueHint = dueHint.ifBlank { null },
-        dueIsApproximate = dueIsApproximate,
-        personRef = personRef.ifBlank { null },
-        direction = direction,
-    )
-
-    private fun BecalmError.toSaveError(): String = when (this) {
-        is BecalmError.NotFound -> "삭제된 약속입니다"
-        is BecalmError.Unauthorized -> "로그인이 필요합니다"
-        is BecalmError.Validation -> message
-        else -> "저장 실패 — 다시 시도해주세요"
     }
 
     private fun hashId(id: String): String = "%08x".format(id.hashCode())

@@ -11,14 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
@@ -26,6 +25,7 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Onboarding step: READ_CONTACTS permission with PIPA notice.
@@ -43,66 +43,98 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 public fun ContactsPermissionScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    effectsOverride: Flow<ContactsPermissionEffect>? = null,
+    onGrant: (() -> Unit)? = null,
+    onSkip: (() -> Unit)? = null,
+    onLaunchSystemPermission: (() -> Unit)? = null,
+    onNavigateToEmailPipa: ((String) -> Unit)? = null,
 ) {
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
-        viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
-        navController.navigate(BecalmRoute.OnboardingEmailPipa(com.becalm.android.data.local.datastore.EmailPipaProvider.GMAIL.storageKey).path)
+    val onboardingViewModel = if (
+        effectsOverride == null || onGrant == null || onSkip == null || onLaunchSystemPermission == null
+    ) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        viewModel
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        requireNotNull(onboardingViewModel).onContactsPermissionResult(granted)
+    }
+    val requestSystemPermission = onLaunchSystemPermission ?: {
+        launcher.launch(Manifest.permission.READ_CONTACTS)
+    }
+    val navigateToEmailPipa = onNavigateToEmailPipa ?: { providerSlug ->
+        navController.navigate(BecalmRoute.OnboardingEmailPipa(providerSlug).path)
+    }
+
+    LaunchedEffect(effectsOverride, onboardingViewModel) {
+        (effectsOverride ?: requireNotNull(onboardingViewModel).contactsPermissionEffects).collect { effect ->
+            when (effect) {
+                ContactsPermissionEffect.RequestSystemPermission -> requestSystemPermission()
+                is ContactsPermissionEffect.NavigateToEmailPipa -> navigateToEmailPipa(effect.provider.storageKey)
+            }
+        }
     }
 
     BecalmScaffold(title = stringResource(R.string.onb_contacts_title)) { padding ->
+        ContactsPermissionContent(
+            onGrant = onGrant ?: requireNotNull(onboardingViewModel)::onAllowContacts,
+            onSkip = onSkip ?: requireNotNull(onboardingViewModel)::onSkipContacts,
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+@Composable
+internal fun ContactsPermissionContent(
+    onGrant: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 24.dp)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.onb_contacts_headline),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         Column(
             modifier = Modifier
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 24.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxWidth()
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(16.dp),
         ) {
             Text(
-                text = stringResource(R.string.onb_contacts_headline),
-                style = MaterialTheme.typography.headlineSmall,
+                text = stringResource(R.string.onb_contacts_body),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(16.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.onb_contacts_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.onb_contacts_pipa),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-            BecalmButton(
-                text = stringResource(R.string.action_grant),
-                onClick = { launcher.launch(Manifest.permission.READ_CONTACTS) },
-                variant = BecalmButtonVariant.Primary,
-                modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(12.dp))
-            BecalmButton(
-                text = stringResource(R.string.action_skip),
-                onClick = {
-                    viewModel.onSkipStep(OnboardingStep.CONTACTS_PERM)
-                    navController.navigate(BecalmRoute.OnboardingEmailPipa(com.becalm.android.data.local.datastore.EmailPipaProvider.GMAIL.storageKey).path)
-                },
-                variant = BecalmButtonVariant.Text,
+            Text(
+                text = stringResource(R.string.onb_contacts_pipa),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Spacer(modifier = Modifier.height(32.dp))
+        BecalmButton(
+            text = stringResource(R.string.action_grant),
+            onClick = onGrant,
+            variant = BecalmButtonVariant.Primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        BecalmButton(
+            text = stringResource(R.string.action_skip),
+            onClick = onSkip,
+            variant = BecalmButtonVariant.Text,
+        )
     }
 }
 
@@ -110,6 +142,9 @@ public fun ContactsPermissionScreen(
 @Composable
 private fun PreviewContactsPermissionScreen() {
     BecalmTheme {
-        ContactsPermissionScreen(navController = rememberNavController())
+        ContactsPermissionContent(
+            onGrant = {},
+            onSkip = {},
+        )
     }
 }

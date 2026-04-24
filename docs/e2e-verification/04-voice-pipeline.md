@@ -2,7 +2,7 @@
 
 Spec: `becalm-android/.spec/voice-pipeline.spec.yml` (version 2)
 
-> **Architecture lock (2026-04-16)**: Android → Railway `POST /v1/voice/transcribe_extract` → Vertex AI Gemini 2.5 Flash → Supabase. On-device STT 제거. Audio 는 ONB-PIPA 동의 시에만 device 를 떠남.
+> **Architecture lock (2026-04-24)**: Android → Railway `POST /v1/voice/transcribe_extract` → Vertex AI Gemini 2.5 Flash (`us-central1`) → Android Room/Supabase mirror. On-device STT 제거. Audio 는 ONB-PIPA 동의 시에만 device 를 떠남.
 
 ---
 
@@ -28,8 +28,9 @@ VoiceUploadWorker                worker/VoiceUploadWorker.kt:81
          │
          ▼
 Railway `/v1/voice/transcribe_extract`  (contract: `.spec/contracts/api-contract.yml`)
-   → Gemini 2.5 Flash (asia-northeast3, responseSchema=CommitmentDraft[])
-   → Supabase service_role INSERT commitments
+   → Gemini 2.5 Flash (us-central1, responseSchema=VoiceExtractItem[])
+   → HTTP 200 { raw_event_id, items[], model, region, raw_model_text? }
+   → Android가 action item만 Room commitments로 투영
 
 Mirror path (raw event ack):
    UploadWorker.kt:54 → `/v1/raw_ingestion_events:batch` (ING-004/SYNC-001)
@@ -37,14 +38,14 @@ Mirror path (raw event ack):
 
 ---
 
-## VOI-001 — `pending` voice raw event 를 Railway 업로드 → commitments INSERT
+## VOI-001 — `pending` voice raw event 를 Railway 업로드 → action items를 commitments로 투영
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
 | Trigger | `worker/ingestion/MediaStoreWorker.kt:460/504` | `insertVoiceRow` → `enqueueVoice` |
 | Worker | `worker/VoiceUploadWorker.kt:93` | `doWork()` |
 | API | `data/remote/api/VoiceApi.kt:64` | `transcribeExtract(multipart)` |
-| Mappers | `worker/VoiceUploadMappers.kt` | DTO → CommitmentEntity 변환 |
+| Mappers | `worker/VoiceUploadMappers.kt` | action projection DTO → CommitmentEntity 변환 |
 | Persist | `data/repository/CommitmentRepositoryImpl.kt:298` | `CommitmentDto.toEntity` |
 | Mirror | `worker/UploadWorker.kt:121` | `flushRawIngestion` — raw event ack 별도 경로 |
 
@@ -72,12 +73,12 @@ grep -rn "chunk\|split" becalm-android/android/app/src/main/java/com/becalm/andr
 
 ---
 
-## VOI-003 — structured output (responseSchema CommitmentDraft[])
+## VOI-003 — structured output (responseSchema VoiceExtractItem[])
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| DTO | `data/remote/dto/VoiceTranscribeDtos.kt` | `TranscribeExtractResponse`, `CommitmentDraftDto` |
-| Domain | `domain/voice/CommitmentDraft.kt` | `CommitmentDraft` fields (direction/text/person_ref?/due_at?/quote/confidence) |
+| DTO | `data/remote/dto/VoiceTranscribeDtos.kt` | `TranscribeExtractResponse`, `VoiceExtractItemDto`, action compatibility projection |
+| Domain | `domain/voice/CommitmentDraft.kt` | current action-only compatibility domain type |
 | Schema test | `android/app/src/test/.../schema/VoiceResponseSchemaTest.kt` | 스키마 위반 → 502 mapping |
 | Contract test | `android/app/src/test/.../contract/VoiceApiContractTest.kt` | api-contract.yml 과 shape 일치 |
 
@@ -149,7 +150,7 @@ grep -rn "filesDir\|cacheDir\|copyTo\|delete" becalm-android/android/app/src/mai
 | --- | --- |
 | Audio leaves device only when PIPA=true | `VoiceUploadWorker.doWork` 에서 consent check 분기 필수. `parkIfConsentWithdrawn` 가 모든 업로드 시도 앞에 위치 |
 | Transcript 영속 금지 | `grep -rn "transcript" becalm-android/android/app/src/main/java/com/becalm/android/data/local` → Room entity 에 transcript 필드 **없어야** 한다 |
-| Vertex ZDR region=asia-northeast3 | 클라이언트는 확인 불가. Railway 측 contract + 서버 로그에서 검증 |
+| Vertex ZDR region=us-central1 | 클라이언트는 확인 불가. Railway 측 contract + 서버 로그에서 검증 |
 | WiFi/unmetered constraint | `worker/WorkSchedulerImpl.kt` 에 `setRequiredNetworkType(UNMETERED)` 존재 확인 |
 
 ---

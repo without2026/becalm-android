@@ -15,10 +15,10 @@ version: 1
 behaviors:
   - id: COLD-001
     type: lifecycle
-    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — 6개 소스 어댑터 중 high-priority 서브셋(google_calendar ±7일, outlook_calendar ±7일, gmail 7일, outlook_mail 7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)을 병렬 코루틴으로 실행. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
+    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — 7개 사용자-facing source 중 high-priority 6개(google_calendar ±7일, outlook_calendar ±7일, gmail 7일, outlook_mail 7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)을 병렬 코루틴으로 실행. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
     trigger: "ColdSyncScreen 진입 (TDY-010 조건: Room에 raw_ingestion_events + commitments + calendar_events 0건)"
     precondition: "인증 완료, DataStore onboarding_completed=false, 최소 1개 소스 연결됨"
-    expected: "Stage 1 코루틴 Scope 시작. 각 어댑터는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT. user_profile 어댑터: Railway GET /v1/user_profile 호출 → Room user_profile 테이블에 UPSERT(최초 빈 row 포함). 동시에 SYNC-006 즉시 업로드도 큐잉되어 calendar_events·raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
+    expected: "Stage 1 코루틴 Scope 시작. 각 어댑터는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT. user_profile bootstrap은 auth session + 기본 timezone/locale로 Room user_profile row를 로컬 생성/UPSERT하고, 이후 별도 user_profile mirror 경로로 서버에 반영한다(서버 GET으로 Room을 역갱신하지 않음). 동시에 SYNC-006 즉시 업로드도 큐잉되어 calendar_events·raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
     source: phase2-acceptance
     tests: []
 

@@ -3,6 +3,8 @@ package com.becalm.android.data.remote.api
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.CalendarEventListResponse
+import com.becalm.android.data.remote.dto.CalendarOAuthStartResponse
+import com.becalm.android.data.remote.dto.CalendarOAuthStatusResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
@@ -224,6 +226,26 @@ public interface RailwayApi {
      */
     @POST("v1/calendar_events:sync")
     public suspend fun syncCalendarEvents(): Response<CalendarSyncResponse>
+
+    /**
+     * Starts the backend-managed calendar OAuth flow for [provider].
+     *
+     * Returns the provider authorization URL and the Railway callback URI that has been
+     * signed with the current user identity.
+     */
+    @GET("v1/oauth/calendar/{provider}:start")
+    public suspend fun startCalendarOAuth(
+        @Path("provider") provider: String,
+    ): Response<CalendarOAuthStartResponse>
+
+    /**
+     * Returns whether the current authenticated user has already completed calendar OAuth
+     * for [provider] on the backend.
+     */
+    @GET("v1/oauth/calendar/{provider}:status")
+    public suspend fun getCalendarOAuthStatus(
+        @Path("provider") provider: String,
+    ): Response<CalendarOAuthStatusResponse>
 
     // =========================================================================
     // PERSONS

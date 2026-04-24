@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
@@ -139,6 +140,7 @@ private fun ExpandableBodyText(bodyPlain: String) {
             text = visibleText,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.testTag("raw-event-body"),
         )
         if (isLong) {
             Spacer(modifier = Modifier.height(4.dp))

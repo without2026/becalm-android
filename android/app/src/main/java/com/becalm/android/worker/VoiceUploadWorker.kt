@@ -39,8 +39,9 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 
 /**
  * [CoroutineWorker] that uploads a voice recording to Railway's
- * `POST /v1/voice/transcribe_extract` endpoint, receives extracted commitments from
- * Vertex AI Gemini 2.5 Flash, and persists them as [CommitmentEntity] rows in Room.
+ * `POST /v1/voice/transcribe_extract` endpoint, receives extracted business items from
+ * Vertex AI Gemini 2.5 Flash, and persists the current action subset as
+ * [CommitmentEntity] rows in Room.
  *
  * ## Inputs ([androidx.work.Data])
  * - [KEY_RAW_EVENT_ID] — String UUID of the [RawIngestionEventEntity] to process.
@@ -59,8 +60,8 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
  *    If consent was withdrawn after step 4 passed (in-flight race), park entity as
  *    `awaiting_consent` and return [Result.success].
  * 6. Call [VoiceApi.transcribeExtract]. On success: insert [CommitmentEntity] rows for each
- *    extracted commitment (deterministic IDs keyed on rawEventId+index), update entity counts and
- *    snippet, record sync success.
+ *    extracted action item (deterministic IDs keyed on rawEventId+index), update raw-event
+ *    action count and snippet, record sync success.
  * 7. Error handling per VOI-006:
  *    - HTTP 401 (after AuthInterceptor refresh): mark "failed", [Result.success].
  *    - HTTP 403/413/422: retryable=false, mark "failed", [Result.success].
@@ -92,12 +93,17 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
+    private val processingPauseGate: ProcessingPauseGate,
+    private val voiceFailureNotifier: VoiceFailureNotifier,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         val rawEventId = inputData.getString(KEY_RAW_EVENT_ID)
         val audioUriString = inputData.getString(KEY_AUDIO_URI)
 
@@ -153,7 +159,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                     TAG,
                     "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
                 )
-                markFailed(entity)
+                markFailed(entity, reasonCode = "audio_unavailable")
                 return@withContext Result.success()
             }
 
@@ -191,12 +197,12 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
                 val now = Clock.System.now()
 
-                // Insert commitments into Room.
+                // Insert extracted trackable items into Room.
                 // IDs are deterministic (UUID v5 keyed on rawEventId+index) so that a
                 // replayed successful response produces an upsert on the same PK rather than
                 // a duplicate row (CommitmentDao uses OnConflictStrategy.REPLACE — finding #2 fix).
-                val commitmentEntities = body.commitments.mapIndexed { index, dto ->
-                    dto.toCommitmentEntity(
+                val commitmentEntities = body.items.mapIndexed { index, dto ->
+                    dto.toTrackableCommitmentEntity(
                         rawEventId = rawEventId,
                         index = index,
                         userId = userId,
@@ -211,31 +217,36 @@ public class VoiceUploadWorker @AssistedInject constructor(
                     commitmentDao.insertAll(commitmentEntities)
                 }
 
-                // Update raw event: count, snippet, keep sync_status='pending' for batch mirror
-                val snippet = body.commitments.firstOrNull()?.quote?.take(SNIPPET_MAX_CHARS)
+                // Update raw event metadata:
+                // - commitmentsExtractedCount now mirrors the persisted trackable-item count.
+                // - eventSnippet uses the first extracted item's quote for recall.
+                val snippet = body.items.firstOrNull()?.quote?.take(SNIPPET_MAX_CHARS)
                 val updated = entity.copy(
-                    commitmentsExtractedCount = body.commitments.size,
+                    commitmentsExtractedCount = body.items.size,
                     eventSnippet = snippet,
                     syncStatus = STATUS_PENDING,
                 )
                 rawIngestionEventDao.update(updated)
 
                 sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
-                logger.d(TAG, "upload success id=${redact(rawEventId)} commitments=${body.commitments.size}")
+                logger.d(
+                    TAG,
+                    "upload success id=${redact(rawEventId)} items=${body.items.size}",
+                )
                 Result.success()
             }
 
             401 -> {
                 // AuthInterceptor already attempted refresh; second 401 means token is invalid
                 logger.w(TAG, "HTTP 401 after refresh id=${redact(rawEventId)} — marking failed")
-                markFailed(entity)
+                markFailed(entity, reasonCode = "unauthorized")
                 Result.success()
             }
 
             403, 413, 422 -> {
                 // Non-retryable: PIPA server-side guard failure, body too large, or duration exceeded
                 logger.w(TAG, "HTTP ${response.code()} non-retryable id=${redact(rawEventId)} — quarantining")
-                markFailed(entity)
+                markFailed(entity, reasonCode = "non_retryable_http_${response.code()}")
                 Result.success()
             }
 
@@ -264,7 +275,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
             else -> {
                 logger.w(TAG, "HTTP ${response.code()} unexpected id=${redact(rawEventId)} — marking failed")
-                markFailed(entity)
+                markFailed(entity, reasonCode = "unexpected_http_${response.code()}")
                 Result.success()
             }
         }
@@ -320,7 +331,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             Voice502Action.Quarantine -> {
                 // Deterministic server-side failure — no point retrying.
                 logger.w(TAG, "HTTP 502 non-retryable ($errorCode) id=${redact(rawEventId)} — quarantining")
-                markFailed(entity)
+                markFailed(entity, reasonCode = errorCode ?: "vertex_502_unknown")
                 Result.success()
             }
             Voice502Action.HandleAsTransient -> {
@@ -370,7 +381,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         return when (VoiceUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
             RetryAction.Quarantine -> {
                 logger.w(TAG, "exhausted retries id=${redact(entity.id)} — marking failed")
-                markFailed(entity)
+                markFailed(entity, reasonCode = "retry_exhausted")
                 Result.success()
             }
             // The row stays "pending" so WorkManager can retry it on the next attempt.
@@ -420,7 +431,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 "exhausted 429 budget id=${redact(rawEventId)} " +
                     "rateLimitedAttempt=$rateLimitedAttempt — marking failed",
             )
-            markFailed(entity)
+            markFailed(entity, reasonCode = "rate_limited_exhausted")
             Result.success()
         } else {
             val delaySec = UploadBackoff.nextDelaySeconds(
@@ -451,8 +462,22 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * is the single source of truth for retry counting), so this is the only place the column
      * is bumped for voice uploads.
      */
-    private suspend fun markFailed(entity: RawIngestionEventEntity) {
-        rawIngestionEventDao.markFailed(id = entity.id, retryIncrement = 1, now = Clock.System.now())
+    private suspend fun markFailed(entity: RawIngestionEventEntity, reasonCode: String?) {
+        rawIngestionEventDao.update(
+            entity.copy(
+                syncStatus = "failed",
+                retryCount = entity.retryCount + 1,
+                lastAttemptAt = Clock.System.now(),
+            ),
+        )
+        if (userPrefsStore.observeNotificationsEnabled().first()) {
+            voiceFailureNotifier.notifyFailure(
+                context = appContext,
+                rawEventId = entity.id,
+                eventTitle = entity.eventTitle,
+                reasonCode = reasonCode,
+            )
+        }
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

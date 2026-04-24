@@ -5,7 +5,8 @@
 
 - **타겟 유저**: 한국 B2B 비즈니스맨, 삼성 Android 전용 MVP
 - **MVP 성공 지표**: 수집 이벤트 100% Supabase 도달 (raw 손실 0)
-- **설계 문서**: [docs/becalm-mvp-design.md](docs/becalm-mvp-design.md) (v2, 2026-04-15)
+- **MVP boundary**: [docs/becalm-mvp-boundary.md](docs/becalm-mvp-boundary.md)
+- **개발 규율**: [docs/android-tdd-sdd-bible.md](docs/android-tdd-sdd-bible.md) (binding, 2026-04-22)
 
 ## Repository layout
 

@@ -21,23 +21,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.navigation.BecalmRoute
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import kotlinx.coroutines.flow.Flow
 
 // ─── CommitmentDetailSheet ────────────────────────────────────────────────────
 
@@ -78,11 +76,45 @@ public fun CommitmentDetailSheet(
     commitmentId: String,
     onDismiss: () -> Unit,
     onEdit: () -> Unit = {},
-    detailViewModel: CommitmentDetailViewModel = hiltViewModel(),
-    managementViewModel: CommitmentManagementViewModel = hiltViewModel(),
+    detailViewModel: CommitmentDetailViewModel? = null,
+    managementViewModel: CommitmentManagementViewModel? = null,
+    stateOverride: DetailUiState? = null,
+    effectsOverride: Flow<CommitmentDetailEffect>? = null,
+    onRemind: (() -> Unit)? = null,
+    onFollowUp: (() -> Unit)? = null,
+    onComplete: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
 ) {
-    val state by detailViewModel.uiState.collectAsStateWithLifecycle()
+    val resolvedDetailViewModel = if (stateOverride == null || effectsOverride == null) {
+        detailViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentDetailViewModel>()
+    } else {
+        detailViewModel
+    }
+    val resolvedManagementViewModel = if (
+        onRemind == null || onFollowUp == null || onComplete == null || onCancel == null
+    ) {
+        managementViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentManagementViewModel>()
+    } else {
+        managementViewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(resolvedDetailViewModel).uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    LaunchedEffect(effectsOverride, resolvedDetailViewModel) {
+        (effectsOverride ?: requireNotNull(resolvedDetailViewModel).effects).collect { effect ->
+            when (effect) {
+                is CommitmentDetailEffect.OpenEdit -> {
+                    onDismiss()
+                    onEdit()
+                }
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -116,30 +148,30 @@ public fun CommitmentDetailSheet(
             else -> {
                 DetailSheetContent(
                     entity = state.entity!!,
+                    quote = state.quote,
                     actionState = state.actionState,
+                    source = state.source,
+                    history = state.history,
+                    actionButtons = state.actionButtons,
                     counterpartyDisplayName = state.counterpartyDisplayName,
-                    onRemind = {
-                        managementViewModel.onRemind(commitmentId)
+                    onRemind = onRemind ?: {
+                        requireNotNull(resolvedManagementViewModel).onRemind(commitmentId)
                         onDismiss()
                     },
-                    onFollowUp = {
-                        managementViewModel.onFollowUp(commitmentId)
+                    onFollowUp = onFollowUp ?: {
+                        requireNotNull(resolvedManagementViewModel).onFollowUp(commitmentId)
                         onDismiss()
                     },
-                    onComplete = {
-                        managementViewModel.onComplete(commitmentId)
+                    onComplete = onComplete ?: {
+                        requireNotNull(resolvedManagementViewModel).onComplete(commitmentId)
                         onDismiss()
                     },
-                    onCancel = {
-                        managementViewModel.onCancel(commitmentId)
+                    onCancel = onCancel ?: {
+                        requireNotNull(resolvedManagementViewModel).onCancel(commitmentId)
                         onDismiss()
                     },
                     onEdit = {
-                        // Dismiss the detail sheet first so the edit sheet lands
-                        // as the single visible modal. The nav host wires this
-                        // callback to BecalmRoute.CommitmentEdit (EDIT-001..008).
-                        onDismiss()
-                        onEdit()
+                        requireNotNull(resolvedDetailViewModel).onEditClick()
                     },
                 )
             }
@@ -150,9 +182,13 @@ public fun CommitmentDetailSheet(
 // ─── Content ──────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DetailSheetContent(
+internal fun DetailSheetContent(
     entity: CommitmentEntity,
+    quote: String,
     actionState: CommitmentState,
+    source: CommitmentSourcePresentation,
+    history: CommitmentHistoryPresentation,
+    actionButtons: CommitmentDetailActionState,
     counterpartyDisplayName: String?,
     onRemind: () -> Unit,
     onFollowUp: () -> Unit,
@@ -181,7 +217,7 @@ private fun DetailSheetContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SimpleChip(text = entity.direction.uppercase())
+            SimpleChip(text = requireNotNull(entity.direction) { "Action commitment detail requires direction" }.uppercase())
             SimpleChip(text = stringForActionState(actionState))
         }
 
@@ -191,16 +227,14 @@ private fun DetailSheetContent(
         SectionLabel(text = stringResource(R.string.commitment_detail_quote_label))
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = entity.quote,
+            text = quote,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        if (entity.quoteDisputed) {
+        if (history.disputeRaisedAt != null) {
             Spacer(modifier = Modifier.height(6.dp))
-            val disputedAt = entity.quoteDisputedAt
-            val disputedWhen = disputedAt?.let(::formatKstShort).orEmpty()
             Text(
-                text = stringResource(R.string.commitment_detail_disputed_badge_fmt, disputedWhen),
+                text = history.disputedLabel.orEmpty(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -209,21 +243,8 @@ private fun DetailSheetContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 4. Source section — manual vs LLM-extracted diverge per MAN-004
-        val isManual = entity.sourceType == SourceType.MANUAL
-        val sourceText = if (isManual) {
-            stringResource(
-                R.string.commitment_detail_manual_source_fmt,
-                formatKstShort(entity.createdAt),
-            )
-        } else {
-            stringResource(
-                R.string.commitment_detail_llm_source_fmt,
-                entity.sourceEventTitle ?: entity.sourceType,
-                formatKstShort(entity.sourceEventOccurredAt),
-            )
-        }
         Text(
-            text = sourceText,
+            text = source.sourceLabel,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -249,7 +270,7 @@ private fun DetailSheetContent(
             Spacer(modifier = Modifier.height(2.dp))
             val prefix = if (entity.dueIsApproximate) "~" else ""
             Text(
-                text = prefix + formatKstShort(dueAt),
+                text = prefix + CommitmentDetailFormatter.formatShortKst(dueAt),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -267,6 +288,7 @@ private fun DetailSheetContent(
         ActionButtonRow(
             actionState = actionState,
             isDeleted = entity.deletedAt != null,
+            actionButtons = actionButtons,
             onRemind = onRemind,
             onFollowUp = onFollowUp,
             onComplete = onComplete,
@@ -277,18 +299,15 @@ private fun DetailSheetContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 8. Footer — last-edited banner + supersede backlink
-        if (entity.lastEditedAt != null) {
+        if (history.lastEditedAt != null) {
             Text(
-                text = stringResource(
-                    R.string.commitment_detail_last_edited_fmt,
-                    formatKstShort(entity.lastEditedAt),
-                ),
+                text = history.lastEditedLabel.orEmpty(),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(4.dp))
         }
-        if (entity.supersedesCommitmentId != null) {
+        if (history.showSupersedeLink) {
             // Disabled per EDIT-008 MVP scope: the backlink is visible but not
             // actionable. Strikethrough makes the "disabled" state visually explicit.
             TextButton(
@@ -314,6 +333,7 @@ private fun DetailSheetContent(
 private fun ActionButtonRow(
     actionState: CommitmentState,
     isDeleted: Boolean,
+    actionButtons: CommitmentDetailActionState,
     onRemind: () -> Unit,
     onFollowUp: () -> Unit,
     onComplete: () -> Unit,
@@ -326,15 +346,11 @@ private fun ActionButtonRow(
     //   [완료]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
     //   [취소]   — PENDING / REMINDED / FOLLOWED_UP / OVERDUE
     //   [편집]   — not CANCELLED, not soft-deleted (EDIT-001)
-    val remindEnabled = actionState == CommitmentState.PENDING
-    val followUpEnabled =
-        actionState == CommitmentState.PENDING || actionState == CommitmentState.REMINDED
-    val completeEnabled = actionState == CommitmentState.PENDING ||
-        actionState == CommitmentState.REMINDED ||
-        actionState == CommitmentState.FOLLOWED_UP ||
-        actionState == CommitmentState.OVERDUE
+    val remindEnabled = CommitmentSheetAction.REMIND in actionButtons.availableActions
+    val followUpEnabled = CommitmentSheetAction.FOLLOW_UP in actionButtons.availableActions
+    val completeEnabled = CommitmentSheetAction.COMPLETE in actionButtons.availableActions
     val cancelEnabled = completeEnabled
-    val editEnabled = actionState != CommitmentState.CANCELLED && !isDeleted
+    val editEnabled = actionButtons.editEnabled && !isDeleted
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -343,7 +359,9 @@ private fun ActionButtonRow(
         OutlinedButton(
             onClick = onRemind,
             enabled = remindEnabled,
-            modifier = Modifier.widthIn(min = 0.dp),
+            modifier = Modifier
+                .widthIn(min = 0.dp)
+                .testTag("commitment-detail-remind"),
         ) { Text(text = stringResource(R.string.commitment_action_remind)) }
         OutlinedButton(
             onClick = onFollowUp,
@@ -363,7 +381,9 @@ private fun ActionButtonRow(
         OutlinedButton(
             onClick = onEdit,
             enabled = editEnabled,
-            modifier = Modifier.widthIn(min = 0.dp),
+            modifier = Modifier
+                .widthIn(min = 0.dp)
+                .testTag("commitment-detail-edit"),
         ) { Text(text = stringResource(R.string.commitment_action_edit)) }
     }
 }
@@ -389,21 +409,6 @@ private fun SimpleChip(text: String) {
             .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
-
-/**
- * Formats [instant] as `"M/d HH:mm"` in [KST_ZONE]. Used for the last-edited banner,
- * the disputed badge timestamp, and the source/due lines. Kept inline (rather than
- * shared via `TimeFormat`) because this sheet is the only caller of this exact
- * format; generalising prematurely would violate CLAUDE.md "Simplicity First".
- */
-private fun formatKstShort(instant: Instant): String {
-    val ldt = instant.toLocalDateTime(KST_ZONE)
-    val hour = ldt.hour.toString().padStart(2, '0')
-    val minute = ldt.minute.toString().padStart(2, '0')
-    return "${ldt.monthNumber}/${ldt.dayOfMonth} $hour:$minute"
-}
-
-private val KST_ZONE: TimeZone = TimeZone.of("Asia/Seoul")
 
 private fun stringForActionState(state: CommitmentState): String = when (state) {
     CommitmentState.PENDING -> "PENDING"

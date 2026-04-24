@@ -5,15 +5,16 @@
 module: source-management
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: SMG-001
     type: ui_interaction
-    description: "Settings → Sources 목록 화면에서 6개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 7개 행"
+    description: "Settings → Sources 목록 화면에서 7개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 8개 행"
     screen: "SourcesListScreen"
     interaction: "화면 진입"
-    precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, imap disconnected, google_calendar connected, outlook_calendar disconnected. READ_CONTACTS 부여됨"
-    expected: "7개 소스 목록 표시됨. Gmail: '연결됨'. Outlook: '오류 — 토큰이 만료되었습니다'. voice: '연결됨'. imap: '미연결'. google_calendar: '연결됨'. outlook_calendar: '미연결'. 연락처: '연결됨 — N명 보강됨' + last_synced_at. READ_CONTACTS 미부여 시 연락처 행: '미연결'"
+    precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, Naver Email disconnected, Daum Email connected, google_calendar connected, outlook_calendar disconnected. READ_CONTACTS 부여됨"
+    expected: "8개 행 표시됨. Gmail: '연결됨'. Outlook: '오류 — 토큰이 만료되었습니다'. voice: '연결됨'. Naver Email: '미연결'. Daum Email: '연결됨'. google_calendar: '연결됨'. outlook_calendar: '미연결'. 연락처: '연결됨 — N명 보강됨' + last_synced_at. READ_CONTACTS 미부여 시 연락처 행: '미연결'"
     source: phase2-acceptance
     tests: []
 
@@ -33,7 +34,7 @@ behaviors:
     screen: "SourceDetailScreen"
     interaction: "disconnected 또는 error 소스 카드 탭"
     precondition: "SourcesListScreen에서 Outlook Mail(error) 카드 탭"
-    expected: "SourceDetailScreen 표시됨. [다시 연결] 버튼 표시됨. [다시 연결] 탭 시 Microsoft OAuth 재인증 플로우 실행됨. 재인증 성공 시 DataStore Outlook 토큰 업데이트됨. SourceDetailScreen 상태가 connected로 갱신됨"
+    expected: "SourceDetailScreen 표시됨. [다시 연결] 버튼 표시됨. [다시 연결] 탭 시 Microsoft OAuth 재인증 플로우 실행됨. calendar source의 경우 backend-managed OAuth start URL을 브라우저/Custom Tab으로 열고 callback 후 연결 상태 polling으로 완료를 확인한다. 재인증 성공 시 SourceDetailScreen 상태가 connected로 갱신됨"
     source: phase2-acceptance
     tests: []
 
@@ -58,6 +59,6 @@ behaviors:
     tests: []
 
 invariants:
-  - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, Transcript)는 삭제하지 않는다"
+  - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, commitments/quotes)는 삭제하지 않는다"
   - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"
   - "[지금 동기화]는 소스 상세 화면에서만 접근 가능하다 — 대시보드에서 소스별 개별 동기화 불가"

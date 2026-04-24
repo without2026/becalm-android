@@ -109,10 +109,10 @@ public data class RawIngestionEventEntity(
     val eventTitle: String? = null,
 
     /**
-     * Voice: first ~200 chars of the first extracted commitment's [quote] field, populated after
+     * Voice: first ~200 chars of the first extracted voice item's [quote] field, populated after
      * [com.becalm.android.worker.VoiceUploadWorker] receives a successful Railway response.
      * Transcript itself is never persisted (voice-pipeline.spec.yml v2 invariant) — the quote
-     * is the only persisted text for voice events. Null when no commitments were extracted.
+     * is the only persisted text for voice events. Null when no items were extracted.
      * Email: body_plain[:200] → Jsoup(html).text()[:200] → subject[:200], whitespace collapsed.
      * See [com.becalm.android.domain.email.EmailSnippetBuilder.buildSnippet] & spec EMAIL-003.
      * Null for calendar events.
@@ -153,8 +153,11 @@ public data class RawIngestionEventEntity(
     val folder: String? = null,
 
     /**
-     * Number of commitments extracted from this event by the LLM pipeline.
-     * Defaults to 0 at ingestion time; updated after the extraction worker runs.
+     * Count of persisted trackable items extracted from this event by the LLM pipeline.
+     *
+     * For voice this now includes `action | schedule | decision` rows persisted into the
+     * expanded `commitments` table. The column name is retained for backward compatibility
+     * with existing Room/UI surfaces and backend wire format.
      */
     @ColumnInfo(name = "commitments_extracted_count")
     val commitmentsExtractedCount: Int = 0,

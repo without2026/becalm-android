@@ -44,11 +44,13 @@ internal fun SettingsPipaSection(
             label = stringResource(R.string.settings_notifications_label),
             checked = notificationsEnabled,
             onCheckedChange = onToggleNotifications,
+            toggleTestTag = "settings-notifications-toggle",
         )
         SettingsToggleRow(
             label = stringResource(R.string.settings_pipa_toggle_label),
             checked = pipaConsentEnabled,
             onCheckedChange = onTogglePipa,
+            toggleTestTag = "settings-pipa-toggle",
         )
     }
 }

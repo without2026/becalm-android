@@ -10,6 +10,7 @@
 module: data-ingestion
 platform: android
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 
 behaviors:
   - id: ING-001
@@ -17,7 +18,7 @@ behaviors:
     description: "ContentObserver가 Samsung One UI Recordings/ 하위 신규 녹음 파일 저장을 감지하면 Room raw_ingestion_events에 pending 레코드를 INSERT한다. 상위 Recordings/ 폴더의 단일 SAF URI grant 하에 두 서브디렉토리('Voice Recorder/'=음성 메모, 'Call/'=통화 녹음)를 동시에 감시한다. source_type은 저장 경로로 구분: 'Voice Recorder/' 하위면 source_type='voice', 'Call/' 하위면 source_type='call_recording'. ContentObserver는 앱 프로세스가 살아있는 동안만 작동한다 — 프로세스 종료 중 발생한 이벤트는 ING-011 foreground catch-up이 MediaStore timestamp cursor로 보완한다"
     trigger: "Samsung Voice Recorder 또는 Samsung Phone(통화 녹음)이 새 .m4a 파일을 SAF-granted Recordings/ URI 하위에 저장, 앱 프로세스가 FOREGROUND 또는 BACKGROUND에서 살아있음"
     precondition: "앱 프로세스가 FOREGROUND 또는 BACKGROUND 상태, SAF tree URI 권한 보유(상위 Recordings/), Room DB 초기화 완료, ContentObserver 등록됨"
-    expected: "Room raw_ingestion_events에 {source_type:'voice'|'call_recording', sync_status:'pending', retry_count:0, person_ref: 통화 녹음의 경우 MediaStore 메타데이터에서 추출 가능한 상대 번호를 E.164 정규화하여 설정(없으면 null), 음성 메모는 null, event_title: MediaStore TITLE, duration_seconds: MediaStore DURATION/1000, commitments_extracted_count:0} 레코드 1건 INSERT됨. event_snippet은 VOI-001 Vertex AI 파이프라인 완료 후 Railway가 갱신"
+    expected: "Room raw_ingestion_events에 {source_type:'voice'|'call_recording', sync_status:'pending', retry_count:0, person_ref: 통화 녹음의 경우 MediaStore 메타데이터에서 추출 가능한 상대 번호를 E.164 정규화하여 설정(없으면 null), 음성 메모는 null, event_title: MediaStore TITLE, duration_seconds: MediaStore DURATION/1000, commitments_extracted_count:0} 레코드 1건 INSERT됨. event_snippet은 VOI-001 draft extraction 완료 후 Android가 첫 commitment.quote로 로컬 갱신"
     source: phase2-acceptance
     tests: []
 
@@ -26,7 +27,7 @@ behaviors:
     description: "WorkManager UploadWorker가 pending 레코드를 Railway batch 엔드포인트에 업로드하고 sync_status를 synced로 업데이트한다. 이 WorkManager periodic job은 ING-011 foreground catch-up의 보조 중복 경로다"
     trigger: "WorkManager UploadWorker 실행 (네트워크 연결 있음)"
     precondition: "Room에 sync_status='pending' raw_ingestion_events 레코드 1건 이상 존재, Supabase JWT 유효"
-    expected: "POST /v1/raw_ingestion_events:batch 성공(HTTP 200) → Room sync_status='synced'로 UPDATE됨. 레코드 DELETE 없음"
+    expected: "POST /v1/raw_ingestion_events:batch 성공(HTTP 200 with results[]/failed[]) → results[]에 포함된 client_event_id 행만 Room sync_status='synced'로 UPDATE됨. count-only ack는 허용되지 않음. 레코드 DELETE 없음"
     source: phase2-acceptance
     tests: []
 
@@ -41,10 +42,10 @@ behaviors:
 
   - id: ING-004
     type: api
-    description: "Railway batch upload 성공 시 HTTP 200 + ack payload 반환. Railway가 Supabase에 실제 INSERT를 수행한다"
+    description: "Railway batch upload 성공 시 HTTP 200 + row-level result payload를 반환한다. response에 포함된 각 result는 이미 user-scoped durable insert가 완료된 이벤트만 나타낸다"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "Supabase JWT Bearer 토큰 유효, body에 events[] 배열(client_event_id, source_type, timestamp 포함)"
-    expected: "HTTP 200, {acknowledged: N, failed: []} — Room sync_status='synced'로 UPDATE됨"
+    expected: "HTTP 200, {results:[{client_event_id, disposition, committed_at}], failed: []} — Android는 result.client_event_id 기준으로만 Room sync_status='synced'로 UPDATE됨"
     source: phase2-acceptance
     tests: []
 
@@ -104,10 +105,10 @@ behaviors:
 
   - id: ING-011
     type: lifecycle
-    description: "[PRIMARY 100%-arrival 경로] 앱 foreground 진입(ON_START) 또는 pull-to-refresh 시 6개 소스 어댑터를 병렬 코루틴으로 실행하여 catch-up sync를 수행한다. 각 어댑터는 DataStore의 last_cursor를 읽어 해당 소스의 'since cursor' API를 호출하고 신규 이벤트를 Room에 INSERT(sync_status='pending')한다. 이후 SYNC-006 즉시 업로드 워커를 enqueueUniqueWork('sync-all-upload', REPLACE)로 트리거한다"
+    description: "[PRIMARY 100%-arrival 경로] 앱 foreground 진입(ON_START) 또는 pull-to-refresh 시 7개 사용자-facing source에 대응하는 어댑터를 병렬 코루틴으로 실행하여 catch-up sync를 수행한다. 각 어댑터는 DataStore의 last_cursor를 읽어 해당 소스의 'since cursor' API를 호출하고 신규 이벤트를 Room에 INSERT(sync_status='pending')한다. 이후 SYNC-006 즉시 업로드 워커를 enqueueUniqueWork('sync-all-upload', REPLACE)로 트리거한다"
     trigger: "앱이 ON_START 생명주기 진입 (BACKGROUND→FOREGROUND 포함) 또는 사용자 pull-to-refresh"
     precondition: "인증 완료, 최소 1개 소스 연결됨, 네트워크 연결됨"
-    expected: "6개 소스 어댑터 병렬 실행됨(각 어댑터 독립 성공/실패 격리). 각 어댑터가 last_cursor 이후 신규 이벤트를 Room에 INSERT함. UploadWorker enqueueUniqueWork('sync-all-upload', REPLACE) 호출됨. DashboardScreen의 OverallSyncIndicator가 'syncing N/6' 상태로 업데이트됨"
+    expected: "7개 사용자-facing source에 대응하는 어댑터가 병렬 실행됨(각 어댑터 독립 성공/실패 격리). 각 어댑터가 last_cursor 이후 신규 이벤트를 Room에 INSERT함. UploadWorker enqueueUniqueWork('sync-all-upload', REPLACE) 호출됨. DashboardScreen의 OverallSyncIndicator가 'syncing N/7' 상태로 업데이트됨"
     source: phase2-acceptance
     tests: []
 
@@ -140,21 +141,21 @@ behaviors:
 
   - id: ING-015
     type: api
-    description: "중복 client_event_id 재전송 시 서버는 200 ack 반환 — 신규 INSERT 없이 기존 레코드 유지. 이는 ING-003의 재시도가 안전하게 반복 실행될 수 있도록 하는 멱등성 계약이다"
+    description: "중복 client_event_id 재전송 시 서버는 200 + result(disposition='duplicate')를 반환한다 — 신규 INSERT 없이 기존 레코드 유지. 이는 ING-003의 재시도가 안전하게 반복 실행될 수 있도록 하는 멱등성 계약이다"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "이미 서버에 (user_id, client_event_id) 레코드 존재"
-    expected: "HTTP 200, acknowledged 카운트에 포함됨. 서버 raw_ingestion_events에 신규 INSERT 없음. Room sync_status='synced'로 UPDATE됨"
+    expected: "HTTP 200, results=[{client_event_id, disposition:'duplicate', committed_at}] 반환. 서버 raw_ingestion_events에 신규 INSERT 없음. Android는 해당 client_event_id를 sync_status='synced'로 UPDATE함"
     source: phase2-acceptance
     tests: []
 
 invariants:
-  - "raw_ingestion_events는 Railway ack(sync_status='synced') 확인 전까지 Room에서 DELETE되지 않는다"
-  - "Transcript 및 EmailBody는 Railway 또는 Supabase로 업로드되지 않는다 (로컬 only)"
+  - "raw_ingestion_events는 Railway durable result(sync_status='synced') 확인 전까지 Room에서 DELETE되지 않는다"
+  - "Transcript 및 EmailBody는 Railway 또는 Supabase로 업로드되지 않는다 (로컬 only). voice에서 서버로 나가는 텍스트는 consent 이후의 quote/event_snippet 최소치뿐이다"
   - "Gmail/Outlook OAuth 토큰 및 IMAP 앱 비밀번호는 Android Keystore에만 저장되며 Railway 서버로 전송되지 않는다"
   - "이메일/캘린더 데이터는 Android 기기에서 직접 로컬 파싱 후 구조화된 이벤트만 Railway로 업로드된다"
-  - "6개 소스 어댑터는 병렬 실행되며 한 어댑터의 실패가 다른 어댑터의 실행을 중단시키지 않는다"
+  - "7개 사용자-facing source에 대응하는 어댑터는 병렬 실행되며 한 어댑터의 실패가 다른 어댑터의 실행을 중단시키지 않는다"
   - "커서는 로그아웃 또는 앱 삭제 시 DataStore에서 삭제된다"
   - "Railway 응답 4xx(401 제외)는 영구 실패로 간주 — sync_status='quarantined'로 격리, 재시도하지 않음"
-  - "동일 client_event_id의 재전송은 서버에서 멱등 처리되며 항상 200 ack 반환 (ING-015)"
+  - "동일 client_event_id의 재전송은 서버에서 멱등 처리되며 항상 200 + row-level result(disposition='duplicate') 반환 (ING-015)"
   - "이메일 인덱싱 범위는 INBOX(받은)과 SENT(보낸) 두 시스템 폴더/라벨로 제한된다 — Drafts·Trash·Spam·Archive·Promotions/Social/Updates/Forums 카테고리는 수집 금지 (ING-006..008)"
   - "Room raw_ingestion_events와 EmailBody는 timestamp 기준 30일 rolling window로 자동 삭제된다 — 단 sync_status='synced' 조건을 만족할 때만. commitments·calendar_events는 자체 lifecycle을 따르며 리텐션 삭제 대상 아님 (data-model.yml migration_notes 참조)"

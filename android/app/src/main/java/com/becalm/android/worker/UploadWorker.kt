@@ -12,8 +12,6 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 
 /**
  * Periodic and on-demand [CoroutineWorker] that drains pending rows from
@@ -68,6 +66,7 @@ public class UploadWorker @AssistedInject constructor(
     rawIngestionRepository: RawIngestionRepository,
     commitmentRepository: CommitmentRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
@@ -81,80 +80,23 @@ public class UploadWorker @AssistedInject constructor(
         logger = logger,
     )
 
+    private val coordinator: UploadWorkerCoordinator = UploadWorkerCoordinator(
+        authRepository = authRepository,
+        rawEventUploader = rawEventUploader,
+        commitmentUploader = commitmentUploader,
+        sourceStatusRepository = sourceStatusRepository,
+        logger = logger,
+    )
+
     public override suspend fun doWork(): Result {
-        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
-
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
         val attempt = workerParams.inputData.getInt(INPUT_KEY_ATTEMPT, 0)
-
-        // ── Step 1: resolve userId ─────────────────────────────────────────────
-        val userId = authRepository.currentSession()?.userId
-        if (userId == null) {
-            logger.w(TAG, "no session — aborting upload attempt=$attempt")
-            return Result.failure(
-                retryOutput("no_session", attempt).build(),
-            )
-        }
-
-        logger.d(TAG, "doWork start attempt=$attempt userId=[redacted]")
-
-        val now = Clock.System.now()
-
-        // ── Step 2: flush raw ingestion events ────────────────────────────────
-        val rawResult = rawEventUploader.flushRawIngestion(userId, attempt)
-        val rawCount = when (rawResult) {
-            is FlushOutcome.Success -> rawResult.count
-            is FlushOutcome.TransportRetry -> return rawResult.result
-            is FlushOutcome.RetryNeeded -> return handleBatchAllRetryable("rawIngestion", attempt, now)
-            is FlushOutcome.PermanentFailure -> return rawResult.result
-        }
-
-        // ── Step 3: flush commitments ─────────────────────────────────────────
-        val commitResult = commitmentUploader.flushCommitments(userId, attempt)
-        val commitCount = when (commitResult) {
-            is FlushOutcome.Success -> commitResult.count
-            is FlushOutcome.TransportRetry -> return commitResult.result
-            is FlushOutcome.RetryNeeded -> return handleBatchAllRetryable("commitment", attempt, now)
-            is FlushOutcome.PermanentFailure -> return commitResult.result
-        }
-
-        // ── Step 4: record success ────────────────────────────────────────────
-        sourceStatusRepository.recordSyncSuccess(SOURCE_TYPE, now)
-
-        logger.i(
-            TAG,
-            "doWork complete rawUploaded=$rawCount commitUploaded=$commitCount attempt=$attempt",
+        return coordinator.run(
+            attempt = attempt,
+            maxRetriesExceeded = hasExceededMaxRetries(logger, TAG, MAX_RETRIES),
         )
-
-        return Result.success(
-            Data.Builder()
-                .putInt(OUTPUT_KEY_UPLOADED_RAW, rawCount)
-                .putInt(OUTPUT_KEY_UPLOADED_COMMIT, commitCount)
-                .build(),
-        )
-    }
-
-    /**
-     * Surfaces a batch-all-retryable flush as [Result.retry] + a sync-error record.
-     *
-     * Intentionally does **not** call [SourceStatusRepository.recordSyncSuccess]: the batch
-     * accepted zero rows, so a green chip would misrepresent sync health. [recordSyncError]
-     * keeps the UI honest while WorkManager schedules the next attempt with backoff.
-     */
-    private suspend fun handleBatchAllRetryable(
-        domain: String,
-        attempt: Int,
-        now: Instant,
-    ): Result {
-        logger.w(TAG, "$domain batch all retryable — Result.retry() (no recordSyncSuccess)")
-        sourceStatusRepository.recordSyncError(
-            SOURCE_TYPE,
-            "batch all retryable, backing off",
-            now,
-        )
-        // Retry reason / attempt are already captured in the logger.w call above and the
-        // sourceStatusRepository.recordSyncError row; WorkManager's Result.retry() does not
-        // accept output data.
-        return Result.retry()
     }
 
     public companion object {

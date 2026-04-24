@@ -1,22 +1,27 @@
 package com.becalm.android.ui.onboarding
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 
 /**
- * Onboarding step: Google Calendar OAuth connection placeholder.
- *
- * // TODO(BECALM-OAUTH-001): wire real Google Calendar OAuth via Google Identity Services SDK.
+ * Onboarding step: Google Calendar OAuth connection.
  *
  * spec: ONB-001, SMG-001
  *
@@ -27,31 +32,96 @@ import com.becalm.android.ui.theme.BecalmTheme
 @Composable
 public fun GoogleCalendarOAuthScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    eventsOverride: Flow<CalendarConnectEvent>? = null,
+    onConnect: (() -> Unit)? = null,
+    onSkip: (() -> Unit)? = null,
+    onNavigateDownstream: (() -> Unit)? = null,
 ) {
-    BecalmScaffold(title = stringResource(R.string.onb_gcal_title)) { padding ->
-        OAuthPlaceholderContent(
+    val activity = LocalContext.current as? android.app.Activity
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val downstream = BecalmRoute.OnboardingOutlookCalendar.path
+    val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        viewModel
+    }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
+
+    val errorCopyByCode = mapOf(
+        "not_implemented" to stringResource(R.string.onb_gcal_error_unavailable),
+        "oauth_not_configured" to stringResource(R.string.onb_gcal_error_unavailable),
+        "browser_unavailable" to stringResource(R.string.onb_gcal_error_unknown),
+        "oauth_timeout" to stringResource(R.string.onb_gcal_error_unknown),
+        "unknown" to stringResource(R.string.onb_gcal_error_unknown),
+    )
+
+    LaunchedEffect(eventsOverride, onboardingViewModel) {
+        (eventsOverride ?: requireNotNull(onboardingViewModel).calendarConnectEvents)
+            .filter { it.provider == CalendarOAuthProvider.GOOGLE_CALENDAR }
+            .collect { event ->
+                when (event) {
+                    is CalendarConnectEvent.Connected -> navigateDownstream()
+                    is CalendarConnectEvent.Failed -> {
+                        snackbarHostState.showSnackbar(
+                            errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
+                        )
+                    }
+                }
+            }
+    }
+
+    BecalmScaffold(
+        title = stringResource(R.string.onb_gcal_title),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { padding ->
+        GoogleCalendarOAuthContent(
             modifier = Modifier.padding(padding),
-            headline = stringResource(R.string.onb_gcal_headline),
-            body = stringResource(R.string.onb_gcal_body),
-            connectLabel = stringResource(R.string.action_connect),
-            onConnect = {
-                // TODO(BECALM-OAUTH-001): wire real Google Calendar OAuth
-                viewModel.onMarkStepStatus(OnboardingStep.LINK_GOOGLE_CALENDAR, StepStatus.COMPLETE)
-                navController.navigate(BecalmRoute.OnboardingOutlookCalendar.path)
+            onConnect = onConnect ?: {
+                val hostActivity = activity
+                if (hostActivity == null) {
+                    scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
+                } else {
+                    requireNotNull(onboardingViewModel).onConnectCalendarProvider(
+                        provider = CalendarOAuthProvider.GOOGLE_CALENDAR,
+                        activity = hostActivity,
+                    )
+                }
+                Unit
             },
-            onSkip = {
-                viewModel.onSkipStep(OnboardingStep.LINK_GOOGLE_CALENDAR)
-                navController.navigate(BecalmRoute.OnboardingOutlookCalendar.path)
+            onSkip = onSkip ?: {
+                requireNotNull(onboardingViewModel).onSkipCalendarSource(CalendarOAuthProvider.GOOGLE_CALENDAR)
+                navigateDownstream()
+                Unit
             },
         )
     }
+}
+
+@Composable
+internal fun GoogleCalendarOAuthContent(
+    onConnect: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OAuthPlaceholderContent(
+        modifier = modifier,
+        headline = stringResource(R.string.onb_gcal_headline),
+        body = stringResource(R.string.onb_gcal_body),
+        connectLabel = stringResource(R.string.action_connect),
+        onConnect = onConnect,
+        onSkip = onSkip,
+    )
 }
 
 @PreviewLightDark
 @Composable
 private fun PreviewGoogleCalendarOAuthScreen() {
     BecalmTheme {
-        GoogleCalendarOAuthScreen(navController = rememberNavController())
+        GoogleCalendarOAuthContent(
+            onConnect = {},
+            onSkip = {},
+        )
     }
 }

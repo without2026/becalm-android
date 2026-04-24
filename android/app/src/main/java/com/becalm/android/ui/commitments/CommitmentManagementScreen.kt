@@ -28,25 +28,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
-import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
+import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ExpandableSectionHeader
-import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -82,14 +81,7 @@ public fun CommitmentManagementScreen(
         onRefresh = viewModel::onPullRefresh,
     )
 
-    LaunchedEffect(state.error) {
-        state.error?.let { err ->
-            scope.launch {
-                snackbarHostState.showSnackbar(err)
-                viewModel.onErrorDismissed()
-            }
-        }
-    }
+    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
 
     // CMT-013 — collect one-shot undo snapshots emitted by [onComplete] / [onCancel]
     // and present a `[복구]` snackbar with a 5 s window. Material3 does not expose a
@@ -100,8 +92,7 @@ public fun CommitmentManagementScreen(
     val undoCompletedMessage = stringResource(R.string.commitment_undo_completed)
     val undoCancelledMessage = stringResource(R.string.commitment_undo_cancelled)
     val undoActionLabel = stringResource(R.string.commitment_undo_action)
-    LaunchedEffect(Unit) {
-        viewModel.undoFlow.collect { snapshot ->
+    CollectFlowEffect(viewModel.undoFlow) { snapshot ->
             val message = when (snapshot) {
                 is CommitmentUndoSnapshot.Completed -> undoCompletedMessage
                 is CommitmentUndoSnapshot.Cancelled -> undoCancelledMessage
@@ -121,10 +112,39 @@ public fun CommitmentManagementScreen(
                     snackbarHostState.currentSnackbarData?.dismiss()
                 }
             }
-        }
     }
 
+    CollectFlowEffect(viewModel.navigation) { nav ->
+        dispatchCommitmentManagementNavigation(nav, onOpenDetail)
+    }
+
+    CommitmentManagementScreenContent(
+        state = state,
+        snackbarHostState = snackbarHostState,
+        pullState = pullState,
+        onFilterChange = viewModel::onFilterChange,
+        onOpenCreate = onOpenCreate,
+        onOpenDetail = viewModel::onCommitmentSelected,
+        onToggleCompletedSection = viewModel::onToggleCompletedSection,
+        onToggleCancelledSection = viewModel::onToggleCancelledSection,
+    )
+}
+
+@OptIn(ExperimentalMaterialApi::class)
+@Composable
+public fun CommitmentManagementScreenContent(
+    state: CommitmentUiState,
+    snackbarHostState: SnackbarHostState,
+    pullState: androidx.compose.material.pullrefresh.PullRefreshState,
+    onFilterChange: (CommitmentFilter) -> Unit,
+    onOpenCreate: () -> Unit,
+    onOpenDetail: (String) -> Unit,
+    onToggleCompletedSection: () -> Unit,
+    onToggleCancelledSection: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     BecalmScaffold(
+        modifier = modifier,
         title = stringResource(R.string.commitments_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
@@ -133,6 +153,7 @@ public fun CommitmentManagementScreen(
             // with supersedeOf bound to the old row id.
             ExtendedFloatingActionButton(
                 onClick = onOpenCreate,
+                modifier = Modifier.testTag("commitment-fab-add"),
                 icon = {
                     Icon(
                         imageVector = Icons.Filled.Add,
@@ -150,7 +171,7 @@ public fun CommitmentManagementScreen(
         ) {
             FilterChipRow(
                 selectedFilter = state.filter,
-                onFilterSelect = viewModel::onFilterChange,
+                onFilterSelect = onFilterChange,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
@@ -173,71 +194,63 @@ public fun CommitmentManagementScreen(
                         )
                     }
                     else -> {
-                        // CMT-009 — partition rows into active + the two terminal sections
-                        // (completed / cancelled). The active group renders without a
-                        // header; each non-empty terminal group renders behind a
-                        // collapsed-by-default [ExpandableSectionHeader]. Empty groups
-                        // omit their header entirely so `이행 완료 (0)` never flashes.
-                        val (activeRows, completedRows, cancelledRows) =
-                            partitionRowsByLifecycle(state.items)
-                        var completedExpanded by rememberSaveable {
-                            mutableStateOf(false)
-                        }
-                        var cancelledExpanded by rememberSaveable {
-                            mutableStateOf(false)
-                        }
                         val completedHeader = stringResource(
                             R.string.commitment_section_completed_fmt,
-                            completedRows.size,
+                            state.completedSection.count,
                         )
                         val cancelledHeader = stringResource(
                             R.string.commitment_section_cancelled_fmt,
-                            cancelledRows.size,
+                            state.cancelledSection.count,
                         )
                         LazyColumn(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            items(items = activeRows, key = { "active-${it.id}" }) { row ->
-                                CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                            items(items = state.activeItems, key = { "active-${it.id}" }) { row ->
+                                CommitmentRowCard(
+                                    row = row,
+                                    onOpenDetail = onOpenDetail,
+                                )
                             }
 
-                            if (completedRows.isNotEmpty()) {
+                            if (state.completedSection.visible) {
                                 item(key = "header-completed") {
                                     ExpandableSectionHeader(
                                         title = completedHeader,
-                                        expanded = completedExpanded,
-                                        onToggle = {
-                                            completedExpanded = !completedExpanded
-                                        },
+                                        expanded = state.completedSection.expanded,
+                                        onToggle = onToggleCompletedSection,
                                     )
                                 }
-                                if (completedExpanded) {
+                                if (state.completedSection.expanded) {
                                     items(
-                                        items = completedRows,
+                                        items = state.completedSection.items,
                                         key = { "completed-${it.id}" },
                                     ) { row ->
-                                        CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                                        CommitmentRowCard(
+                                            row = row,
+                                            onOpenDetail = onOpenDetail,
+                                        )
                                     }
                                 }
                             }
 
-                            if (cancelledRows.isNotEmpty()) {
+                            if (state.cancelledSection.visible) {
                                 item(key = "header-cancelled") {
                                     ExpandableSectionHeader(
                                         title = cancelledHeader,
-                                        expanded = cancelledExpanded,
-                                        onToggle = {
-                                            cancelledExpanded = !cancelledExpanded
-                                        },
+                                        expanded = state.cancelledSection.expanded,
+                                        onToggle = onToggleCancelledSection,
                                     )
                                 }
-                                if (cancelledExpanded) {
+                                if (state.cancelledSection.expanded) {
                                     items(
-                                        items = cancelledRows,
+                                        items = state.cancelledSection.items,
                                         key = { "cancelled-${it.id}" },
                                     ) { row ->
-                                        CommitmentRowCard(row = row, onOpenDetail = onOpenDetail)
+                                        CommitmentRowCard(
+                                            row = row,
+                                            onOpenDetail = onOpenDetail,
+                                        )
                                     }
                                 }
                             }
@@ -260,28 +273,6 @@ public fun CommitmentManagementScreen(
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
  */
 private const val UNDO_WINDOW_MS: Long = 5_000L
-
-/**
- * CMT-009 — partitions the full [rows] list into the three rendering buckets used by
- * [CommitmentManagementScreen]. Extracted as a pure helper so the Composable body reads
- * as "partition + render" rather than three inline [List.filter] lambdas.
- *
- * @return A [Triple] of (active, completed, cancelled). `active` is every row whose
- *   `action_state` is neither COMPLETED nor CANCELLED — i.e. PENDING / REMINDED /
- *   FOLLOWED_UP / OVERDUE. The three buckets are disjoint and their union equals
- *   [rows] (no row is dropped or duplicated).
- */
-private fun partitionRowsByLifecycle(
-    rows: List<CommitmentRow>,
-): Triple<List<CommitmentRow>, List<CommitmentRow>, List<CommitmentRow>> {
-    val active = rows.filter {
-        it.actionState != CommitmentState.COMPLETED &&
-            it.actionState != CommitmentState.CANCELLED
-    }
-    val completed = rows.filter { it.actionState == CommitmentState.COMPLETED }
-    val cancelled = rows.filter { it.actionState == CommitmentState.CANCELLED }
-    return Triple(active, completed, cancelled)
-}
 
 /**
  * Renders one [CommitmentRow] as a [CommitmentCard]. Extracted so the LazyColumn call
@@ -334,7 +325,9 @@ private fun FilterChipRow(
                 label = {
                     Text(text = label, style = MaterialTheme.typography.labelMedium)
                 },
-                modifier = Modifier.padding(end = 8.dp),
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .testTag("commitment-filter-${filter.name.lowercase()}"),
             )
         }
     }

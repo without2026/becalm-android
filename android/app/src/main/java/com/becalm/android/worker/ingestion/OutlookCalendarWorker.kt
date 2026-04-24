@@ -16,6 +16,8 @@ import com.becalm.android.data.remote.msgraph.MsGraphClient
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -23,6 +25,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import java.util.UUID
 
 /**
@@ -69,14 +72,20 @@ public class OutlookCalendarWorker @AssistedInject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val syncCursorStore: SyncCursorStore,
     private val authRepository: AuthRepository,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         val now = Clock.System.now()
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
+            .takeIf { it > 0 }
         logger.d(TAG, "doWork started runAttemptCount=$runAttemptCount")
 
         // Every ingested row must be tagged with the authenticated user's UUID so that
@@ -96,6 +105,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
         sourceStatusRepository.recordSyncStart(SourceType.OUTLOOK_CALENDAR)
 
         var cursor = syncCursorStore.observeCursor(CURSOR_KEY).first()
+        val boundedInitialSync = cursor == null && lookbackDays != null
         var totalFetched = 0
 
         // ── Pagination loop ───────────────────────────────────────────────────
@@ -120,14 +130,22 @@ public class OutlookCalendarWorker @AssistedInject constructor(
 
                     // Upsert this page into Room before updating the cursor.
                     if (events.isNotEmpty()) {
-                        val entities = events.map { it.toEntity(userId) }
+                        val filteredEvents = if (boundedInitialSync) {
+                            val windowDays = requireNotNull(lookbackDays)
+                            val rangeStart = daysAgo(now, windowDays)
+                            val rangeEnd = daysAhead(now, windowDays)
+                            events.filter { event -> event.start >= rangeStart && event.start < rangeEnd }
+                        } else {
+                            events
+                        }
+                        val entities = filteredEvents.map { it.toEntity(userId) }
                         val insertResult = calendarEventRepository.insertLocalBatch(entities)
                         if (insertResult is BecalmResult.Failure) {
                             logger.e(TAG, "insertLocalBatch failed — retrying")
                             return@withContext Result.retry()
                         }
-                        totalFetched += events.size
-                        logger.d(TAG, "page inserted count=${events.size} total=$totalFetched")
+                        totalFetched += filteredEvents.size
+                        logger.d(TAG, "page inserted count=${filteredEvents.size} total=$totalFetched")
                     }
 
                     when {
@@ -223,6 +241,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "OutlookCalendarWorker"
+        private const val NO_LOOKBACK: Int = -1
 
         /** Maximum WorkManager attempts before permanently failing (R4-02). */
         public const val MAX_RETRIES: Int = 5
@@ -234,3 +253,9 @@ public class OutlookCalendarWorker @AssistedInject constructor(
         public const val CURSOR_KEY: String = "outlook_calendar_delta"
     }
 }
+
+private fun daysAgo(now: Instant, days: Int): Instant =
+    Instant.fromEpochMilliseconds(now.toEpochMilliseconds() - days * 86_400_000L)
+
+private fun daysAhead(now: Instant, days: Int): Instant =
+    Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + days * 86_400_000L)

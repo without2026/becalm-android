@@ -26,21 +26,22 @@ import retrofit2.http.Part
  * ## Idempotency
  * The `client_event_id` part carries the same UUID v4 used in the corresponding
  * `/v1/raw_ingestion_events:batch` upload. Railway deduplicates on (user_id, client_event_id)
- * and returns the cached commitments result on duplicate submissions without re-running Gemini.
+ * and returns the cached extraction result on duplicate submissions without re-running Gemini.
  *
  * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
  */
 public interface VoiceApi {
 
     /**
-     * Uploads a complete audio file to Railway for server-side transcription and commitment
-     * extraction via Vertex AI Gemini 2.5 Flash (asia-northeast3, ZDR enabled).
+     * Uploads a complete audio file to Railway for server-side business-item extraction via
+     * Vertex AI Gemini 2.5 Flash (`us-central1`, ZDR enabled).
      *
      * The audio bytes are streamed from a [ContentResolver] input stream directly into this
      * multipart part — no temp-file copy on device (VOI-007).
      *
      * ## Response handling
-     * - HTTP 200: commitments extracted; caller inserts them into Room and updates the raw event.
+     * - HTTP 200: `items` extracted; caller persists the current action subset into Room
+     *   commitments and updates the raw event metadata.
      * - HTTP 401: [com.becalm.android.data.remote.interceptor.AuthInterceptor] attempts refresh;
      *   second 401 propagates to caller for permanent failure handling.
      * - HTTP 403: server-side PIPA consent audit failed; caller marks event `sync_status=failed`.

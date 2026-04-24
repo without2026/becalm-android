@@ -2,7 +2,6 @@ package com.becalm.android.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
@@ -12,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -43,6 +43,7 @@ public data class SettingsUiState(
     val language: String = "",
     val notificationsEnabled: Boolean = true,
     val pipaConsentEnabled: Boolean = false,
+    val processingPaused: Boolean = false,
     val storageMb: Long? = null,
     val loading: Boolean = true,
     val error: String? = null,
@@ -77,6 +78,18 @@ public class SettingsViewModel @Inject constructor(
     private val logger: Logger,
 ) : ViewModel() {
 
+    private val pipaConsentHandler: SettingsPipaConsentHandler = SettingsPipaConsentHandler(
+        userPrefsStore = userPrefsStore,
+        rawIngestionRepository = rawIngestionRepository,
+        workScheduler = workScheduler,
+        logger = logger,
+    )
+
+    private val sessionActionHandler: SettingsSessionActionHandler = SettingsSessionActionHandler(
+        authRepository = authRepository,
+        logger = logger,
+    )
+
     private val _uiState: MutableStateFlow<SettingsUiState> =
         MutableStateFlow(SettingsUiState())
 
@@ -85,6 +98,11 @@ public class SettingsViewModel @Inject constructor(
 
     init {
         loadSettings()
+        viewModelScope.launch {
+            userPrefsStore.observeProcessingPaused().collect { paused ->
+                _uiState.update { it.copy(processingPaused = paused) }
+            }
+        }
     }
 
     // ─── Init load ────────────────────────────────────────────────────────────
@@ -102,16 +120,39 @@ public class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val session = authRepository.currentSession()
-                // Take the first value from each preference flow without subscribing forever.
-                val localeTag = userPrefsStore.observeLocaleTag().first() ?: ""
-                val notificationsEnabled = userPrefsStore.observeNotificationsEnabled().first()
-                val pipaConsentEnabled = userPrefsStore.observeThirdPartyProvisionConsent().first()
+                // Preference reads are independently fallible. Missing one preference must not
+                // blank the whole screen or hide the signed-in email.
+                val localeTag = readPrefOrDefault(
+                    op = "observeLocaleTag",
+                    defaultValue = "",
+                ) {
+                    userPrefsStore.observeLocaleTag().first() ?: ""
+                }
+                val notificationsEnabled = readPrefOrDefault(
+                    op = "observeNotificationsEnabled",
+                    defaultValue = true,
+                ) {
+                    userPrefsStore.observeNotificationsEnabled().first()
+                }
+                val pipaConsentEnabled = readPrefOrDefault(
+                    op = "observeThirdPartyProvisionConsent",
+                    defaultValue = false,
+                ) {
+                    userPrefsStore.observeThirdPartyProvisionConsent().first()
+                }
+                val processingPaused = readPrefOrDefault(
+                    op = "observeProcessingPaused",
+                    defaultValue = false,
+                ) {
+                    userPrefsStore.observeProcessingPaused().first()
+                }
                 _uiState.update { state ->
                     state.copy(
-                        userEmail = session?.email?.maskEmail(),
+                        userEmail = session?.email,
                         language = localeTag,
                         notificationsEnabled = notificationsEnabled,
                         pipaConsentEnabled = pipaConsentEnabled,
+                        processingPaused = processingPaused,
                         loading = false,
                     )
                 }
@@ -121,6 +162,17 @@ public class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(loading = false, error = e.message ?: "load failed") }
             }
         }
+    }
+
+    private suspend fun <T> readPrefOrDefault(
+        op: String,
+        defaultValue: T,
+        read: suspend () -> T,
+    ): T = try {
+        read()
+    } catch (e: Exception) {
+        logger.w(TAG, "$op failed, using default", e)
+        defaultValue
     }
 
     // ─── Actions ──────────────────────────────────────────────────────────────
@@ -221,40 +273,7 @@ public class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(pipaConsentEnabled = enabled, error = null) }
         viewModelScope.launch {
             try {
-                userPrefsStore.setThirdPartyProvisionConsent(enabled)
-                logger.i(TAG, "PIPA third-party provision consent toggled to $enabled")
-
-                // Obtain userId for DAO scope — fall back gracefully if session is absent.
-                val userId = userPrefsStore.observeCurrentUserId().first()
-                if (userId.isNullOrBlank()) {
-                    logger.w(TAG, "onTogglePipaConsent: userId absent — skipping post-toggle steps")
-                    return@launch
-                }
-
-                if (enabled) {
-                    // Atomically release awaiting_consent rows → pending and get exact IDs.
-                    // Using the IDs-returning variant ensures we enqueue exactly the released
-                    // rows — no chance of missing new rows or re-enqueueing existing pending ones
-                    // (finding #2 fix).
-                    val releasedIds = unwrapIdsOrShowError(
-                        result = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId),
-                        failureLogPrefix = "releaseAwaitingConsentVoiceAndReturnIds failed",
-                    )
-                    val enqueuedCount = reenqueueReleasedVoice(userId, releasedIds)
-                    logger.d(TAG, "re-enqueued $enqueuedCount voice uploads after consent grant")
-                } else {
-                    // Consent withdrawn: park pending/queued voice rows and cancel their WorkManager
-                    // jobs to prevent already-enqueued uploads from proceeding (finding #1 fix).
-                    val parkedIds = unwrapIdsOrShowError(
-                        result = rawIngestionRepository.parkAndCancelPendingVoice(userId),
-                        failureLogPrefix = "parkAndCancelPendingVoice failed",
-                    )
-                    for (id in parkedIds) {
-                        workScheduler.cancelVoiceUpload(rawEventId = id)
-                    }
-                    logger.d(TAG, "parked and cancelled ${parkedIds.size} voice uploads after consent withdrawal")
-                    // No retroactive deletion of already-uploaded data (per ONB-PIPA spec).
-                }
+                pipaConsentHandler.toggle(enabled = enabled, updateState = _uiState::update)
             } catch (e: Exception) {
                 logger.e(TAG, "onTogglePipaConsent failed", e)
                 // Revert optimistic UI update on failure.
@@ -275,14 +294,9 @@ public class SettingsViewModel @Inject constructor(
      * On failure, surfaces the error string via [SettingsUiState.error].
      */
     public fun onSignOut() {
-        runAuthOp(
-            failureLogPrefix = "sign-out failed",
-            op = { authRepository.invalidateSession() },
-            onSuccess = {
-                logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
-                _uiState.update { it.copy(loading = false, signedOut = true) }
-            },
-        )
+        viewModelScope.launch {
+            sessionActionHandler.signOut(updateState = _uiState::update)
+        }
     }
 
     /**
@@ -298,82 +312,9 @@ public class SettingsViewModel @Inject constructor(
      * On failure, surfaces the error via [SettingsUiState.error].
      */
     public fun onWipeLocalData() {
-        runAuthOp(
-            failureLogPrefix = "PIPA wipe failed",
-            op = { authRepository.signOut() },
-            onSuccess = {
-                logger.d(TAG, "PIPA wipe and sign-out completed")
-                _uiState.update { it.copy(loading = false, error = null) }
-            },
-        )
-    }
-
-    /**
-     * [onSignOut] / [onWipeLocalData]의 공통 loading=true → AuthRepository 호출 →
-     * Failure 시 logger.w("[failureLogPrefix]: ...") + loading=false + error surface 패턴을
-     * 통합한다. Success 분기는 호출부마다 로그 문구·state 필드(signedOut vs error=null)가
-     * 달라 [onSuccess] 콜백에 위임 — 원본 순서·메시지를 그대로 보존한다.
-     */
-    private fun runAuthOp(
-        failureLogPrefix: String,
-        op: suspend () -> BecalmResult<Unit>,
-        onSuccess: () -> Unit,
-    ) {
         viewModelScope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
-            when (val result = op()) {
-                is BecalmResult.Success -> onSuccess()
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "$failureLogPrefix: ${result.error}")
-                    _uiState.update { it.copy(loading = false, error = result.error.toString()) }
-                }
-            }
+            sessionActionHandler.wipeLocalData(updateState = _uiState::update)
         }
-    }
-
-    /**
-     * PIPA 토글의 두 분기(release / park)에서 공통인 `when(result) { Success → ids;
-     * Failure → logger.e + error surface + emptyList() }` 패턴을 통합한다. 실패 시
-     * 로그 메시지와 UI error 문자열(`result.error.toString()`)은 원본과 동일하게 유지되고,
-     * loading 플래그는 양쪽 다 건드리지 않던 동작을 그대로 보존한다.
-     */
-    private fun unwrapIdsOrShowError(
-        result: BecalmResult<List<String>>,
-        failureLogPrefix: String,
-    ): List<String> = when (result) {
-        is BecalmResult.Success -> result.value
-        is BecalmResult.Failure -> {
-            logger.e(TAG, "$failureLogPrefix: ${result.error}")
-            _uiState.update { it.copy(error = result.error.toString()) }
-            emptyList()
-        }
-    }
-
-    /**
-     * 릴리스된 voice row ID 각각에 대해 `findById → sourceRef 유효성 확인 → WorkScheduler 호출`을
-     * 수행하고 실제 enqueue 성공한 개수를 돌려준다. 원본 인라인 for-loop과 동일하게
-     *  - entity == null → `logger.w("released voice row id=$id not found ...")` + skip
-     *  - sourceRef 가 null/blank → `logger.w("voice row id=$id has null sourceRef ...")` + skip
-     *  - 정상 → `workScheduler.enqueueVoiceUpload` 호출 후 카운터 증가
-     * 순서와 로그 문구를 그대로 보존한다 (finding #2 경로).
-     */
-    private suspend fun reenqueueReleasedVoice(userId: String, releasedIds: List<String>): Int {
-        var enqueuedCount = 0
-        for (id in releasedIds) {
-            val entity = rawIngestionRepository.findById(id = id, userId = userId)
-            if (entity == null) {
-                logger.w(TAG, "released voice row id=$id not found for re-enqueue — skipping")
-                continue
-            }
-            val audioUri = entity.sourceRef
-            if (audioUri.isNullOrBlank()) {
-                logger.w(TAG, "voice row id=$id has null sourceRef — skipping enqueue")
-                continue
-            }
-            workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = audioUri)
-            enqueuedCount++
-        }
-        return enqueuedCount
     }
 }
 

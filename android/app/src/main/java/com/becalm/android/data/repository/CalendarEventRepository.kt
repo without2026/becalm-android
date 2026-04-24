@@ -63,7 +63,12 @@ public interface CalendarEventRepository {
      * @return [BecalmResult.Success] with [RefreshStats], or a typed failure on the first
      *   unrecoverable error.
      */
-    public suspend fun refreshSince(userId: String, since: Instant?): BecalmResult<RefreshStats>
+    public suspend fun refreshSince(
+        userId: String,
+        since: Instant?,
+        rangeStart: Instant? = null,
+        rangeEnd: Instant? = null,
+    ): BecalmResult<RefreshStats>
 
     /**
      * Upserts [entities] into the local `calendar_events` table in a single transaction.
@@ -150,6 +155,8 @@ public class CalendarEventRepositoryImpl @Inject constructor(
     override suspend fun refreshSince(
         userId: String,
         since: Instant?,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
     ): BecalmResult<CalendarEventRepository.RefreshStats> = safeApi(
         ioLogMessage = "refreshSince network error",
         unexpectedLogMessage = "refreshSince unexpected error",
@@ -164,7 +171,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         var lastCursor: String? = cursor
 
         for (page in 1..REFRESH_PAGE_CAP) {
-            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page)) {
+            val outcome = when (val r = fetchAndPersistPage(userId, cursor, sinceStr, page, rangeStart, rangeEnd)) {
                 is BecalmResult.Success -> r.value
                 is BecalmResult.Failure -> return@safeApi BecalmResult.Failure(r.error)
             }
@@ -202,6 +209,8 @@ public class CalendarEventRepositoryImpl @Inject constructor(
         cursor: String?,
         sinceStr: String?,
         page: Int,
+        rangeStart: Instant?,
+        rangeEnd: Instant?,
     ): BecalmResult<PageOutcome> {
         val response = api.getCalendarEvents(
             cursor = cursor,
@@ -216,7 +225,12 @@ public class CalendarEventRepositoryImpl @Inject constructor(
                 BecalmError.Unknown(IllegalStateException("null body on page $page")),
             )
 
-        val entities = body.data.map { it.toEntity(userId) }
+        val filtered = body.data.filter { dto ->
+            val meetsStart = rangeStart == null || dto.startAt >= rangeStart
+            val meetsEnd = rangeEnd == null || dto.startAt < rangeEnd
+            meetsStart && meetsEnd
+        }
+        val entities = filtered.map { it.toEntity(userId) }
         dao.insertAll(entities)
 
         // Persist the cursor immediately after each page is durably written.
@@ -226,7 +240,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
 
         return BecalmResult.Success(
             PageOutcome(
-                fetched = body.data.size,
+                fetched = filtered.size,
                 upserted = entities.size,
                 cursor = body.cursor,
                 hasMore = body.hasMore,

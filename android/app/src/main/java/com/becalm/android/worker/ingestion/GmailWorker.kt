@@ -30,6 +30,8 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.SourceKind
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
@@ -103,6 +105,7 @@ public class GmailWorker @AssistedInject constructor(
     private val metricsStore: MetricsStore,
     private val workScheduler: WorkScheduler,
     private val authRepository: AuthRepository,
+    private val processingPauseGate: ProcessingPauseGate,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -121,6 +124,9 @@ public class GmailWorker @AssistedInject constructor(
     }
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         logger.d(TAG, "doWork start")
 
         // Step 1. Load the persisted Gmail credential into the in-memory cache. The
@@ -152,17 +158,20 @@ public class GmailWorker @AssistedInject constructor(
 
         val storedHistoryId: Long? = cursorStore.observeGmailHistoryId().first()
 
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
+            .takeIf { it > 0 }
+
         val syncResult: SyncOutcome = if (storedHistoryId != null) {
             runIncrementalSync(userId, storedHistoryId.toString())
         } else {
-            runFullSync(userId)
+            runFullSync(userId, lookbackDays)
         }
 
         return@withContext when (syncResult) {
             is SyncOutcome.HistoryExpired -> {
                 logger.d(TAG, "doWork historyId expired, falling back to full-sync")
                 cursorStore.setGmailHistoryId(null)
-                runFullSync(userId).toWorkerResult(" fallback-full-sync")
+                runFullSync(userId, lookbackDays).toWorkerResult(" fallback-full-sync")
             }
             else -> syncResult.toWorkerResult("")
         }
@@ -268,13 +277,13 @@ public class GmailWorker @AssistedInject constructor(
 
     // ── Full sync ─────────────────────────────────────────────────────────────
 
-    private suspend fun runFullSync(userId: String): SyncOutcome {
+    private suspend fun runFullSync(userId: String, lookbackDays: Int?): SyncOutcome {
         var totalFetched = 0
 
         // EMAIL-001: INBOX pass first then SENT so both direction hints reach
         // ingestion during cold start.
         for (label in GmailLabelScope.entries) {
-            when (val outcome = runFullSyncForLabel(userId, label)) {
+            when (val outcome = runFullSyncForLabel(userId, label, lookbackDays)) {
                 is SyncOutcome.Success -> totalFetched += outcome.fetchedCount
                 SyncOutcome.HistoryExpired,
                 SyncOutcome.Unauthorized,
@@ -291,13 +300,14 @@ public class GmailWorker @AssistedInject constructor(
     private suspend fun runFullSyncForLabel(
         userId: String,
         label: GmailLabelScope,
+        lookbackDays: Int?,
     ): SyncOutcome {
         var pageToken: String? = null
         var inserted = 0
         val folder = if (label == GmailLabelScope.SENT) FOLDER_SENT else FOLDER_INBOX
         while (true) {
             val result: BecalmResult<GmailMessagePage> =
-                gmailClient.listMessagesFullSyncForLabel(label, pageToken)
+                gmailClient.listMessagesFullSyncForLabel(label, pageToken, lookbackDays)
             when (result) {
                 is BecalmResult.Failure -> return result.error.toSyncOutcome()
                 is BecalmResult.Success -> {
@@ -487,6 +497,7 @@ public class GmailWorker @AssistedInject constructor(
         // Gmail system labels used for folder routing per EMAIL-001.
         private const val LABEL_INBOX: String = "INBOX"
         private const val LABEL_SENT: String = "SENT"
+        private const val NO_LOOKBACK: Int = -1
 
         /**
          * Gmail labels that disqualify a message from the INBOX ingestion pipeline

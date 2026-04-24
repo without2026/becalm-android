@@ -3,8 +3,8 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.onSuccess
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
-import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.auth.ProcessRestarter
@@ -18,11 +18,15 @@ import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
+import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import java.io.IOException
 import javax.inject.Inject
@@ -152,8 +156,27 @@ public class AuthRepositoryImpl @Inject constructor(
     // Outlook mailbox authorization on the same phone (PIPA cross-account leakage).
     private val msGraphTokenProvider: MsGraphTokenProviderImpl,
     private val processRestarter: ProcessRestarter,
+    private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : AuthRepository {
+
+    private val cleanupPlanner: AuthSessionCleanupPlanner = AuthSessionCleanupPlanner(
+        authClient = authClient,
+        sessionStore = sessionStore,
+        tokenProvider = tokenProvider,
+        deviceKeyStore = deviceKeyStore,
+        syncCursorStore = syncCursorStore,
+        userPrefsStore = userPrefsStore,
+        databaseProvider = databaseProvider,
+        workScheduler = workScheduler,
+        contentObserverBootstrap = contentObserverBootstrap,
+        personEnrichmentRepository = personEnrichmentRepository,
+        imapCredentialStore = imapCredentialStore,
+        googleAuthTokenProvider = googleAuthTokenProvider,
+        msGraphTokenProvider = msGraphTokenProvider,
+        ioDispatcher = ioDispatcher,
+    )
 
     // Broadcasts the latest session across save/clear boundaries so that observers of
     // [observeAuthState] re-emit after sign-in and sign-out. `null` means no session is
@@ -197,6 +220,7 @@ public class AuthRepositoryImpl @Inject constructor(
         databaseProvider.ensureOpenFor(newHash)
         sessionFlow.value = session
         tokenProvider.primeCache()
+        appRuntimeSyncCoordinator.refresh()
         if (priorHash != null && priorHash != newHash) {
             logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
             processRestarter.restart()
@@ -204,46 +228,10 @@ public class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut(): BecalmResult<Unit> {
-        // PIPA wipe — every step runs regardless of prior step failures.
-        // The first failure is captured and returned after all steps complete.
-        // Order: cancel workers first, then clear enrichment + IMAP creds, then clear tokens.
         val preludeFailure = mutableListOf<BecalmResult.Failure>()
         val session = loadSessionForLogout(preludeFailure)
-
-        val steps = buildList {
-            add(NamedStep("cancelAllWorkers") { workScheduler.cancelAll() })
-            add(NamedStep("stopContentObservers") { contentObserverBootstrap.stop() })
-            if (session != null) {
-                // Best-effort server-side revoke; always returns Success per authClient contract.
-                add(NamedStep("serverRevoke") { authClient.signOut(session.accessToken) })
-            }
-            // personEnrichmentRepository.deleteAll() already returns BecalmResult<Int>;
-            // wrap its throw semantics without double-wrapping the returned Result.
-            add(NamedStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
-            add(NamedStep("imapCredentialClear") { imapCredentialStore.clearAll() })
-            // Wipe the Gmail OAuth credential (disk + in-memory cache) and transition the
-            // OAuthTokenState to Unauthenticated so a subsequent account on the same device
-            // cannot inherit the previous user's Gmail grant (PIPA cross-account leak guard).
-            add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
-            // Analogue for Microsoft Graph — clears the MSAL single-account cache and the
-            // mirrored [OAuthCredentialStore] entry so the next user on the same device
-            // cannot inherit the previous user's Outlook mailbox authorization.
-            add(NamedStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
-            add(NamedStep("sessionStoreClear") { sessionStore.clear() })
-            // Drop the in-memory access-token cache in lockstep with the persisted session
-            // so the next hot-path request re-consults storage and reflects the cleared state
-            // (Round 6A.4). This is synchronous and always succeeds.
-            add(NamedStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
-            add(NamedStep("deviceKeyClear") { deviceKeyStore.clear() })
-            add(NamedStep("syncCursorClear") { syncCursorStore.clearAll() })
-            add(NamedStep("userPrefsClearAll") { userPrefsStore.clearAll() })
-            add(NamedStep("databaseClearAll") { databaseProvider.current().clearAllTables() })
-            // Release the Room file handle so the next sign-in opens a fresh per-user file
-            // without a lingering WAL lock (S6-A).
-            add(NamedStep("databaseClose") { databaseProvider.close() })
-        }
-
-        val stepResult = runAllSteps("signOut", steps)
+        val steps = cleanupPlanner.buildSignOutSteps(session)
+        val stepResult = AuthRepositoryRunner.runAllSteps("signOut", steps, logger)
 
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
@@ -252,39 +240,9 @@ public class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun invalidateSession(): BecalmResult<Unit> {
-        // Session-only cleanup — preserves Room data per the local-first spec invariant
-        // "로그아웃 시 Room DB 데이터는 삭제하지 않는다". Every step runs regardless of prior
-        // step failures; the first failure is captured and returned after all steps complete.
         val preludeFailure = mutableListOf<BecalmResult.Failure>()
         val session = loadSessionForLogout(preludeFailure)
-
-        val steps = buildList {
-            add(NamedStep("cancelAllWorkers") { workScheduler.cancelAll() })
-            add(NamedStep("stopContentObservers") { contentObserverBootstrap.stop() })
-            if (session != null) {
-                add(NamedStep("serverRevoke") { authClient.signOut(session.accessToken) })
-            }
-            // IMAP credentials are tied to the current account (not the raw Room event data),
-            // so they are considered part of "session" and are cleared here.
-            add(NamedStep("imapCredentialClear") { imapCredentialStore.clearAll() })
-            // Same rationale applies to the Gmail OAuth credential: account-scoped grant,
-            // cleared on every session-invalidate to prevent the next account from
-            // inheriting it (cross-account leak guard).
-            add(NamedStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
-            // Outlook / MS Graph parallel — the `<provider>_connected` DataStore flag is
-            // cleared on currentUserIdClear, but the MSAL cache and the mirrored
-            // [OAuthCredentialStore] entry survive process death and must be wiped here
-            // for the same cross-account leakage reason.
-            add(NamedStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
-            add(NamedStep("sessionStoreClear") { sessionStore.clear() })
-            // Drop the in-memory access-token cache in lockstep with the persisted session
-            // so the next hot-path request re-consults storage (Round 6A.4).
-            add(NamedStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
-            add(NamedStep("deviceKeyClear") { deviceKeyStore.clear() })
-            // Clear the non-secret current-user-id mirror. Other UI preferences
-            // (locale, notifications flag, onboarding completion) are intentionally preserved.
-            add(NamedStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
-        }
+        val steps = cleanupPlanner.buildInvalidateSessionSteps(session)
 
         // NOTE: Intentionally NOT calling databaseProvider.current().clearAllTables(),
         // personEnrichmentRepository.deleteAll(), syncCursorStore.clearAll(), or
@@ -303,7 +261,7 @@ public class AuthRepositoryImpl @Inject constructor(
         // user will restart the app anyway (alpha contract; see
         // [BeCalmDatabaseProvider]).
 
-        val stepResult = runAllSteps("invalidateSession", steps)
+        val stepResult = AuthRepositoryRunner.runAllSteps("invalidateSession", steps, logger)
 
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
@@ -323,7 +281,7 @@ public class AuthRepositoryImpl @Inject constructor(
     private suspend fun loadSessionForLogout(
         outFailures: MutableList<BecalmResult.Failure>,
     ): SupabaseSession? {
-        return when (val result = runStepNamed("loadSession") { sessionStore.load() }) {
+        return when (val result = AuthRepositoryRunner.runStepNamed("loadSession", logger) { sessionStore.load() }) {
             is BecalmResult.Success -> result.value
             is BecalmResult.Failure -> {
                 outFailures += result
@@ -350,7 +308,15 @@ public class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun currentSession(): SupabaseSession? = sessionStore.load()
 
-    override fun observeAuthState(): Flow<AuthState> = sessionFlow
+    override fun observeAuthState(): Flow<AuthState> = merge(
+        sessionFlow,
+        sessionStore.observe()
+            .filter { session -> session == null }
+            .map {
+                sessionFlow.value = null
+                null
+            },
+    )
         .onStart {
             // Seed from the persisted store on first collection so cold starts immediately
             // see any previously saved session without waiting for a sign-in event.
@@ -362,68 +328,4 @@ public class AuthRepositoryImpl @Inject constructor(
             if (session != null) AuthState.Authenticated(session) else AuthState.Unauthenticated
         }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
-
-    /**
-     * One named step in a multi-step logout sequence.
-     *
-     * Each step is identified by a human-readable [name] used in log messages so that
-     * operators can correlate a failure to the exact wipe operation. [block] encapsulates
-     * the actual side-effect; exceptions thrown from [block] are mapped to [BecalmResult.Failure]
-     * by [runStepNamed].
-     */
-    private data class NamedStep(val name: String, val block: suspend () -> Any?)
-
-    /**
-     * Executes every step in [steps] in order, returning the first [BecalmResult.Failure]
-     * encountered while still running the remaining steps (PIPA wipe invariant).
-     *
-     * If a step's block itself returns a [BecalmResult.Failure] (e.g.
-     * [PersonEnrichmentRepository.deleteAll]), that failure is surfaced directly without
-     * re-wrapping — avoiding a silent `Success(Failure(...))` outer/inner double-wrap bug.
-     *
-     * [flow] is prepended to each log tag so that mixed signOut / invalidateSession traces
-     * remain distinguishable in aggregated logs.
-     */
-    private suspend fun runAllSteps(flow: String, steps: List<NamedStep>): BecalmResult<Unit> {
-        var firstFailure: BecalmResult.Failure? = null
-        for (step in steps) {
-            val wrapped = runStepNamed("$flow/${step.name}") { step.block() }
-            val stepResult: BecalmResult<*> = when (wrapped) {
-                is BecalmResult.Failure -> wrapped
-                is BecalmResult.Success -> {
-                    // Unwrap one level when the step block itself returned a BecalmResult
-                    // (e.g. deleteAll() returns BecalmResult<Int>), otherwise treat as success.
-                    when (val inner = wrapped.value) {
-                        is BecalmResult.Failure -> inner
-                        else -> wrapped
-                    }
-                }
-            }
-            if (firstFailure == null && stepResult is BecalmResult.Failure) {
-                firstFailure = stepResult
-            }
-        }
-        return firstFailure ?: BecalmResult.Success(Unit)
-    }
-
-    /**
-     * Executes [block] inside a try/catch, logging on success or failure.
-     *
-     * Maps [IOException] to [BecalmError.Io] and all other non-cancellation [Throwable]
-     * to [BecalmError.Unknown]. [CancellationException]s are re-thrown via
-     * [rethrowIfCancellation] so that structured concurrency cancellation propagates.
-     */
-    private suspend fun <T> runStepNamed(label: String, block: suspend () -> T): BecalmResult<T> = try {
-        val value = block()
-        logger.d(TAG, "$label completed")
-        BecalmResult.Success(value)
-    } catch (e: IOException) {
-        logger.e(TAG, "$label IOException", e)
-        BecalmResult.Failure(BecalmError.Io(e.message ?: "IO error"))
-    } catch (e: Throwable) {
-        e.rethrowIfCancellation()
-        logger.e(TAG, "$label unexpected error", e)
-        BecalmResult.Failure(BecalmError.Unknown(e))
-    }
 }

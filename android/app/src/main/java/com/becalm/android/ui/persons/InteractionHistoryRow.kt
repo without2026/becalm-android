@@ -8,6 +8,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
@@ -15,6 +16,7 @@ import com.becalm.android.ui.components.CommitmentsExtractedBadge
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.theme.glassPanel
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 
 /**
  * Unified row renderer for the "상호작용 히스토리" section of [PersonDetailScreen]
@@ -37,7 +39,9 @@ internal fun InteractionHistoryRow(
     modifier: Modifier = Modifier,
 ) {
     val rowModifier = when (row) {
-        is InteractionRow.Event -> modifier.clickable { onEventTap(row.id) }
+        is InteractionRow.Event -> modifier
+            .testTag("person-detail-event-${row.id}")
+            .clickable { onEventTap(row.id) }
         else -> modifier
     }
     Column(
@@ -82,7 +86,11 @@ private fun EventRow(row: InteractionRow.Event) {
 @Composable
 private fun CommitmentRow(row: InteractionRow.Commitment) {
     Text(
-        text = stringResource(R.string.person_detail_commitments_section),
+        text = when (row.itemType) {
+            CommitmentItemType.SCHEDULE -> "Schedule"
+            CommitmentItemType.DECISION -> "Decision"
+            else -> stringResource(R.string.person_detail_commitments_section)
+        },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
     )
@@ -91,6 +99,18 @@ private fun CommitmentRow(row: InteractionRow.Commitment) {
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface,
     )
+    val statusText = when (row.itemType) {
+        CommitmentItemType.SCHEDULE -> row.scheduleStatus
+        CommitmentItemType.DECISION -> row.decisionStatus
+        else -> row.direction ?: row.actionState
+    }
+    if (!statusText.isNullOrBlank()) {
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     IngestionTimestamp(timestamp = row.timestamp)
 }
 

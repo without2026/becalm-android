@@ -248,10 +248,10 @@ public fun CommitmentCard(
                             verticalPadding = 2.dp,
                         )
                     }
-                    // Mark-done button — showMarkDone guarantees onMarkDone != null
-                    if (showMarkDone && onMarkDone != null) {
+                    // Mark-done button — showMarkDone already implies onMarkDone is non-null.
+                    if (showMarkDone) {
                         IconButton(
-                            onClick = onMarkDone,
+                            onClick = requireNotNull(onMarkDone),
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                         ) {
                             Icon(

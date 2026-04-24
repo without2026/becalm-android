@@ -75,27 +75,16 @@ public object SourceType {
     )
 
     /**
-     * **Product-UI source set** — the external product sources the user connects to in
-     * the Sources screen and whose sync state feeds the Today aggregate banner.
+     * **Product-UI source set** — the seven user-facing sources shown in Sources and Today.
      *
-     * Excludes [VOICE] (handled by its own capture path — recorder UI, not a connect-able
-     * account) and [CALL_RECORDING] (wave 0 carve-out: schema-only for now; no UI tile,
-     * no ingestion worker — a future wave will ship the Samsung call-recording
-     * ingestion + UI and promote it out of this carve-out).
+     * Includes [VOICE] because the product treats recorder ingestion as a first-class
+     * user-facing source (Today chips / Sources list / overall sync), but continues to
+     * exclude [CALL_RECORDING] because wave 0 ships only the schema-side carve-out.
      *
-     * Iteration order is the canonical render order for the Sources list and the chips
-     * strip on the Today screen.
-     *
-     * Use this for:
-     * - [SourceStatusRepository.observeAll] — the list of rows rendered to the user
-     * - [TodayOverallSync.deriveOverallState] — the "all synced" banner math
-     * - Any consumer whose output ends up on screen or drives product-facing aggregates
-     *
-     * Do **not** use for DTO validation — see [ALL].
-     *
-     * Spec ref: wave-0 carve-out (CALL_RECORDING schema lands ahead of its UI/ingestion).
+     * Iteration order is the canonical render order for the Sources list and Today strip.
      */
     public val PRODUCT_SOURCES: Set<String> = setOf(
+        VOICE,
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,
@@ -103,4 +92,10 @@ public object SourceType {
         GOOGLE_CALENDAR,
         OUTLOOK_CALENDAR,
     )
+
+    /** True when the value is allowed on raw_ingestion_events and extraction workers. */
+    public fun isRawIngestionSource(sourceType: String): Boolean = sourceType in ALL
+
+    /** True only for user-authored commitments with no backing raw event. */
+    public fun isManualCommitmentSource(sourceType: String): Boolean = sourceType == MANUAL
 }

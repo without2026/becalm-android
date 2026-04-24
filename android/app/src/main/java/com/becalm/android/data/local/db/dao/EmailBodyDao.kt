@@ -116,4 +116,14 @@ public interface EmailBodyDao {
             "WHERE sync_status = 'synced' AND timestamp < :cutoffMillis)",
     )
     suspend fun deleteOlderThanForSynced(cutoffMillis: Long): Int
+
+    @Query(
+        """
+        SELECT email_body.* FROM email_body
+        INNER JOIN raw_ingestion_events ON raw_ingestion_events.id = email_body.raw_event_id
+        WHERE raw_ingestion_events.user_id = :userId
+        ORDER BY raw_ingestion_events.timestamp DESC
+        """,
+    )
+    suspend fun findAllForUser(userId: String): List<EmailBodyEntity>
 }

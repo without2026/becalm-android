@@ -5,9 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
-import com.becalm.android.data.local.db.entity.CalendarEventEntity
-import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -59,22 +57,24 @@ public sealed class InteractionRow {
     ) : InteractionRow()
 
     /**
-     * A commitment (give/take) linked to this person.
+     * A persisted trackable item linked to this person.
      *
      * @property timestamp When the source event occurred.
-     * @property title Commitment title.
-     * @property direction "give" or "take".
-     * @property actionState v5 follow-through state. Valid values per
-     *   [CommitmentEntity.actionState]: `"pending"`, `"reminded"`,
-     *   `"followed_up"`, `"completed"`. Partition into the "completed"
-     *   section happens on this column only — the legacy `commitment_state`
-     *   column is intentionally ignored.
+     * @property title Normalized item text/title.
+     * @property itemType `action | schedule | decision`.
+     * @property direction Action-only direction.
+     * @property actionState Action-only lifecycle state.
+     * @property scheduleStatus Schedule-only subtype.
+     * @property decisionStatus Decision-only subtype.
      */
     public data class Commitment(
         val timestamp: Instant,
         val title: String,
-        val direction: String,
-        val actionState: String,
+        val itemType: String = CommitmentItemType.ACTION,
+        val direction: String? = null,
+        val actionState: String? = null,
+        val scheduleStatus: String? = null,
+        val decisionStatus: String? = null,
     ) : InteractionRow()
 
     /**
@@ -105,8 +105,13 @@ public sealed class InteractionRow {
 public data class PersonDetailUiState(
     val personRef: String = "",
     val displayName: String? = null,
+    val nickname: String? = null,
     val companyName: String? = null,
     val jobTitle: String? = null,
+    val eventCount: Int = 0,
+    val pendingCommitmentCount: Int = 0,
+    val channelSources: Set<String> = emptySet(),
+    val completedExpanded: Boolean = false,
     val pendingCommitments: List<InteractionRow.Commitment> = emptyList(),
     val completedCommitments: List<InteractionRow.Commitment> = emptyList(),
     val interactionHistory: List<InteractionRow> = emptyList(),
@@ -120,17 +125,6 @@ private const val TAG = "PersonDetailViewModel"
 internal const val ARG_PERSON_REF = "person_id"
 private const val RAW_EVENTS_LIMIT = 100
 private const val CALENDAR_EVENTS_LIMIT = 50
-
-/** v5 `action_state` terminal value that places a commitment in the "완료" section. */
-internal const val ACTION_STATE_COMPLETED: String = "completed"
-
-/**
- * Character budget for the truncated snippet rendered on [InteractionHistoryRow]
- * per `.spec/contracts/ui-map.yml:206-210`. Chosen to match
- * `RawEventDetailUiState.snippet` (SRC-004) so the timeline and drill-down share a
- * consistent "at-a-glance" preview length.
- */
-private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
@@ -162,6 +156,7 @@ public class PersonDetailViewModel @Inject constructor(
     private val _uiState: MutableStateFlow<PersonDetailUiState> =
         MutableStateFlow(PersonDetailUiState(personRef = personRef))
     public val uiState: StateFlow<PersonDetailUiState> = _uiState.asStateFlow()
+    private val _completedExpanded: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     init {
         if (personRef.isEmpty()) {
@@ -180,6 +175,11 @@ public class PersonDetailViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    /** Toggles the completed-commitments section expansion state (SRC-008). */
+    public fun onToggleCompletedExpanded() {
+        _completedExpanded.update { !it }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -195,18 +195,15 @@ public class PersonDetailViewModel @Inject constructor(
                             rawIngestionRepository.observeForPerson(userId, personRef, RAW_EVENTS_LIMIT),
                             commitmentRepository.observeAllForPerson(userId, personRef),
                             calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
-                        ) { enrichment, rawEvents, commitments, calendarEvents ->
-                            val sections = buildInteractions(rawEvents, commitments, calendarEvents)
-                            PersonDetailUiState(
+                            _completedExpanded,
+                        ) { enrichment, rawEvents, commitments, calendarEvents, completedExpanded ->
+                            PersonDetailProjector.buildState(
                                 personRef = personRef,
-                                displayName = enrichment?.displayName,
-                                companyName = enrichment?.company,
-                                jobTitle = enrichment?.title,
-                                pendingCommitments = sections.pendingCommitments,
-                                completedCommitments = sections.completedCommitments,
-                                interactionHistory = sections.interactionHistory,
-                                loading = false,
-                                error = null,
+                                enrichment = enrichment,
+                                rawEvents = rawEvents,
+                                commitments = commitments,
+                                calendarEvents = calendarEvents,
+                                completedExpanded = completedExpanded,
                             )
                         }.catch { e ->
                             logger.e(TAG, "observeDetail failed", e)
@@ -226,73 +223,4 @@ public class PersonDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Container for the three UI sections produced by [buildInteractions].
-     */
-    private data class InteractionSections(
-        val pendingCommitments: List<InteractionRow.Commitment>,
-        val completedCommitments: List<InteractionRow.Commitment>,
-        val interactionHistory: List<InteractionRow>,
-    )
-
-    /**
-     * Splits raw events, commitments, and calendar meetings into three sections:
-     * pending commitments, completed commitments, and non-commitment interaction history
-     * (sorted newest-first).
-     */
-    private fun buildInteractions(
-        rawEvents: List<RawIngestionEventEntity>,
-        commitments: List<CommitmentEntity>,
-        calendarEvents: List<CalendarEventEntity>,
-    ): InteractionSections {
-        val eventRows: List<InteractionRow> = rawEvents.map(::toEventRow)
-        val commitmentRows: List<InteractionRow.Commitment> = commitments.map(::toCommitmentRow)
-        val calendarRows: List<InteractionRow> = calendarEvents.map(::toCalendarMeetingRow)
-
-        // Partition on the v5 `action_state` column only — the legacy
-        // `commitment_state` column is retained for schema parity but drifts on
-        // the dispute/edit path (see CommitmentRepositoryImpl).
-        val (completed, pending) = commitmentRows.partition { c ->
-            c.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true)
-        }
-        // history contains only Event + CalendarMeeting — commitmentRows are partitioned out
-        // above. The Commitment branch is unreachable here; the else guards the invariant.
-        val history = (eventRows + calendarRows)
-            .sortedByDescending { row ->
-                when (row) {
-                    is InteractionRow.Event -> row.timestamp
-                    is InteractionRow.CalendarMeeting -> row.timestamp
-                    else -> error("history must not contain ${row::class.simpleName}")
-                }
-            }
-        return InteractionSections(
-            pendingCommitments = pending.sortedByDescending { it.timestamp },
-            completedCommitments = completed.sortedByDescending { it.timestamp },
-            interactionHistory = history,
-        )
-    }
-
-    private fun toEventRow(e: RawIngestionEventEntity): InteractionRow.Event =
-        InteractionRow.Event(
-            id = e.id,
-            timestamp = e.timestamp,
-            source = e.sourceType,
-            summary = e.eventTitle,
-            snippet = e.eventSnippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
-            commitmentsExtractedCount = e.commitmentsExtractedCount,
-        )
-
-    private fun toCommitmentRow(c: CommitmentEntity): InteractionRow.Commitment =
-        InteractionRow.Commitment(
-            timestamp = c.sourceEventOccurredAt,
-            title = c.title,
-            direction = c.direction,
-            actionState = c.actionState,
-        )
-
-    private fun toCalendarMeetingRow(m: CalendarEventEntity): InteractionRow.CalendarMeeting =
-        InteractionRow.CalendarMeeting(
-            timestamp = m.startAt,
-            title = m.title,
-        )
 }

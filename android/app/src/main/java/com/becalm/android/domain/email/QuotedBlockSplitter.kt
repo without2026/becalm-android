@@ -13,21 +13,19 @@ import javax.inject.Inject
  * reply. Without this separation the LLM would happily re-extract the counterparty's old
  * promises as if they were the user's new ones.
  *
- * ## Algorithm (in order; first match wins)
- * 1. **Sentinel scan** — look for a line that matches one of the three common "quote-header"
- *    markers: Gmail's `On <date>, <sender> wrote:` line, Outlook's
+ * ## Algorithm (earliest quote marker wins)
+ * 1. Find the first sentinel line matching one of the common "quote-header" markers:
+ *    Gmail's `On <date>, <sender> wrote:` line, Outlook's
  *    `-----Original Message-----` separator, or Outlook's From/Sent/To/Subject header block.
- *    When a sentinel is found everything from that line onward (inclusive) becomes `quoted`;
- *    everything before it becomes `commitment`.
- * 2. **`^>` scan** — when no sentinel matched, search for the first contiguous run of lines
- *    whose first non-whitespace character is `>` (including nested `>>` / `>>>` forms). The
- *    run, plus everything after it, becomes `quoted`; everything before becomes `commitment`.
- * 3. **Fallback** — no sentinel and no `^>` block: the entire body is `commitment`, and
- *    `quoted` is null.
+ * 2. Find the first line whose first non-whitespace character is `>` (including nested
+ *    `>>` / `>>>` forms).
+ * 3. Use whichever marker appears earlier in the body. Everything from that point onward
+ *    becomes `quoted`; everything before becomes `commitment`.
+ * 4. If neither marker exists, the entire body is `commitment` and `quoted` is null.
  *
- * Sentinel-first was chosen over `^>`-first because `On ... wrote:` / `-----Original Message-----`
- * markers have near-zero false-positive rate, while stray `>` lines occasionally appear inside
- * quoted code blocks or Markdown tables in the primary body.
+ * This preserves the most context in the primary body while still stripping quoted history.
+ * It also matches real clients better: some replies prepend a short `>` line before a later
+ * `On ... wrote:` header, and the quoted split must start at that earliest visible quote.
  *
  * ## MVP scope
  * English sentinels only. Korean equivalents like `2023년 12월 18일 오후 3:45, 홍길동 님이 작성:`
@@ -55,28 +53,24 @@ public class QuotedBlockSplitter @Inject constructor() {
             return SplitResult(commitment = "", quoted = null)
         }
 
-        val sentinelSplit = splitOnSentinel(bodyPlain)
-        if (sentinelSplit != null) return sentinelSplit
-
-        val angleSplit = splitOnAngleBracketRun(bodyPlain)
-        if (angleSplit != null) return angleSplit
-
-        return SplitResult(commitment = bodyPlain.trim(), quoted = null)
+        return splitAtFirstQuotedMarker(bodyPlain)
+            ?: SplitResult(commitment = bodyPlain.trim(), quoted = null)
     }
 
-    // ─── Sentinel ──────────────────────────────────────────────────────────────
+    // ─── Quote-marker scan ────────────────────────────────────────────────────
 
     /**
-     * Attempts to split [body] using one of the three sentinel regexes. Returns null when no
-     * sentinel matched so the caller can fall through to the `^>` scan.
+     * Computes the earliest quoted-region start from either a sentinel match or a `>` run.
+     * Returns null when the body has no quoted marker at all.
      */
-    private fun splitOnSentinel(body: String): SplitResult? {
-        val earliestMatch = SENTINEL_REGEXES
+    private fun splitAtFirstQuotedMarker(body: String): SplitResult? {
+        val sentinelIndex = SENTINEL_REGEXES
             .mapNotNull { it.find(body) }
             .minByOrNull { it.range.first }
-            ?: return null
-
-        val splitIndex = earliestMatch.range.first
+            ?.range
+            ?.first
+        val angleIndex = firstAngleQuotedLineIndex(body)
+        val splitIndex = listOfNotNull(sentinelIndex, angleIndex).minOrNull() ?: return null
         val commitment = body.substring(0, splitIndex).trim()
         val quoted = body.substring(splitIndex).trim()
         return SplitResult(
@@ -85,29 +79,15 @@ public class QuotedBlockSplitter @Inject constructor() {
         )
     }
 
-    /**
-     * Attempts to split [body] on the first contiguous run of `^>`-prefixed lines. Returns
-     * null when no such run exists.
-     */
-    private fun splitOnAngleBracketRun(body: String): SplitResult? {
-        val lines = body.split("\n")
-        var firstQuotedLine = -1
-        for (index in lines.indices) {
-            if (lines[index].trimStart().startsWith(">")) {
-                firstQuotedLine = index
-                break
+    private fun firstAngleQuotedLineIndex(body: String): Int? {
+        var offset = 0
+        for (line in body.split('\n')) {
+            if (line.trimStart().startsWith(">")) {
+                return offset
             }
+            offset += line.length + 1
         }
-        if (firstQuotedLine == -1) return null
-
-        val commitmentLines = lines.subList(0, firstQuotedLine)
-        val quotedLines = lines.subList(firstQuotedLine, lines.size)
-        val commitment = commitmentLines.joinToString("\n").trim()
-        val quoted = quotedLines.joinToString("\n").trim()
-        return SplitResult(
-            commitment = commitment,
-            quoted = quoted.ifEmpty { null },
-        )
+        return null
     }
 }
 

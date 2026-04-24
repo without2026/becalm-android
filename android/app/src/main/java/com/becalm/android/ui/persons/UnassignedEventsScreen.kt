@@ -2,15 +2,18 @@ package com.becalm.android.ui.persons
 
 import android.view.WindowManager
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,12 +28,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.EventSourceBadge
+import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 
@@ -74,47 +79,61 @@ public fun UnassignedEventsScreen(
             }
         },
     ) { padding ->
-        when {
-            state.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
+        UnassignedEventsContent(
+            loading = state.loading,
+            unassignedEvents = state.unassignedEvents,
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+@Composable
+internal fun UnassignedEventsContent(
+    loading: Boolean,
+    unassignedEvents: List<UnassignedEventSummary>,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        loading -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
             }
-            else -> {
-                // Unassigned events have personRef with no display name match.
-                // Filter those without a displayName as a proxy until SRC-008 DAO is available.
-                val unassigned = state.people.filter { it.displayName == null }
-                if (unassigned.isEmpty()) {
-                    EmptyState(
-                        title = stringResource(R.string.persons_unassigned_empty_title),
-                        message = stringResource(R.string.persons_unassigned_empty_message),
-                        icon = Icons.Filled.List,
-                        modifier = Modifier.padding(padding),
-                    )
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        }
+
+        unassignedEvents.isEmpty() -> {
+            EmptyState(
+                title = stringResource(R.string.persons_unassigned_empty_title),
+                message = stringResource(R.string.persons_unassigned_empty_message),
+                icon = Icons.AutoMirrored.Filled.List,
+                modifier = modifier,
+            )
+        }
+
+        else -> {
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                modifier = modifier.fillMaxSize(),
+            ) {
+                items(items = unassignedEvents, key = { it.id }) { event ->
+                    Column(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .glassPanel(MaterialTheme.shapes.medium)
+                            .padding(12.dp),
                     ) {
-                        items(items = unassigned, key = { it.personRef }) { person ->
-                            Text(
-                                text = stringResource(R.string.persons_unidentified),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .glassPanel(MaterialTheme.shapes.medium)
-                                    .padding(12.dp),
-                            )
-                        }
+                        EventSourceBadge(sourceType = event.sourceType)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = event.title ?: stringResource(R.string.persons_unidentified),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        IngestionTimestamp(timestamp = event.timestamp)
                     }
                 }
             }
@@ -140,7 +159,7 @@ private fun PreviewUnassignedEventsEmpty() {
             EmptyState(
                 title = "No unassigned events",
                 message = "All events have been matched to a person.",
-                icon = Icons.Filled.List,
+                icon = Icons.AutoMirrored.Filled.List,
                 modifier = Modifier.padding(padding),
             )
         }

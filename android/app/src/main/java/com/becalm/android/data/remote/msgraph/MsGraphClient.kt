@@ -161,9 +161,8 @@ public data class CalendarViewDeltaPage(
 /**
  * Supplies a valid Microsoft Graph bearer token for the current user.
  *
- * This is a stub interface — the real implementation will be provided by `AuthViewModel`
- * in Round 6 once the MSAL / Microsoft Identity integration lands. Inject a no-op or
- * test double until then.
+ * Production binds [MsGraphTokenProviderImpl] via Hilt. Tests may still substitute a
+ * no-op or fake implementation when they need deterministic auth behavior.
  */
 public interface MsGraphTokenProvider {
     /**

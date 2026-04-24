@@ -73,11 +73,15 @@ public class EnrichmentWorker @AssistedInject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return@withContext Result.success()
+        }
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         // ENR-003: resolve userId; null session → terminal failure
@@ -289,4 +293,3 @@ private fun classifyRef(ref: String): RefKind = when {
     ref.startsWith('+') || ref.all { it.isDigit() } -> RefKind.PHONE
     else -> RefKind.NAME
 }
-

@@ -19,13 +19,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
@@ -51,7 +51,7 @@ import kotlinx.coroutines.launch
  *
  * No `Log.*` calls reference user-entered text (email/password).
  *
- * spec: AUTH-001 (email sign-in), AUTH-002 (Google sign-in placeholder)
+ * spec: AUTH-001 (email sign-in), AUTH-002 (Google sign-in)
  *
  * Primary VM: [AuthViewModel]
  * Navigation entry: [BecalmRoute.Login]
@@ -60,16 +60,46 @@ import kotlinx.coroutines.launch
 @Composable
 public fun LoginScreen(
     navController: NavHostController,
-    viewModel: AuthViewModel = hiltViewModel(),
-    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: AuthViewModel? = null,
+    onboardingViewModel: OnboardingViewModel? = null,
+    stateOverride: AuthUiState? = null,
+    onEmailSignIn: ((String, String) -> Unit)? = null,
+    googleSignInEnabledOverride: Boolean? = null,
+    onGoogleSignInLaunch: (() -> Unit)? = null,
+    onSignedInNavigate: ((String) -> Unit)? = null,
+    onGoogleIdToken: ((String) -> Unit)? = null,
+    onErrorDismissed: (() -> Unit)? = null,
+    onMarkLoginGranted: (() -> Unit)? = null,
+    applySecureFlag: Boolean = true,
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val needsAuthViewModel = stateOverride == null ||
+        onEmailSignIn == null ||
+        onGoogleIdToken == null ||
+        onErrorDismissed == null ||
+        (onGoogleSignInLaunch == null && googleSignInEnabledOverride == null)
+    val authViewModel = if (needsAuthViewModel) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
+    } else {
+        viewModel
+    }
+    val resolvedOnboardingViewModel = if (onMarkLoginGranted == null) {
+        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        onboardingViewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(authViewModel).uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     // FLAG_SECURE: prevent screenshot capture of password screen (PIPA Article 29)
     val context = LocalContext.current
-    DisposableEffect(Unit) {
+    DisposableEffect(applySecureFlag) {
+        if (!applySecureFlag) return@DisposableEffect onDispose {}
         val window = (context as? android.app.Activity)?.window
         window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose {
@@ -83,7 +113,8 @@ public fun LoginScreen(
             val signedIn = state as AuthUiState.SignedIn
             // Mark the onboarding LOGIN step terminal before leaving this screen so the
             // onCompleteOnboarding() gate can ever pass (LOGIN is step 2 of the canonical 12).
-            onboardingViewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
+            onMarkLoginGranted?.invoke() ?: requireNotNull(resolvedOnboardingViewModel)
+                .onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
             val destination = if (signedIn.onboardingCompleted) {
                 BecalmRoute.Today.path
             } else {
@@ -92,14 +123,16 @@ public fun LoginScreen(
                 // the PIPA disclosure — the OnboardingPipaConsent composable handles that hop.
                 BecalmRoute.OnboardingPipaConsent.path
             }
-            navController.navigate(destination) {
-                popUpTo(BecalmRoute.Login.path) { inclusive = true }
-            }
+            (onSignedInNavigate ?: { target ->
+                navController.navigate(target) {
+                    popUpTo(BecalmRoute.Login.path) { inclusive = true }
+                }
+            })(destination)
         }
         if (state is AuthUiState.Error) {
             scope.launch {
                 snackbarHostState.showSnackbar((state as AuthUiState.Error).message)
-                viewModel.onErrorDismissed()
+                onErrorDismissed?.invoke() ?: requireNotNull(authViewModel).onErrorDismissed()
             }
         }
     }
@@ -109,20 +142,28 @@ public fun LoginScreen(
     // are acquired separately in S6-F through AuthorizationClient — the two APIs coexist.
     val googleErrorUnknown = stringResource(R.string.login_google_error_unknown)
     val googleErrorNoCreds = stringResource(R.string.login_google_error_no_credentials)
-    val googleLauncher = rememberGoogleSignInLauncher(
-        onResult = { result ->
-            when (result) {
-                is GoogleSignInResult.Success -> viewModel.onGoogleSignIn(result.idToken)
-                is GoogleSignInResult.UserCancelled -> Unit // User dismissed the picker — silent.
-                is GoogleSignInResult.NoCredentials -> scope.launch {
-                    snackbarHostState.showSnackbar(googleErrorNoCreds)
+    val googleLauncher = if (onGoogleSignInLaunch == null || googleSignInEnabledOverride == null) {
+        rememberGoogleSignInLauncher(
+            onResult = { result ->
+                when (result) {
+                    is GoogleSignInResult.Success ->
+                        onGoogleIdToken?.invoke(result.idToken)
+                            ?: requireNotNull(authViewModel).onGoogleSignIn(result.idToken)
+                    is GoogleSignInResult.UserCancelled -> Unit // User dismissed the picker — silent.
+                    is GoogleSignInResult.NoCredentials -> scope.launch {
+                        snackbarHostState.showSnackbar(googleErrorNoCreds)
+                    }
+                    is GoogleSignInResult.Error -> scope.launch {
+                        snackbarHostState.showSnackbar(googleErrorUnknown)
+                    }
                 }
-                is GoogleSignInResult.Error -> scope.launch {
-                    snackbarHostState.showSnackbar(googleErrorUnknown)
-                }
-            }
-        },
-    )
+            },
+        )
+    } else {
+        null
+    }
+    val googleEnabled = googleSignInEnabledOverride ?: requireNotNull(googleLauncher).isConfigured
+    val launchGoogleSignIn = onGoogleSignInLaunch ?: { requireNotNull(googleLauncher).launch() }
 
     BecalmScaffold(
         title = stringResource(R.string.login_title),
@@ -131,15 +172,18 @@ public fun LoginScreen(
         LoginForm(
             modifier = Modifier.padding(padding),
             isLoading = state is AuthUiState.Loading,
-            googleSignInEnabled = googleLauncher.isConfigured,
-            onSignIn = { email, password -> viewModel.onEmailSignIn(email, password) },
-            onGoogleSignIn = { googleLauncher.launch() },
+            googleSignInEnabled = googleEnabled,
+            onSignIn = { email, password ->
+                onEmailSignIn?.invoke(email, password)
+                    ?: requireNotNull(authViewModel).onEmailSignIn(email, password)
+            },
+            onGoogleSignIn = launchGoogleSignIn,
         )
     }
 }
 
 @Composable
-private fun LoginForm(
+internal fun LoginForm(
     modifier: Modifier = Modifier,
     isLoading: Boolean,
     googleSignInEnabled: Boolean,
@@ -164,7 +208,9 @@ private fun LoginForm(
             placeholder = stringResource(R.string.login_email_placeholder),
             keyboardType = KeyboardType.Email,
             imeAction = ImeAction.Next,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("login-email"),
         )
         Spacer(modifier = Modifier.height(16.dp))
         BecalmTextField(
@@ -179,7 +225,9 @@ private fun LoginForm(
             supportingText = if (showEmptyError && password.isBlank()) {
                 stringResource(R.string.login_error_empty_fields)
             } else null,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("login-password"),
         )
         Spacer(modifier = Modifier.height(32.dp))
         BecalmButton(

@@ -24,13 +24,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
@@ -127,7 +128,7 @@ public fun ImapSetupScreen(
 }
 
 @Composable
-private fun ImapForm(
+internal fun ImapForm(
     modifier: Modifier = Modifier,
     onSave: (ImapProvider, username: String, appPassword: String) -> Unit,
     onSkip: () -> Unit,
@@ -160,16 +161,24 @@ private fun ImapForm(
         )
         Spacer(modifier = Modifier.height(16.dp))
 
+        val providers = listOf(ImapProvider.Naver, ImapProvider.Daum)
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            ImapProvider.SELECTABLE.forEachIndexed { index, provider ->
+            providers.forEachIndexed { index, provider ->
+                val displayNameRes = provider.displayNameRes
                 SegmentedButton(
                     selected = provider == selectedProvider,
                     onClick = { selectedProvider = provider },
                     shape = SegmentedButtonDefaults.itemShape(
                         index = index,
-                        count = ImapProvider.SELECTABLE.size,
+                        count = providers.size,
                     ),
-                    label = { Text(stringResource(provider.displayNameRes)) },
+                    modifier = Modifier.testTag(
+                        when (provider) {
+                            ImapProvider.Naver -> "imap-provider-naver"
+                            ImapProvider.Daum -> "imap-provider-daum"
+                        },
+                    ),
+                    label = { Text(stringResource(displayNameRes)) },
                 )
             }
         }
@@ -182,7 +191,9 @@ private fun ImapForm(
             placeholder = stringResource(selectedProvider.usernamePlaceholderRes),
             keyboardType = KeyboardType.Email,
             imeAction = ImeAction.Next,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("imap-username"),
         )
         Spacer(modifier = Modifier.height(12.dp))
         BecalmTextField(
@@ -193,7 +204,9 @@ private fun ImapForm(
             keyboardType = KeyboardType.Password,
             imeAction = ImeAction.Done,
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("imap-password"),
         )
         Spacer(modifier = Modifier.height(32.dp))
         BecalmButton(
@@ -208,6 +221,7 @@ private fun ImapForm(
             text = stringResource(R.string.action_skip),
             onClick = onSkip,
             variant = BecalmButtonVariant.Text,
+            modifier = Modifier.testTag("imap-skip"),
         )
     }
 }

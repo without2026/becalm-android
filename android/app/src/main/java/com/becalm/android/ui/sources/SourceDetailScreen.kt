@@ -18,35 +18,39 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.statusStringToSyncStatus
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.dispatchSourceDetailEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 
 /**
  * Source detail screen — status, last-sync info, reconnect / disconnect / manual-sync actions.
  *
  * [SourceStatusIndicator] label is status-phrasing only; no account email/PII is surfaced.
- * Disconnect is a no-op until SMG-004 is implemented (see [SourcesListViewModel.disconnectSource]).
  *
  * spec: SMG-002..005
  *
@@ -61,6 +65,10 @@ public fun SourceDetailScreen(
     viewModel: SourceDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    CollectFlowEffect(viewModel.effects) { effect ->
+        navController.dispatchSourceDetailEffect(effect)
+    }
 
     BecalmScaffold(
         title = state.sourceType.replaceFirstChar { it.uppercase() }.ifEmpty {
@@ -94,9 +102,14 @@ public fun SourceDetailScreen(
                 }
             }
             else -> {
-                SourceDetailContent(
+                SourceDetailScreenContent(
                     state = state,
                     contentPadding = padding,
+                    onReconnect = viewModel::onReconnect,
+                    onManualSync = viewModel::onManualSync,
+                    onDisconnectClick = viewModel::onDisconnectClick,
+                    onDisconnectDismiss = viewModel::onDisconnectDismiss,
+                    onDisconnectConfirm = viewModel::onDisconnectConfirm,
                 )
             }
         }
@@ -104,9 +117,14 @@ public fun SourceDetailScreen(
 }
 
 @Composable
-private fun SourceDetailContent(
+public fun SourceDetailScreenContent(
     state: SourceDetailUiState,
     contentPadding: PaddingValues,
+    onReconnect: () -> Unit,
+    onManualSync: () -> Unit,
+    onDisconnectClick: () -> Unit,
+    onDisconnectDismiss: () -> Unit,
+    onDisconnectConfirm: () -> Unit,
 ) {
     val syncStatus = statusStringToSyncStatus(state.status)
     val statusLabel = when (syncStatus) {
@@ -151,21 +169,76 @@ private fun SourceDetailContent(
                             label = statusLabel,
                         )
                     }
+                    state.lastSyncAt?.let { at ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.source_detail_last_sync_fmt,
+                                at.toLocalTimeLabel(),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.eventsSyncedCount?.let { count ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.source_detail_events_synced_fmt, count),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.lastError?.let { lastError ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.source_detail_last_error_fmt, lastError),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    state.actionError?.let { actionError ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = actionError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
-                    // Reconnect / Disconnect — disconnect is a no-op (SMG-004 pending)
-                    BecalmButton(
-                        text = stringResource(R.string.action_reconnect),
-                        onClick = { /* TODO(SMG-004): wire reconnect action */ },
-                        variant = BecalmButtonVariant.Secondary,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    BecalmButton(
-                        text = stringResource(R.string.action_disconnect),
-                        onClick = { /* TODO(SMG-004): no API exists yet */ },
-                        variant = BecalmButtonVariant.Text,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    if (state.showReconnectButton) {
+                        BecalmButton(
+                            text = stringResource(R.string.action_reconnect),
+                            onClick = onReconnect,
+                            variant = BecalmButtonVariant.Secondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source-detail-reconnect"),
+                        )
+                    }
+                    if (state.showManualSyncButton) {
+                        if (state.showReconnectButton) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        BecalmButton(
+                            text = stringResource(R.string.action_sync_now),
+                            onClick = onManualSync,
+                            variant = BecalmButtonVariant.Secondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source-detail-sync-now"),
+                        )
+                    }
+                    if (state.showDisconnectButton) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        BecalmButton(
+                            text = stringResource(R.string.action_disconnect),
+                            onClick = onDisconnectClick,
+                            variant = BecalmButtonVariant.Text,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source-detail-disconnect"),
+                        )
+                    }
                 }
             }
         }
@@ -212,7 +285,37 @@ private fun SourceDetailContent(
             }
         }
     }
+
+    if (state.showDisconnectConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = onDisconnectDismiss,
+            title = {
+                Text(text = stringResource(R.string.source_detail_disconnect_confirm_title))
+            },
+            text = {
+                Text(text = stringResource(R.string.source_detail_disconnect_confirm_body))
+            },
+            confirmButton = {
+                BecalmButton(
+                    text = stringResource(R.string.action_confirm),
+                    onClick = onDisconnectConfirm,
+                    variant = BecalmButtonVariant.Secondary,
+                    modifier = Modifier.testTag("source-detail-disconnect-confirm"),
+                )
+            },
+            dismissButton = {
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = onDisconnectDismiss,
+                    variant = BecalmButtonVariant.Text,
+                    modifier = Modifier.testTag("source-detail-disconnect-cancel"),
+                )
+            },
+        )
+    }
 }
+
+private fun Instant.toLocalTimeLabel(): String = toString().substringAfter("T").take(5)
 
 @PreviewLightDark
 @Composable
@@ -229,7 +332,7 @@ private fun PreviewSourceDetailScreenWithEvents() {
                 }
             },
         ) { padding ->
-            SourceDetailContent(
+            SourceDetailScreenContent(
                 state = SourceDetailUiState(
                     sourceType = "gmail",
                     status = "CONNECTED",
@@ -247,6 +350,11 @@ private fun PreviewSourceDetailScreenWithEvents() {
                     ),
                 ),
                 contentPadding = padding,
+                onReconnect = {},
+                onManualSync = {},
+                onDisconnectClick = {},
+                onDisconnectDismiss = {},
+                onDisconnectConfirm = {},
             )
         }
     }

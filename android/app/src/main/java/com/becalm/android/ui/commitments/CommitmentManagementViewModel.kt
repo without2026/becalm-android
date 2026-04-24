@@ -149,16 +149,33 @@ public sealed interface CommitmentUndoSnapshot {
 // spec: CMT-001, CMT-010
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
+    val activeItems: List<CommitmentRow> = emptyList(),
+    val completedSection: CommitmentSectionUiState = CommitmentSectionUiState(),
+    val cancelledSection: CommitmentSectionUiState = CommitmentSectionUiState(),
     val filter: CommitmentFilter = CommitmentFilter.ALL,
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val error: String? = null,
 )
 
+/** Test-visible projection of one expandable terminal section (CMT-009 / CMT-012). */
+public data class CommitmentSectionUiState(
+    val count: Int = 0,
+    val items: List<CommitmentRow> = emptyList(),
+    val expanded: Boolean = false,
+    val dimmed: Boolean = true,
+) {
+    public val visible: Boolean get() = count > 0
+}
+
+/** One-shot navigation emitted from [CommitmentManagementViewModel]. */
+public sealed interface CommitmentManagementNavigation {
+    public data class OpenDetail(val commitmentId: String) : CommitmentManagementNavigation
+}
+
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "CommitmentMgmtVM"
-private const val COUNTERPARTY_DISPLAY_MAX = 30
 
 /**
  * ViewModel for CommitmentManagementScreen.
@@ -221,6 +238,15 @@ public class CommitmentManagementViewModel @Inject constructor(
     /** Publicly exposed undo stream for the [CommitmentManagementScreen] collector. */
     public val undoFlow: SharedFlow<CommitmentUndoSnapshot> = _undoFlow.asSharedFlow()
 
+    private val _navigation: MutableSharedFlow<CommitmentManagementNavigation> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** One-shot navigation for card taps (CMT-003). */
+    public val navigation: SharedFlow<CommitmentManagementNavigation> = _navigation.asSharedFlow()
+
     /**
      * Backing store for the unfiltered entity list from Room. Required so that
      * [onFilterChange] can re-apply a different filter without re-querying Room.
@@ -272,10 +298,11 @@ public class CommitmentManagementViewModel @Inject constructor(
                 .collect { (entities, enrichment) ->
                     allEntities.value = entities
                     enrichmentMap.value = enrichment
-                    val filter = _uiState.value.filter
                     _uiState.update { state ->
-                        state.copy(
-                            items = applyFilter(entities, filter, enrichment),
+                        CommitmentManagementProjector.buildUiState(
+                            current = state,
+                            entities = entities,
+                            enrichment = enrichment,
                             loading = false,
                         )
                     }
@@ -300,9 +327,38 @@ public class CommitmentManagementViewModel @Inject constructor(
     // spec: CMT-003
     public fun onFilterChange(filter: CommitmentFilter) {
         _uiState.update { state ->
-            state.copy(
+            CommitmentManagementProjector.buildUiState(
+                current = state,
+                entities = allEntities.value,
+                enrichment = enrichmentMap.value,
                 filter = filter,
-                items = applyFilter(allEntities.value, filter, enrichmentMap.value),
+            )
+        }
+    }
+
+    /** Emits a one-shot detail navigation for the tapped card (CMT-003). */
+    public fun onCommitmentSelected(id: String) {
+        _navigation.tryEmit(CommitmentManagementNavigation.OpenDetail(id))
+    }
+
+    /** Toggles the collapsed-by-default completed section (CMT-009). */
+    public fun onToggleCompletedSection() {
+        _uiState.update { state ->
+            state.copy(
+                completedSection = state.completedSection.copy(
+                    expanded = !state.completedSection.expanded,
+                ),
+            )
+        }
+    }
+
+    /** Toggles the collapsed-by-default cancelled section (CMT-012). */
+    public fun onToggleCancelledSection() {
+        _uiState.update { state ->
+            state.copy(
+                cancelledSection = state.cancelledSection.copy(
+                    expanded = !state.cancelledSection.expanded,
+                ),
             )
         }
     }
@@ -526,52 +582,4 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-002, CMT-003, CMT-004, CMT-010
     // spec: CMT-005..010 — post-Round-1 state model alignment verified
-    private fun applyFilter(
-        entities: List<CommitmentEntity>,
-        filter: CommitmentFilter,
-        enrichment: Map<String, PersonEnrichmentEntity>,
-    ): List<CommitmentRow> {
-        val filtered = when (filter) {
-            CommitmentFilter.ALL -> entities
-            CommitmentFilter.GIVE -> entities.filter { it.direction == "give" }
-            CommitmentFilter.TAKE -> entities.filter { it.direction == "take" }
-        }
-        return filtered.map { entity ->
-            val state = CommitmentState.fromWire(entity.actionState)
-            CommitmentRow(
-                id = entity.id,
-                title = entity.title,
-                direction = entity.direction,
-                derivedStatus = state.name,
-                actionState = state,
-                dueAt = entity.dueAt,
-                dueIsApproximate = entity.dueIsApproximate,
-                counterpartyDisplayName = resolveCounterpartyDisplay(entity, enrichment),
-                dueHint = entity.dueHint,
-                isManual = entity.sourceType == SourceType.MANUAL,
-            )
-        }
-    }
-
-    /**
-     * CMT-001 counterparty display resolution. Fallback chain:
-     * 1. `enrichment[personRef].displayName`
-     * 2. `enrichment[personRef].nickname`
-     * 3. `personRef` itself (canonicalized identifier is acceptable as last-mile label)
-     * 4. `counterpartyRaw.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows without personRef
-     *
-     * Returns `null` only when the commitment has no personRef AND no counterpartyRaw.
-     */
-    private fun resolveCounterpartyDisplay(
-        commitment: CommitmentEntity,
-        enrichment: Map<String, PersonEnrichmentEntity>,
-    ): String? {
-        val ref = commitment.personRef
-        return if (ref != null) {
-            val hit = enrichment[ref]
-            hit?.displayName ?: hit?.nickname ?: ref
-        } else {
-            commitment.counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)
-        }
-    }
 }

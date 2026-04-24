@@ -255,8 +255,31 @@ public sealed class BecalmRoute(public val path: String) {
     /** Settings root — accessed via top-right icon on TodayTimelineScreen. */
     public data object Settings : BecalmRoute("settings")
 
+    /** PIPA rights execution hub under Settings. */
+    public data object PrivacyManagement : BecalmRoute("settings/privacy")
+
+    /** Selective consent withdrawal screen. */
+    public data object ConsentWithdraw : BecalmRoute("settings/privacy/consents")
+
+    /** Processing-pause control screen. */
+    public data object ProcessingPause : BecalmRoute("settings/privacy/pause")
+
+    /** Two-step local account deletion flow. */
+    public data object AccountDeletion : BecalmRoute("settings/privacy/delete-account")
+
+    /** Local-only PIPA activity log. */
+    public data object ActivityLog : BecalmRoute("settings/privacy/activity-log")
+
     /** Sources list: 6-source adapter status rows + contacts pseudo-source (ENR-008, SMG-001). */
     public data object SettingsSources : BecalmRoute("settings/sources")
+
+    /**
+     * Contacts pseudo-source detail under Settings.
+     *
+     * Opened only when READ_CONTACTS is already granted. The permission-denied branch
+     * routes to [OnboardingContacts] instead.
+     */
+    public data object ContactsSourceDetail : BecalmRoute("settings/sources/contacts")
 
     /**
      * Source detail: status, last-sync info, reconnect / disconnect / manual-sync

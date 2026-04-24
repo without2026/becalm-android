@@ -12,24 +12,26 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.today.ColdSyncEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.today.ColdSyncUiState
 import com.becalm.android.ui.today.ColdSyncViewModel
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Cold sync loading screen shown on first run when Room is entirely empty.
@@ -48,28 +50,44 @@ import com.becalm.android.ui.today.ColdSyncViewModel
 @Composable
 public fun ColdSyncScreen(
     navController: NavHostController,
-    coldSyncViewModel: ColdSyncViewModel = hiltViewModel(),
-    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
+    coldSyncViewModel: ColdSyncViewModel? = null,
+    stateOverride: ColdSyncUiState? = null,
+    effectsOverride: Flow<ColdSyncEffect>? = null,
+    onScreenVisible: (() -> Unit)? = null,
+    onNavigateToToday: (() -> Unit)? = null,
+    onComplete: (() -> Unit)? = null,
+    onSkipForNow: (() -> Unit)? = null,
 ) {
-    val state by coldSyncViewModel.state.collectAsStateWithLifecycle()
-    val onboardingState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
+    val viewModel = if (stateOverride == null || effectsOverride == null || onScreenVisible == null || onComplete == null || onSkipForNow == null) {
+        coldSyncViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<ColdSyncViewModel>()
+    } else {
+        coldSyncViewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(viewModel).state.collectAsStateWithLifecycle()
+        collectedState
+    }
+    val navigateToToday = onNavigateToToday ?: {
+        navController.navigate(BecalmRoute.Today.path) {
+            popUpTo(BecalmRoute.OnboardingRecordingFolder.path) { inclusive = true }
+        }
+    }
 
-    // Navigate only after onCompleteOnboarding() has persisted successfully.
-    // COLD_SYNC is the terminal onboarding step; the VM marks it COMPLETE after the
-    // DataStore write succeeds (no separate "COMPLETE" enum).
-    val onboardingDone = onboardingState.stepStates[OnboardingStep.COLD_SYNC] == StepStatus.COMPLETE
-    LaunchedEffect(onboardingDone) {
-        if (onboardingDone) {
-            navController.navigate(BecalmRoute.Today.path) {
-                popUpTo(BecalmRoute.OnboardingRecordingFolder.path) { inclusive = true }
-            }
+    LaunchedEffect(viewModel, onScreenVisible) {
+        onScreenVisible?.invoke() ?: requireNotNull(viewModel).onScreenVisible()
+    }
+    CollectFlowEffect(effectsOverride ?: requireNotNull(viewModel).effects) { effect ->
+        when (effect) {
+            ColdSyncEffect.NavigateToToday -> navigateToToday()
         }
     }
 
     // Auto-trigger completion when sync finishes
     LaunchedEffect(state.done) {
         if (state.done) {
-            onboardingViewModel.onCompleteOnboarding()
+            onComplete?.invoke() ?: requireNotNull(viewModel).onStage1Completed()
         }
     }
 
@@ -77,15 +95,17 @@ public fun ColdSyncScreen(
         ColdSyncContent(
             modifier = Modifier.padding(padding),
             state = state,
-            onContinue = { onboardingViewModel.onCompleteOnboarding() },
+            onContinue = { onComplete?.invoke() ?: requireNotNull(viewModel).onStage1Completed() },
+            onSkipForNow = onSkipForNow ?: { requireNotNull(viewModel).onSkipForNow() },
         )
     }
 }
 
 @Composable
-private fun ColdSyncContent(
+internal fun ColdSyncContent(
     state: ColdSyncUiState,
     onContinue: () -> Unit,
+    onSkipForNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -114,6 +134,14 @@ private fun ColdSyncContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(modifier = Modifier.height(24.dp))
+                BecalmButton(
+                    text = stringResource(R.string.onb_cold_sync_skip_cta),
+                    onClick = onSkipForNow,
+                    enabled = state.skipEnabled && !state.transitioning,
+                    variant = BecalmButtonVariant.Secondary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             } else {
                 Text(
                     text = stringResource(R.string.onb_cold_sync_done),
@@ -141,6 +169,7 @@ private fun PreviewColdSyncInProgress() {
                 modifier = Modifier.padding(padding),
                 state = ColdSyncUiState(overallProgress = 0.45f, done = false),
                 onContinue = {},
+                onSkipForNow = {},
             )
         }
     }
@@ -155,6 +184,7 @@ private fun PreviewColdSyncDone() {
                 modifier = Modifier.padding(padding),
                 state = ColdSyncUiState(overallProgress = 1f, done = true),
                 onContinue = {},
+                onSkipForNow = {},
             )
         }
     }

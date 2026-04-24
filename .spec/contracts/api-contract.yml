@@ -1,4 +1,5 @@
 version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
 # BeCalm Android MVP — API Contract (client_primary profile)
 #
 # TWO API surfaces:
@@ -8,10 +9,17 @@ version: 1
 # Android does NOT call Supabase REST (rest/v1/*) directly for data.
 # All commitments, raw events, and calendar data flow through Railway.
 # Railway holds the Supabase service_role key; Android sends only its Supabase JWT as Bearer.
+# Today/Settings의 SourceStatusStrip, SourcesList, OverallSyncIndicator는 Railway 응답 타입이 아니라 Android local-derived state다.
+# 사용자-facing status 대상 source는 7개(voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar)이며,
+# call_recording은 voice pipeline provenance subtype으로만 남고 별도 status chip을 만들지 않는다.
 #
 # Error envelope for all Railway endpoints:
 #   4xx/5xx: { error: string, message: string, request_id?: string }
 # Rate limiting: HTTP 429 with Retry-After header (seconds).
+# Write success semantics for every Railway insert/update endpoint:
+#   - HTTP 200/201 = durable commit completed in user-scoped server storage.
+#   - HTTP 202 = accepted/queued only and MUST NOT be treated as synced by Android.
+#   - Batch write endpoints MUST return row-level results keyed by client-generated ids; count-only ack is forbidden.
 
 base_path: ${BECALM_API_BASE_URL}
 auth: bearer_jwt
@@ -24,15 +32,97 @@ types:
     message: string             # 사람이 읽을 수 있는 상세
     retryable: boolean          # true면 client가 재시도, false면 quarantine
 
+  BatchWriteResult:
+    client_event_id: uuid       # Android가 생성한 멱등 키. Room row 상태 갱신의 기준 키
+    disposition: string         # "inserted" | "duplicate" — 둘 다 durable commit success
+    committed_at: datetime      # 서버 durable commit 완료 시각 (UTC)
+
+  LocalDerivedSourceStatus:
+    owner: android_client_only
+    source_id: string           # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    label: string               # Voice | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
+    connection_state: string    # connected | disconnected | error
+    visual_state: string        # idle | syncing | error | synced
+    last_sync_at?: datetime
+    last_error?: string
+    events_synced_count?: int
+    # Railway는 이 타입을 직접 반환하지 않는다. Android가 DataStore connection flags/cursors, Keystore credential 존재 여부,
+    # WorkManager/runtime sync 상태, Room 보조 메타데이터를 조합해 파생한다.
+
+  LocalDerivedContactsSourceStatus:
+    owner: android_client_only
+    source_id: string           # contacts
+    connection_state: string    # connected | disconnected
+    enriched_count?: int
+    last_sync_at?: datetime
+    # contacts는 Railway API surface가 아니다. READ_CONTACTS permission + Room persons_enrichment 기반 로컬 파생 row다.
+
+  CalendarOAuthStart:
+    provider: string
+    authorization_url: string
+    redirect_uri: string
+    state: string
+
+  CalendarOAuthStatus:
+    provider: string
+    connected: boolean
+    account_email?: string
+    display_name?: string
+
+  VoiceExtractItem:
+    type: string              # "action" | "schedule" | "decision"
+    text: string              # 원문 언어를 유지한 정규화 문구
+    quote: string             # 오디오에서 추출한 verbatim 원문 발화 단편(<=100 chars, 원문 언어 유지)
+    person_ref?: string       # 정규화된 상대방 식별자. 식별 불가 시 null
+    due_at?: datetime         # ISO8601 with explicit +09:00 offset (KST) or null
+    due_hint?: string         # 원문 시점 표현(원문 언어 유지)
+    due_is_approximate: bool
+    confidence: float         # 0.0 ~ 1.0
+    direction?: string        # type=action 일 때만 "give" | "take"
+    schedule_status?: string  # type=schedule 일 때만 "confirmed" | "changed" | "postponed" | "cancelled" | "follow_up"
+    decision_status?: string  # type=decision 일 때만 "approved" | "rejected" | "chosen" | "deferred" | "ongoing"
+
   CommitmentDraft:
+    # Android의 현재 Room commitment 저장을 위한 legacy action projection.
     direction: string           # "give" | "take"
     text: string                # 요약 문구 (1~2 문장)
-    quote: string               # 오디오에서 추출한 원문 발화 단편 — 법적 증거 기록, 앱이 요약·편집 금지
+    quote: string               # 오디오에서 추출한 verbatim 원문 발화 단편(<=100 chars) — recall용 최소 evidence, 앱이 요약·편집 금지
     person_ref?: string         # 정규화된 상대방 식별자 (정규화 우선순위: phone E.164 > email lowercase > display_name normalized). 식별 불가 시 null
     due_at?: datetime           # ISO8601 with explicit +09:00 offset (KST). Android는 UTC로 저장·계산하되 payload는 KST로 전송한다. 발화에 시점 언급이 없으면 null
     due_hint?: string           # 원문에서 추출한 시점 문구 원본 (예: "다음주", "월말까지", "이번달 안에", "내일 오전"). 상대적/모호 표현은 due_at으로 해석할 때 손실되므로 원문 보존
     due_is_approximate: bool    # default false. true이면 due_at이 명시적 날짜·시각이 아닌 hint에서 LLM이 추론한 값 — UI는 "약" 마크(예: "~4/24")로 표기하여 사용자에게 보정 필요 여부를 알림
     confidence: float           # 0.0 ~ 1.0
+
+  Commitment:
+    id: uuid
+    user_id: uuid
+    item_type: string          # action | schedule | decision
+    direction?: string         # item_type=action 일 때만 give | take
+    schedule_status?: string   # item_type=schedule 일 때만 confirmed | changed | postponed | cancelled | follow_up
+    decision_status?: string   # item_type=decision 일 때만 approved | rejected | chosen | deferred | ongoing
+    counterparty_raw?: string
+    person_ref?: string
+    title: string
+    description?: string
+    quote: string
+    source_event_title?: string
+    source_event_occurred_at: datetime
+    due_at?: datetime
+    due_hint?: string
+    due_is_approximate: boolean
+    action_state: string       # action rows lifecycle; non-action rows use storage sentinel
+    source_type: string
+    source_ref?: string
+    confidence: float
+    sync_status?: string
+    created_at: datetime
+    updated_at: datetime
+    last_edited_by?: uuid
+    last_edited_at?: datetime
+    quote_disputed: boolean
+    quote_disputed_at?: datetime
+    deleted_at?: datetime
+    supersedes_commitment_id?: uuid
 
 endpoints:
   # ========== SUPABASE AUTH (client calls directly) ==========
@@ -64,15 +154,16 @@ endpoints:
   - method: POST
     path: /v1/raw_ingestion_events:batch
     auth: required
-    idempotency: client_event_id   # 서버는 (user_id, client_event_id) UNIQUE로 dedupe. 중복 전송은 200 ack로 처리 (새 INSERT 없음).
+    idempotency: client_event_id   # 서버는 (user_id, client_event_id) UNIQUE로 dedupe. 중복 전송은 disposition='duplicate'로 200 반환.
     body:
       events:
         - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
           source_type: string         # voice | call_recording | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+                                     # UI label mapping: naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 7 user-facing sources: voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
           source_ref?: string
           person_ref?: string         # Canonicalized counterparty; null if unidentifiable
           event_title?: string        # voice: MediaStore title / email: subject / calendar: title
-          event_snippet?: string      # email/voice: first ~200 chars of body/transcript
+          event_snippet?: string      # email: body 앞 ~200 chars / voice: 첫 commitment.quote(<=100 chars). full transcript는 절대 전송되지 않음
           duration_seconds?: int      # voice only
           location?: string           # calendar only
           commitments_extracted_count?: int  # default 0; updated after LLM extraction
@@ -81,7 +172,11 @@ endpoints:
       max_batch_size: 100              # events[] 길이. 초과 시 413.
       max_body_bytes: 1048576          # 1 MiB. 초과 시 413.
     response:
-      200: { acknowledged: int, failed: "FailedEvent[]" }   # 부분 성공 — failed[]는 재전송 대상(retryable:true)과 quarantine 대상(retryable:false)을 구분
+      200:
+        results: "BatchWriteResult[]"
+        failed: "FailedEvent[]"
+        # results[] 각 원소는 이미 user-scoped durable commit 완료된 row만 포함한다.
+        # Android는 results[].client_event_id 기준으로만 Room sync_status='synced' 전이 가능.
       400: { error: string, message: string }               # 잘못된 JSON / 필수 필드 누락 / body events=[]
       401: { error: string, message: string }               # 토큰 없음/만료 — AUTH-007 refresh 트리거
       413: { error: string, message: string }               # max_batch_size 또는 max_body_bytes 초과 — client chunk 후 재전송
@@ -91,17 +186,16 @@ endpoints:
       503: { error: string, message: string }               # 일시적 downstream 장애 — retryable
     spec_refs: [ING-003, ING-004, ING-005, ING-011, ING-012, ING-013, SYNC-001, SYNC-002, SYNC-003, SYNC-005, SYNC-006]
 
-  # ========== RAILWAY — VOICE (audio → commitments) ==========
+  # ========== RAILWAY — VOICE (audio → structured items) ==========
 
   - method: POST
     path: /v1/voice/transcribe_extract
     auth: required
     content_type: multipart/form-data
-    idempotency: client_event_id   # 서버는 (user_id, client_event_id)로 기존 raw event를 upsert. 중복 업로드는 commitments 재추출 없이 기존 결과 반환.
+    idempotency: client_event_id   # 동일 raw event에 대한 추출 재시도 dedupe 키. 이 endpoint는 draft extraction only이며 DB write authority를 갖지 않는다.
     body:
       audio: binary                # .m4a AAC. 메모리 스트리밍으로 수신 — 서버는 파일시스템/Supabase Storage에 저장하지 않음
       client_event_id: uuid        # raw_ingestion_events의 멱등 키와 동일
-      raw_event_id: uuid           # 연결될 raw_ingestion_events.id (Android가 미리 INSERT한 행의 서버 id; /batch 성공 후 받은 값)
       duration_seconds: int
       timestamp: datetime
       person_ref?: string
@@ -112,12 +206,10 @@ endpoints:
     response:
       200:
         raw_event_id: uuid
-        commitments: "CommitmentDraft[]"
+        items: "VoiceExtractItem[]"
         model: string                        # "gemini-2.5-flash"
-        region: string                       # "asia-northeast3"
-      202:
-        job_id: uuid                         # 긴 오디오 async 처리로 전환된 경우. MVP에서는 발행하지 않음 — post-MVP 예약.
-        status: string                       # "queued"
+        region: string                       # "us-central1"
+        raw_model_text?: string
       400: { error: string, message: string }    # 멀티파트 파싱 실패, 필수 필드 누락
       401: { error: string, message: string }    # JWT 만료 — AUTH-007 refresh 트리거
       403: { error: string, message: string }    # pipa_third_party_consent 서버측 감사 실패 (클라이언트 guard와 defense-in-depth)
@@ -132,9 +224,9 @@ endpoints:
         # schema_violation: responseSchema 미준수(enum/필수필드 위반)
       503: { error: string, message: string }    # Vertex AI 일시 downstream 장애 — retryable
     notes:
-      - "서버는 Vertex AI 호출을 asia-northeast3 엔드포인트로 고정하고 ZDR(Zero Data Retention) 플래그를 설정한다"
+      - "서버는 Vertex AI 호출을 us-central1 엔드포인트로 수행하고 ZDR(Zero Data Retention) 정책을 적용한다"
       - "오디오 바이트·transcript·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
-      - "추출된 commitments는 Supabase commitments 테이블에 INSERT되고 raw_ingestion_events.commitments_extracted_count가 갱신된다"
+      - "이 endpoint는 draft extraction only다. Railway는 commitments/raw_ingestion_events를 직접 write하지 않고, Android가 응답을 받아 로컬 Room을 먼저 갱신한 뒤 별도 batch mirror로 서버에 반영한다"
       - "오디오 처리 전략: 청크 분할 없이 전체 파일을 단일 Gemini 호출로 전달 — cross-boundary commitment와 화자 맥락 손실 방지. max_duration_seconds=7200(120분) 상한은 단일 호출 안전 범위(입력 1M 토큰 / 출력 8192 토큰 여유)를 기준으로 설정. 상한 초과는 클라이언트에서 quarantine."
     spec_refs: [VOI-001, VOI-002, VOI-003, VOI-006, VOI-007]
 
@@ -148,6 +240,7 @@ endpoints:
       limit?: int             # Default 20
       since?: string          # ISO datetime — commitments updated after this time
       person_ref?: string     # Filter by person
+      item_type?: string      # action | schedule | decision
       direction?: string      # give | take
       action_state?: string   # pending | reminded | followed_up | completed | overdue | cancelled
     query:
@@ -155,10 +248,11 @@ endpoints:
     response:
       200:
         data: "Commitment[]"
-        # Commitment type includes: id, user_id, direction, counterparty_raw, person_ref,
+        # Commitment type includes: id, user_id, item_type, direction?, schedule_status?, decision_status?, counterparty_raw, person_ref,
         # title, description, quote, source_event_title, source_event_occurred_at,
         # due_at (ISO8601 KST), due_hint, due_is_approximate,
         # action_state, source_type (voice|call_recording|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
+        # UI label mapping: naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'; call_recording remains an internal/raw subtype rather than a separate source-status chip.
         # source_ref, confidence,
         # sync_status, created_at, updated_at,
         # last_edited_by, last_edited_at, quote_disputed, quote_disputed_at,
@@ -189,12 +283,14 @@ endpoints:
       due_hint?: string        # LLM 원문 시점 표현 혹은 사용자 입력(nullable)
       due_is_approximate?: boolean
       person_ref?: string      # canonicalized counterparty(nullable)
+      schedule_status?: string # confirmed | changed | postponed | cancelled | follow_up
+      decision_status?: string # approved | rejected | chosen | deferred | ongoing
       direction?: string       # give | take
       quote_disputed?: boolean # true = 이의 제기, false = 해제 (EDIT-005)
       quote_disputed_at?: string  # 서버가 set — client가 보내도 무시(server-generated)
       deleted_at?: string      # ISO8601 — soft delete 시 client가 now() 값 전송(EDIT-006). null 전송은 deleted 복구 허용(post-MVP에서 사용, MVP 클라이언트는 미사용)
       last_edited_at: string   # required — 모든 PATCH 호출에 첨부(클라이언트가 now() 값 전송)
-      # 금지: quote(법적 증거, 절대 편집 불가), source_type, source_ref, source_event_title, source_event_occurred_at, confidence, created_at, id, user_id, supersedes_commitment_id
+      # 금지: quote(법적 증거, 절대 편집 불가), source_type, source_ref, source_event_title, source_event_occurred_at, confidence, created_at, id, user_id, supersedes_commitment_id, item_type
       #   → 이 중 하나라도 body에 포함되면 422 { error: 'immutable_field', field: '<field>' }.
     response:
       200: { data: Commitment }
@@ -214,7 +310,10 @@ endpoints:
     # manual commitment 생성(manual-commitment.spec.yml MAN-003) 및 EDIT-007 supersede 경로 양쪽에서 사용.
     body:
       id: string               # client-generated UUID v4 (멱등성 키 — ING-015와 동일 패턴)
-      direction: string        # give | take
+      item_type: string        # action | schedule | decision
+      direction?: string       # item_type=action 일 때만 give | take
+      schedule_status?: string # item_type=schedule 일 때만 confirmed | changed | postponed | cancelled | follow_up
+      decision_status?: string # item_type=decision 일 때만 approved | rejected | chosen | deferred | ongoing
       title: string            # 1..200 chars
       quote: string            # manual: 1..500 chars(사용자 입력) / supersede: 원본 commitment에서 복사된 verbatim
       source_type: string      # enum. manual = 'manual', supersede = 원본의 source_type 상속
@@ -229,14 +328,16 @@ endpoints:
       last_edited_by: string   # user_id
       last_edited_at: string   # ISO8601
     response:
-      201: { data: Commitment }
+      201:
+        data: Commitment
+        disposition: string   # "inserted" | "duplicate". 201은 durable commit 완료를 의미한다
       401: { error: string, message: string }
       409: { error: string, message: string }  # 동일 id 중복 — 멱등 처리로 기존 row 반환 가능(서버 선택) 또는 409
       422: { error: string, message: string, field?: string }
       # 422 cases:
       #   - invalid_source_type: source_type 값이 enum에 없음
       #   - supersede_target_not_found: supersedes_commitment_id가 존재하지 않거나 다른 user 소유
-      #   - validation_failed: title/quote/direction 규칙 위반
+      #   - validation_failed: title/quote/item_type/subtype 규칙 위반
     spec_refs: [MAN-003, EDIT-007]
 
   # ========== RAILWAY — CALENDAR EVENTS ==========
@@ -263,6 +364,30 @@ endpoints:
       401: { error: string, message: string }
       429: { error: string, message: string }
     spec_refs: [TDY-005]
+
+  - method: GET
+    path: /v1/oauth/calendar/{provider}:start
+    auth: required
+    response:
+      200: "CalendarOAuthStart"
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+      503: { error: string, message: string }
+    notes:
+      - "provider는 google_calendar | outlook_calendar"
+      - "Android는 반환된 authorization_url을 외부 브라우저/Custom Tab으로 연다"
+    spec_refs: [ONB-001, SMG-003]
+
+  - method: GET
+    path: /v1/oauth/calendar/{provider}:status
+    auth: required
+    response:
+      200: "CalendarOAuthStatus"
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    notes:
+      - "callback 이후 user_calendar_connections 존재 여부를 Android가 polling하는 최소 external integration surface"
+    spec_refs: [ONB-001, SMG-003]
 
   # ========== RAILWAY — PERSONS (virtual grouping — no persons table in MVP) ==========
 

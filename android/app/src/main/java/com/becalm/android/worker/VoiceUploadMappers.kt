@@ -1,8 +1,10 @@
 package com.becalm.android.worker
 
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
+import com.becalm.android.data.remote.dto.VoiceExtractItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -79,6 +81,44 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     counterpartyRaw = null,
     personRef = personRef,
     title = text.take(500), // reasonable title truncation
+    description = null,
+    quote = quote,
+    sourceEventTitle = sourceEventTitle,
+    sourceEventOccurredAt = sourceEventOccurredAt,
+    dueAt = dueAt,
+    dueHint = dueHint,
+    dueIsApproximate = dueIsApproximate,
+    actionState = "pending",
+    sourceType = sourceType,
+    sourceRef = sourceRef,
+    confidence = confidence.toDouble(),
+    commitmentState = CommitmentLifecycleLegacy.DRAFT,
+    syncStatus = STATUS_PENDING,
+    createdAt = now,
+    updatedAt = now,
+)
+
+internal fun VoiceExtractItemDto.toTrackableCommitmentEntity(
+    rawEventId: String,
+    index: Int,
+    userId: String,
+    sourceRef: String?,
+    sourceType: String,
+    sourceEventTitle: String?,
+    sourceEventOccurredAt: Instant,
+    now: Instant,
+): CommitmentEntity = CommitmentEntity(
+    id = UUID.nameUUIDFromBytes(
+        "commitment:$rawEventId:$index".toByteArray(Charsets.UTF_8),
+    ).toString(),
+    userId = userId,
+    itemType = type,
+    direction = direction?.lowercase(),
+    scheduleStatus = scheduleStatus,
+    decisionStatus = decisionStatus,
+    counterpartyRaw = null,
+    personRef = personRef,
+    title = text.take(500),
     description = null,
     quote = quote,
     sourceEventTitle = sourceEventTitle,

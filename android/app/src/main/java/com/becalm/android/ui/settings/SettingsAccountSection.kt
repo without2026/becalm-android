@@ -50,5 +50,11 @@ internal fun SettingsAccountSection(
             variant = BecalmButtonVariant.Secondary,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.settings_sign_out_pipa_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

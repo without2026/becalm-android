@@ -33,7 +33,10 @@ internal fun CommitmentEntity.toBatchItemDto(): CommitmentBatchItemDto =
         commitment = CommitmentBatchPayloadDto(
             id = id,
             userId = userId,
+            itemType = itemType,
             direction = direction,
+            scheduleStatus = scheduleStatus,
+            decisionStatus = decisionStatus,
             counterpartyRaw = counterpartyRaw,
             personRef = personRef,
             title = title,
@@ -120,7 +123,10 @@ internal fun CommitmentDto.toEntity(
     CommitmentEntity(
         id = id,
         userId = userId,
+        itemType = itemType,
         direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
         counterpartyRaw = counterpartyRaw,
         personRef = personRef,
         title = title,

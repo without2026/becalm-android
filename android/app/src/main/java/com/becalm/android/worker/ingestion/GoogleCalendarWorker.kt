@@ -12,8 +12,11 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.ProcessingPauseGate
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.datetime.Instant
 
 /**
  * Periodic [CoroutineWorker] that triggers a server-side Google Calendar sync and then
@@ -49,11 +52,15 @@ public class GoogleCalendarWorker @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingPauseGate: ProcessingPauseGate,
     private val clock: Clock,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
         logger.d(TAG, "doWork started runAttempt=${runAttemptCount}")
 
         // ── Step 1: resolve userId ────────────────────────────────────────────
@@ -64,6 +71,8 @@ public class GoogleCalendarWorker @AssistedInject constructor(
         }
 
         val startedAt = clock.nowInstant()
+        val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
+            .takeIf { it > 0 }
         sourceStatusRepository.recordSyncStart(SourceType.GOOGLE_CALENDAR)
 
         // ── Step 2: trigger server-side calendar sync ─────────────────────────
@@ -113,7 +122,16 @@ public class GoogleCalendarWorker @AssistedInject constructor(
 
         // ── Step 3: pull canonicalised rows into Room ─────────────────────────
         // `since = null` → resume from the persisted cursor stored by refreshSince itself.
-        val refreshStats = when (val refreshResult = calendarEventRepository.refreshSince(userId, since = null)) {
+        val rangeStart = lookbackDays?.let { windowDays -> daysAgo(startedAt, windowDays) }
+        val rangeEnd = lookbackDays?.let { windowDays -> daysAhead(startedAt, windowDays) }
+        val refreshStats = when (
+            val refreshResult = calendarEventRepository.refreshSince(
+                userId = userId,
+                since = null,
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+            )
+        ) {
             is BecalmResult.Success -> refreshResult.value
             is BecalmResult.Failure -> {
                 val error = refreshResult.error
@@ -153,8 +171,15 @@ public class GoogleCalendarWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "GoogleCalendarWorker"
+        private const val NO_LOOKBACK: Int = -1
     }
 }
+
+private fun daysAgo(now: Instant, days: Int): Instant =
+    Instant.fromEpochMilliseconds(now.toEpochMilliseconds() - days * 86_400_000L)
+
+private fun daysAhead(now: Instant, days: Int): Instant =
+    Instant.fromEpochMilliseconds(now.toEpochMilliseconds() + days * 86_400_000L)
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
 

@@ -45,10 +45,19 @@ public interface WorkScheduler {
      */
     public fun enqueueUpload(attempt: Int = 0)
 
+    /** Enrolls the periodic redundancy upload chain used by ING-002. */
+    public fun scheduleUploadRedundancy()
+
     /**
      * Enqueues a one-shot [EnrichmentWorker] to refresh on-device contact enrichment.
      */
     public fun enqueueEnrichment()
+
+    /** Enrolls the daily periodic contacts enrichment sweep. */
+    public fun scheduleEnrichmentSweep()
+
+    /** Cancels the periodic contacts enrichment sweep when READ_CONTACTS is unavailable. */
+    public fun cancelEnrichmentSweep()
 
     /**
      * Enqueues a one-shot [VoiceUploadWorker] to upload a voice recording to Railway and
@@ -139,6 +148,23 @@ public interface WorkScheduler {
      * data-ingestion invariant line 160.
      */
     public fun scheduleRetentionSweep()
+
+    /**
+     * Enqueues the periodic CMT-011 overdue sweep under a stable unique-work name.
+     *
+     * The implementation must use a 6-hour repeat interval and KEEP semantics so
+     * repeated cold-start enrollment does not reset the timer.
+     */
+    public fun scheduleOverdueSweep()
+
+    /** Hands an in-progress Stage 1 cold sync off to WorkManager after [나중에 하기]. */
+    public fun enqueueDeferredColdSyncStage1()
+
+    /** Enqueues the non-blocking Stage 2 cold-sync backfill. */
+    public fun enqueueColdSyncStage2()
+
+    /** Cancels the non-blocking Stage 2 cold-sync backfill chain. */
+    public fun cancelColdSyncStage2()
 
     /**
      * Cancels the [VoiceUploadWorker] unique-work entry for [rawEventId], if one is enqueued

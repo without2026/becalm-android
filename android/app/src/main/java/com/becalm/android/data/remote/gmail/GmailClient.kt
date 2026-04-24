@@ -333,6 +333,7 @@ public interface GmailClient {
     public suspend fun listMessagesFullSyncForLabel(
         label: GmailLabelScope,
         pageToken: String?,
+        lookbackDays: Int? = null,
     ): BecalmResult<GmailMessagePage>
 
     /**
@@ -432,12 +433,13 @@ public class GmailClientImpl(
     override suspend fun listMessagesFullSyncForLabel(
         label: GmailLabelScope,
         pageToken: String?,
+        lookbackDays: Int?,
     ): BecalmResult<GmailMessagePage> {
         // `q=` carries Gmail search syntax (label: / -category: / -in:) so the
         // INBOX pass can exclude CATEGORY_PROMOTIONS & friends which `labelIds=`
         // cannot express. URLEncoder is required because the query contains
         // spaces and the `-` operator — Gmail rejects raw unencoded values.
-        val encodedQuery = URLEncoder.encode(label.queryString, Charsets.UTF_8.name())
+        val encodedQuery = URLEncoder.encode(label.withLookbackDays(lookbackDays), Charsets.UTF_8.name())
         val url = buildString {
             append("$GMAIL_BASE_URL/messages?q=")
             append(encodedQuery)

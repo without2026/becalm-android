@@ -7,6 +7,7 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.UserProfileDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -87,4 +88,8 @@ public object DatabaseModule {
     @Provides
     public fun provideEmailBodyDao(db: BeCalmDatabase): EmailBodyDao =
         db.emailBodyDao()
+
+    @Provides
+    public fun provideUserProfileDao(db: BeCalmDatabase): UserProfileDao =
+        db.userProfileDao()
 }

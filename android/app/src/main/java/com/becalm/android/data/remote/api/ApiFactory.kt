@@ -1,5 +1,6 @@
 package com.becalm.android.data.remote.api
 
+import com.becalm.android.data.auth.AuthFailureSessionInvalidator
 import com.becalm.android.data.remote.interceptor.AuthInterceptor
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyInterceptor
@@ -48,6 +49,7 @@ public object ApiFactory {
      */
     public fun createOkHttpClient(
         authProvider: AuthTokenProvider,
+        authFailureSessionInvalidator: AuthFailureSessionInvalidator,
         idempotencyProvider: IdempotencyKeyProvider,
         railwayHost: String,
         isDebug: Boolean,
@@ -64,7 +66,7 @@ public object ApiFactory {
             // Chain: outermost → innermost
             .addInterceptor(loggingInterceptor)
             .addInterceptor(RetryInterceptor())
-            .addInterceptor(AuthInterceptor(authProvider, railwayHost))
+            .addInterceptor(AuthInterceptor(authProvider, authFailureSessionInvalidator, railwayHost))
             .addInterceptor(IdempotencyInterceptor(idempotencyProvider))
             .build()
     }

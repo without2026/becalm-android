@@ -31,10 +31,24 @@ public object UniqueWorkKeys {
     public const val OUTLOOK_CAL: String = "ingest.outlook_cal"
 
     /** Batch upload to Railway backend via [com.becalm.android.worker.UploadWorker]. */
-    public const val UPLOAD: String = "sync.upload"
+    public const val UPLOAD: String = "sync-all-upload"
+
+    /** Periodic redundancy upload chain for pending rows. */
+    public const val UPLOAD_PERIODIC: String = "sync-all-upload-periodic"
+
+    /**
+     * Deprecated upload key used before SYNC-006 contract alignment.
+     *
+     * Kept only so [WorkScheduler.cleanupLegacyWorkNames] can cancel any stale work
+     * enqueued under the old name after upgrade.
+     */
+    internal const val LEGACY_UPLOAD_KEY: String = "sync.upload"
 
     /** Contact enrichment via [com.becalm.android.worker.EnrichmentWorker]. */
     public const val ENRICHMENT: String = "enrichment"
+
+    /** Daily periodic enrichment sweep. */
+    public const val ENRICHMENT_PERIODIC: String = "enrichment.periodic"
 
     /**
      * Voice upload via [com.becalm.android.worker.VoiceUploadWorker].
@@ -100,6 +114,20 @@ public object UniqueWorkKeys {
      * Spec refs: EMAIL-006, data-ingestion invariant line 160.
      */
     public const val RETENTION_SWEEP: String = "retention.sweep"
+
+    /**
+     * Periodic overdue lifecycle sweep via [com.becalm.android.worker.OverdueSweepWorker].
+     *
+     * CMT-011 requires a stable periodic chain so repeated cold-start enrollment does not
+     * fan out duplicate workers.
+     */
+    public const val OVERDUE_SWEEP: String = "commitment.overdue_sweep"
+
+    /** Background continuation of deferred Stage 1 cold sync. */
+    public const val COLD_SYNC_STAGE1_DEFERRED: String = "cold-sync-stage1-deferred"
+
+    /** Background Stage 2 cold-sync backfill chain. */
+    public const val COLD_SYNC_STAGE2: String = "cold-sync-stage2"
 
     /**
      * Deprecated legacy key — cancelled on every cold start for one release after Wave 0

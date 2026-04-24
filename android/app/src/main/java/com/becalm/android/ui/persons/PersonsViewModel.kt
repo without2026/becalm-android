@@ -2,17 +2,13 @@ package com.becalm.android.ui.persons
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
-import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -20,9 +16,7 @@ import kotlinx.datetime.Instant
 // ─── UI models ────────────────────────────────────────────────────────────────
 
 /**
- * A single row in the persons list, derived from [PersonEnrichmentEntity] enriched
- * with interaction statistics (placeholders until a dedicated DAO aggregate query lands;
- * see the [PersonsViewModel] KDoc).
+ * A single row in the persons list, derived from the Room-backed persons projection owner.
  *
  * @property personRef Canonicalized counterparty identifier.
  * @property displayName Human-readable name from the on-device contact, or null when absent.
@@ -33,14 +27,23 @@ import kotlinx.datetime.Instant
 public data class PersonRow(
     val personRef: String,
     val displayName: String?,
+    val nickname: String? = null,
+    val companyName: String? = null,
+    val jobTitle: String? = null,
     val lastInteractionAt: Instant?,
     val interactionCount: Int,
+    val pendingCommitmentCount: Int = 0,
+    val channelSources: Set<String> = emptySet(),
+    val lastInteractionSnippet: String? = null,
 ) {
     /**
-     * User-facing label. Falls back to a redacted prefix of [personRef] so raw
-     * phone numbers / emails are never shown (SRC-001, ENR-006).
+     * User-facing label. Falls back to the canonical raw [personRef] when no
+     * display name or nickname is available (SRC-001, ENR-006).
      */
-    val displayLabel: String get() = displayName ?: if (personRef.length <= 3) "***" else personRef.take(3) + "***"
+    val displayLabel: String
+        get() = displayName
+            ?: nickname
+            ?: personRef
 }
 
 /**
@@ -54,6 +57,15 @@ public data class PersonRow(
 public data class PersonsUiState(
     val query: String = "",
     val people: List<PersonRow> = emptyList(),
+    val unassignedEvents: List<UnassignedEventSummary> = emptyList(),
+    val showOfflineBadge: Boolean = false,
+    val offlineLastSyncAt: Instant? = null,
+    val sortOrder: PersonsSortOrder = PersonsSortOrder.MOST_RECENT_EVENT_DESC,
+    val pageSize: Int = 20,
+    val hasMorePages: Boolean = false,
+    val nextCursor: String? = null,
+    val refreshing: Boolean = false,
+    val lastRefreshSnapshot: PersonsRefreshSnapshot? = null,
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -65,17 +77,22 @@ private const val QUERY_DEBOUNCE_MS = 300L
 /**
  * ViewModel for PersonsScreen (SRC-001, SRC-002).
  *
- * Observes [PersonEnrichmentRepository.observeAll] and maps each entity to a
- * [PersonRow]. Per-person interaction stats are placeholders until a dedicated
- * DAO aggregate query lands (planned post-SP-05).
+ * Observes the persons-screen projection seams and maps them into a single
+ * [PersonsUiState] snapshot.
  *
  * Search filtering is debounced at [QUERY_DEBOUNCE_MS] ms to avoid re-rendering
  * on every keystroke.
  */
 @HiltViewModel
 public class PersonsViewModel @Inject constructor(
-    private val personEnrichmentRepository: PersonEnrichmentRepository,
+    userPrefsStore: UserPrefsStore,
+    projectionPort: PersonsScreenProjectionPort,
+    private val refreshCoordinator: PersonsRefreshCoordinator,
 ) : ViewModel() {
+    private val stateSource = PersonsScreenStateSource(
+        userPrefsStore = userPrefsStore,
+        projectionPort = projectionPort,
+    )
 
     private val _uiState: MutableStateFlow<PersonsUiState> = MutableStateFlow(PersonsUiState())
     public val uiState: StateFlow<PersonsUiState> = _uiState.asStateFlow()
@@ -106,52 +123,35 @@ public class PersonsViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    /**
+     * Re-runs the Room-backed grouping query and triggers catch-up + enrichment refresh.
+     *
+     * The projection port owns the actual scheduler calls so tests can observe that this
+     * entry point exists without binding to WorkManager or Android lifecycle classes.
+     */
+    public fun onPullRefresh() {
+        _uiState.update { it.copy(refreshing = true) }
+        val snapshot = refreshCoordinator.refresh()
+        _uiState.update { it.copy(refreshing = false, lastRefreshSnapshot = snapshot) }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
-    @OptIn(FlowPreview::class)
     private fun observePeople() {
         viewModelScope.launch {
-            combine(
-                personEnrichmentRepository.observeAll(),
-                _query.debounce(QUERY_DEBOUNCE_MS),
-            ) { enrichmentList, query ->
-                enrichmentList to query
-            }.catch { e ->
+            stateSource.observe(
+                queryFlow = _query,
+                pageSize = PERSONS_PAGE_SIZE,
+                queryDebounceMs = QUERY_DEBOUNCE_MS,
+            ).catch { e ->
                 _uiState.update { it.copy(loading = false, error = e.message ?: "load failed") }
-            }.collect { (enrichmentList, query) ->
-                val rows = enrichmentList
-                    .filter { entity ->
-                        query.isBlank() ||
-                            entity.displayName?.contains(query, ignoreCase = true) == true ||
-                            entity.personRef.contains(query, ignoreCase = true)
-                    }
-                    .map { entity -> entity.toPersonRow() }
-
-                _uiState.update {
-                    it.copy(
-                        query = query,
-                        people = rows,
-                        loading = false,
-                    )
-                }
+            }.collect { state ->
+                _uiState.value = state
             }
         }
     }
 
-    /**
-     * Maps a [PersonEnrichmentEntity] to a [PersonRow].
-     *
-     * Interaction stats ([lastInteractionAt] / [interactionCount]) require a coroutine
-     * database call per-person which would N+1 the list query.  PersonRow carries
-     * placeholder defaults (null / 0) here; a dedicated DAO aggregate query (planned
-     * post-SP-05) will replace this with a single JOIN once the index is available.
-     */
-    // TODO(SRC-001): Replace placeholder stats with a DAO aggregate query (COUNT + MAX)
-    // once the raw_ingestion_events index on person_ref is available (post-SP-05).
-    private fun PersonEnrichmentEntity.toPersonRow(): PersonRow = PersonRow(
-        personRef = personRef,
-        displayName = displayName,
-        lastInteractionAt = null,
-        interactionCount = 0,
-    )
+    private companion object {
+        const val PERSONS_PAGE_SIZE: Int = 20
+    }
 }

@@ -95,11 +95,11 @@ behaviors:
 
   - id: CMT-010
     type: gesture
-    description: "pull-to-refresh 시 Railway GET /v1/commitments를 재호출하고 Room 캐시를 갱신한다"
+    description: "pull-to-refresh 시 CommitmentManagementScreen은 Room 목록을 즉시 재조회하고, 동시에 foreground catch-up(ING-011) + 즉시 업로드(SYNC-006)를 트리거한다. 서버 GET으로 Room을 역갱신하지 않는다"
     gesture: "pull-to-refresh"
     screen: "CommitmentManagementScreen"
     precondition: "CommitmentManagementScreen 표시됨, 네트워크 연결됨"
-    expected: "GET /v1/commitments 호출됨(현재 action_state 필터 유지). Room 갱신됨. 목록 업데이트됨"
+    expected: "pull-to-refresh 즉시 현재 action_state 필터로 Room 목록 재조회됨. 동시에 ING-011이 실행되어 새 source event를 로컬 수집하고, 그 결과 생성된 commitments가 Room에 반영되면 목록이 갱신됨. pending mutation이 있으면 SYNC-006으로 mirror flush가 시작된다"
     source: phase2-acceptance
     tests: []
 

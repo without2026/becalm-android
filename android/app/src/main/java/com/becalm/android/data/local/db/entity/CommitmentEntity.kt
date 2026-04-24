@@ -6,6 +6,28 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.datetime.Instant
 
+public object CommitmentItemType {
+    public const val ACTION: String = "action"
+    public const val SCHEDULE: String = "schedule"
+    public const val DECISION: String = "decision"
+}
+
+public object CommitmentScheduleStatus {
+    public const val CONFIRMED: String = "confirmed"
+    public const val CHANGED: String = "changed"
+    public const val POSTPONED: String = "postponed"
+    public const val CANCELLED: String = "cancelled"
+    public const val FOLLOW_UP: String = "follow_up"
+}
+
+public object CommitmentDecisionStatus {
+    public const val APPROVED: String = "approved"
+    public const val REJECTED: String = "rejected"
+    public const val CHOSEN: String = "chosen"
+    public const val DEFERRED: String = "deferred"
+    public const val ONGOING: String = "ongoing"
+}
+
 /**
  * Room entity mirroring the `commitments` Supabase table (data-model.yml).
  *
@@ -25,8 +47,12 @@ import kotlinx.datetime.Instant
  *   is enforced at the Railway/Supabase layer; it is intentionally NOT declared as a
  *   Room `@ForeignKey` here because `auth.users` is managed by Supabase Auth and has
  *   no corresponding Room entity on-device (data-model.yml migration_notes, line 269).
+ * @property itemType Trackable-item discriminator. Valid values: "action" | "schedule" | "decision".
  * @property direction Commitment direction from the authenticated user's perspective.
  *   Valid values: "give" (user owes counterparty) | "take" (counterparty owes user).
+ *   Null for non-action rows.
+ * @property scheduleStatus Schedule change subtype. Non-null only when [itemType] is "schedule".
+ * @property decisionStatus Decision subtype. Non-null only when [itemType] is "decision".
  * @property counterpartyRaw Raw uncanonized counterparty identifier as extracted
  *   from the source event (phone number, email, or display name). Null when absent.
  * @property personRef Canonicalized counterparty identifier following the precedence
@@ -124,7 +150,7 @@ import kotlinx.datetime.Instant
     tableName = "commitments",
     indices = [
         // idx_commitments_user_action_due — supports CommitmentManagementScreen queries
-        Index(value = ["user_id", "action_state", "due_at"], name = "idx_commitments_user_action_due"),
+        Index(value = ["user_id", "item_type", "action_state", "due_at"], name = "idx_commitments_user_action_due"),
         // Supports SyncWorker pending-sync batch reads
         Index(value = ["user_id", "sync_status"]),
         // idx_commitments_user_person_due — supports PersonDetailScreen and /v1/persons/{id}/commitments
@@ -148,8 +174,17 @@ public data class CommitmentEntity(
     @ColumnInfo(name = "user_id")
     val userId: String,
 
+    @ColumnInfo(name = "item_type", defaultValue = "action")
+    val itemType: String = CommitmentItemType.ACTION,
+
     @ColumnInfo(name = "direction")
-    val direction: String,
+    val direction: String?,
+
+    @ColumnInfo(name = "schedule_status")
+    val scheduleStatus: String? = null,
+
+    @ColumnInfo(name = "decision_status")
+    val decisionStatus: String? = null,
 
     @ColumnInfo(name = "counterparty_raw")
     val counterpartyRaw: String?,

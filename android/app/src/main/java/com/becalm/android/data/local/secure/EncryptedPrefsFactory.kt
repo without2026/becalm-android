@@ -1,5 +1,6 @@
 package com.becalm.android.data.local.secure
 
+import android.os.Build
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -28,14 +29,23 @@ internal fun buildStorePrefs(
     fileName: String,
     masterKeyAlias: String,
     logTag: String,
-): SharedPreferences = try {
-    buildEncryptedPrefs(context, fileName, masterKeyAlias)
+): SharedPreferences {
+    if (isRobolectricRuntime()) {
+        Timber.i("$logTag: using plain SharedPreferences under Robolectric runtime")
+        return context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
+    }
+    return try {
+        buildEncryptedPrefs(context, fileName, masterKeyAlias)
 } catch (t: Throwable) {
     Timber.w(t, "$logTag: master key or prefs unavailable; wiping and rebuilding")
     context.deleteSharedPreferences(fileName)
     // Second failure propagates — device Keystore is broken beyond recovery.
     buildEncryptedPrefs(context, fileName, masterKeyAlias)
 }
+}
+
+private fun isRobolectricRuntime(): Boolean =
+    Build.FINGERPRINT.contains("robolectric", ignoreCase = true)
 
 private fun buildEncryptedPrefs(
     context: Context,

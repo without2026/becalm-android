@@ -1,5 +1,6 @@
 package com.becalm.android.data.remote.interceptor
 
+import com.becalm.android.data.auth.AuthFailureSessionInvalidator
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -25,13 +26,14 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  *       (R1-01 fix: guarantees the returned Response is never consumed/closed).
  *    b. [AuthTokenProvider.refresh] is invoked via [runBlocking] on the current OkHttp
  *       dispatcher thread (refresh performs network I/O to Supabase Auth).
- *    c. If [refresh] returns `null` (refresh failed or no session), the buffered 401
- *       response is returned to the caller. No retry is attempted. Retrofit can surface
- *       the body to higher-layer error handlers.
- *    d. If [refresh] returns a non-null token, the buffered 401 response is closed to
- *       free resources, the original request is rebuilt with the new
- *       `Authorization: Bearer <newToken>` header, and executed exactly **once**.
- *       The second response is returned unchanged — no further 401 retry occurs.
+ *    c. If refresh reports [AuthTokenProvider.RefreshResult.Failed], the buffered 401 is
+ *       returned unchanged — the failure was transient, so local auth state is preserved.
+ *    d. If refresh reports [AuthTokenProvider.RefreshResult.Unauthenticated], the buffered
+ *       401 is returned and the local session is collapsed to signed-out via
+ *       [authFailureSessionInvalidator].
+ *    e. If refresh reports [AuthTokenProvider.RefreshResult.Refreshed], the buffered 401
+ *       response is closed, the request is rebuilt with the new bearer token, and executed
+ *       exactly **once**. If that retry also returns 401, local auth state is invalidated.
  *
  * 4. **IOException propagation** — IOExceptions from the network are never swallowed;
  *    they propagate to the caller for handling by [RetryInterceptor].
@@ -44,6 +46,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  */
 public class AuthInterceptor(
     private val authTokenProvider: AuthTokenProvider,
+    private val authFailureSessionInvalidator: AuthFailureSessionInvalidator,
     private val railwayHost: String,
 ) : Interceptor {
 
@@ -78,15 +81,27 @@ public class AuthInterceptor(
 
         // Pass the token we attached to the failing request so the provider can detect
         // "cache already advanced past this 401" and coalesce duplicate refreshes.
-        val newToken = runBlocking { authTokenProvider.refresh(token) }
-        if (newToken == null) {
-            return bufferedResponse
+        when (val refresh = runBlocking { authTokenProvider.refresh(token) }) {
+            is AuthTokenProvider.RefreshResult.Failed -> return bufferedResponse
+            is AuthTokenProvider.RefreshResult.Unauthenticated -> {
+                runCatching {
+                    runBlocking { authFailureSessionInvalidator.invalidate() }
+                }
+                return bufferedResponse
+            }
+            is AuthTokenProvider.RefreshResult.Refreshed -> {
+                bufferedResponse.close()
+                val retryRequest = originalRequest.newBuilder()
+                    .header("Authorization", "Bearer ${refresh.accessToken}")
+                    .build()
+                val retryResponse = chain.proceed(retryRequest)
+                if (retryResponse.code == 401) {
+                    runCatching {
+                        runBlocking { authFailureSessionInvalidator.invalidate() }
+                    }
+                }
+                return retryResponse
+            }
         }
-
-        bufferedResponse.close()
-        val retryRequest = originalRequest.newBuilder()
-            .header("Authorization", "Bearer $newToken")
-            .build()
-        return chain.proceed(retryRequest)
     }
 }

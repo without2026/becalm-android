@@ -41,8 +41,10 @@ public data class PersonSummaryDto(
     @field:Json(name = "last_contact_at") val lastContactAt: Instant? = null,
 
     /**
-     * Count of commitments for this person where action_state is not "completed".
-     * Used for the badge indicator in PersonCard.
+     * Count of open persisted trackable items for this person.
+     *
+     * Action rows are excluded when terminal (`completed` / `cancelled`); schedule and
+     * decision rows count as open until a future dedicated lifecycle is introduced.
      */
     @field:Json(name = "open_commitments_count") val openCommitmentsCount: Int? = null,
 )

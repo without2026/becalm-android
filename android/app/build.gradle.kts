@@ -30,6 +30,14 @@ fun localProp(key: String): String {
     return value ?: ""
 }
 
+fun gradleOrLocalProp(key: String): String {
+    val gradleValue = findProperty(key)?.toString()
+    if (!gradleValue.isNullOrBlank()) {
+        return gradleValue
+    }
+    return localProp(key)
+}
+
 android {
     namespace = "com.becalm.android"
     compileSdk = 35
@@ -67,7 +75,7 @@ android {
         buildConfigField(
             "String",
             "GOOGLE_WEB_CLIENT_ID",
-            "\"${findProperty("google.web.client.id") ?: ""}\"",
+            "\"${gradleOrLocalProp("google.web.client.id")}\"",
         )
     }
 
@@ -109,6 +117,15 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/LICENSE.md"
+            excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/LICENSE-notice.md"
+        }
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -221,6 +238,8 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.mockwebserver)
     // kotlin-reflect powers the DTO-invariant reflection test

@@ -13,6 +13,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
@@ -169,6 +170,14 @@ public class CommitmentRepositoryImpl @Inject constructor(
             ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
         val entity = dao.findByIdForUser(actorId, id)
             ?: return@withContext BecalmResult.Failure(BecalmError.NotFound("commitment/$id"))
+        if (entity.itemType != CommitmentItemType.ACTION) {
+            return@withContext BecalmResult.Failure(
+                BecalmError.Validation(
+                    field = "itemType",
+                    message = "State transitions are only valid for action items",
+                )
+            )
+        }
 
         val current = CommitmentState.fromWire(entity.actionState)
         when (val result = CommitmentStateMachine.transition(current, event)) {
@@ -234,6 +243,24 @@ public class CommitmentRepositoryImpl @Inject constructor(
             is BecalmResult.Failure -> dao.markPending(id)
         }
         return mapped
+    }
+
+    override suspend fun findOverdueCandidates(
+        userId: String,
+        cutoff: Instant,
+        limit: Int,
+    ): List<CommitmentEntity> = withContext(ioDispatcher) {
+        dao.findOverdueCandidates(userId = userId, cutoff = cutoff, limit = limit)
+    }
+
+    override suspend fun markOverdue(
+        ids: List<String>,
+        updatedAt: Instant,
+    ): BecalmResult<Int> = withContext(ioDispatcher) {
+        if (ids.isEmpty()) {
+            return@withContext BecalmResult.Success(0)
+        }
+        BecalmResult.Success(dao.markOverdue(ids = ids, updatedAt = updatedAt))
     }
 
     // ── Edit / dispute / soft-delete / supersede ─────────────────────────────
@@ -433,6 +460,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
         val newRow = CommitmentEntity(
             id = newId,
             userId = actorId,
+            itemType = CommitmentItemType.ACTION,
             direction = input.direction,
             counterpartyRaw = oldRow?.counterpartyRaw,
             personRef = input.personRef,

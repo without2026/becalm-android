@@ -5,8 +5,8 @@
 # (c) LLM이 놓친 약속을 수동으로 보완, (d) commitment-edit.spec.yml EDIT-007 supersede 경로의 입력 화면.
 #
 # 핵심 차이: source_type='manual', confidence=1.0, source_event_title=null, quote=사용자 입력 텍스트.
-# 스키마 의존성: raw_ingestion_events.source_type 및 commitments.source_type enum에 'manual' 추가 필요 —
-# 현재 data-model.yml의 enum 주석은 LLM 추출 소스 8종만 나열하며 후속 DDL 마이그레이션에서 확장된다.
+# 스키마 의존성: commitments.source_type enum에만 'manual' 추가 필요.
+# raw_ingestion_events.source_type은 확장하지 않는다 — 수동 약속은 원본 이벤트가 없어 raw row를 만들지 않는다.
 
 module: manual-commitment
 platform: android
@@ -39,7 +39,7 @@ behaviors:
     screen: "CommitmentCreateSheet"
     interaction: "[저장] 버튼 탭"
     precondition: "validation 통과 (MAN-005), 신규 manual 모드"
-    expected: "Room commitments INSERT with source_type='manual', confidence=1.0, source_event_occurred_at=now() KST, user-provided 필드(title/direction/quote/person_ref/due_*). sync_status='pending'. Railway POST /v1/commitments body에 동일 payload(server는 source_type='manual'을 수락하도록 enum 확장 필요). 응답 200 시 sync_status='synced'. CommitmentCreateSheet dismiss → CommitmentManagementScreen 목록 상단에 새 카드 반영. supersede 모드 저장 동작은 EDIT-007에서 정의 (old row deleted_at + new row supersedes_commitment_id)"
+    expected: "Room commitments INSERT with source_type='manual', confidence=1.0, source_event_occurred_at=now() KST, user-provided 필드(title/direction/quote/person_ref/due_*). sync_status='pending'. Railway POST /v1/commitments body에 동일 payload(server는 source_type='manual'을 수락하도록 enum 확장 필요). 응답 201(durable commit 완료) 시 sync_status='synced'. CommitmentCreateSheet dismiss → CommitmentManagementScreen 목록 상단에 새 카드 반영. supersede 모드 저장 동작은 EDIT-007에서 정의 (old row deleted_at + new row supersedes_commitment_id)"
     source: phase2-acceptance
     tests: []
 

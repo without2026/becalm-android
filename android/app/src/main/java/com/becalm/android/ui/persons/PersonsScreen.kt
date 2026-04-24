@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,10 +23,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -34,17 +33,20 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Persons list screen — enriched display names and interaction counts.
@@ -62,18 +64,28 @@ public fun PersonsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
 
-    LaunchedEffect(state.error) {
-        state.error?.let { err ->
-            scope.launch {
-                snackbarHostState.showSnackbar(err)
-                viewModel.onErrorDismissed()
-            }
-        }
-    }
+    PersonsScreenContent(
+        state = state,
+        snackbarHostState = snackbarHostState,
+        onQueryChange = viewModel::onQueryChange,
+        onPersonClick = { personRef ->
+            navController.navigate(BecalmRoute.PersonDetail(personRef).path)
+        },
+    )
+}
 
+@Composable
+public fun PersonsScreenContent(
+    state: PersonsUiState,
+    snackbarHostState: SnackbarHostState,
+    onQueryChange: (String) -> Unit,
+    onPersonClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     BecalmScaffold(
+        modifier = modifier,
         title = stringResource(R.string.persons_title),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
@@ -82,9 +94,12 @@ public fun PersonsScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (state.showOfflineBadge) {
+                OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
+            }
             BecalmTextField(
                 value = state.query,
-                onValueChange = viewModel::onQueryChange,
+                onValueChange = onQueryChange,
                 placeholder = stringResource(R.string.persons_search_placeholder),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -105,10 +120,8 @@ public fun PersonsScreen(
                 }
                 else -> {
                     PersonList(
-                        people = state.people,
-                        onPersonClick = { personRef ->
-                            navController.navigate(BecalmRoute.PersonDetail(personRef).path)
-                        },
+                        state = state,
+                        onPersonClick = onPersonClick,
                     )
                 }
             }
@@ -118,7 +131,7 @@ public fun PersonsScreen(
 
 @Composable
 private fun PersonList(
-    people: List<PersonRow>,
+    state: PersonsUiState,
     onPersonClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -126,7 +139,7 @@ private fun PersonList(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        items(items = people, key = { it.personRef }) { person ->
+        items(items = state.people, key = { it.personRef }) { person ->
             PersonRowItem(
                 person = person,
                 onClick = { onPersonClick(person.personRef) },
@@ -134,6 +147,24 @@ private fun PersonList(
                     .fillMaxWidth()
                     .padding(vertical = 4.dp),
             )
+        }
+        if (state.unassignedEvents.isNotEmpty()) {
+            item(key = "unassigned-header") {
+                Text(
+                    text = stringResource(R.string.persons_unassigned_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
+                )
+            }
+            items(items = state.unassignedEvents, key = { it.id }) { event ->
+                UnassignedEventRow(
+                    event = event,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                )
+            }
         }
     }
 }
@@ -161,10 +192,27 @@ private fun PersonRowItem(
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = person.displayLabel,
+                text = buildDisplayHeadline(person),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            if (person.pendingCommitmentCount > 0) {
+                Text(
+                    text = stringResource(
+                        R.string.persons_pending_commitments_fmt,
+                        person.pendingCommitmentCount,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (!person.lastInteractionSnippet.isNullOrBlank()) {
+                Text(
+                    text = person.lastInteractionSnippet,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (person.interactionCount > 0) {
                 Text(
                     text = stringResource(R.string.persons_interactions_count, person.interactionCount),
@@ -174,6 +222,74 @@ private fun PersonRowItem(
             }
         }
     }
+}
+
+@Composable
+private fun UnassignedEventRow(
+    event: UnassignedEventSummary,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Person,
+            contentDescription = null,
+            modifier = Modifier.size(36.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = event.title ?: stringResource(R.string.raw_event_detail_no_title),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = event.sourceType,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfflineBadge(lastSyncAt: Instant?) {
+    val copy = if (lastSyncAt == null) {
+        stringResource(R.string.persons_offline_badge_no_sync)
+    } else {
+        stringResource(R.string.persons_offline_badge_fmt, lastSyncAt.toHourMinuteLabel())
+    }
+    Text(
+        text = copy,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(12.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+private fun buildDisplayHeadline(person: PersonRow): String {
+    val parts = buildList {
+        add(person.displayLabel)
+        person.companyName?.takeIf { it.isNotBlank() }?.let(::add)
+        person.jobTitle?.takeIf { it.isNotBlank() }?.let(::add)
+    }
+    return parts.joinToString(separator = " · ")
+}
+
+private fun Instant.toHourMinuteLabel(): String {
+    val local = toLocalDateTime(TimeZone.currentSystemDefault())
+    val hh = local.hour.toString().padStart(2, '0')
+    val mm = local.minute.toString().padStart(2, '0')
+    return "$hh:$mm"
 }
 
 @PreviewLightDark
@@ -195,9 +311,24 @@ private fun PreviewPersonsScreenPopulated() {
                 ) {
                     items(
                         listOf(
-                            PersonRow("ref1", "Alice Kim", null, 12),
-                            PersonRow("ref2", "Bob Lee", null, 5),
-                            PersonRow("ref3", "Carol Park", null, 3),
+                            PersonRow(
+                                personRef = "ref1",
+                                displayName = "Alice Kim",
+                                lastInteractionAt = null,
+                                interactionCount = 12,
+                            ),
+                            PersonRow(
+                                personRef = "ref2",
+                                displayName = "Bob Lee",
+                                lastInteractionAt = null,
+                                interactionCount = 5,
+                            ),
+                            PersonRow(
+                                personRef = "ref3",
+                                displayName = "Carol Park",
+                                lastInteractionAt = null,
+                                interactionCount = 3,
+                            ),
                         ),
                     ) { person ->
                         PersonRowItem(

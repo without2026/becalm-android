@@ -30,11 +30,20 @@ public data class CommitmentDto(
     /** Supabase auth.users UUID of the owning user. */
     @field:Json(name = "user_id") val userId: String,
 
+    /** Trackable-item discriminator. "action" | "schedule" | "decision". */
+    @field:Json(name = "item_type") val itemType: String = "action",
+
     /**
      * Commitment direction from the authenticated user's perspective.
      * Valid values: "give" (user owes counterparty) | "take" (counterparty owes user).
      */
-    @field:Json(name = "direction") val direction: String,
+    @field:Json(name = "direction") val direction: String? = null,
+
+    /** Schedule status subtype. Non-null only when item_type == "schedule". */
+    @field:Json(name = "schedule_status") val scheduleStatus: String? = null,
+
+    /** Decision status subtype. Non-null only when item_type == "decision". */
+    @field:Json(name = "decision_status") val decisionStatus: String? = null,
 
     /**
      * Raw uncanonized counterparty identifier as extracted from the source event.

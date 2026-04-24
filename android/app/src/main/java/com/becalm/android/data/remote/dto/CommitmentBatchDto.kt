@@ -49,8 +49,17 @@ public data class CommitmentBatchPayloadDto(
     /** Supabase auth.users UUID of the owning user. Echoed in the body for server-side audit. */
     @field:Json(name = "user_id") val userId: String,
 
-    /** "give" | "take" */
-    @field:Json(name = "direction") val direction: String,
+    /** "action" | "schedule" | "decision" */
+    @field:Json(name = "item_type") val itemType: String = "action",
+
+    /** "give" | "take" for action rows, null otherwise. */
+    @field:Json(name = "direction") val direction: String? = null,
+
+    /** Schedule subtype for schedule rows, null otherwise. */
+    @field:Json(name = "schedule_status") val scheduleStatus: String? = null,
+
+    /** Decision subtype for decision rows, null otherwise. */
+    @field:Json(name = "decision_status") val decisionStatus: String? = null,
 
     /** Raw uncanonized counterparty identifier; may be phone / email / display name. */
     @field:Json(name = "counterparty_raw") val counterpartyRaw: String? = null,

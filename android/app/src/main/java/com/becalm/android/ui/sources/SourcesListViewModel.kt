@@ -3,10 +3,15 @@ package com.becalm.android.ui.sources
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -32,6 +37,7 @@ public data class SourceStatusRow(
     val lastSyncAt: Instant?,
     val lastError: String?,
     val itemsCount: Int,
+    val enrichedCount: Int? = null,
 )
 
 /**
@@ -47,6 +53,18 @@ public data class SourcesListUiState(
     val items: List<SourceStatusRow> = emptyList(),
 )
 
+/** One-shot navigation effects emitted by [SourcesListViewModel]. */
+public sealed interface SourcesListNavigation {
+    /** Navigate to a concrete source detail route under `/settings/sources/{source_id}`. */
+    public data class SourceDetail(val sourceType: String) : SourcesListNavigation
+
+    /** Navigate to the READ_CONTACTS permission screen when the pseudo-source is unavailable. */
+    public data object ContactsPermission : SourcesListNavigation
+
+    /** Navigate to the contacts pseudo-source detail screen when permission is granted. */
+    public data object ContactsDetail : SourcesListNavigation
+}
+
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "SourcesListViewModel"
@@ -57,45 +75,36 @@ private const val TAG = "SourcesListViewModel"
  * Observes [SourceStatusRepository.observeAll] and projects each [SourceStatus] to a
  * [SourceStatusRow].
  *
- * ## Disconnect
- * [SourceStatusRepository] has no `disconnect(sourceType)` method in the current API.
- * The disconnect flow (SMG-004) is deferred: [disconnectSource] logs a warning and is a
- * no-op until a server-side revoke endpoint and corresponding repository method are added.
+ * Disconnect / reconnect actions are owned by the detail screen; this list surface only
+ * projects rows and resolves row-tap navigation.
  */
 @HiltViewModel
 public class SourcesListViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
+    private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val contactsPermissionChecker: ContactsPermissionChecker,
     private val logger: Logger,
 ) : ViewModel() {
+
+    private val _navigation: MutableSharedFlow<SourcesListNavigation> =
+        MutableSharedFlow(extraBufferCapacity = 1)
+
+    /** One-shot navigation stream for row taps. */
+    public val navigation: SharedFlow<SourcesListNavigation> = _navigation.asSharedFlow()
 
     /**
      * Observable state consumed by the sources list composable.
      */
-    public val state: StateFlow<SourcesListUiState> = sourceStatusRepository.observeAll()
-        .map { statuses ->
-            val mappedStatuses = statuses.map { s ->
-                SourceStatusRow(
-                    sourceType = s.sourceType,
-                    status = s.status.name,
-                    lastSyncAt = s.lastSyncedAt,
-                    lastError = s.errorMessage,
-                    itemsCount = 0, // SMG-002: no per-source count query exists yet
-                )
-            }
-            // SMG-001 + ENR-008: contacts is a pseudo-source imported via the
-            // READ_CONTACTS permission granted during onboarding, not an OAuth flow.
-            // Status is hardcoded to "CONNECTED" because the VM layer cannot query
-            // Android runtime permissions directly. A proper permission check should
-            // be injected via a `PermissionRepository` when available, so this row
-            // reflects the real grant state rather than assuming it.
-            val contactsRow = SourceStatusRow(
-                sourceType = "contacts",
-                status = "CONNECTED",
-                lastSyncAt = null,
-                lastError = null,
-                itemsCount = 0,
+    public val state: StateFlow<SourcesListUiState> = combine(
+        sourceStatusRepository.observeAll(),
+        personEnrichmentRepository.observeAll(),
+        contactsPermissionChecker.observeGrantState(),
+    ) { statuses, enrichmentRows, permissionGranted ->
+            SourcesListProjector.buildState(
+                statuses = statuses,
+                enrichmentRows = enrichmentRows,
+                permissionGranted = permissionGranted,
             )
-            SourcesListUiState(items = listOf(contactsRow) + mappedStatuses)
         }
         .catch { e ->
             logger.e(TAG, "observeAll failed", e as? Exception ?: Exception(e))
@@ -112,17 +121,17 @@ public class SourcesListViewModel @Inject constructor(
     }
 
     /**
-     * Initiates a disconnect for [sourceType].
+     * Routes a tapped source row to the appropriate destination.
      *
-     * API gap: [SourceStatusRepository] has no `disconnect` method. This call is logged
-     * and is a no-op until SMG-004 is implemented with a server-side revoke endpoint.
-     *
-     * @param sourceType One of the [com.becalm.android.data.remote.dto.SourceType] constants.
+     * The contacts pseudo-source is permission-gated and does not share the same route as
+     * sync-backed sources, so its branch is surfaced here rather than hard-coded in Compose.
      */
-    public fun disconnectSource(sourceType: String) {
-        // SMG-004: SourceStatusRepository.disconnect() does not exist in the current API.
-        // When a revoke endpoint is added, replace this with a viewModelScope.launch call
-        // that delegates to the repository.
-        logger.w(TAG, "disconnectSource called for $sourceType but no API method exists yet (SMG-004)")
+    public fun onSourceSelected(sourceType: String) {
+        val target = SourcesListNavigationResolver.resolve(
+            sourceType = sourceType,
+            contactsPermissionGranted = contactsPermissionChecker.isGranted(),
+        )
+        _navigation.tryEmit(target)
     }
+
 }

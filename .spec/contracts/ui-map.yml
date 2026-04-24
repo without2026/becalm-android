@@ -82,7 +82,7 @@ routes:
   - path: /onboarding/cold-sync
     screen: ColdSyncScreen
     data: []
-    components: [ColdSyncProgressList, DismissButton]
+    components: [ColdSyncProgressList, DeferButton]
     auth: required
     # TDY-010 / ONB-008: First-run only. Shown when Room is entirely empty after onboarding.
     # DataStore onboarding_completed=true written only after this screen is dismissed or sync completes.
@@ -91,21 +91,21 @@ routes:
 
   - path: /today
     screen: TodayTimelineScreen
-    data: ["GET /v1/commitments", "GET /v1/calendar_events"]
+    data: ["Room commitments query", "Room calendar_events query", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
     components: [OverallSyncIndicator, SourceStatusStrip, TodayTimeline, CommitmentItem, CalendarEventItem, BottomNavigationBar]
     auth: required
     # Tab 1: 오늘의 타임라인. Settings 접근: 우상단 아이콘 탭 → /settings. HamburgerMenu 없음.
 
   - path: /persons
     screen: PersonsScreen
-    data: ["GET /v1/persons"]
+    data: ["Room person_ref grouping query", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
     components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
     auth: required
     # Tab 2: 인물. PersonCard에 enriched 표시명 + DNBadge(미이행 약속 수) 표시.
 
   - path: /persons/{person_id}
     screen: PersonDetailScreen
-    data: ["GET /v1/persons/{person_id}/events", "GET /v1/persons/{person_id}/commitments"]
+    data: ["Room raw_ingestion_events query by person_ref", "Room commitments query by person_ref"]
     components: [PersonHeader, CommitmentCard, InteractionHistoryRow, RawEventRow]
     auth: required
     # 3-section body: 미이행 약속 / 이행 완료 / 상호작용 히스토리 (SRC-002, SRC-008)
@@ -126,7 +126,7 @@ routes:
 
   - path: /commitments
     screen: CommitmentManagementScreen
-    data: ["GET /v1/commitments", "PATCH /v1/commitments/{id}"]
+    data: ["Room commitments query", "PATCH /v1/commitments/{id}", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
     components: [CommitmentFilterTabs, CommitmentCard, DNBadge, BottomNavigationBar]
     auth: required
     # Tab 3: 약속관리. Filter tabs: 전체 / 내가 한 / 상대가 한. Expandable completed section.
@@ -145,7 +145,7 @@ routes:
     data: []
     components: [SourceStatusRow]
     auth: required
-    # SMG-001: 6-source list + '연락처' pseudo-source row (ENR-008).
+    # SMG-001: 7-source list + '연락처' pseudo-source row (ENR-008).
 
   - path: /settings/sources/{source_id}
     screen: SourceDetailScreen
@@ -153,6 +153,14 @@ routes:
     components: [SourceStatusDetail, LastSyncInfo, ReconnectButton, DisconnectButton, ManualSyncButton]
     auth: required
     # SMG-002..005: source detail, reconnect flow, disconnect, manual per-source sync.
+    # source_id enum: voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+
+  - path: /settings/sources/contacts
+    screen: ContactsSourceDetailScreen
+    data: []
+    components: [ContactsSourceDetail, LastSyncInfo, PermissionRevokeButton]
+    auth: required
+    # ENR-008: contacts pseudo-source detail. Railway/API-backed source detail이 아니라 local-only enrichment status screen.
 
 shared_components:
   - name: BottomNavigationBar
@@ -166,12 +174,12 @@ shared_components:
       state: "OverallSyncState"
       syncingCount: int
       lastSyncAt: "datetime?"
-    description: "6개 어댑터 상태 집계. 4가지 상태: idle / 'syncing N/6' / 'synced HH:mm' / '일부 소스 실패 — 설정에서 확인'(경고색). 탭 인터랙션 없음"
+    description: "7개 사용자-facing source 상태 집계. 4가지 상태: idle / 'syncing N/7' / 'synced HH:mm' / '일부 소스 실패 — 설정에서 확인'(경고색). 탭 인터랙션 없음"
 
   - name: SourceStatusStrip
     props:
       sources: "SourceStatus[]"
-    description: "6개 소스(Gmail, Outlook Mail, 네이버, 다음, Google Calendar, Outlook Calendar) 칩 배열. 각 칩: idle(회색) / syncing(스피너) / error(빨간 점) / synced(초록 체크+HH:mm). 읽기 전용 — 탭 인터랙션 없음"
+    description: "7개 소스(Voice, Gmail, Outlook Mail, Naver Email, Daum Email, Google Calendar, Outlook Calendar) 칩 배열. 각 칩: idle(회색) / syncing(스피너) / error(빨간 점) / synced(초록 체크+HH:mm). 읽기 전용 — 탭 인터랙션 없음"
 
   - name: TodayTimeline
     props:
@@ -245,4 +253,63 @@ shared_components:
       sources: "ColdSyncSourceProgress[]"
       completedCount: int
       totalCount: int
-    description: "초기 동기화 전용. '초기 데이터를 가져오는 중 (N/6 완료)' 헤더 + 소스별 진행 항목(완료 체크/진행 스피너). [나중에 하기] 버튼 포함"
+    description: "초기 동기화 전용. '초기 데이터를 가져오는 중 (N/7 완료)' 헤더 + 소스별 진행 항목(완료 체크/진행 스피너). [나중에 하기] 버튼 포함"
+
+types:
+  SourceId:
+    enum: [voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar]
+    description: "Today/Settings에서 사용자에게 노출되는 source id. 표시 라벨은 Voice, Gmail, Outlook Mail, Naver Email, Daum Email, Google Calendar, Outlook Calendar"
+
+  SourceVisualState:
+    enum: [idle, syncing, error, synced]
+    description: "칩/행의 동기화 시각 상태. idle=회색, syncing=스피너, error=빨간 점, synced=초록 체크+HH:mm"
+
+  SourceConnectionState:
+    enum: [connected, disconnected, error]
+    description: "연결 상태. error는 credential 만료, cursor invalidation 등 복구가 필요한 상태"
+
+  OverallSyncState:
+    kind: "idle | syncing | synced | partial_failure"
+    syncingCount?: int
+    totalCount: int
+    lastSyncAt?: datetime
+    failedSourceIds?: "SourceId[]"
+    description: "Today 상단 전체 집계 상태. totalCount는 항상 7. kind=syncing이면 syncingCount를, kind=synced면 min(last_sync_at)을 표시"
+
+  SourceStatus:
+    sourceId: SourceId
+    label: string
+    visualState: SourceVisualState
+    connectionState: SourceConnectionState
+    lastSyncAt?: datetime
+    lastError?: string
+    eventsSyncedCount?: int
+    description: "SourceStatusStrip, SourcesListScreen, SourceDetailScreen이 공유하는 로컬 파생 상태"
+
+  ContactsSourceRow:
+    sourceId: "contacts"
+    label: string
+    connectionState: "connected | disconnected"
+    enrichedCount?: int
+    lastSyncAt?: datetime
+    description: "연락처 pseudo-source 전용 row. READ_CONTACTS 허용 시 connected, 거부/미부여 시 disconnected. 탭 시 ContactsSourceDetailScreen 또는 ContactsPermissionScreen으로 이동"
+
+  ContactsSourceDetailState:
+    connectionState: "connected | disconnected"
+    enrichedCount?: int
+    lastSyncAt?: datetime
+    showPermissionRevokeButton: boolean
+    description: "연락처 enrichment 상태 상세. granted면 lastSyncAt/enrichedCount와 [권한 해제] 노출, 미부여면 ContactsPermissionScreen 재진입 경로만 노출"
+
+  SourceDetailState:
+    source: SourceStatus
+    showReconnectButton: boolean
+    showDisconnectButton: boolean
+    showManualSyncButton: boolean
+    description: "connected면 disconnect/manual sync 노출. disconnected 또는 error면 reconnect 노출. contacts는 대상 아님"
+
+  ColdSyncSourceProgress:
+    sourceId: "gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar | user_profile"
+    label: string
+    state: "pending | syncing | completed | failed"
+    description: "Cold sync 진행 항목. totalCount=7은 6개 source + user_profile bootstrap을 포함한다. voice/call_recording은 Stage 1 대상이 아님"

@@ -147,6 +147,44 @@ public interface RawIngestionEventDao {
     ): Flow<List<RawIngestionEventEntity>>
 
     /**
+     * Emits every event with an identified counterparty for [userId], newest-first.
+     *
+     * Serves the persons-screen aggregate owner so person grouping and sort semantics can
+     * be implemented from Room state rather than from a placeholder enrichment-only list.
+     */
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND person_ref IS NOT NULL
+        ORDER BY timestamp DESC
+        """,
+    )
+    public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits a live list of the most recent events for [sourceType] owned by [userId],
+     * newest-first.
+     *
+     * This is the source-detail owner query: pushing the predicate into SQL avoids the
+     * previous over-fetch + in-memory filter path in `SourceDetailViewModel`.
+     */
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+        ORDER BY timestamp DESC
+        LIMIT :limit
+        """,
+    )
+    public fun observeRecentForSourceType(
+        userId: String,
+        sourceType: String,
+        limit: Int,
+    ): Flow<List<RawIngestionEventEntity>>
+
+    /**
      * Emits a live list of the most recent events with no identified counterparty
      * (person_ref IS NULL) for [userId], newest-first. Drives the "Unassigned" group
      * in the main timeline.
@@ -164,6 +202,25 @@ public interface RawIngestionEventDao {
         userId: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits the count of events for [userId] whose source is in [sourceTypes] and whose
+     * timestamp is on or after [since]. Used by cold-sync Stage 2 progress to surface
+     * real local item counts instead of placeholder source-slot counts.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN (:sourceTypes)
+          AND timestamp >= :since
+        """,
+    )
+    public fun observeCountForSourceTypesSince(
+        userId: String,
+        sourceTypes: List<String>,
+        since: Instant,
+    ): Flow<Int>
 
     /**
      * Hard-deletes all events owned by [userId]. Called on logout to clear local data
@@ -196,6 +253,32 @@ public interface RawIngestionEventDao {
         """,
     )
     public suspend fun findById(id: String, userId: String): RawIngestionEventEntity?
+
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+        ORDER BY timestamp DESC
+        """,
+    )
+    public suspend fun findAllForUser(userId: String): List<RawIngestionEventEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+        """,
+    )
+    public suspend fun countForUser(userId: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('gmail', 'outlook_mail', 'naver_imap', 'daum_imap')
+        """,
+    )
+    public suspend fun countEmailRowsForUser(userId: String): Int
 
     /**
      * Returns all voice events for [userId] that are blocked waiting for PIPA consent

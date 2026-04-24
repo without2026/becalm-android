@@ -14,5 +14,5 @@ public interface WorkSchedulerCompat {
      * WorkManager deduplicates concurrent enqueues; calling this method multiple times
      * before the worker starts is safe.
      */
-    public fun enqueueMediaStoreOneShotNow()
+    public fun enqueueMediaStoreOneShotNow(lookbackDays: Int? = null)
 }

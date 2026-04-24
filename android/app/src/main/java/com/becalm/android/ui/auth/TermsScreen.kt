@@ -19,22 +19,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.rememberNavController
-import com.becalm.android.ui.onboarding.OnboardingStep
+import com.becalm.android.ui.onboarding.OnboardingNavigationEvent
 import com.becalm.android.ui.onboarding.OnboardingViewModel
-import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CollectFlowEffect
+import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Terms and Privacy Policy acceptance screen.
@@ -52,75 +53,125 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 public fun TermsScreen(
     navController: NavHostController,
-    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
+    onboardingViewModel: OnboardingViewModel? = null,
+    authViewModel: AuthViewModel? = null,
+    onboardingNavigationEvents: Flow<OnboardingNavigationEvent>? = null,
+    authEffects: Flow<AuthEffect>? = null,
+    onContinue: (() -> Unit)? = null,
+    onDecline: (() -> Unit)? = null,
+    onNavigateToLogin: (() -> Unit)? = null,
+    onFinishApp: (() -> Unit)? = null,
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    val resolvedOnboardingViewModel = if (
+        onboardingNavigationEvents == null || onContinue == null
+    ) {
+        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        onboardingViewModel
+    }
+    val resolvedAuthViewModel = if (authEffects == null || onDecline == null) {
+        authViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
+    } else {
+        authViewModel
+    }
+    val resolvedOnContinue = onContinue ?: requireNotNull(resolvedOnboardingViewModel)::onAcceptTermsAndContinue
+    val resolvedOnDecline = onDecline ?: requireNotNull(resolvedAuthViewModel)::onDeclineTerms
+    val resolvedNavigateToLogin = onNavigateToLogin ?: {
+        navController.navigate(BecalmRoute.Login.path)
+    }
+    val resolvedFinishApp = onFinishApp ?: {
+        (context as? android.app.Activity)?.finish()
+    }
+
+    CollectFlowEffect(onboardingNavigationEvents ?: requireNotNull(resolvedOnboardingViewModel).navigationEvents) { event ->
+        when (event) {
+            OnboardingNavigationEvent.NavigateToLogin -> resolvedNavigateToLogin()
+        }
+    }
+
+    CollectFlowEffect(authEffects ?: requireNotNull(resolvedAuthViewModel).effects) { effect ->
+        when (effect) {
+            AuthEffect.FinishApp -> resolvedFinishApp()
+        }
+    }
 
     BecalmScaffold(title = stringResource(R.string.terms_title)) { padding ->
+        TermsContent(
+            accepted = accepted,
+            onAcceptedChange = { accepted = it },
+            onContinue = resolvedOnContinue,
+            onDecline = resolvedOnDecline,
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+@Composable
+internal fun TermsContent(
+    accepted: Boolean,
+    onAcceptedChange: (Boolean) -> Unit,
+    onContinue: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.terms_subtitle),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(24.dp))
         Column(
             modifier = Modifier
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxWidth()
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(16.dp),
         ) {
             Text(
-                text = stringResource(R.string.terms_subtitle),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(16.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.terms_pipa_notice),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Checkbox(
-                    checked = accepted,
-                    onCheckedChange = { accepted = it },
-                )
-                Text(
-                    text = stringResource(R.string.terms_accept_checkbox),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Spacer(modifier = Modifier.height(24.dp))
-            BecalmButton(
-                text = stringResource(R.string.terms_cta),
-                onClick = {
-                    onboardingViewModel.onAcceptTerms()
-                    onboardingViewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
-                    navController.navigate(BecalmRoute.Login.path)
-                },
-                enabled = accepted,
-                variant = BecalmButtonVariant.Primary,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            // Clean exit path for users who decline terms — required so declining consent
-            // never leaves the user stuck on this screen (PIPA finding #3 fix).
-            BecalmButton(
-                text = stringResource(R.string.terms_decline_cta),
-                onClick = { (context as? android.app.Activity)?.finish() },
-                variant = BecalmButtonVariant.Secondary,
-                modifier = Modifier.fillMaxWidth(),
+                text = stringResource(R.string.terms_pipa_notice),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
+        Spacer(modifier = Modifier.height(32.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Checkbox(
+                checked = accepted,
+                onCheckedChange = onAcceptedChange,
+                modifier = Modifier.testTag("terms-checkbox"),
+            )
+            Text(
+                text = stringResource(R.string.terms_accept_checkbox),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        BecalmButton(
+            text = stringResource(R.string.terms_cta),
+            onClick = onContinue,
+            enabled = accepted,
+            variant = BecalmButtonVariant.Primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        BecalmButton(
+            text = stringResource(R.string.terms_decline_cta),
+            onClick = onDecline,
+            variant = BecalmButtonVariant.Secondary,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -130,6 +181,11 @@ public fun TermsScreen(
 @Composable
 private fun PreviewTermsScreen() {
     BecalmTheme {
-        TermsScreen(navController = rememberNavController())
+        TermsContent(
+            accepted = false,
+            onAcceptedChange = {},
+            onContinue = {},
+            onDecline = {},
+        )
     }
 }

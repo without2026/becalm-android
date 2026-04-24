@@ -35,12 +35,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentManualValidator.Field
+import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -85,17 +86,50 @@ import kotlinx.datetime.toLocalDateTime
 public fun CommitmentCreateSheet(
     @Suppress("UNUSED_PARAMETER") supersedeOf: String?,
     onDismiss: () -> Unit,
-    viewModel: CommitmentCreateViewModel = hiltViewModel(),
+    viewModel: CommitmentCreateViewModel? = null,
+    stateOverride: CreateUiState? = null,
+    dismissEventsOverride: Flow<Unit>? = null,
+    onTitleChange: ((String) -> Unit)? = null,
+    onDirectionChange: ((String) -> Unit)? = null,
+    onQuoteChange: ((String) -> Unit)? = null,
+    onPersonRefChange: ((String) -> Unit)? = null,
+    onDueAtMillisChange: ((Long?) -> Unit)? = null,
+    onDueHintChange: ((String) -> Unit)? = null,
+    onApproxChange: ((Boolean) -> Unit)? = null,
+    onSave: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
 ) {
     // `supersedeOf` is consumed by the Hilt-injected [CommitmentCreateViewModel]
     // via its SavedStateHandle; the parameter stays on this signature so the nav
     // host can pass it explicitly at call time (see BecalmNavHost wiring).
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val createViewModel = if (
+        stateOverride == null ||
+            dismissEventsOverride == null ||
+            onTitleChange == null ||
+            onDirectionChange == null ||
+            onQuoteChange == null ||
+            onPersonRefChange == null ||
+            onDueAtMillisChange == null ||
+            onDueHintChange == null ||
+            onApproxChange == null ||
+            onSave == null ||
+            onCancel == null
+    ) {
+        viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentCreateViewModel>()
+    } else {
+        viewModel
+    }
+    val state = if (stateOverride != null) {
+        stateOverride
+    } else {
+        val collectedState by requireNotNull(createViewModel).uiState.collectAsStateWithLifecycle()
+        collectedState
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Consume one-shot dismiss events from the VM (save success).
-    LaunchedEffect(viewModel) {
-        viewModel.dismiss.collect { onDismiss() }
+    LaunchedEffect(dismissEventsOverride, createViewModel) {
+        (dismissEventsOverride ?: requireNotNull(createViewModel).dismiss).collect { onDismiss() }
     }
 
     ModalBottomSheet(
@@ -104,15 +138,15 @@ public fun CommitmentCreateSheet(
     ) {
         CreateSheetContent(
             state = state,
-            onTitleChange = viewModel::onTitleChange,
-            onDirectionChange = viewModel::onDirectionChange,
-            onQuoteChange = viewModel::onQuoteChange,
-            onPersonRefChange = viewModel::onPersonRefChange,
-            onDueAtMillisChange = viewModel::onDueAtMillisChange,
-            onDueHintChange = viewModel::onDueHintChange,
-            onApproxChange = viewModel::onApproxChange,
-            onSave = viewModel::onSave,
-            onCancel = onDismiss,
+            onTitleChange = onTitleChange ?: requireNotNull(createViewModel)::onTitleChange,
+            onDirectionChange = onDirectionChange ?: requireNotNull(createViewModel)::onDirectionChange,
+            onQuoteChange = onQuoteChange ?: requireNotNull(createViewModel)::onQuoteChange,
+            onPersonRefChange = onPersonRefChange ?: requireNotNull(createViewModel)::onPersonRefChange,
+            onDueAtMillisChange = onDueAtMillisChange ?: requireNotNull(createViewModel)::onDueAtMillisChange,
+            onDueHintChange = onDueHintChange ?: requireNotNull(createViewModel)::onDueHintChange,
+            onApproxChange = onApproxChange ?: requireNotNull(createViewModel)::onApproxChange,
+            onSave = onSave ?: requireNotNull(createViewModel)::onSave,
+            onCancel = onCancel ?: onDismiss,
         )
     }
 }
@@ -121,7 +155,7 @@ public fun CommitmentCreateSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CreateSheetContent(
+internal fun CreateSheetContent(
     state: CreateUiState,
     onTitleChange: (String) -> Unit,
     onDirectionChange: (String) -> Unit,
@@ -165,7 +199,9 @@ private fun CreateSheetContent(
             },
             singleLine = true,
             enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("commitment-create-title"),
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -319,7 +355,9 @@ private fun CreateSheetContent(
             Button(
                 onClick = onSave,
                 enabled = !state.saving,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("commitment-create-save"),
             ) {
                 if (state.saving) {
                     CircularProgressIndicator(

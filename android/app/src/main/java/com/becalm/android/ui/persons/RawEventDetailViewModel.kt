@@ -49,6 +49,10 @@ public data class RawEventDetailUiState(
     val eventTitle: String? = null,
     val timestamp: kotlinx.datetime.Instant? = null,
     val snippet: String? = null,
+    val durationSeconds: Int? = null,
+    val location: String? = null,
+    val attendeesRaw: String? = null,
+    val commitmentQuotes: List<String> = emptyList(),
     val emailBody: EmailBodyUi? = null,
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
@@ -60,7 +64,7 @@ public data class RawEventDetailUiState(
 
 private const val TAG = "RawEventDetailViewModel"
 internal const val ARG_EVENT_ID = "event_id"
-private const val ERROR_EVENT_NOT_FOUND = "Event not found"
+internal const val ERROR_EVENT_NOT_FOUND = "Event not found"
 
 /**
  * ViewModel for RawEventDetailScreen (SRC-008).
@@ -82,6 +86,7 @@ private const val ERROR_EVENT_NOT_FOUND = "Event not found"
 public class RawEventDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val emailBodyRepository: EmailBodyRepository,
+    private val projectionPort: RawEventDetailProjectionPort,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -108,18 +113,25 @@ public class RawEventDetailViewModel @Inject constructor(
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) {
                 logger.w(TAG, "loadEvent id=%08x userId absent — treating as not found".format(eventId.hashCode()))
-                _uiState.value = notFoundState()
+                _uiState.value = RawEventDetailProjector.notFoundState()
                 return@launch
             }
 
             val entity = rawIngestionRepository.findById(id = eventId, userId = userId)
             logger.d(TAG, "loadEvent id=%08x found=${entity != null}".format(eventId.hashCode()))
             if (entity == null) {
-                _uiState.value = notFoundState()
+                _uiState.value = RawEventDetailProjector.notFoundState()
                 return@launch
             }
 
-            _uiState.value = buildLoadedState(entity = entity, emailBody = maybeLoadEmailBody(entity))
+            val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
+            val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
+            _uiState.value = RawEventDetailProjector.buildLoadedState(
+                entity = entity,
+                emailBody = maybeLoadEmailBody(entity),
+                commitmentQuotes = commitmentQuotes,
+                attendeesRaw = attendeesRaw,
+            )
         }
     }
 
@@ -135,30 +147,4 @@ public class RawEventDetailViewModel @Inject constructor(
             null
         }
 
-    private fun buildLoadedState(
-        entity: RawIngestionEventEntity,
-        emailBody: EmailBodyEntity?,
-    ): RawEventDetailUiState {
-        val ui = emailBody?.let { EmailBodyUi(bodyPlain = it.bodyPlain, bodyHtml = it.bodyHtml) }
-        val attachments = AttachmentMetaParser.parse(emailBody?.attachmentsMeta)
-        return RawEventDetailUiState(
-            eventId = entity.id,
-            sourceType = entity.sourceType,
-            eventTitle = entity.eventTitle,
-            timestamp = entity.timestamp,
-            snippet = entity.eventSnippet?.take(SNIPPET_CHAR_LIMIT),
-            emailBody = ui,
-            attachmentCount = attachments.size,
-            commitmentsExtractedCount = entity.commitmentsExtractedCount,
-            loading = false,
-        )
-    }
-
-    private fun notFoundState(): RawEventDetailUiState =
-        RawEventDetailUiState(loading = false, error = ERROR_EVENT_NOT_FOUND)
-
-    private companion object {
-        /** Spec SRC-004: timeline preview clips body to 200 chars. */
-        const val SNIPPET_CHAR_LIMIT: Int = 200
-    }
 }

@@ -30,11 +30,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
 import com.becalm.android.ui.components.DirectionBadge
 import com.becalm.android.ui.components.EmptyState
@@ -43,6 +44,7 @@ import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusStrip
 import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 
@@ -74,9 +76,13 @@ public fun TodayTimelineScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    CollectFlowEffect(viewModel.effects) { effect ->
+        navController.dispatchTodayEffect(effect)
+    }
+
     TodayTimelineContent(
         state = state,
-        onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
+        onOpenSettings = viewModel::onOpenSettings,
         onPullRefresh = viewModel::onPullRefresh,
     )
 }
@@ -121,6 +127,18 @@ public fun TodayTimelineContent(
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
+            if (state.processingPaused) {
+                Text(
+                    text = stringResource(R.string.processing_paused_banner),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .glassPanel(MaterialTheme.shapes.medium)
+                        .padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             OverallSyncIndicator(state = state.overall)
             SourceStatusStrip(sources = buildChips(state.sourceStatus))
             Box(

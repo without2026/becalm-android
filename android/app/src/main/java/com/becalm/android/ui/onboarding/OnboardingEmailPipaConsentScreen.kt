@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.becalm.android.R
@@ -76,68 +76,83 @@ public fun OnboardingEmailPipaConsentScreen(
         title = stringResource(copy.titleRes),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
+        OnboardingEmailPipaConsentContent(
+            providerSlug = providerSlug,
+            onAgree = {
+                scope.launch {
+                    val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = true)
+                    if (ok) {
+                        navController.navigate(copy.connectRoute)
+                    } else {
+                        snackbarHostState.showSnackbar(writeFailedCopy)
+                    }
+                }
+            },
+            onDeny = {
+                scope.launch {
+                    val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = false)
+                    if (ok) {
+                        navController.navigate(copy.skipAheadRoute)
+                    } else {
+                        snackbarHostState.showSnackbar(writeFailedCopy)
+                    }
+                }
+            },
+            modifier = Modifier.padding(padding),
+        )
+    }
+}
+
+@Composable
+internal fun OnboardingEmailPipaConsentContent(
+    providerSlug: String,
+    onAgree: () -> Unit,
+    onDeny: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val copy = pipaCopyForSlug(providerSlug) ?: return
+    Column(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 24.dp)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(copy.headlineRes),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         Column(
             modifier = Modifier
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 24.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxWidth()
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(16.dp),
         ) {
-            Text(
-                text = stringResource(copy.headlineRes),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(16.dp),
-            ) {
-                PipaBulletLine(labelRes = R.string.onb_pipa_email_recipient, valueRes = copy.recipientRes)
-                Spacer(modifier = Modifier.height(8.dp))
-                PipaBulletLine(labelRes = R.string.onb_pipa_email_purpose, valueRes = R.string.onb_pipa_email_purpose_body)
-                Spacer(modifier = Modifier.height(8.dp))
-                PipaBulletLine(labelRes = R.string.onb_pipa_email_items, valueRes = R.string.onb_pipa_email_items_body)
-                Spacer(modifier = Modifier.height(8.dp))
-                PipaBulletLine(labelRes = R.string.onb_pipa_email_retention, valueRes = R.string.onb_pipa_email_retention_body)
-                Spacer(modifier = Modifier.height(8.dp))
-                PipaBulletLine(labelRes = R.string.onb_pipa_email_opt_out, valueRes = R.string.onb_pipa_email_opt_out_body)
-            }
-            Spacer(modifier = Modifier.height(32.dp))
-            BecalmButton(
-                text = stringResource(R.string.onb_pipa_email_cta_agree),
-                onClick = {
-                    scope.launch {
-                        val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = true)
-                        if (ok) {
-                            navController.navigate(copy.connectRoute)
-                        } else {
-                            snackbarHostState.showSnackbar(writeFailedCopy)
-                        }
-                    }
-                },
-                variant = BecalmButtonVariant.Primary,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            BecalmButton(
-                text = stringResource(R.string.onb_pipa_email_cta_deny),
-                onClick = {
-                    scope.launch {
-                        val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = false)
-                        if (ok) {
-                            navController.navigate(copy.skipAheadRoute)
-                        } else {
-                            snackbarHostState.showSnackbar(writeFailedCopy)
-                        }
-                    }
-                },
-                variant = BecalmButtonVariant.Text,
-            )
+            PipaBulletLine(labelRes = R.string.onb_pipa_email_recipient, valueRes = copy.recipientRes)
+            Spacer(modifier = Modifier.height(8.dp))
+            PipaBulletLine(labelRes = R.string.onb_pipa_email_purpose, valueRes = R.string.onb_pipa_email_purpose_body)
+            Spacer(modifier = Modifier.height(8.dp))
+            PipaBulletLine(labelRes = R.string.onb_pipa_email_items, valueRes = R.string.onb_pipa_email_items_body)
+            Spacer(modifier = Modifier.height(8.dp))
+            PipaBulletLine(labelRes = R.string.onb_pipa_email_retention, valueRes = R.string.onb_pipa_email_retention_body)
+            Spacer(modifier = Modifier.height(8.dp))
+            PipaBulletLine(labelRes = R.string.onb_pipa_email_opt_out, valueRes = R.string.onb_pipa_email_opt_out_body)
         }
+        Spacer(modifier = Modifier.height(32.dp))
+        BecalmButton(
+            text = stringResource(R.string.onb_pipa_email_cta_agree),
+            onClick = onAgree,
+            variant = BecalmButtonVariant.Primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        BecalmButton(
+            text = stringResource(R.string.onb_pipa_email_cta_deny),
+            onClick = onDeny,
+            variant = BecalmButtonVariant.Text,
+        )
     }
 }
 

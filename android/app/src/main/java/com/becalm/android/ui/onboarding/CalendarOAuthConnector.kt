@@ -1,0 +1,102 @@
+package com.becalm.android.ui.onboarding
+
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import com.becalm.android.core.util.Logger
+import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
+import com.squareup.moshi.Moshi
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.delay
+
+/**
+ * Thin production seam for calendar OAuth launches.
+ *
+ * The real Google / Microsoft interactive flows are external-integration owners and are
+ * intentionally left out of the local test surface. Production therefore depends on this
+ * explicit connector rather than faking success inside the screen.
+ */
+@Singleton
+public class CalendarOAuthConnector @Inject constructor(
+    private val railwayApi: RailwayApi,
+    private val moshi: Moshi,
+    private val logger: Logger,
+) {
+
+    public suspend fun startSignIn(
+        provider: CalendarOAuthProvider,
+        activity: Activity,
+    ): CalendarOAuthResult {
+        val startResponse = railwayApi.startCalendarOAuth(provider.sourceType)
+        if (!startResponse.isSuccessful) {
+            return CalendarOAuthResult.Failed(errorCode = parseErrorCode(startResponse.errorBody()?.string()))
+        }
+        val authorizationUrl = startResponse.body()?.authorizationUrl
+            ?: return CalendarOAuthResult.Failed(errorCode = "oauth_start_failed")
+
+        try {
+            activity.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(authorizationUrl)),
+            )
+        } catch (_: ActivityNotFoundException) {
+            return CalendarOAuthResult.Failed(errorCode = "browser_unavailable")
+        }
+
+        repeat(POLL_ATTEMPTS) {
+            delay(POLL_INTERVAL_MILLIS)
+            val statusResponse = railwayApi.getCalendarOAuthStatus(provider.sourceType)
+            if (!statusResponse.isSuccessful) {
+                logger.w(TAG, "calendar OAuth status poll failed code=${statusResponse.code()}")
+                return@repeat
+            }
+            val statusBody = statusResponse.body() ?: return@repeat
+            if (!statusBody.connected) return@repeat
+
+            val syncResponse = railwayApi.syncCalendarEvents()
+            if (!syncResponse.isSuccessful) {
+                logger.w(TAG, "calendar sync after connect failed code=${syncResponse.code()}")
+            }
+            return CalendarOAuthResult.Connected
+        }
+
+        return CalendarOAuthResult.Failed(errorCode = "oauth_timeout")
+    }
+
+    private fun parseErrorCode(rawBody: String?): String {
+        if (rawBody.isNullOrBlank()) return "unknown"
+        return runCatching {
+            moshi.adapter(ErrorEnvelopeDto::class.java).fromJson(rawBody)?.error
+        }.getOrNull() ?: "unknown"
+    }
+
+    private companion object {
+        private const val TAG = "CalendarOAuthConnector"
+        private const val POLL_INTERVAL_MILLIS: Long = 2_000L
+        private const val POLL_ATTEMPTS: Int = 60
+    }
+}
+
+public enum class CalendarOAuthProvider(
+    public val sourceType: String,
+    public val step: OnboardingStep,
+) {
+    GOOGLE_CALENDAR(
+        sourceType = com.becalm.android.data.remote.dto.SourceType.GOOGLE_CALENDAR,
+        step = OnboardingStep.LINK_GOOGLE_CALENDAR,
+    ),
+    OUTLOOK_CALENDAR(
+        sourceType = com.becalm.android.data.remote.dto.SourceType.OUTLOOK_CALENDAR,
+        step = OnboardingStep.LINK_OUTLOOK_CALENDAR,
+    ),
+}
+
+public sealed interface CalendarOAuthResult {
+    public data object Connected : CalendarOAuthResult
+
+    public data class Failed(
+        val errorCode: String,
+    ) : CalendarOAuthResult
+}

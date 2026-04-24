@@ -64,18 +64,12 @@ import java.util.UUID
  * Constructed by [MediaStoreWorker] from its own collaborators rather than via Hilt
  * `@Inject`, so unit tests do not need to know about the split.
  *
- * ## Known gap (follow-up)
- * The full SAF tree URI migration required by `.spec/onboarding.spec.yml:37-44` (ONB-003)
- * is deferred to a Wave 6 onboarding PR tracked by `refactor/ui/onboarding/saf-tree`.
- * This file continues to query `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` directly;
- * the LIKE patterns below were realigned to Samsung One UI 6.x's
- * `Recordings/Voice Recorder/` layout in PR #14 (see
- * `docs/plans/worker-voice-ingestion-realign.md` and
- * `docs/plans/worker-voice-ingestion-saf-tree-followup.md`) so that ingestion no longer
- * silently returns zero on Samsung devices. The eventual pivot to
- * `DocumentsContract.buildChildDocumentsUriUsingTree` + `COLUMN_LAST_MODIFIED` watermarks
- * is tracked separately and requires coordinated onboarding UI changes (SAF picker +
- * `takePersistableUriPermission`) that are out of scope for this PR.
+ * ## SAF grant contract
+ * ONB-003 now persists a Recordings-tree SAF URI grant before voice ingestion is enabled.
+ * This probe still queries `MediaStore.Audio.Media.EXTERNAL_CONTENT_URI` directly; the
+ * SAF tree grant is enforced by [MediaStoreWorker] and [com.becalm.android.worker.AppRuntimeSyncCoordinator]
+ * before this probe is reached. A future pivot to `DocumentsContract` child traversal
+ * would be an implementation swap, not an MVP-owner gap.
  */
 internal class VoiceMediaStoreProbe(
     private val appContext: Context,
@@ -105,7 +99,7 @@ internal class VoiceMediaStoreProbe(
      *
      * @return Count of [RawIngestionEventEntity] rows freshly inserted this run.
      */
-    suspend fun ingestVoiceRecordings(now: Instant): Int {
+    suspend fun ingestVoiceRecordings(now: Instant, lookbackDays: Int? = null): Int {
         // userId is required: skip rather than insert orphan rows
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId == null) {
@@ -121,7 +115,11 @@ internal class VoiceMediaStoreProbe(
         val pipaConsented = userPrefsStore.observeThirdPartyProvisionConsent().first()
 
         // Cursor stored in ms; DATE_ADDED is in seconds
-        val lastSeenMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE).first() ?: 0L
+        val persistedCursorMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE).first()
+        val lookbackCursorMs = lookbackDays?.let { days ->
+            now.toEpochMilliseconds() - days * 86_400_000L
+        } ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
         val lastSeenSec = lastSeenMs / 1_000L
 
         // Build folder-filter predicate and projection.
@@ -313,7 +311,7 @@ internal class VoiceMediaStoreProbe(
      *   to `Result.retry()` so WorkManager re-attempts instead of silently succeeding past
      *   a ContentResolver query exception (ING-001 data-loss guard).
      */
-    suspend fun ingestCallRecordings(now: Instant): CallRecordingIngestOutcome {
+    suspend fun ingestCallRecordings(now: Instant, lookbackDays: Int? = null): CallRecordingIngestOutcome {
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId == null) {
             logger.w(TAG, "userId null — skipping call_recording ingestion this cycle")
@@ -329,7 +327,11 @@ internal class VoiceMediaStoreProbe(
         // older than the newest voice memo in the same run, permanently skipping it
         // (ING-001 data-loss). Using [KIND_CALL_RECORDING] keeps the two subtrees
         // cursor-independent.
-        val lastSeenMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING).first() ?: 0L
+        val persistedCursorMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING).first()
+        val lookbackCursorMs = lookbackDays?.let { days ->
+            now.toEpochMilliseconds() - days * 86_400_000L
+        } ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
         val lastSeenSec = lastSeenMs / 1_000L
 
         val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -387,7 +389,7 @@ internal class VoiceMediaStoreProbe(
             val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
             val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
-            val idxTitle = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val idxTitle = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
 
             while (cursor.moveToNext()) {
                 val row = readVoiceRow(
@@ -397,7 +399,7 @@ internal class VoiceMediaStoreProbe(
                     idxDuration,
                     idxDisplayName,
                     clientEventIdPrefix = CALL_RECORDING_CLIENT_EVENT_ID_PREFIX,
-                    idxTitle = idxTitle,
+                    idxTitle = idxTitle.takeIf { it >= 0 },
                 )
 
                 // ING-001: extract counterparty number from filename and normalize to E.164;

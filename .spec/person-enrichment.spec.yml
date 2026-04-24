@@ -64,10 +64,10 @@ behaviors:
 
   - id: ENR-007
     type: lifecycle
-    description: "로그아웃 또는 앱 삭제 시 persons_enrichment 테이블 전체 삭제됨"
-    trigger: "사용자 로그아웃 또는 앱 삭제"
+    description: "계정 삭제 또는 앱 삭제 시 persons_enrichment 테이블 전체 삭제됨. 일반 로그아웃은 user-scoped DB를 보존하므로 enrichment도 유지된다"
+    trigger: "사용자 계정 삭제 또는 앱 삭제"
     precondition: "persons_enrichment에 레코드 존재"
-    expected: "persons_enrichment 테이블 전체 레코드 삭제됨. 다음 로그인 후 ENR-003 재실행 시 재구성됨"
+    expected: "계정 삭제(PIPA-005) 또는 앱 삭제 시 persons_enrichment 테이블 전체 레코드 삭제됨. 일반 로그아웃(AUTH-005)에서는 해당 user-scoped DB 파일이 유지되므로 enrichment도 그대로 남고, 동일 계정 재로그인 시 즉시 재사용된다"
     source: phase2-acceptance
     tests: []
 
@@ -86,4 +86,4 @@ invariants:
   - "CONTACTS 권한 거부 시 앱 기능에 영향 없음 — persons_enrichment 없이 person_ref 원본값으로 fallback"
   - "EnrichmentWorker는 ContactsContract.Data만 읽는다 — SMS, 통화 기록, 기타 민감 데이터 접근 없음"
   - "persons_enrichment UPSERT 키는 person_ref (TEXT PRIMARY KEY) — 동일 person_ref의 연락처 정보는 항상 최신으로 덮어씀"
-  - "로그아웃 시 persons_enrichment 전체 삭제 — 타인 기기 공유 환경에서 개인 연락처 유출 방지"
+  - "일반 로그아웃은 persons_enrichment를 삭제하지 않는다 — user-scoped DB 격리가 전제된다. 완전 삭제는 계정 삭제 또는 앱 삭제 경로만 수행한다"
