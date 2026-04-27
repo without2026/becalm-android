@@ -61,6 +61,7 @@ public data class Error(val message: String) : AuthUiState()
 /** One-shot effects emitted by [AuthViewModel]. */
 public sealed interface AuthEffect {
     public data object FinishApp : AuthEffect
+    public data object NavigateToLogin : AuthEffect
 }
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -198,6 +199,23 @@ public class AuthViewModel @Inject constructor(
      */
     public fun onDeclineTerms() {
         _effects.tryEmit(AuthEffect.FinishApp)
+    }
+
+    /**
+     * Persists terms acceptance from the public auth shell and then emits a one-shot
+     * navigation to Login. This keeps TermsScreen independent from onboarding/runtime
+     * owners so the public auth shell can render pre-auth without that graph.
+     */
+    public fun onAcceptTermsAndContinue() {
+        viewModelScope.launch {
+            try {
+                userPrefsStore.setTermsAccepted(true)
+                _effects.emit(AuthEffect.NavigateToLogin)
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to persist terms acceptance", e)
+                _uiState.value = AuthUiState.Error(e.message ?: "terms acceptance failed")
+            }
+        }
     }
 
     // spec: AUTH-003, AUTH-004, AUTH-006, AUTH-007
