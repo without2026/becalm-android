@@ -61,7 +61,7 @@ class WorkSchedulerImplSpecTest {
     fun `COLD-001 stage1 one-shot scheduler passes bounded lookback days into worker input`() {
         val request = slot<OneTimeWorkRequest>()
 
-        WorkSchedulerImpl(appContext, logger).enqueueGmailOneShotNow(7)
+        WorkSchedulerImpl(appContext, logger).enqueueImapNaverOneShotNow(7)
 
         verify(exactly = 1) {
             workManager.enqueueUniqueWork(any(), any(), capture(request))

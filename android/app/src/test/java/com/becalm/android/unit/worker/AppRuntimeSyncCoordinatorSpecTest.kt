@@ -42,10 +42,8 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { contentObserverBootstrap.start() }
         verify(exactly = 1) { workScheduler.scheduleUploadRedundancy() }
         verify(exactly = 1) { workScheduler.scheduleEnrichmentSweep() }
-        verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.GMAIL) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.NAVER_IMAP) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.DAUM_IMAP) }
-        verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.OUTLOOK_MAIL) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.GOOGLE_CALENDAR) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.OUTLOOK_CALENDAR) }
         verify(exactly = 0) { contentObserverBootstrap.stop() }

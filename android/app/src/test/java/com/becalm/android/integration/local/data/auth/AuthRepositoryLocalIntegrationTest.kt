@@ -13,9 +13,8 @@ import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -98,8 +97,7 @@ class AuthRepositoryLocalIntegrationTest {
         override suspend fun deleteAll() = delegate().deleteAll()
     }
     private val imapCredentialStore = mockk<com.becalm.android.data.local.secure.ImapCredentialStore>(relaxed = true)
-    private val googleAuthTokenProvider = mockk<GoogleAuthTokenProviderImpl>(relaxed = true)
-    private val msGraphTokenProvider = mockk<MsGraphTokenProviderImpl>(relaxed = true)
+    private val oauthCredentialStore = mockk<OAuthCredentialStore>(relaxed = true)
     private val processRestarter = mockk<ProcessRestarter>()
     private val appRuntimeSyncCoordinator = mockk<AppRuntimeSyncCoordinator>(relaxed = true)
 
@@ -115,8 +113,7 @@ class AuthRepositoryLocalIntegrationTest {
         contentObserverBootstrap = contentObserverBootstrap,
         personEnrichmentRepository = enrichmentRepository,
         imapCredentialStore = imapCredentialStore,
-        googleAuthTokenProvider = googleAuthTokenProvider,
-        msGraphTokenProvider = msGraphTokenProvider,
+        oauthCredentialStore = oauthCredentialStore,
         processRestarter = processRestarter,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
         ioDispatcher = Dispatchers.IO,

@@ -50,11 +50,11 @@ behaviors:
 
   - id: SMG-005
     type: ui_interaction
-    description: "소스 상세 화면의 [지금 동기화] 버튼이 해당 소스 어댑터만 선택적으로 실행한다 — WorkManager enqueueUniqueWork('sync-<source>', REPLACE). 이것이 앱에서 유일한 소스별 수동 트리거다"
+    description: "소스 상세 화면의 [지금 동기화] 버튼이 source owner에 맞는 수동 동기화를 실행한다. backend-managed source는 Railway sync endpoint를, local source는 WorkManager worker를 사용한다. 이것이 앱에서 유일한 소스별 수동 트리거다"
     screen: "SourceDetailScreen"
     interaction: "[지금 동기화] 버튼 탭"
     precondition: "SourceDetailScreen에서 Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
-    expected: "WorkManager enqueueUniqueWork('sync-gmail', REPLACE) 호출됨. Gmail 어댑터만 실행됨(다른 소스 영향 없음). SourceDetailScreen의 last_sync_at 갱신됨. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨"
+    expected: "Railway `POST /v1/mail_sources:sync?provider=gmail` 이 호출됨. 다른 소스는 영향받지 않는다. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨. IMAP/voice 같은 local source는 기존처럼 해당 WorkManager worker만 실행된다"
     source: phase2-acceptance
     tests: []
 

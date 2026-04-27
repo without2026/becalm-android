@@ -12,11 +12,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
+import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.LoginForm
 import com.becalm.android.ui.auth.SplashContent
+import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsContent
+import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -42,6 +46,57 @@ class AuthUiTest {
 
         composeRule.onNodeWithText(string(R.string.splash_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.splash_tagline)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `splash screen routes signed out user without terms to terms`() {
+        assertSplashRoute(AuthUiState.SignedOut(termsAccepted = false), BecalmRoute.Terms.path)
+    }
+
+    @Test
+    fun `splash screen routes signed out user with terms to login`() {
+        assertSplashRoute(AuthUiState.SignedOut(termsAccepted = true), BecalmRoute.Login.path)
+    }
+
+    @Test
+    fun `splash screen routes signed in unfinished user to onboarding pipa`() {
+        assertSplashRoute(
+            AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = false),
+            BecalmRoute.OnboardingPipaConsent.path,
+        )
+    }
+
+    @Test
+    fun `splash screen routes signed in finished user to today`() {
+        assertSplashRoute(
+            AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = true),
+            BecalmRoute.Today.path,
+        )
+    }
+
+    @Test
+    fun `splash screen keeps loading state on splash`() {
+        var route: String? = "sentinel"
+
+        composeRule.setContent {
+            val navController = rememberNavController()
+            BecalmTheme {
+                SplashScreen(
+                    navController = navController,
+                    stateOverride = AuthUiState.Loading,
+                    onNavigate = { route = it },
+                )
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertEquals("sentinel", route)
+        }
+    }
+
+    @Test
+    fun `splash screen routes error state to terms`() {
+        assertSplashRoute(AuthUiState.Error(message = "boom"), BecalmRoute.Terms.path)
     }
 
     @Test
@@ -145,4 +200,23 @@ class AuthUiTest {
 
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
+
+    private fun assertSplashRoute(state: AuthUiState, expectedRoute: String) {
+        var route: String? = null
+
+        composeRule.setContent {
+            val navController = rememberNavController()
+            BecalmTheme {
+                SplashScreen(
+                    navController = navController,
+                    stateOverride = state,
+                    onNavigate = { route = it },
+                )
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertEquals(expectedRoute, route)
+        }
+    }
 }

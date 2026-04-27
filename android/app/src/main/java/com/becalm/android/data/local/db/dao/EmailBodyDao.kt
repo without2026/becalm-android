@@ -16,10 +16,9 @@ import com.becalm.android.data.local.db.entity.EmailBodyEntity
  * layer (future `feat/repo/email` PR) enforces this at the boundary.
  *
  * ## Cold vs one-shot
- * All methods here are one-shot `suspend` functions — the consumer workers
- * (`GmailWorker`, `OutlookMailWorker`, `ImapNaverWorker`, `ImapDaumWorker`,
- * `RetentionSweepWorker`) never require reactive re-emission. No Flow-returning
- * queries are declared on this DAO by design.
+ * All methods here are one-shot `suspend` functions — the local IMAP adapters and
+ * retention sweep never require reactive re-emission. No Flow-returning queries are
+ * declared on this DAO by design.
  *
  * ## Index coverage
  * See [EmailBodyEntity] for the two declared indices; every query below is designed
@@ -39,8 +38,7 @@ public interface EmailBodyDao {
      * genuine upsert (one row per `raw_event_id`) even though [EmailBodyEntity.id] is
      * a client-generated random UUID that would otherwise never collide on PK.
      *
-     * Used by: future `GmailWorker`, `OutlookMailWorker`, `ImapNaverWorker`,
-     * `ImapDaumWorker` (all under EMAIL-001..007, adapter PRs `ADAPT-EMAIL-*`).
+     * Used by local IMAP adapters under EMAIL-001..007.
      *
      * @param entity The body row to persist.
      * @return The SQLite rowid of the inserted row. Identical rowids across

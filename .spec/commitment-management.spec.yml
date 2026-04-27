@@ -6,21 +6,21 @@ version: 1
 behaviors:
   - id: CMT-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 진입 시 전체 약속 목록이 표시된다. 기본 탭: '전체'. 각 약속 카드에 direction 배지(내가 한/상대가 한) + quote + title + person_ref 표시명 + due_at(KST 표시) + action_state 표시됨. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
+    description: "CommitmentManagementScreen 진입 시 전체 tracked item 목록이 표시된다. 기본 탭: '전체'. 각 카드에는 item_type(action|schedule|decision), subtype(direction|schedule_status|decision_status), title, person_ref 기반 표시명, due_at(KST 표시) 또는 due_hint, 그리고 action item일 때만 action_state가 표시된다. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
     screen: "CommitmentManagementScreen"
     interaction: "하단 탭 '약속관리' 탭"
-    precondition: "인증 완료, Room에 Commitment 3건(give 2건 + take 1건) 존재"
-    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/내가 한/상대가 한) 표시됨. 3건 모두 표시됨. 각 카드에 quote, title, person_ref 기반 표시명, due_at(M/d HH:mm KST), due_is_approximate=true면 '~' prefix + due_hint 보조 라벨, action_state 표시됨"
+    precondition: "인증 완료, Room에 trackable item 5건(action give 2건 + action take 1건 + schedule 1건 + decision 1건) 존재"
+    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/액션/내가 한/상대가 한/일정/결정) 표시됨. 5건 모두 표시됨. 각 카드에 type chip + subtype chip + title + person_ref 기반 표시명 + due_at(M/d HH:mm KST) 또는 due_hint 표시됨. action item은 action_state와 direction(give/take) 표시, schedule item은 schedule_status 표시, decision item은 decision_status 표시"
     source: phase2-acceptance
     tests: []
 
   - id: CMT-002
     type: ui_interaction
-    description: "CommitmentFilterTabs — '내가 한' 탭 선택 시 direction='give' 약속만 필터링됨"
+    description: "CommitmentFilterTabs — type/action subtype 기준으로 목록을 필터링한다. action은 direction='give'|'take'로 세부 필터 가능하다"
     screen: "CommitmentManagementScreen"
-    interaction: "'내가 한' 탭 탭"
-    precondition: "CommitmentManagementScreen 표시됨, Room에 give 2건 + take 1건"
-    expected: "give 2건만 표시됨. take 1건 숨겨짐. '상대가 한' 탭 탭 시 take 1건만 표시됨. '전체' 탭 탭 시 3건 복원됨"
+    interaction: "'액션' / '내가 한' / '상대가 한' / '일정' / '결정' 탭 탭"
+    precondition: "CommitmentManagementScreen 표시됨, Room에 action give 2건 + action take 1건 + schedule 1건 + decision 1건"
+    expected: "'액션' 탭 시 action 3건만 표시됨. '내가 한' 탭 시 direction='give' action 2건만 표시됨. '상대가 한' 탭 시 direction='take' action 1건만 표시됨. '일정' 탭 시 schedule 1건만 표시됨. '결정' 탭 시 decision 1건만 표시됨. '전체' 탭 탭 시 5건 복원됨"
     source: phase2-acceptance
     tests: []
 

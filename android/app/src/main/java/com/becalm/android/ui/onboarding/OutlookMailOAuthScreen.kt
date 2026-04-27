@@ -28,12 +28,10 @@ import kotlinx.coroutines.launch
 /**
  * Onboarding step: Outlook Mail OAuth connection (S6-G).
  *
- * Mirrors the Gmail launcher pattern; the underlying provider
- * ([com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl]) drives MSAL's
- * `acquireTokenInteractive(Mail.Read, offline_access)` behind
- * [OnboardingViewModel.onConnectEmailProvider]. No PendingIntent is expected — MSAL
- * launches its own browser tab — but the screen still handles the branch defensively
- * so a future provider change doesn't silently regress the consent flow.
+ * Mirrors the Gmail launcher pattern; the underlying flow is now backend-managed via
+ * [EmailOAuthConnector] behind [OnboardingViewModel.onConnectEmailProvider]. No
+ * PendingIntent is expected, but the screen still handles the branch defensively so a
+ * future provider change doesn't silently regress the consent flow.
  *
  * spec: AUTH-002, ONB-004, ONB-007, SMG-001
  *

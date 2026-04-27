@@ -47,48 +47,7 @@ public data class GoogleOAuthCredential(
 )
 
 /**
- * Microsoft Graph OAuth credential persisted in [OAuthCredentialStore] alongside the
- * `google_*` namespace.
- *
- * Microsoft Authentication Library (MSAL) maintains its own secure token cache, but BeCalm
- * mirrors the access token here so that the MS Graph client can read tokens over the same
- * [MsGraphTokenProvider.getAccessToken] call path as the Gmail provider — see plan doc
- * `docs/plans/repo-auth-msgraph-oauth-provider.md` § 5.1 for the "defensive double-write"
- * rationale against PIPA invariant 153.
- *
- * [refreshToken] is nullable because MSAL does not expose the long-lived refresh token to
- * the application in the standard single-account flow; silent refresh goes through
- * `acquireTokenSilent`, which consults MSAL's own cache. The field is retained for
- * symmetry with [GoogleOAuthCredential].
- *
- * [scope] is locked to `"Mail.Read offline_access"` (space-separated, MSAL convention) on
- * write and validated on read — a mismatched stored scope causes
- * [OAuthCredentialStore.loadMsGraph] to return `null` and self-clear the keys.
- *
- * [accountIdentifier] stores the MSAL `IAccount.getId()` value so silent refresh can
- * re-bind to the correct account record on multi-account devices (should not occur in
- * single-account mode, but the field guards against future-mode migrations).
- *
- * @param accessToken        Microsoft Graph bearer token.
- * @param refreshToken       Long-lived refresh token when the provider emits one; null otherwise.
- * @param expiresAtEpochMillis Epoch millisecond timestamp when [accessToken] ceases to be valid.
- * @param scope              Space-separated OAuth scope string granted by the authorization
- *                           result (locked to [OAuthCredentialStore.MS_GRAPH_MAIL_READ_SCOPE]).
- * @param accountIdentifier  MSAL `IAccount.getId()` of the Microsoft account this credential
- *                           belongs to; used by silent refresh to bind against the correct
- *                           cached account.
- */
-public data class MsGraphOAuthCredential(
-    val accessToken: String,
-    val refreshToken: String?,
-    val expiresAtEpochMillis: Long,
-    val scope: String,
-    val accountIdentifier: String,
-)
-
-/**
- * Encrypted store for third-party OAuth access tokens (Gmail today; Microsoft Graph
- * in a follow-up PR).
+ * Encrypted store for the remaining device-side Google OAuth credential cache.
  *
  * ## Security model
  * Uses a dedicated [androidx.security.crypto.EncryptedSharedPreferences] file
@@ -101,20 +60,17 @@ public data class MsGraphOAuthCredential(
  * Value encryption: AES-256-GCM (probabilistic, fresh nonce per write).
  *
  * ## Namespace isolation
- * Preference keys are **per-provider namespaced** with a provider prefix:
- * - `google_*` — Gmail OAuth (this PR).
- * - `ms_graph_*` — Microsoft Graph OAuth (follow-up PR).
+ * Preference keys are provider-namespaced with a `google_*` prefix so provider-specific
+ * sign-outs do not clobber unrelated secure state.
  *
- * [clearGoogle] removes only the `google_*` keys so that provider-specific sign-outs
- * don't clobber the other provider's credentials. A global clear (e.g. account deletion)
+ * [clearGoogle] removes only the `google_*` keys. A global clear (e.g. account deletion)
  * lives outside this class today — future PR can add `clearAll()` if needed.
  *
  * ## PIPA invariant (spec 153)
- * `.spec/data-ingestion.spec.yml:153` requires that Gmail/Outlook OAuth tokens live in
- * the Android Keystore only and are never transmitted to Railway. [EncryptedTokenStore]
- * is restricted to Supabase session fields; this store is the exclusive owner of
- * third-party OAuth tokens. See plan doc
- * `docs/plans/repo-auth-gmail-oauth-provider.md` § 3.3 for the invariant rationale.
+ * `.spec/data-ingestion.spec.yml:153` requires that any locally persisted third-party OAuth
+ * tokens live in the Android Keystore only and are never transmitted to Railway.
+ * [EncryptedTokenStore] is restricted to Supabase session fields; this store owns the
+ * remaining device-side Google credential cache kept for logout hygiene and legacy upgrades.
  *
  * ## Scope lock (ING-006 MVP)
  * Gmail scope is hard-coded to [GMAIL_READONLY_SCOPE]. On read, if the persisted
@@ -189,11 +145,11 @@ public class OAuthCredentialStore {
         internal const val KEY_GOOGLE_SCOPE: String = "google_scope"
 
         /**
-         * Email of the Google account this credential belongs to. Pinned on every
-         * subsequent `AuthorizationRequest.Builder.setAccount(Account(email, "com.google"))`
-         * in [com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl] so that
-         * background `refreshSilently(...)` cannot resolve against a different account on
-         * multi-account devices (Gmail mailbox-swap guard).
+         * Email of the Google account this credential belongs to.
+         *
+         * This remains for legacy compatibility with device-side Google OAuth caches.
+         * Backend-managed Gmail no longer refreshes through a local provider class, but
+         * sign-out cleanup and older upgraded installs may still carry this field.
          */
         internal const val KEY_GOOGLE_ACCOUNT_EMAIL: String = "google_account_email"
 
@@ -205,30 +161,6 @@ public class OAuthCredentialStore {
         public const val GMAIL_READONLY_SCOPE: String =
             "https://www.googleapis.com/auth/gmail.readonly"
 
-        // ms_graph_* namespace.
-        internal const val KEY_MS_GRAPH_ACCESS_TOKEN: String = "ms_graph_access_token"
-        internal const val KEY_MS_GRAPH_REFRESH_TOKEN: String = "ms_graph_refresh_token"
-        internal const val KEY_MS_GRAPH_TOKEN_EXPIRES_AT: String = "ms_graph_token_expires_at"
-        internal const val KEY_MS_GRAPH_SCOPE: String = "ms_graph_scope"
-
-        /**
-         * MSAL `IAccount.getId()` of the Microsoft account this credential is bound to.
-         * Consumed by [com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl] to
-         * look up the cached account handle for silent refresh. Without it, MSAL cannot
-         * resolve which account record in its token cache to refresh against once the app
-         * process is restarted.
-         */
-        internal const val KEY_MS_GRAPH_ACCOUNT_IDENTIFIER: String = "ms_graph_account_identifier"
-
-        /**
-         * The one and only Microsoft Graph OAuth scope set permitted by ING-007 MVP
-         * (`.spec/data-ingestion.spec.yml:71`). Stored as a space-separated string in
-         * MSAL convention; any authorization result granting a different scope string is
-         * rejected by [loadMsGraph] and self-cleared. Expanding to `Mail.ReadWrite`,
-         * `Mail.Send`, or `Calendars.Read` requires a new provider class — do not edit
-         * this constant.
-         */
-        public const val MS_GRAPH_MAIL_READ_SCOPE: String = "Mail.Read offline_access"
     }
 
     /**
@@ -301,8 +233,7 @@ public class OAuthCredentialStore {
     }
 
     /**
-     * Removes only the `google_*` keys, preserving any other provider namespace
-     * (e.g. `ms_graph_*`) that may coexist in the same preference file.
+     * Removes only the `google_*` keys in this preference file.
      *
      * Disk access is performed on [kotlinx.coroutines.Dispatchers.IO].
      */
@@ -385,116 +316,4 @@ public class OAuthCredentialStore {
         }
     }
 
-    // ── Microsoft Graph namespace ────────────────────────────────────────────────
-
-    /**
-     * Returns the persisted [MsGraphOAuthCredential], or `null` when:
-     * - no Microsoft Graph credentials have been saved yet,
-     * - any of [KEY_MS_GRAPH_ACCESS_TOKEN] / [KEY_MS_GRAPH_TOKEN_EXPIRES_AT] /
-     *   [KEY_MS_GRAPH_SCOPE] / [KEY_MS_GRAPH_ACCOUNT_IDENTIFIER] is absent, or
-     * - the persisted scope differs from [MS_GRAPH_MAIL_READ_SCOPE] (in which case the
-     *   stale `ms_graph_*` keys are cleared as a self-defense measure — mirrors the
-     *   Gmail-side scope-mismatch guard).
-     *
-     * Never touches the `google_*` keys — namespace isolation is preserved even on the
-     * self-defense path.
-     *
-     * Disk access is performed on [kotlinx.coroutines.Dispatchers.IO].
-     */
-    public suspend fun loadMsGraph(): MsGraphOAuthCredential? = withContext(ioDispatcher) {
-        val accessToken = prefs.getString(KEY_MS_GRAPH_ACCESS_TOKEN, null) ?: return@withContext null
-        val scope = prefs.getString(KEY_MS_GRAPH_SCOPE, null) ?: return@withContext null
-        if (!prefs.contains(KEY_MS_GRAPH_TOKEN_EXPIRES_AT)) return@withContext null
-        val expiresAt = prefs.getLong(KEY_MS_GRAPH_TOKEN_EXPIRES_AT, 0L)
-        val accountIdentifier =
-            prefs.getString(KEY_MS_GRAPH_ACCOUNT_IDENTIFIER, null) ?: return@withContext null
-
-        if (scope != MS_GRAPH_MAIL_READ_SCOPE) {
-            Timber.w(
-                "OAuthCredentialStore: stored ms_graph_scope=%s differs from expected " +
-                    "Mail.Read+offline_access — clearing",
-                scope,
-            )
-            clearMsGraphKeysLocked()
-            return@withContext null
-        }
-
-        val refreshToken = prefs.getString(KEY_MS_GRAPH_REFRESH_TOKEN, null)
-        MsGraphOAuthCredential(
-            accessToken = accessToken,
-            refreshToken = refreshToken,
-            expiresAtEpochMillis = expiresAt,
-            scope = scope,
-            accountIdentifier = accountIdentifier,
-        )
-    }
-
-    /**
-     * Persists [credential] atomically. All five `ms_graph_*` keys are written in a
-     * single [SharedPreferences.Editor] transaction so a crash between `put` calls cannot
-     * leave a half-written credential pair on disk.
-     *
-     * Never touches the `google_*` keys. Disk access is performed on
-     * [kotlinx.coroutines.Dispatchers.IO].
-     */
-    public suspend fun saveMsGraph(credential: MsGraphOAuthCredential): Unit = withContext(ioDispatcher) {
-        val editor = prefs.edit()
-            .putString(KEY_MS_GRAPH_ACCESS_TOKEN, credential.accessToken)
-            .putLong(KEY_MS_GRAPH_TOKEN_EXPIRES_AT, credential.expiresAtEpochMillis)
-            .putString(KEY_MS_GRAPH_SCOPE, credential.scope)
-            .putString(KEY_MS_GRAPH_ACCOUNT_IDENTIFIER, credential.accountIdentifier)
-        // Null refresh tokens are modelled by removing the key rather than writing a
-        // literal "null" string that loadMsGraph() would then re-read.
-        if (credential.refreshToken != null) {
-            editor.putString(KEY_MS_GRAPH_REFRESH_TOKEN, credential.refreshToken)
-        } else {
-            editor.remove(KEY_MS_GRAPH_REFRESH_TOKEN)
-        }
-        editor.apply()
-        Timber.d(
-            "OAuthCredentialStore: ms_graph credential saved, expires=%d accountId=%s",
-            credential.expiresAtEpochMillis,
-            credential.accountIdentifier,
-        )
-    }
-
-    /**
-     * Removes only the `ms_graph_*` keys, preserving the `google_*` namespace (and any
-     * future provider) that coexists in the same preference file. Mirrors the contract
-     * of [clearGoogle].
-     *
-     * Disk access is performed on [kotlinx.coroutines.Dispatchers.IO].
-     */
-    public suspend fun clearMsGraph(): Unit = withContext(ioDispatcher) {
-        clearMsGraphKeysLocked()
-        Timber.d("OAuthCredentialStore: ms_graph credentials cleared")
-    }
-
-    /**
-     * Unsynchronised helper that removes the five `ms_graph_*` keys. Called from both
-     * [clearMsGraph] and the self-defense branch of [loadMsGraph]. The caller is
-     * responsible for dispatcher discipline.
-     *
-     * **Uses `commit()` (synchronous) intentionally** — matches the PIPA cross-account
-     * rationale documented on [clearGoogleKeysLocked]. A process-death between return
-     * and disk flush must not leave the previous user's MS Graph bearer token on disk.
-     */
-    private fun clearMsGraphKeysLocked() {
-        val committed = prefs.edit()
-            .remove(KEY_MS_GRAPH_ACCESS_TOKEN)
-            .remove(KEY_MS_GRAPH_REFRESH_TOKEN)
-            .remove(KEY_MS_GRAPH_TOKEN_EXPIRES_AT)
-            .remove(KEY_MS_GRAPH_SCOPE)
-            .remove(KEY_MS_GRAPH_ACCOUNT_IDENTIFIER)
-            .commit()
-        if (!committed) {
-            Timber.w(
-                "OAuthCredentialStore: ms_graph credential clear commit returned false — " +
-                    "Keystore or disk write failed; propagating as IOException",
-            )
-            throw IOException(
-                "OAuthCredentialStore.clearMsGraph commit failed — on-disk credential may still be present",
-            )
-        }
-    }
 }

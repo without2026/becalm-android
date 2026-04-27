@@ -3,11 +3,7 @@ package com.becalm.android.domain.email
 import com.becalm.android.worker.ingestion.canonicalizeEmail
 
 /**
- * EMAIL-002 person_ref derivation shared by every email ingestion worker
- * ([com.becalm.android.worker.ingestion.GmailWorker],
- * [com.becalm.android.worker.ingestion.OutlookMailWorker],
- * [com.becalm.android.worker.ingestion.ImapNaverWorker],
- * [com.becalm.android.worker.ingestion.ImapDaumWorker]).
+ * EMAIL-002 person_ref derivation shared by local email-ingestion adapters.
  *
  * ## Contract (`.spec/email-pipeline.spec.yml:22-27 § EMAIL-002`)
  *
@@ -21,7 +17,7 @@ import com.becalm.android.worker.ingestion.canonicalizeEmail
  * cannot name a single counterparty, so quarantining to `null` keeps
  * downstream counterparty resolution from making up a person.
  *
- * Every worker used to carry its own `derivePersonRef` copy plus a private
+ * Local adapters used to carry their own `derivePersonRef` copy plus a private
  * `GROUP_EMAIL_RECIPIENT_THRESHOLD = 10` companion constant; this object is
  * the single source of truth.
  */

@@ -10,7 +10,6 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.VoiceFailureNotifier
@@ -61,19 +60,6 @@ public class BecalmApplication : Application(), Configuration.Provider {
      */
     @Inject
     public lateinit var imapCredentialStoreMigrator: ImapCredentialStoreMigrator
-
-    /**
-     * Concrete [GoogleAuthTokenProviderImpl] — injected by concrete type rather than
-     * through the [com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider]
-     * interface so that the startup [GoogleAuthTokenProviderImpl.warmUp] call is
-     * reachable. The interface intentionally does not expose warm-up because it is an
-     * implementation concern (loading the Keystore-backed credential into the hot-path
-     * cache). Without this warm-up, the first Gmail request after a process restart
-     * would see `currentToken() == null` and fail with `BecalmError.Unauthorized` even
-     * though a valid token is persisted on-device (ING-006 cold-start regression).
-     */
-    @Inject
-    public lateinit var googleAuthTokenProvider: GoogleAuthTokenProviderImpl
 
     /**
      * [SyncCursorStore] — hosts the one-shot Outlook mail cursor v2 migration that
@@ -154,25 +140,6 @@ public class BecalmApplication : Application(), Configuration.Provider {
         applicationScope.launch {
             runCatching { imapCredentialStoreMigrator.migrateIfNeeded() }
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP migration launch failed") }
-        }
-
-        // Hydrate the Gmail OAuth credential cache from Keystore. `currentToken()` is
-        // called synchronously on the OkHttp dispatcher and cannot reach disk itself,
-        // so without this eager warm-up the first Gmail API request after every
-        // process restart would see a cold cache and fail with
-        // `BecalmError.Unauthorized` even when a valid token is persisted. Idempotent.
-        //
-        // Wrapped in runCatching for the same reason: [warmUp] can throw an
-        // `IOException` when its internal self-defense path fails to commit the
-        // pin-preserving clear for an expired credential on a damaged Keystore. Letting
-        // that propagate to the root coroutine would crash the process before the UI
-        // could drive recovery — the worker-level [GoogleAuthTokenProviderImpl.warmUp]
-        // call inside [GmailWorker.doWork] retries on next sync, and
-        // [GmailWorker] then falls through to [refreshSilently] which surfaces
-        // reauth state to the UI.
-        applicationScope.launch {
-            runCatching { googleAuthTokenProvider.warmUp() }
-                .onFailure { Timber.e(it, "BecalmApplication: Gmail OAuth warmUp launch failed") }
         }
 
         // Promote the Wave 1 single Outlook mail cursor ("outlook_mail_delta") into

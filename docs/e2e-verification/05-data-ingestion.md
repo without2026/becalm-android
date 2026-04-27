@@ -9,31 +9,29 @@ Spec: `becalm-android/.spec/data-ingestion.spec.yml`
 
 ---
 
-## 0. 전체 흐름 (6 소스 + batch upload)
+## 0. 전체 흐름 (7 user-facing sources + batch upload)
 
 ```
-[Source adapters — parallel coroutines]
-worker/ingestion/
-   ├─ MediaStoreWorker.kt:84         voice (ING-001/011)
-   ├─ GmailWorker.kt:59              gmail (ING-006/011)
-   ├─ OutlookMailWorker.kt           outlook_mail (ING-007/011)
-   ├─ ImapNaverWorker.kt             naver_imap/daum_imap (ING-008/011)
-   ├─ GoogleCalendarWorker.kt        google_calendar (ING-009/011)
-   └─ OutlookCalendarWorker.kt       outlook_calendar (ING-010/011)
+[Source owners]
+Android local adapters:
+   ├─ MediaStoreWorker.kt            voice
+   └─ ImapNaverWorker.kt / ImapDaumWorker.kt
+
+Backend-managed adapters (Railway):
+   ├─ Gmail OAuth + sync             gmail
+   ├─ Outlook Mail OAuth + sync      outlook_mail
+   ├─ Google Calendar OAuth + sync   google_calendar
+   └─ Outlook Calendar OAuth + sync  outlook_calendar
         │
         ▼
-Room: raw_ingestion_events (sync_status='pending')
-   data/local/db/dao/RawIngestionEventDao.kt
+Railway / device both converge on raw_ingestion_events + source_status
         │
         ▼
-UploadWorker.kt:54 → POST /v1/raw_ingestion_events:batch  (ING-002/003/004/014/015)
-        │
-        ▼
-Railway → Supabase (service_role) — 멱등 (user_id, client_event_id) UNIQUE
+Android consumes mirrored Room state / backend APIs as the source-of-truth UI surface
 ```
 
 Schedulers:
-- `worker/ForegroundCatchUpScheduler.kt:107` — LifecycleObserver `onStart` → ING-011 fan-out
+- `worker/ForegroundCatchUpScheduler.kt:107` — LifecycleObserver `onStart` → local fan-out
 - `worker/WorkSchedulerImpl.kt` — periodic jobs
 - `worker/UniqueWorkKeys.kt:11` — `UPLOAD`, `sync-<source>` 키
 - `worker/UploadBackoff.kt` — exponential backoff 표
@@ -104,28 +102,27 @@ grep -n "quarantined\|retryable" becalm-android/android/app/src/main/java/com/be
 
 ---
 
-## ING-006 — Gmail 주기 sync (보조 경로)
+## ING-006 — Gmail backend-managed sync
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Worker | `worker/ingestion/GmailWorker.kt:70` | `doWork` |
-| Incremental | `GmailWorker.kt:158` | `runIncrementalSync(startHistoryId)` |
-| Full sync | `GmailWorker.kt:192` | `runFullSync` |
-| Fetch | `GmailWorker.kt:261` | `fetchAndInsert(userId, messageId)` |
-| Cursor | `data/local/datastore/SyncCursorStore.kt:108-116` | `observeGmailHistoryId` / `setGmailHistoryId` |
-| OAuth creds | `data/local/secure/EncryptedTokenStore.kt` + `data/remote/gmail/GmailClient.kt` |
+| Android connect | `ui/onboarding/EmailOAuthConnector.kt` | `startSignIn(GMAIL)` |
+| Backend start/callback | `becalm-backend/app/api/v1.py` | `/v1/oauth/mail/gmail:*` |
+| Backend sync | `becalm-backend/app/services/mail_sync.py` | Gmail fetch + raw mirror |
+| Android consume | `data/remote/api/RailwayApi.kt` | `syncMailSource("gmail")` |
 
-**Verify PIPA invariant**: Gmail OAuth 토큰은 Keystore-backed EncryptedPrefs 에만 저장, Railway 로 **전송 금지**. `grep -rn "gmail.*token\|gmailToken" becalm-android/android/app/src/main/java/com/becalm/android/data/remote/api` → 히트 0건.
+**Verify**: Railway `source_status.gmail = synced`, `raw_ingestion_events(source_type='gmail')` mirror exists.
 
 ---
 
-## ING-007 — Outlook Mail 주기 sync
+## ING-007 — Outlook Mail backend-managed sync
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Worker | `worker/ingestion/OutlookMailWorker.kt` | `doWork` |
-| Graph client | `data/remote/msgraph/MsGraphClient.kt` + `MsGraphClientImpl.kt` | `/messages/delta` |
-| Cursor | `SyncCursorStore.kt:68-77` | `observeCursor("outlook_mail")` / `setCursor` |
+| Android connect | `ui/onboarding/EmailOAuthConnector.kt` | `startSignIn(OUTLOOK_MAIL)` |
+| Backend start/callback | `becalm-backend/app/api/v1.py` | `/v1/oauth/mail/outlook_mail:*` |
+| Backend sync | `becalm-backend/app/services/mail_sync.py` | Graph fetch + raw mirror |
+| Android consume | `data/remote/api/RailwayApi.kt` | `syncMailSource("outlook_mail")` |
 
 ---
 
@@ -144,9 +141,10 @@ grep -n "quarantined\|retryable" becalm-android/android/app/src/main/java/com/be
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Worker | `worker/ingestion/GoogleCalendarWorker.kt` | `doWork` |
-| DAO | `data/local/db/dao/CalendarEventDao.kt` | UPSERT |
-| Cursor | `SyncCursorStore.observeCursor("google_calendar")` | syncToken |
+| Android connect | `ui/onboarding/CalendarOAuthConnector.kt` | `startSignIn(GOOGLE_CALENDAR)` |
+| Worker | `worker/ingestion/GoogleCalendarWorker.kt` | `doWork` — Railway sync trigger + mirror refresh |
+| Backend sync | `becalm-backend/app/services/calendar_sync.py` | provider fetch + canonical mirror |
+| Android consume | `data/repository/CalendarEventRepository.kt` | `refreshSince` |
 
 ---
 
@@ -154,19 +152,21 @@ grep -n "quarantined\|retryable" becalm-android/android/app/src/main/java/com/be
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Worker | `worker/ingestion/OutlookCalendarWorker.kt` | `doWork` |
-| Test | `worker/ingestion/OutlookCalendarWorkerTest.kt` | 존재 |
+| Android connect | `ui/onboarding/CalendarOAuthConnector.kt` | `startSignIn(OUTLOOK_CALENDAR)` |
+| Worker | `worker/ingestion/OutlookCalendarWorker.kt` | `doWork` — Railway sync trigger + mirror refresh |
+| Backend sync | `becalm-backend/app/services/calendar_sync.py` | provider fetch + canonical mirror |
+| Android consume | `data/repository/CalendarEventRepository.kt` | `refreshSince` |
 
 ---
 
-## ING-011 — PRIMARY foreground catch-up (6 adapters parallel)
+## ING-011 — PRIMARY foreground catch-up
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
 | Lifecycle trigger | `worker/ForegroundCatchUpScheduler.kt:121` | `onStart(owner: LifecycleOwner)` |
 | Entry | `ForegroundCatchUpScheduler.kt:107` | `start()` — 앱 초기화 시 `ProcessLifecycleOwner` 에 register |
 | Fan-out | `ForegroundCatchUpScheduler.kt:177` | `enqueueForSources(sources)` |
-| Per-source triggers | `ForegroundCatchUpScheduler.kt:25-40` | `enqueueGmailOneShotNow` / `enqueueImapNaverOneShotNow` / … |
+| Per-source triggers | `ForegroundCatchUpScheduler.kt` | Calendar mirror workers + IMAP + voice one-shots |
 | 후속 upload kick | `ForegroundCatchUpScheduler.kt:177` → `WorkSchedulerImpl` | `enqueueUniqueWork('sync-all-upload', REPLACE)` (SYNC-006) |
 
 **Verify**: 
@@ -180,8 +180,8 @@ grep -n "enqueue.*OneShotNow\|REPLACE" becalm-android/android/app/src/main/java/
 
 | Cursor 종류 | DataStore 키 / 메서드 |
 | --- | --- |
-| gmail historyId | `SyncCursorStore.kt:108-116` `observeGmailHistoryId` |
-| outlook_mail deltaLink | `observeCursor("outlook_mail")` |
+| gmail historyId | legacy compatibility only — backend-managed flow no longer advances a local cursor |
+| outlook_mail deltaLink | legacy compatibility only — backend-managed flow no longer advances a local cursor |
 | naver_imap | `observeImapState("naver_imap")` (UIDVALIDITY+UID) |
 | daum_imap | `observeImapState("daum_imap")` |
 | google_calendar syncToken | `observeCursor("google_calendar")` |
@@ -190,15 +190,13 @@ grep -n "enqueue.*OneShotNow\|REPLACE" becalm-android/android/app/src/main/java/
 
 ---
 
-## ING-013 — Cursor invalidation (Gmail 410 / IMAP UIDVALIDITY / MS Graph 410)
+## ING-013 — Cursor invalidation (local IMAP only; Gmail/Outlook Mail now backend-owned)
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Gmail | `GmailWorker.kt:354` | `HistoryExpired` outcome → `seedHistoryIdCursor()` (L224) + 30일 full sync (L192) |
 | IMAP | `worker/ingestion/ImapNaverWorker.kt` | UIDVALIDITY mismatch 분기 |
-| MS Graph | `worker/ingestion/OutlookMailWorker.kt` | 410 → reset cursor |
 
-**Verify**: `grep -rn "HistoryExpired\|UIDVALIDITY\|410" becalm-android/android/app/src/main/java/com/becalm/android/worker/ingestion`
+**Verify**: `grep -rn "UIDVALIDITY" becalm-android/android/app/src/main/java/com/becalm/android/app/src/main/java/com/becalm/android/worker/ingestion`
 
 ---
 

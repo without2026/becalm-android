@@ -233,8 +233,25 @@
     <!-- Commitments -->
     <string name="commitments_title">약속 관리</string>
     <string name="commitments_filter_all">전체</string>
+    <string name="commitments_filter_action">액션</string>
     <string name="commitments_filter_give">내가 한</string>
     <string name="commitments_filter_take">상대가 한</string>
+    <string name="commitments_filter_schedule">일정</string>
+    <string name="commitments_filter_decision">결정</string>
+    <string name="commitment_item_type_action">액션</string>
+    <string name="commitment_item_type_schedule">일정</string>
+    <string name="commitment_item_type_decision">결정</string>
+    <string name="commitment_subtype_schedule_confirmed">확정</string>
+    <string name="commitment_subtype_schedule_changed">변경</string>
+    <string name="commitment_subtype_schedule_postponed">연기</string>
+    <string name="commitment_subtype_schedule_cancelled">취소</string>
+    <string name="commitment_subtype_schedule_follow_up">후속 조율</string>
+    <string name="commitment_subtype_decision_approved">승인</string>
+    <string name="commitment_subtype_decision_rejected">반려</string>
+    <string name="commitment_subtype_decision_chosen">채택</string>
+    <string name="commitment_subtype_decision_deferred">보류</string>
+    <string name="commitment_subtype_decision_ongoing">논의중</string>
+    <string name="commitment_counterparty_unknown">미지정 상대</string>
     <string name="commitments_empty_title">약속 없음</string>
     <string name="commitments_empty_message">회의와 이메일에서 추출된 약속이 여기에 표시됩니다.</string>
 

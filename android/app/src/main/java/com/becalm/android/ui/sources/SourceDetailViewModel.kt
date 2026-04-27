@@ -3,11 +3,13 @@ package com.becalm.android.ui.sources
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -115,14 +117,14 @@ public class SourceDetailViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceAdministrationPort: SourceAdministrationPort,
-    private val workScheduler: WorkScheduler,
+    private val sourceSyncPort: SourceSyncPort,
     private val logger: Logger,
 ) : ViewModel() {
 
     private val sourceType: String = savedStateHandle[ARG_SOURCE_TYPE] ?: ""
     private val actionHandler: SourceDetailActionHandler = SourceDetailActionHandler(
         sourceAdministrationPort = sourceAdministrationPort,
-        workScheduler = workScheduler,
+        sourceSyncPort = sourceSyncPort,
         logger = logger,
     )
 
@@ -153,9 +155,25 @@ public class SourceDetailViewModel @Inject constructor(
         _effects.tryEmit(SourceDetailEffect.OpenReconnect(destination))
     }
 
-    /** Enqueues immediate sync work for this source. */
+    /** Triggers an immediate manual sync through the active source owner for this source. */
     public fun onManualSync() {
-        actionHandler.requestManualSync(sourceType = sourceType, hasValidSourceType = hasValidSourceType)
+        viewModelScope.launch {
+            when (
+                val result = actionHandler.requestManualSync(
+                    sourceType = sourceType,
+                    hasValidSourceType = hasValidSourceType,
+                )
+            ) {
+                is BecalmResult.Success -> _actionError.value = null
+                is BecalmResult.Failure -> {
+                    _disconnectOutcome.value = null
+                    _actionError.value = when (val error = result.error) {
+                        is BecalmError.Validation -> error.message
+                        else -> error.safeMessage
+                    }
+                }
+            }
+        }
     }
 
     /** Opens the confirmation dialog for disconnecting this source. */

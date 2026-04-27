@@ -9,10 +9,6 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
-import com.becalm.android.data.remote.gmail.FailureReason
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
-import com.becalm.android.data.remote.gmail.OAuthSignInResult
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -118,7 +114,7 @@ public sealed class PipaConsentEvent {
  * One-shot outcome of an email-source connection attempt (S6-F/G/H).
  *
  * Scoped to the onboarding surface so downstream source-management UIs can share the
- * same [ObservabilityClient] / [GoogleAuthTokenProviderImpl] plumbing without coupling
+ * same [ObservabilityClient] / backend-managed mail OAuth plumbing without coupling
  * to this ViewModel — they will ship their own analog once they need it.
  */
 public sealed class EmailConnectEvent {
@@ -210,17 +206,14 @@ public class OnboardingViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
     private val observability: ObservabilityClient,
-    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
-    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
     private val imapCredentialStore: ImapCredentialStore,
+    private val emailOAuthConnector: EmailOAuthConnector,
     private val calendarOAuthConnector: CalendarOAuthConnector,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
         userPrefsStore = userPrefsStore,
-        googleAuthTokenProvider = googleAuthTokenProvider,
-        msGraphTokenProvider = msGraphTokenProvider,
         imapCredentialStore = imapCredentialStore,
         observability = observability,
         logger = logger,
@@ -503,34 +496,59 @@ public class OnboardingViewModel @Inject constructor(
     /**
      * Initiates an interactive OAuth sign-in for the given email [provider].
      *
-     * Routes to either [GoogleAuthTokenProviderImpl.startSignIn] or
-     * [MsGraphTokenProviderImpl.startSignIn]; on success persists the
+     * Routes through [EmailOAuthConnector.startSignIn]; on success persists the
      * `<provider>_connected=true` flag, marks the appropriate step
      * [StepStatus.COMPLETE], and emits [EmailConnectEvent.Connected]. Failures emit
      * [EmailConnectEvent.Failed] and mark the step [StepStatus.SKIPPED] so the ONB-008
-     * terminal gate accepts the flow. The Google first-run consent path surfaces a
-     * [EmailConnectEvent.PendingIntentRequired] so the screen can resolve it with a
-     * normal Activity-result launcher.
+     * terminal gate accepts the flow.
      *
      * [provider] must be [EmailPipaProvider.GMAIL] or [EmailPipaProvider.OUTLOOK_MAIL]
      * — IMAP is credential-based and uses [saveImapCredentials] instead.
      *
      * @param provider Target email provider.
-     * @param activity The foreground activity; required by both provider SDKs for the
-     *   AuthorizationClient / MSAL interactive call.
+     * @param activity The foreground activity; required so [EmailOAuthConnector] can
+     *   launch the external browser flow for the backend-managed OAuth callback path.
      */
     public fun onConnectEmailProvider(provider: EmailPipaProvider, activity: Activity) {
         require(provider == EmailPipaProvider.GMAIL || provider == EmailPipaProvider.OUTLOOK_MAIL) {
             "${provider.storageKey} uses saveImapCredentials(), not onConnectEmailProvider()"
         }
         viewModelScope.launch {
-            emailActionHandler.connectEmailProvider(
-                provider = provider,
-                activity = activity,
-                updateState = _uiState::update,
-                emitEvent = { event -> _emailConnectEvents.emit(event) },
-                reportStepFailed = ::reportOnboardingStepFailed,
-            )
+            val oauthProvider = when (provider) {
+                EmailPipaProvider.GMAIL -> EmailOAuthProvider.GMAIL
+                EmailPipaProvider.OUTLOOK_MAIL -> EmailOAuthProvider.OUTLOOK_MAIL
+                EmailPipaProvider.NAVER_IMAP,
+                EmailPipaProvider.DAUM_IMAP,
+                -> error("unreachable")
+            }
+            val consented = userPrefsStore.observeEmailPipaConsent(provider).first()
+            if (!consented) {
+                reportOnboardingStepFailed(oauthProvider.step, "pipa_consent_missing")
+                _uiState.update {
+                    it.copy(stepStates = it.stepStates + (oauthProvider.step to StepStatus.SKIPPED))
+                }
+                _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
+                return@launch
+            }
+            when (val result = emailOAuthConnector.startSignIn(oauthProvider, activity)) {
+                EmailOAuthResult.Connected -> {
+                    userPrefsStore.setEmailSourceConnected(provider, true)
+                    userPrefsStore.setEmailSourceManagedByBackend(provider, true)
+                    onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
+                    observability.captureMessage(
+                        message = "onboarding_email_connected",
+                        tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
+                    )
+                    _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
+                }
+                is EmailOAuthResult.Failed -> {
+                    reportOnboardingStepFailed(oauthProvider.step, result.errorCode)
+                    _uiState.update {
+                        it.copy(stepStates = it.stepStates + (oauthProvider.step to StepStatus.SKIPPED))
+                    }
+                    _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, result.errorCode))
+                }
+            }
         }
     }
 

@@ -16,6 +16,7 @@ import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.domain.commitment.CommitmentState
@@ -85,7 +86,8 @@ class CommitmentSheetsUiTest {
         }
 
         composeRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
-        composeRule.onNodeWithText("GIVE").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeRule.onNodeWithText("PENDING").assertIsDisplayed()
         composeRule.onNodeWithText("voice:4/24 10:00").assertIsDisplayed()
         composeRule.onAllNodesWithText("마지막 수정: 4/24 10:30 (본인)").assertCountEquals(1)
@@ -97,6 +99,41 @@ class CommitmentSheetsUiTest {
             assertEquals(1, remindClicks)
             assertEquals(1, editClicks)
         }
+    }
+
+    @Test
+    fun `commitment detail content renders schedule item as read only trackable`() {
+        composeRule.setContent {
+            BecalmTheme {
+                DetailSheetContent(
+                    entity = commitmentEntity(
+                        itemType = CommitmentItemType.SCHEDULE,
+                        direction = null,
+                        scheduleStatus = CommitmentScheduleStatus.CHANGED,
+                    ),
+                    quote = "9월 19일 11시로 바꿨어요",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    history = CommitmentHistoryPresentation(),
+                    actionButtons = CommitmentDetailActionState(
+                        availableActions = emptySet(),
+                        editEnabled = false,
+                    ),
+                    counterpartyDisplayName = "김철수",
+                    onRemind = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = {},
+                    onEdit = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.commitment_item_type_schedule)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_subtype_schedule_changed)).assertIsDisplayed()
+        composeRule.onAllNodesWithText("PENDING").assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.commitment_action_remind)).assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.commitment_action_edit)).assertCountEquals(0)
     }
 
     @Test
@@ -196,13 +233,18 @@ class CommitmentSheetsUiTest {
         }
     }
 
-    private fun commitmentEntity(): CommitmentEntity = CommitmentEntity(
+    private fun commitmentEntity(
+        itemType: String = CommitmentItemType.ACTION,
+        direction: String? = "give",
+        scheduleStatus: String? = null,
+        decisionStatus: String? = null,
+    ): CommitmentEntity = CommitmentEntity(
         id = "commitment-1",
         userId = "user-1",
-        itemType = CommitmentItemType.ACTION,
-        direction = "give",
-        scheduleStatus = null,
-        decisionStatus = null,
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
         counterpartyRaw = "김철수",
         personRef = "person-1",
         title = "제안서 보내기",

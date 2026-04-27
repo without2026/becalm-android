@@ -79,10 +79,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private companion object {
         private const val TAG = "AppRuntimeSync"
         private val PERIODIC_SOURCES: List<String> = listOf(
-            SourceType.GMAIL,
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
-            SourceType.OUTLOOK_MAIL,
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
         )

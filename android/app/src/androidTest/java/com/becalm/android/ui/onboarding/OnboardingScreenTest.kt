@@ -23,6 +23,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.today.ColdSyncUiState
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -164,6 +165,81 @@ class OnboardingScreenTest {
     }
 
     @Test
+    fun email_pipa_screen_navigates_to_connect_route_after_agree_persist_success() {
+        val persisted = mutableListOf<Pair<List<EmailPipaProvider>, Boolean>>()
+        var destination: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                OnboardingEmailPipaConsentScreen(
+                    providerSlug = "outlook_mail",
+                    navController = rememberNavController(),
+                    onPersistConsent = { recipients, granted ->
+                        persisted += recipients to granted
+                        true
+                    },
+                    onNavigate = { destination = it },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_agree)).performClick()
+
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(
+                listOf(listOf(EmailPipaProvider.OUTLOOK_MAIL) to true),
+                persisted,
+            )
+            assertEquals(BecalmRoute.OnboardingOutlookMail.path, destination)
+        }
+    }
+
+    @Test
+    fun email_pipa_screen_shows_snackbar_when_persist_fails() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                OnboardingEmailPipaConsentScreen(
+                    providerSlug = "gmail",
+                    navController = rememberNavController(),
+                    onPersistConsent = { _, _ -> false },
+                    onNavigate = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_agree)).performClick()
+
+        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_error_write_failed)).assertIsDisplayed()
+    }
+
+    @Test
+    fun email_pipa_screen_routes_unknown_slug_to_gmail_and_reports_error() {
+        var reported: Pair<OnboardingStep, String>? = null
+        var destination: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                OnboardingEmailPipaConsentScreen(
+                    providerSlug = "unknown-provider",
+                    navController = rememberNavController(),
+                    onPersistConsent = { _, _ -> true },
+                    onReportUnknownProvider = { step, code -> reported = step to code },
+                    onNavigate = { destination = it },
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            assertEquals(
+                OnboardingStep.LINK_GMAIL to "pipa_email_unknown_provider",
+                reported,
+            )
+            assertEquals(BecalmRoute.OnboardingGmail.path, destination)
+        }
+    }
+
+    @Test
     fun oauth_placeholder_contents_show_provider_copy_and_ctas() {
         composeTestRule.setContent {
             BecalmTheme {
@@ -215,6 +291,82 @@ class OnboardingScreenTest {
             assertEquals("daum_imap", savedProvider)
             assertEquals("user@daum.net", savedUsername)
             assertEquals("app-password", savedPassword)
+        }
+    }
+
+    @Test
+    fun imap_setup_screen_navigates_when_connected_event_arrives() {
+        val events = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        var navigateCount = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                ImapSetupScreen(
+                    navController = rememberNavController(),
+                    emailConnectEventsOverride = events,
+                    onSaveCredentials = { _, _, _ -> },
+                    onSkipStep = {},
+                    onNavigateToGoogleCalendar = { navigateCount += 1 },
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            events.tryEmit(EmailConnectEvent.Connected(EmailPipaProvider.NAVER_IMAP))
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(1, navigateCount)
+        }
+    }
+
+    @Test
+    fun imap_setup_screen_shows_snackbar_for_failed_event() {
+        val events = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                ImapSetupScreen(
+                    navController = rememberNavController(),
+                    emailConnectEventsOverride = events,
+                    onSaveCredentials = { _, _, _ -> },
+                    onSkipStep = {},
+                    onNavigateToGoogleCalendar = {},
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            events.tryEmit(EmailConnectEvent.Failed(EmailPipaProvider.DAUM_IMAP, "network"))
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.onb_imap_error_network)).assertIsDisplayed()
+    }
+
+    @Test
+    fun imap_setup_screen_dispatches_skip_and_navigation_callbacks() {
+        val events = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        var skipCount = 0
+        var navigateCount = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                ImapSetupScreen(
+                    navController = rememberNavController(),
+                    emailConnectEventsOverride = events,
+                    onSaveCredentials = { _, _, _ -> },
+                    onSkipStep = { skipCount += 1 },
+                    onNavigateToGoogleCalendar = { navigateCount += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("imap-skip").performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, skipCount)
+            assertEquals(1, navigateCount)
         }
     }
 

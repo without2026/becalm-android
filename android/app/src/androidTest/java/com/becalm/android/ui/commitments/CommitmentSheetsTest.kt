@@ -17,6 +17,7 @@ import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.domain.commitment.CommitmentState
@@ -73,7 +74,8 @@ class CommitmentSheetsTest {
         }
 
         composeTestRule.onNodeWithText("Send proposal").assertIsDisplayed()
-        composeTestRule.onNodeWithText("GIVE").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeTestRule.onNodeWithText("PENDING").assertIsDisplayed()
         composeTestRule.onNodeWithText("voice:4/24 10:00").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Last edited: 4/24 10:30 (me)").assertCountEquals(1)
@@ -88,6 +90,41 @@ class CommitmentSheetsTest {
             assertEquals(1, remindClicks)
             assertEquals(1, editClicks)
         }
+    }
+
+    @Test
+    fun commitment_detail_content_renders_schedule_item_as_read_only_trackable() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                DetailSheetContent(
+                    entity = commitmentEntity(
+                        itemType = CommitmentItemType.SCHEDULE,
+                        direction = null,
+                        scheduleStatus = CommitmentScheduleStatus.CHANGED,
+                    ),
+                    quote = "Moved it to 9/19 11:00",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    history = CommitmentHistoryPresentation(),
+                    actionButtons = CommitmentDetailActionState(
+                        availableActions = emptySet(),
+                        editEnabled = false,
+                    ),
+                    counterpartyDisplayName = "Alice Kim",
+                    onRemind = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = {},
+                    onEdit = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.commitment_item_type_schedule)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.commitment_subtype_schedule_changed)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("PENDING").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.commitment_action_remind)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.commitment_action_edit)).assertCountEquals(0)
     }
 
     @Test
@@ -467,13 +504,18 @@ class CommitmentSheetsTest {
         }
     }
 
-    private fun commitmentEntity(): CommitmentEntity = CommitmentEntity(
+    private fun commitmentEntity(
+        itemType: String = CommitmentItemType.ACTION,
+        direction: String? = "give",
+        scheduleStatus: String? = null,
+        decisionStatus: String? = null,
+    ): CommitmentEntity = CommitmentEntity(
         id = "commitment-1",
         userId = "user-1",
-        itemType = CommitmentItemType.ACTION,
-        direction = "give",
-        scheduleStatus = null,
-        decisionStatus = null,
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
         counterpartyRaw = "Alice Kim",
         personRef = "person-1",
         title = "Send proposal",

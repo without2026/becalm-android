@@ -31,7 +31,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -217,8 +220,11 @@ internal fun DetailSheetContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SimpleChip(text = requireNotNull(entity.direction) { "Action commitment detail requires direction" }.uppercase())
-            SimpleChip(text = stringForActionState(actionState))
+            SimpleChip(text = itemTypeLabel(entity))
+            subtypeLabel(entity)?.let { SimpleChip(text = it) }
+            if (entity.itemType == CommitmentItemType.ACTION) {
+                SimpleChip(text = stringForActionState(actionState))
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -285,18 +291,20 @@ internal fun DetailSheetContent(
         }
 
         // 7. Action button strip
-        ActionButtonRow(
-            actionState = actionState,
-            isDeleted = entity.deletedAt != null,
-            actionButtons = actionButtons,
-            onRemind = onRemind,
-            onFollowUp = onFollowUp,
-            onComplete = onComplete,
-            onCancel = onCancel,
-            onEdit = onEdit,
-        )
+        if (actionButtons.availableActions.isNotEmpty() || actionButtons.editEnabled) {
+            ActionButtonRow(
+                actionState = actionState,
+                isDeleted = entity.deletedAt != null,
+                actionButtons = actionButtons,
+                onRemind = onRemind,
+                onFollowUp = onFollowUp,
+                onComplete = onComplete,
+                onCancel = onCancel,
+                onEdit = onEdit,
+            )
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // 8. Footer — last-edited banner + supersede backlink
         if (history.lastEditedAt != null) {
@@ -417,4 +425,38 @@ private fun stringForActionState(state: CommitmentState): String = when (state) 
     CommitmentState.COMPLETED -> "COMPLETED"
     CommitmentState.OVERDUE -> "OVERDUE"
     CommitmentState.CANCELLED -> "CANCELLED"
+}
+
+@Composable
+private fun itemTypeLabel(entity: CommitmentEntity): String = when (entity.itemType) {
+    CommitmentItemType.ACTION -> stringResource(R.string.commitment_item_type_action)
+    CommitmentItemType.SCHEDULE -> stringResource(R.string.commitment_item_type_schedule)
+    CommitmentItemType.DECISION -> stringResource(R.string.commitment_item_type_decision)
+    else -> stringResource(R.string.commitment_item_type_action)
+}
+
+@Composable
+private fun subtypeLabel(entity: CommitmentEntity): String? = when (entity.itemType) {
+    CommitmentItemType.ACTION -> when (entity.direction?.lowercase()) {
+        "give" -> stringResource(R.string.commitments_filter_give)
+        "take" -> stringResource(R.string.commitments_filter_take)
+        else -> null
+    }
+    CommitmentItemType.SCHEDULE -> when (entity.scheduleStatus) {
+        CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+        CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
+        CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
+        CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)
+        CommitmentScheduleStatus.FOLLOW_UP -> stringResource(R.string.commitment_subtype_schedule_follow_up)
+        else -> null
+    }
+    CommitmentItemType.DECISION -> when (entity.decisionStatus) {
+        CommitmentDecisionStatus.APPROVED -> stringResource(R.string.commitment_subtype_decision_approved)
+        CommitmentDecisionStatus.REJECTED -> stringResource(R.string.commitment_subtype_decision_rejected)
+        CommitmentDecisionStatus.CHOSEN -> stringResource(R.string.commitment_subtype_decision_chosen)
+        CommitmentDecisionStatus.DEFERRED -> stringResource(R.string.commitment_subtype_decision_deferred)
+        CommitmentDecisionStatus.ONGOING -> stringResource(R.string.commitment_subtype_decision_ongoing)
+        else -> null
+    }
+    else -> null
 }

@@ -37,9 +37,9 @@ import java.util.UUID
  * table.
  *
  * ## Contract (EMAIL-001 · EMAIL-005 · EMAIL-008)
- * Invoked by an email ingestion adapter (`GmailWorker` / `OutlookMailWorker` /
- * `ImapNaverWorker` / `ImapDaumWorker`) immediately after that worker inserts both the
- * [RawIngestionEventEntity] and its matching [EmailBodyEntity]. The worker:
+ * Invoked by a local email ingestion adapter (today: `ImapNaverWorker` / `ImapDaumWorker`)
+ * immediately after that adapter inserts both the [RawIngestionEventEntity] and its
+ * matching [EmailBodyEntity]. The worker:
  *
  * 1. Loads the raw event and its email body (scoped by user_id for multi-account safety).
  * 2. Resolves the primary message body, splitting off any quoted reply block via

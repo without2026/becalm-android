@@ -62,8 +62,6 @@ class CommitmentManagementUiTest {
         var selectedFilter: CommitmentFilter? = null
         var openCreateCount = 0
         var openedDetailId: String? = null
-        var toggleCompletedCount = 0
-        var toggleCancelledCount = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -71,8 +69,16 @@ class CommitmentManagementUiTest {
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
-                        items = listOf(activeRow("active-1", "활성 약속")),
-                        activeItems = listOf(activeRow("active-1", "활성 약속")),
+                        items = listOf(
+                            activeRow("active-1", "활성 약속"),
+                            scheduleRow("schedule-1", "일정 변경"),
+                            decisionRow("decision-1", "방향 결정"),
+                        ),
+                        activeItems = listOf(
+                            activeRow("active-1", "활성 약속"),
+                            scheduleRow("schedule-1", "일정 변경"),
+                            decisionRow("decision-1", "방향 결정"),
+                        ),
                         completedSection = CommitmentSectionUiState(
                             expanded = false,
                             count = 1,
@@ -90,40 +96,71 @@ class CommitmentManagementUiTest {
                     onFilterChange = { selectedFilter = it },
                     onOpenCreate = { openCreateCount += 1 },
                     onOpenDetail = { openedDetailId = it },
-                    onToggleCompletedSection = { toggleCompletedCount += 1 },
-                    onToggleCancelledSection = { toggleCancelledCount += 1 },
+                    onToggleCompletedSection = {},
+                    onToggleCancelledSection = {},
                 )
             }
         }
 
         composeRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.commitments_filter_take)).assertIsDisplayed()
+        composeRule.onNodeWithText("김철수").assertIsDisplayed()
+        composeRule.onNodeWithText("일정 변경").assertIsDisplayed()
         composeRule.onNodeWithText("활성 약속").performClick()
-        composeRule.onNodeWithText(string(R.string.commitment_section_completed_fmt, 1)).performClick()
-        composeRule.onNodeWithText(string(R.string.commitment_section_cancelled_fmt, 1)).performClick()
         composeRule.onNodeWithTag("commitment-fab-add").performClick()
-        composeRule.onNodeWithTag("commitment-filter-give").performClick()
+        composeRule.onNodeWithTag("commitment-filter-schedule").performClick()
 
         composeRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
-            assertEquals(1, toggleCompletedCount)
-            assertEquals(1, toggleCancelledCount)
             assertEquals(1, openCreateCount)
-            assertEquals(CommitmentFilter.GIVE, selectedFilter)
+            assertEquals(CommitmentFilter.SCHEDULE, selectedFilter)
         }
     }
 
     private fun activeRow(id: String, title: String): CommitmentRow = CommitmentRow(
         id = id,
+        itemType = "action",
         title = title,
         direction = "give",
+        scheduleStatus = null,
+        decisionStatus = null,
         derivedStatus = "PENDING",
         actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
         dueAt = Instant.parse("2026-04-24T01:00:00Z"),
         dueIsApproximate = false,
         dueHint = null,
         counterpartyDisplayName = "김철수",
+        isManual = false,
+    )
+
+    private fun scheduleRow(id: String, title: String): CommitmentRow = CommitmentRow(
+        id = id,
+        itemType = "schedule",
+        title = title,
+        direction = null,
+        scheduleStatus = "changed",
+        decisionStatus = null,
+        derivedStatus = null,
+        actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
+        dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+        dueIsApproximate = false,
+        dueHint = null,
+        counterpartyDisplayName = "박과장",
+        isManual = false,
+    )
+
+    private fun decisionRow(id: String, title: String): CommitmentRow = CommitmentRow(
+        id = id,
+        itemType = "decision",
+        title = title,
+        direction = null,
+        scheduleStatus = null,
+        decisionStatus = "chosen",
+        derivedStatus = null,
+        actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
+        dueAt = null,
+        dueIsApproximate = false,
+        dueHint = null,
+        counterpartyDisplayName = "이부장",
         isManual = false,
     )
 

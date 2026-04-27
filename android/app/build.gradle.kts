@@ -54,17 +54,6 @@ android {
         buildConfigField("String", "BECALM_API_BASE_URL", "\"${localProp("BECALM_API_BASE_URL")}\"")
         buildConfigField("String", "SUPABASE_URL",        "\"${localProp("SUPABASE_URL")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY",   "\"${localProp("SUPABASE_ANON_KEY")}\"")
-        // MSAL Microsoft Entra application (client) ID — consumed by AuthModule via
-        // @Named("msalClientId"). Developer overrides via Gradle property `msal.client.id`
-        // (typically set in ~/.gradle/gradle.properties or local.properties); CI supplies
-        // the production value. Placeholder zero-GUID is a valid format for debug/test
-        // builds that never hit the actual MSAL endpoint.
-        // See docs/plans/repo-auth-msgraph-oauth-provider.md § 5.4.
-        buildConfigField(
-            "String",
-            "MSAL_CLIENT_ID",
-            "\"${findProperty("msal.client.id") ?: "00000000-0000-0000-0000-000000000000"}\"",
-        )
         // Google Web OAuth 2.0 Client ID registered against the Supabase project's
         // Google provider (S6-C). Developer overrides via Gradle property
         // `google.web.client.id` (typically in ~/.gradle/gradle.properties or
@@ -208,14 +197,11 @@ dependencies {
     // ─── Jsoup (HTML → plain-text for EmailSnippetBuilder, EMAIL-003) ────────
     implementation(libs.jsoup)
 
-    // ─── Google Identity Services (Gmail OAuth — GoogleAuthTokenProviderImpl) ─
+    // ─── Google Identity Services (Supabase Google login) ───────────────────
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(libs.play.services.auth)
-
-    // ─── MSAL (MS Graph OAuth — MsGraphTokenProviderImpl, ING-007) ───────────
-    implementation(libs.msal)
 
     // ─── libphonenumber (E.164 normalization for call-recording person_ref) ──
     implementation(libs.libphonenumber)

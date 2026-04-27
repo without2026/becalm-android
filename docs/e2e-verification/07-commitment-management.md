@@ -8,7 +8,7 @@ Spec: `becalm-android/.spec/commitment-management.spec.yml`
 
 ```
 CommitmentManagementScreen (ui/commitments/CommitmentManagementScreen.kt)
-        │  filter tabs, CommitmentCard, [리마인드]/[팔로업]/[완료]
+        │  filter tabs, CommitmentCard, detail/edit/create sheet routing
         ▼
 CommitmentManagementViewModel (ui/commitments/CommitmentManagementViewModel.kt:112)
         │  onConfirm / onSchedule / onMarkDone / onDismiss / onFilterChange
@@ -32,34 +32,36 @@ Card composable: `ui/components/CommitmentCard.kt`
 
 ---
 
-## CMT-001 — 전체 목록 + direction 배지 + quote/title/person_ref/due_date/action_state
+## CMT-001 — 전체 tracked item 목록 + type/subtype/person 표시
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Screen | `ui/commitments/CommitmentManagementScreen.kt` | `CommitmentFilterTabs` + `LazyColumn<CommitmentCard>` |
-| VM | `CommitmentManagementViewModel.kt:145` | `observeCommitments()` |
-| Rows | `CommitmentManagementViewModel.kt:63` | `CommitmentRow` data class |
+| Screen | `ui/commitments/CommitmentManagementScreen.kt` | `FilterChipRow` + `LazyColumn<CommitmentCard>` |
+| Projector | `ui/commitments/CommitmentManagementProjector.kt` | `toRow(...)` — itemType / direction / scheduleStatus / decisionStatus / counterpartyDisplayName |
+| Rows | `ui/commitments/CommitmentManagementViewModel.kt` | `CommitmentRow` data class |
 | Repo | `CommitmentRepositoryImpl.kt:49` | `observeAllForUser(userId)` |
-| person_ref 표시명 | `PersonEnrichmentRepository.kt:105` | LEFT JOIN (Room 쿼리 또는 VM side-merge) |
+| person_ref 표시명 | `PersonEnrichmentRepository.kt:105` | enrichment side-merge (`displayName -> nickname -> personRef -> counterpartyRaw`) |
+| Card UI | `ui/components/CommitmentCard.kt` | type chip + subtype chip + title + counterparty + due badge, action item일 때만 action_state chip |
 
 ---
 
-## CMT-002 — 탭 필터 전체/내가한/상대가한
+## CMT-002 — 탭 필터 전체/액션/내가한/상대가한/일정/결정
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Enum | `CommitmentManagementViewModel.kt:39` | `CommitmentFilter.ALL / GIVE / TAKE` |
+| Enum | `CommitmentManagementViewModel.kt` | `CommitmentFilter.ALL / ACTION / GIVE / TAKE / SCHEDULE / DECISION` |
 | VM | `CommitmentManagementViewModel.kt:188` | `onFilterChange(filter)` |
-| Apply | `CommitmentManagementViewModel.kt:305` | `applyFilter(...)` |
+| Apply | `ui/commitments/CommitmentManagementProjector.kt` | `applyFilter(...)` |
 
 ---
 
-## CMT-003 — CommitmentDetailSheet (quote 전문 + 출처)
+## CMT-003 — CommitmentDetailSheet (action/schedule/decision 공통 상세)
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| Sheet | `ui/commitments/CommitmentManagementScreen.kt` | BottomSheet composable |
-| Entity | `data/local/db/entity/CommitmentEntity.kt` | `quote`, `source_event_title`, `source_event_occurred_at` |
+| Sheet | `ui/commitments/CommitmentDetailSheet.kt` | `DetailSheetContent(...)` |
+| Entity | `data/local/db/entity/CommitmentEntity.kt` | `item_type`, `direction`, `schedule_status`, `decision_status`, `quote`, `source_event_title`, `source_event_occurred_at` |
+| Read-only gate | `ui/commitments/CommitmentDetailProjector.kt` | non-action item은 `availableActions=emptySet()` + `editEnabled=false` |
 
 ---
 

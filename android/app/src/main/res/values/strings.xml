@@ -253,8 +253,25 @@
     <!-- Commitments -->
     <string name="commitments_title">Commitments</string>
     <string name="commitments_filter_all">All</string>
+    <string name="commitments_filter_action">Action</string>
     <string name="commitments_filter_give">I give</string>
     <string name="commitments_filter_take">I take</string>
+    <string name="commitments_filter_schedule">Schedule</string>
+    <string name="commitments_filter_decision">Decision</string>
+    <string name="commitment_item_type_action">Action</string>
+    <string name="commitment_item_type_schedule">Schedule</string>
+    <string name="commitment_item_type_decision">Decision</string>
+    <string name="commitment_subtype_schedule_confirmed">Confirmed</string>
+    <string name="commitment_subtype_schedule_changed">Changed</string>
+    <string name="commitment_subtype_schedule_postponed">Postponed</string>
+    <string name="commitment_subtype_schedule_cancelled">Cancelled</string>
+    <string name="commitment_subtype_schedule_follow_up">Follow-up</string>
+    <string name="commitment_subtype_decision_approved">Approved</string>
+    <string name="commitment_subtype_decision_rejected">Rejected</string>
+    <string name="commitment_subtype_decision_chosen">Chosen</string>
+    <string name="commitment_subtype_decision_deferred">Deferred</string>
+    <string name="commitment_subtype_decision_ongoing">Ongoing</string>
+    <string name="commitment_counterparty_unknown">Unassigned counterparty</string>
     <string name="commitments_empty_title">No commitments</string>
     <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
 

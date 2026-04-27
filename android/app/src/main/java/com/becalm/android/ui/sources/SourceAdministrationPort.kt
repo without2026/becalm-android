@@ -15,7 +15,6 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ingestion.ImapDaumWorker
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import com.becalm.android.worker.ingestion.MediaStoreWorker
-import com.becalm.android.worker.ingestion.OutlookCalendarWorker
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -106,10 +105,6 @@ public class DefaultSourceAdministrationPort @Inject constructor(
                 syncCursorStore.setImapState(ImapDaumWorker.MAILBOX_DAUM_SENT, null)
                 true
             }
-            SourceType.OUTLOOK_CALENDAR -> {
-                syncCursorStore.clearCursor(OutlookCalendarWorker.CURSOR_KEY)
-                true
-            }
             SourceType.VOICE -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, null)
                 true
@@ -139,6 +134,13 @@ public class DefaultSourceAdministrationPort @Inject constructor(
             SourceType.OUTLOOK_MAIL -> userPrefsStore.setEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL, false)
             SourceType.NAVER_IMAP -> userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, false)
             SourceType.DAUM_IMAP -> userPrefsStore.setEmailSourceConnected(EmailPipaProvider.DAUM_IMAP, false)
+        }
+        when (sourceType) {
+            SourceType.GMAIL -> userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, false)
+            SourceType.OUTLOOK_MAIL -> userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.OUTLOOK_MAIL, false)
+            SourceType.NAVER_IMAP -> userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.NAVER_IMAP, false)
+            SourceType.DAUM_IMAP -> userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.DAUM_IMAP, false)
+            else -> Unit
         }
     }
 

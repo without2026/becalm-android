@@ -54,7 +54,7 @@ import kotlinx.datetime.Instant
 /**
  * Commitment management screen — full list with filter tabs.
  *
- * Filter tabs: 전체 / 내가 한 / 상대가 한.
+ * Filter tabs: 전체 / 액션 / 내가 한 / 상대가 한 / 일정 / 결정.
  * Due-today / overdue indicators surface as per-card DN badges, not top-level filters.
  * Each [CommitmentRow] is rendered via [CommitmentCard].
  * Error surfaced via [SnackbarHost].
@@ -285,8 +285,11 @@ private fun CommitmentRowCard(
     onOpenDetail: (id: String) -> Unit,
 ) {
     CommitmentCard(
+        itemType = row.itemType,
         title = row.title,
         direction = row.direction,
+        scheduleStatus = row.scheduleStatus,
+        decisionStatus = row.decisionStatus,
         derivedStatus = row.derivedStatus,
         dueAt = row.dueAt,
         counterpartyDisplayName = row.counterpartyDisplayName,
@@ -311,8 +314,11 @@ private fun FilterChipRow(
 ) {
     val filters = listOf(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
+        CommitmentFilter.ACTION to stringResource(R.string.commitments_filter_action),
         CommitmentFilter.GIVE to stringResource(R.string.commitments_filter_give),
         CommitmentFilter.TAKE to stringResource(R.string.commitments_filter_take),
+        CommitmentFilter.SCHEDULE to stringResource(R.string.commitments_filter_schedule),
+        CommitmentFilter.DECISION to stringResource(R.string.commitments_filter_decision),
     )
     LazyRow(
         modifier = modifier,
@@ -361,8 +367,11 @@ private fun PreviewCommitmentManagementScreenPopulated() {
                     ) { (dirTitlePair, status) ->
                         val (dir, title) = dirTitlePair
                         CommitmentCard(
+                            itemType = "action",
                             title = title,
                             direction = dir,
+                            scheduleStatus = null,
+                            decisionStatus = null,
                             derivedStatus = status,
                             dueAt = Instant.parse("2026-04-20T00:00:00+09:00"),
                             counterpartyDisplayName = "Alice Kim",

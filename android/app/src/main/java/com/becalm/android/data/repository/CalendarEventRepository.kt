@@ -73,10 +73,9 @@ public interface CalendarEventRepository {
     /**
      * Upserts [entities] into the local `calendar_events` table in a single transaction.
      *
-     * Used by on-device ingestion workers (e.g. OutlookCalendarWorker) that fetch events
-     * directly from a provider API rather than via Railway. Idempotent under the Room
-     * unique index on `(user_id, source_type, source_ref)` — re-ingesting the same Graph
-     * event replaces the existing row rather than creating a duplicate.
+     * Retained as a local persistence seam for tests and any future caller that already has
+     * canonicalized calendar rows in memory. The current production path still prefers
+     * [refreshSince] + [triggerServerSync].
      *
      * @return [BecalmResult.Success] with the count of rows written, or a typed failure
      *   on local I/O error.

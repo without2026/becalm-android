@@ -290,6 +290,16 @@ public interface UserPrefsStore {
     public suspend fun setEmailSourceConnected(provider: EmailPipaProvider, connected: Boolean)
 
     /**
+     * Emits whether the email [provider] is backend-managed rather than owned by a local worker.
+     */
+    public fun observeEmailSourceManagedByBackend(provider: EmailPipaProvider): Flow<Boolean>
+
+    /**
+     * Persists whether the email [provider] is backend-managed.
+     */
+    public suspend fun setEmailSourceManagedByBackend(provider: EmailPipaProvider, managed: Boolean)
+
+    /**
      * Emits the stored PIPA 제3자 제공 consent flag for the email [provider] (one of
      * [EmailPipaProvider.GMAIL], [EmailPipaProvider.OUTLOOK_MAIL],
      * [EmailPipaProvider.NAVER_IMAP], [EmailPipaProvider.DAUM_IMAP]).
@@ -412,6 +422,7 @@ public data class PipaActionLogEntry(
  * | Per-provider PIPA consent        | `pipa_email_<provider>_consent`  | false   |
  * | Per-provider PIPA consent at     | `pipa_email_<provider>_consent_at` | null  |
  * | Per-provider source connected    | `<provider>_connected`           | false   |
+ * | Per-provider backend owner flag  | `<provider>_backend_managed`     | false   |
  */
 public class UserPrefsStoreImpl @Inject constructor(
     private val dataStore: DataStore<Preferences>,
@@ -615,20 +626,24 @@ public class UserPrefsStoreImpl @Inject constructor(
         combine(
             observeSourceEnabled(SourceType.VOICE),
             observeEmailSourceConnected(EmailPipaProvider.GMAIL),
+            observeEmailSourceManagedByBackend(EmailPipaProvider.GMAIL),
             observeEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL),
+            observeEmailSourceManagedByBackend(EmailPipaProvider.OUTLOOK_MAIL),
             observeEmailSourceConnected(EmailPipaProvider.NAVER_IMAP),
+            observeEmailSourceManagedByBackend(EmailPipaProvider.NAVER_IMAP),
             observeEmailSourceConnected(EmailPipaProvider.DAUM_IMAP),
+            observeEmailSourceManagedByBackend(EmailPipaProvider.DAUM_IMAP),
             observeSourceEnabled(SourceType.GOOGLE_CALENDAR),
             observeSourceEnabled(SourceType.OUTLOOK_CALENDAR),
         ) { values ->
             buildSet {
                 if (values[0]) add(SourceType.VOICE)
-                if (values[1]) add(SourceType.GMAIL)
-                if (values[2]) add(SourceType.OUTLOOK_MAIL)
-                if (values[3]) add(SourceType.NAVER_IMAP)
-                if (values[4]) add(SourceType.DAUM_IMAP)
-                if (values[5]) add(SourceType.GOOGLE_CALENDAR)
-                if (values[6]) add(SourceType.OUTLOOK_CALENDAR)
+                if (values[1] && !values[2]) add(SourceType.GMAIL)
+                if (values[3] && !values[4]) add(SourceType.OUTLOOK_MAIL)
+                if (values[5] && !values[6]) add(SourceType.NAVER_IMAP)
+                if (values[7] && !values[8]) add(SourceType.DAUM_IMAP)
+                if (values[9]) add(SourceType.GOOGLE_CALENDAR)
+                if (values[10]) add(SourceType.OUTLOOK_CALENDAR)
             }
         }
 
@@ -665,6 +680,19 @@ public class UserPrefsStoreImpl @Inject constructor(
         dataStore.edit { prefs ->
             val userId = prefs[currentUserIdKey] ?: return@edit
             prefs[userScoped(userId).emailSourceConnectedKey(provider)] = connected
+        }
+    }
+
+    override fun observeEmailSourceManagedByBackend(provider: EmailPipaProvider): Flow<Boolean> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map false
+            prefs[userScoped(userId).emailSourceBackendManagedKey(provider)] ?: false
+        }
+
+    override suspend fun setEmailSourceManagedByBackend(provider: EmailPipaProvider, managed: Boolean) {
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            prefs[userScoped(userId).emailSourceBackendManagedKey(provider)] = managed
         }
     }
 
@@ -738,6 +766,9 @@ public class UserPrefsStoreImpl @Inject constructor(
 
         fun emailSourceConnectedKey(provider: EmailPipaProvider): Preferences.Key<Boolean> =
             booleanKey("${provider.storageKey}_connected")
+
+        fun emailSourceBackendManagedKey(provider: EmailPipaProvider): Preferences.Key<Boolean> =
+            booleanKey("${provider.storageKey}_backend_managed")
 
         fun sourceEnabledKey(sourceType: String): Preferences.Key<Boolean> =
             booleanKey("${sourceType}_enabled")

@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
  *
  * Replaces the pre-S6-F placeholder — the `[연결]` CTA now drives
  * [OnboardingViewModel.onConnectEmailProvider] which wraps
- * [com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl.startSignIn].
+ * backend-managed Gmail OAuth via [EmailOAuthConnector].
  *
  * Result handling:
  * - [EmailConnectEvent.Connected] — navigate forward to the next PIPA disclosure.

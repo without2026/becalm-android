@@ -60,19 +60,19 @@ behaviors:
 
   - id: ING-006
     type: lifecycle
-    description: "[주기적 보조 경로] Gmail OAuth WorkManager periodic sync가 신규 이메일을 로컬 파싱하여 Room EmailBody + RawIngestionEvent로 저장한다. 인덱싱 범위는 사용자 주소록 기반 대화 메일로 한정: 시스템 라벨 'INBOX'(받은 편지함) + 'SENT'(보낸 편지함) 두 라벨만 대상. 'DRAFT', 'TRASH', 'SPAM', 'CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'는 제외. person_ref 정규화 방향은 direction에 따라 다름: INBOX 메일은 발신자(From) 이메일, SENT 메일은 수신자(To 첫 번째) 이메일. Gmail 자격증명은 Android Keystore에 보관되며 Railway로 전송되지 않는다"
-    trigger: "WorkManager GmailSyncWorker 실행 (15분 주기)"
-    precondition: "Gmail OAuth 토큰 유효(Keystore 저장), Room DB 초기화, 마지막 sync 이후 INBOX 또는 SENT 라벨에 신규 메시지 1건 존재"
-    expected: "Room raw_ingestion_events 1건(source_type='gmail', person_ref=INBOX는 발신자/SENT는 수신자 이메일, event_title=이메일제목, event_snippet=본문앞200자, source_ref=Gmail messageId) + EmailBody 1건 INSERT됨. Promotions/Social/Updates/Forums 카테고리 및 Draft/Trash/Spam 메일은 INSERT되지 않음"
+    description: "[주기적 보조 경로] Railway backend-managed Gmail sync가 신규 이메일을 canonical raw_ingestion_events + EmailBody로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 인덱싱 범위는 'INBOX' + 'SENT' 두 라벨만 대상이며 Draft/Trash/Spam/Promotions/Social/Updates/Forums는 제외된다"
+    trigger: "Railway Gmail sync endpoint 호출 후 Android mirror refresh"
+    precondition: "Railway에 Gmail 연결 완료, 마지막 sync 이후 INBOX 또는 SENT 라벨에 신규 메시지 1건 존재"
+    expected: "Railway source_status='gmail: synced' 반영 후 Android Room raw_ingestion_events / EmailBody mirror에 Gmail row가 내려온다. person_ref 방향은 INBOX=발신자, SENT=수신자 기준으로 정규화된다"
     source: phase2-acceptance
     tests: []
 
   - id: ING-007
     type: lifecycle
-    description: "[주기적 보조 경로] Outlook Mail Microsoft Graph WorkManager periodic sync가 신규 이메일을 로컬 파싱하여 Room에 저장한다. 인덱싱 범위는 'Inbox' + 'Sent Items' 두 메일 폴더만 대상. 'Drafts', 'Deleted Items', 'Junk Email', 'Archive'는 제외. Focused/Other 구분 없이 Inbox 전체 처리. Outlook OAuth 토큰은 Keystore에 보관되며 Railway로 전송되지 않는다"
-    trigger: "WorkManager OutlookSyncWorker 실행 (15분 주기)"
-    precondition: "Microsoft Graph OAuth 토큰 유효(Keystore 저장), Inbox 또는 Sent Items에 신규 메시지 1건 존재"
-    expected: "Room raw_ingestion_events 1건(source_type='outlook_mail', person_ref=Inbox는 발신자/Sent Items는 수신자 이메일, event_title=이메일제목, event_snippet=본문앞200자, source_ref=Outlook messageId) + EmailBody 1건 INSERT됨. Drafts/Deleted Items/Junk Email/Archive 메일은 INSERT되지 않음"
+    description: "[주기적 보조 경로] Railway backend-managed Outlook Mail sync가 신규 이메일을 canonical raw_ingestion_events + EmailBody로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 인덱싱 범위는 'Inbox' + 'Sent Items' 두 폴더만 대상이며 Drafts/Deleted Items/Junk Email/Archive는 제외된다"
+    trigger: "Railway Outlook Mail sync endpoint 호출 후 Android mirror refresh"
+    precondition: "Railway에 Outlook Mail 연결 완료, Inbox 또는 Sent Items에 신규 메시지 1건 존재"
+    expected: "Railway source_status='outlook_mail: synced' 반영 후 Android Room raw_ingestion_events / EmailBody mirror에 Outlook Mail row가 내려온다. person_ref 방향은 Inbox=발신자, Sent Items=수신자 기준으로 정규화된다"
     source: phase2-acceptance
     tests: []
 
@@ -87,19 +87,19 @@ behaviors:
 
   - id: ING-009
     type: lifecycle
-    description: "[주기적 보조 경로] Google Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다. 취소된 이벤트(Google API status='cancelled')는 하드 삭제하지 않고 Room calendar_events.status='cancelled'로 UPSERT하여 UI가 회색 처리(strike-through) 후 표시하도록 한다 — 사용자가 과거에 본 약속의 흔적을 잃지 않도록 보존"
-    trigger: "WorkManager CalendarSyncWorker 실행 (1시간 주기)"
-    precondition: "Google Calendar OAuth 토큰 유효(Keystore 저장), 오늘 캘린더 이벤트 1건 존재"
-    expected: "Room calendar_events 1건(source_type='google_calendar', status='confirmed'|'cancelled') INSERT 또는 UPSERT됨. Google API가 deletedEvent 또는 status='cancelled'로 반환한 이벤트는 기존 row를 status='cancelled'로 UPDATE(DELETE 아님). 해당 raw_ingestion_events에 event_title=캘린더 제목, location=장소(있을 경우) 저장됨"
+    description: "[주기적 보조 경로] Railway backend-managed Google Calendar sync가 오늘의 이벤트를 canonical calendar_events / raw_ingestion_events로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 취소된 이벤트는 status='cancelled'로 유지한다"
+    trigger: "GoogleCalendarWorker 또는 source manual sync가 Railway calendar sync endpoint를 호출"
+    precondition: "Railway에 Google Calendar 연결 완료, 오늘 캘린더 이벤트 1건 존재"
+    expected: "Android Room calendar_events mirror에 source_type='google_calendar' row가 INSERT 또는 UPSERT된다. 취소된 이벤트는 hard delete 대신 status='cancelled'로 유지되고, raw_ingestion_events mirror에도 event_title/location이 반영된다"
     source: phase2-acceptance
     tests: []
 
   - id: ING-010
     type: lifecycle
-    description: "[주기적 보조 경로] Outlook Calendar sync가 오늘의 이벤트를 Room CalendarEvent에 저장한다. 취소된 이벤트(MS Graph isCancelled=true 또는 @removed deltaToken 응답)는 하드 삭제하지 않고 Room calendar_events.status='cancelled'로 UPSERT하여 회색 처리 후 UI에 유지한다"
-    trigger: "WorkManager OutlookCalendarSyncWorker 실행"
-    precondition: "Microsoft Graph Calendar 토큰 유효(Keystore 저장), 오늘 이벤트 1건 존재"
-    expected: "Room calendar_events 1건(source_type='outlook_calendar', status='confirmed'|'cancelled') INSERT 또는 UPSERT됨. MS Graph가 isCancelled=true 또는 @removed 이벤트를 반환한 경우 기존 row를 status='cancelled'로 UPDATE(DELETE 아님). 해당 raw_ingestion_events에 event_title=캘린더 제목, location=장소(있을 경우) 저장됨"
+    description: "[주기적 보조 경로] Railway backend-managed Outlook Calendar sync가 오늘의 이벤트를 canonical calendar_events / raw_ingestion_events로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 취소된 이벤트는 status='cancelled'로 유지한다"
+    trigger: "OutlookCalendarWorker 또는 source manual sync가 Railway calendar sync endpoint를 호출"
+    precondition: "Railway에 Outlook Calendar 연결 완료, 오늘 이벤트 1건 존재"
+    expected: "Android Room calendar_events mirror에 source_type='outlook_calendar' row가 INSERT 또는 UPSERT된다. 취소된 이벤트는 hard delete 대신 status='cancelled'로 유지되고, raw_ingestion_events mirror에도 event_title/location이 반영된다"
     source: phase2-acceptance
     tests: []
 
@@ -123,8 +123,8 @@ behaviors:
 
   - id: ING-013
     type: lifecycle
-    description: "커서 무효화(Gmail 410 historyId 만료 / IMAP UIDVALIDITY 변경 / MS Graph 410 deltaToken stale) 시 해당 소스 어댑터가 DataStore cursor를 초기화하고 제한된 전체 재동기화(최근 30일)를 수행한다"
-    trigger: "소스 API가 커서 무효화 오류 반환 (Gmail HTTP 410, IMAP UIDVALIDITY mismatch, MS Graph HTTP 410)"
+    description: "커서 무효화(Gmail 410 historyId 만료 / IMAP UIDVALIDITY 변경 / backend mirror pagination invalidation) 시 해당 소스 어댑터가 DataStore cursor를 초기화하고 제한된 전체 재동기화를 수행한다"
+    trigger: "소스 API가 커서 무효화 오류 반환 (Gmail HTTP 410, IMAP UIDVALIDITY mismatch, backend pagination reset)"
     precondition: "어댑터 cursor가 DataStore에 저장됨, source API가 410 또는 UIDVALIDITY mismatch 응답"
     expected: "DataStore 해당 소스 cursor 초기화됨(null). 최근 30일 범위로 전체 재동기화 실행됨. 신규 cursor 저장됨. OverallSyncIndicator의 해당 소스 칩이 syncing 상태로 표시됨"
     source: phase2-acceptance

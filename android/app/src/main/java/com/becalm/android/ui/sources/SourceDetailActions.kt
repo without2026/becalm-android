@@ -5,7 +5,6 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.worker.WorkScheduler
 
 internal object SourceDetailActionResolver {
     fun reconnectDestinationFor(sourceType: String): SourceReconnectDestination? =
@@ -24,19 +23,18 @@ internal object SourceDetailActionResolver {
 
 internal class SourceDetailActionHandler(
     private val sourceAdministrationPort: SourceAdministrationPort,
-    private val workScheduler: WorkScheduler,
+    private val sourceSyncPort: SourceSyncPort,
     private val logger: Logger,
 ) {
-    fun requestManualSync(
+    suspend fun requestManualSync(
         sourceType: String,
         hasValidSourceType: Boolean,
-    ) {
+    ): BecalmResult<Unit> {
         if (!hasValidSourceType || sourceType == SourceType.CALL_RECORDING) {
             logger.w(TAG, "onManualSync ignored for unsupported sourceType=$sourceType")
-            return
+            return BecalmResult.Failure(BecalmError.Validation("sourceType", "unsupported source"))
         }
-        workScheduler.enqueueExpedited(sourceType)
-        logger.d(TAG, "manual sync requested for sourceType=$sourceType")
+        return sourceSyncPort.requestManualSync(sourceType)
     }
 
     suspend fun disconnect(

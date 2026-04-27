@@ -33,7 +33,7 @@ behaviors:
     type: ui_interaction
     description: "OAuth 토큰 만료·revoke로 소스가 disconnect된 경우 SourceStatusStrip 칩이 error 상태로 바뀌고 상단 배너 '[Gmail] 연결이 끊어졌습니다 — 재연결'이 표시된다. 탭 시 OAuth 재연결 플로우(소스별 OAuth 스크린으로 딥링크)"
     screen: "TodayTimelineScreen | SettingsScreen"
-    interaction: "소스 disconnect 감지 (Gmail 401 invalid_grant / MS Graph 401 unauthorized_client / IMAP auth failure)"
+    interaction: "소스 disconnect 감지 (Gmail OAuth revoke / Outlook OAuth revoke / IMAP auth failure)"
     precondition: "소스 어댑터가 AUTH-007 refresh에 실패 (refresh_token도 만료/revoke)"
     expected: "DataStore의 해당 소스 connected=false로 UPDATE. SourceStatusStrip 칩 빨간색 + 배너 표시. 탭 시 해당 소스의 OAuth 재연결 스크린으로 이동. 재연결 성공 시 cursor는 유지(stale cursor는 ERR-002 경로로 다시 reset될 수 있음). 백그라운드 WorkManager 동기화는 재연결 전까지 skip"
     source: phase2-acceptance
