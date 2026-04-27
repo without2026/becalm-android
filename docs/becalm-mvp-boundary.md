@@ -129,6 +129,7 @@ Implications:
 - Splash is a transition-only gate; once startup auth bootstrap resolves, the app must advance to Terms, Login, Onboarding, or Today rather than remain on a blank loading shell
 - Splash / Terms / Login are public auth shell routes and must render from auth/public state only; they must not require onboarding/runtime-owner dependency graphs to paint the first frame
 - Startup diagnostics for this public auth shell must distinguish route resolution, NavController destination change, composition commit, and first layout/render evidence
+- Glass surface styling must not blur foreground content; auth disclosures, fields, and CTA labels must remain readable on first render
 - before a cloud account session exists, no background worker, DAO, or source sync path may touch the user-scoped Room database
 - this also applies to stale persisted WorkManager rows restored after process death; worker construction itself must remain Room-safe until authenticated state is confirmed
 - foreground catch-up, periodic redundancy, and source-specific manual sync are all gated behind authenticated session state
