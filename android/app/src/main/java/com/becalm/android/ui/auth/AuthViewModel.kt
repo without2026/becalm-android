@@ -2,6 +2,7 @@ package com.becalm.android.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
@@ -11,8 +12,11 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.ui.onboarding.OnboardingProgressResolver
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import javax.inject.Provider
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -23,6 +27,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
@@ -87,6 +92,8 @@ private const val SIGNUP_FAILED_MESSAGE = "Could not create account"
 public class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
+    private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap>,
+    @IoDispatcher private val runtimeBootstrapDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -100,6 +107,7 @@ public class AuthViewModel @Inject constructor(
     public val effects: SharedFlow<AuthEffect> = _effects.asSharedFlow()
 
     private var sessionObservationJob: Job? = null
+    private var runtimeBootstrapUserId: String? = null
 
     init {
         onObserveSession()
@@ -267,8 +275,8 @@ public class AuthViewModel @Inject constructor(
         sessionObservationJob?.cancel()
         sessionObservationJob = viewModelScope.launch {
             try {
-                _uiState.value = bootstrapUiState()
-                logger.d(TAG, "startup auth bootstrap resolved to ${_uiState.value}")
+                setUiState(bootstrapUiState())
+                logger.d(TAG, "startup auth bootstrap resolved to ${uiState.value}")
             } catch (e: Exception) {
                 logger.w(TAG, "startup auth bootstrap failed")
                 _uiState.value = AuthUiState.Error(e.message ?: "session bootstrap failed")
@@ -279,7 +287,7 @@ public class AuthViewModel @Inject constructor(
                     _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
                 }
                 .collect { authState ->
-                    _uiState.value = authState.toUiState()
+                    setUiState(authState.toUiState())
                 }
         }
     }
@@ -290,6 +298,33 @@ public class AuthViewModel @Inject constructor(
      */
     public fun onErrorDismissed() {
         _uiState.value = AuthUiState.SignedOut()
+    }
+
+    private fun setUiState(state: AuthUiState) {
+        _uiState.value = state
+        when (state) {
+            is AuthUiState.SignedIn -> startRuntimeBootstrap(state.userId)
+            is AuthUiState.SignedOut -> runtimeBootstrapUserId = null
+            AuthUiState.Loading,
+            is AuthUiState.Error -> Unit
+        }
+    }
+
+    private fun startRuntimeBootstrap(userId: String) {
+        if (runtimeBootstrapUserId == userId) return
+        runtimeBootstrapUserId = userId
+        viewModelScope.launch {
+            runCatching {
+                withContext(runtimeBootstrapDispatcher) {
+                    runtimeBootstrapProvider.get().startForUser(userId)
+                }
+            }.onFailure { error ->
+                if (runtimeBootstrapUserId == userId) {
+                    runtimeBootstrapUserId = null
+                }
+                logger.e(TAG, "runtime bootstrap failed", error)
+            }
+        }
     }
 
     private suspend fun bootstrapUiState(): AuthUiState {

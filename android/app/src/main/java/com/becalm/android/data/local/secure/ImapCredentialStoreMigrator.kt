@@ -25,10 +25,9 @@ import javax.inject.Singleton
  * migration in isolation from the production store's happy-path code paths.
  *
  * ## Invariant
- * Every public API of [ImapCredentialStore] must observe migrated data. Because the
- * migrator runs on `BecalmApplication.onCreate()` before any ingestion worker can fire
- * (periodic workers are enqueued by the scheduler which runs after Hilt's graph is
- * warm), a single fire-and-forget `launch` on an IO dispatcher is sufficient.
+ * Every public API of [ImapCredentialStore] must observe migrated data. Authenticated
+ * runtime bootstrap invokes the migrator before source workers are scheduled, and IMAP
+ * workers also invoke it at the top of their own work path for persisted-work recovery.
  *
  * ## Failure policy (fail loudly)
  * On any [Throwable] the flag is NOT set. The next app start retries the migration.

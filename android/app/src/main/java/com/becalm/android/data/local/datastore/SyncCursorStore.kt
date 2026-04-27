@@ -243,8 +243,8 @@ public interface SyncCursorStore {
      * - The SENT key is intentionally left null — Wave 1 never indexed sent mail,
      *   so the first Wave 3 run performed a bounded cold full-sync of that folder.
      *
-     * Safe to call from BecalmApplication.onCreate on every launch; performs at
-     * most one DataStore read after the migration has completed.
+     * Safe to call from authenticated runtime bootstrap before source work is scheduled;
+     * performs at most one DataStore read after the migration has completed.
      */
     public suspend fun runOutlookMailCursorMigrationV2()
 
@@ -266,8 +266,8 @@ public interface SyncCursorStore {
      * - The legacy keys are always removed on successful migration so that a future
      *   regression cannot accidentally re-read them.
      *
-     * Safe to call from [BecalmApplication.onCreate] on every launch; performs at
-     * most one DataStore read after the migration has completed.
+     * Safe to call from authenticated runtime bootstrap before source work is scheduled;
+     * performs at most one DataStore read after the migration has completed.
      *
      * Spec refs: ING-008 (`.spec/data-ingestion.spec.yml:78-85`),
      * ING-013 (`.spec/data-ingestion.spec.yml:105-110`).
