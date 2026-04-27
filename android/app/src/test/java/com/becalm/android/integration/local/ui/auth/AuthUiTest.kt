@@ -108,6 +108,7 @@ class AuthUiTest {
                     isLoading = false,
                     googleSignInEnabled = false,
                     onSignIn = { _, _ -> },
+                    onSignUp = { _, _ -> },
                     onGoogleSignIn = {},
                 )
             }
@@ -133,6 +134,7 @@ class AuthUiTest {
                         submittedEmail = email
                         submittedPassword = password
                     },
+                    onSignUp = { _, _ -> },
                     onGoogleSignIn = {},
                 )
             }
@@ -149,6 +151,36 @@ class AuthUiTest {
     }
 
     @Test
+    fun `login form forwards entered credentials for account creation`() {
+        var submittedEmail: String? = null
+        var submittedPassword: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    onSignIn = { _, _ -> },
+                    onSignUp = { email, password ->
+                        submittedEmail = email
+                        submittedPassword = password
+                    },
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("login-email").performTextInput("new@example.com")
+        composeRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
+        composeRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("new@example.com", submittedEmail)
+            assertEquals("ValidPass1!", submittedPassword)
+        }
+    }
+
+    @Test
     fun `login screen signed out shell renders without onboarding owner callback`() {
         composeRule.setContent {
             BecalmTheme {
@@ -156,6 +188,7 @@ class AuthUiTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = false,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},

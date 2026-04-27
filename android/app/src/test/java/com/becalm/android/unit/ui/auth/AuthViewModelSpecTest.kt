@@ -125,6 +125,49 @@ class AuthViewModelSpecTest {
     }
 
     @Test
+    fun `AUTH-001A email sign-up success is reflected through observer transition`() = runTest {
+        val states = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
+        every { authRepository.observeAuthState() } returns states
+        every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
+        coEvery { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") } coAnswers {
+            states.value = AuthState.Authenticated(session.copy(email = "new@example.com"))
+            BecalmResult.Success(session.copy(email = "new@example.com"))
+        }
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onEmailSignUp("new@example.com", "ValidPass1!")
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = false),
+            viewModel.uiState.value,
+        )
+        coVerify(exactly = 1) { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") }
+    }
+
+    @Test
+    fun `AUTH-001A email sign-up confirmation requirement stays on login with stable message`() = runTest {
+        coEvery { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") } returns
+            BecalmResult.Failure(
+                BecalmError.Validation(field = "email", message = "email_confirmation_required"),
+            )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onEmailSignUp("new@example.com", "ValidPass1!")
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.Error("Check your email to confirm your account, then sign in."),
+            viewModel.uiState.value,
+        )
+        coVerify(exactly = 1) { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") }
+    }
+
+    @Test
     fun `AUTH-010 bootstrap resolves signed out route from persisted terms before observer emits`() = runTest {
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(false)
         every { authRepository.observeAuthState() } returns emptyFlow()
