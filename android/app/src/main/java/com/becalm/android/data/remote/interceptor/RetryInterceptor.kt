@@ -34,6 +34,9 @@ import java.io.IOException
  * This ensures compliance with the server's rate-limit window (SYNC-005) while
  * preventing runaway waits.
  *
+ * **Response lifecycle** — retryable HTTP responses are closed before the next
+ * `chain.proceed()` call. Only the final attempt's response is returned open to the caller.
+ *
  * **IOException propagation** — after exhausting the attempt budget an [IOException]
  * is re-thrown unchanged; it is never swallowed.
  */
@@ -49,7 +52,6 @@ public class RetryInterceptor : Interceptor {
 
         var attempt = 0
         var lastException: IOException? = null
-        var lastRetryableResponse: Response? = null
         // Override written by 429 Retry-After handling; consumed by the next iteration's sleep.
         var overrideNextDelayMs: Long? = null
 
@@ -64,14 +66,17 @@ public class RetryInterceptor : Interceptor {
                 val response = chain.proceed(request)
 
                 if (!isRetryableStatus(response.code)) {
-                    lastRetryableResponse?.close()
                     return response
                 }
 
-                // Retryable status — remember it, compute any Retry-After override, advance.
-                lastRetryableResponse?.close()
-                lastRetryableResponse = response
+                // Budget exhausted: return the final retryable response open for the caller.
+                if (attempt == MAX_ATTEMPTS - 1) {
+                    return response
+                }
+
+                // Retryable status — read retry metadata, then close before the next proceed().
                 overrideNextDelayMs = retryAfterOverrideMs(response)
+                response.close()
                 attempt++
             } catch (e: IOException) {
                 lastException = e
@@ -79,9 +84,6 @@ public class RetryInterceptor : Interceptor {
             }
         }
 
-        // Budget exhausted. Prefer returning the last retryable response so callers see the
-        // real server status. Fall back to rethrowing the last IOException if we never got one.
-        lastRetryableResponse?.let { return it }
         throw lastException ?: IOException("RetryInterceptor: attempt budget ($MAX_ATTEMPTS) exhausted")
     }
 

@@ -23,15 +23,14 @@ import java.util.concurrent.TimeUnit
  * ## OkHttp interceptor chain (outermost → innermost)
  *
  * 1. [HttpLoggingInterceptor] — logs request/response details. `BASIC` in debug builds,
- *    `NONE` in release builds. Outermost so it logs the final wire request after all
- *    header mutations have been applied.
- * 2. [RetryInterceptor] — retries on IOException, HTTP 5xx (except 501), 408, 429 with
+ *    `NONE` in release builds.
+ * 2. [IdempotencyInterceptor] — converts the `X-BeCalm-Idempotent: 1` sentinel header into
+ *    a real `Idempotency-Key: <uuid>` once per logical OkHttp call. It sits outside retry
+ *    and auth so 5xx/408/429 retries and 401 refresh retries reuse the same key.
+ * 3. [RetryInterceptor] — retries on IOException, HTTP 5xx (except 501), 408, 429 with
  *    exponential backoff. Sits above auth so a refreshed token is used on retry.
- * 3. [AuthInterceptor] — attaches `Authorization: Bearer` and handles 401 refresh-and-retry
+ * 4. [AuthInterceptor] — attaches `Authorization: Bearer` and handles 401 refresh-and-retry
  *    (AUTH-007). Host-guarded: passes Supabase Auth calls through unchanged.
- * 4. [IdempotencyInterceptor] — converts the `X-BeCalm-Idempotent: 1` sentinel header into
- *    a real `Idempotency-Key: <uuid>` on the wire. Innermost so the key is generated after
- *    all other header decisions have been made.
  */
 public object ApiFactory {
 
@@ -65,9 +64,9 @@ public object ApiFactory {
             .writeTimeout(timeouts.writeSeconds, TimeUnit.SECONDS)
             // Chain: outermost → innermost
             .addInterceptor(loggingInterceptor)
+            .addInterceptor(IdempotencyInterceptor(idempotencyProvider))
             .addInterceptor(RetryInterceptor())
             .addInterceptor(AuthInterceptor(authProvider, authFailureSessionInvalidator, railwayHost))
-            .addInterceptor(IdempotencyInterceptor(idempotencyProvider))
             .build()
     }
 
