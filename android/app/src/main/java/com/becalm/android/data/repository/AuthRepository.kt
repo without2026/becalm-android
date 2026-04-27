@@ -62,6 +62,15 @@ public interface AuthRepository {
     public suspend fun signInWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
 
     /**
+     * Creates an email/password account (AUTH-001A).
+     *
+     * On providers that return a session immediately, this follows the same local
+     * post-auth state path as [signInWithEmail]. If email confirmation is required,
+     * the remote client returns a validation failure and no local auth state is mutated.
+     */
+    public suspend fun signUpWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
+
+    /**
      * Signs in with a Google ID token obtained from the Google Sign-In SDK (AUTH-002).
      *
      * @param idToken Raw JWT ID token returned by Google Sign-In.
@@ -174,6 +183,13 @@ public class AuthRepositoryImpl @Inject constructor(
         password: String,
     ): BecalmResult<SupabaseSession> =
         authClient.signInWithEmail(email, password)
+            .onSuccess { value -> applySignInState(value) }
+
+    override suspend fun signUpWithEmail(
+        email: String,
+        password: String,
+    ): BecalmResult<SupabaseSession> =
+        authClient.signUpWithEmail(email, password)
             .onSuccess { value -> applySignInState(value) }
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =

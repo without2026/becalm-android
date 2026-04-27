@@ -68,6 +68,8 @@ public sealed interface AuthEffect {
 
 private const val TAG = "AuthViewModel"
 private const val INVALID_EMAIL_PASSWORD_MESSAGE = "Invalid email or password"
+private const val EMAIL_CONFIRMATION_REQUIRED_MESSAGE = "Check your email to confirm your account, then sign in."
+private const val SIGNUP_FAILED_MESSAGE = "Could not create account"
 
 /**
  * ViewModel for the authentication flow.
@@ -123,6 +125,38 @@ public class AuthViewModel @Inject constructor(
                     val message = when (result.error) {
                         is BecalmError.Unauthorized -> INVALID_EMAIL_PASSWORD_MESSAGE
                         else -> result.error.safeMessage
+                    }
+                    _uiState.value = AuthUiState.Error(message)
+                }
+            }
+        }
+    }
+
+    // spec: AUTH-001A
+    /**
+     * Creates an email/password account from the public Login shell.
+     *
+     * If Supabase returns a session immediately, the session observer drives the
+     * transition to [AuthUiState.SignedIn]. If email confirmation is required, the
+     * screen stays on Login and shows a stable confirmation-required message.
+     */
+    public fun onEmailSignUp(email: String, password: String) {
+        viewModelScope.launch {
+            _uiState.value = AuthUiState.Loading
+            when (val result = authRepository.signUpWithEmail(email, password)) {
+                is BecalmResult.Success -> {
+                    logger.d(TAG, "email sign-up succeeded")
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "email sign-up failed")
+                    val message = when (val error = result.error) {
+                        is BecalmError.Validation ->
+                            if (error.message == "email_confirmation_required") {
+                                EMAIL_CONFIRMATION_REQUIRED_MESSAGE
+                            } else {
+                                SIGNUP_FAILED_MESSAGE
+                            }
+                        else -> error.safeMessage
                     }
                     _uiState.value = AuthUiState.Error(message)
                 }

@@ -46,10 +46,13 @@
     <string name="login_password_label">Password</string>
     <string name="login_password_placeholder">Your password</string>
     <string name="login_cta">Sign In</string>
+    <string name="login_signup_cta">Create account</string>
     <string name="login_google_cta">Continue with Google</string>
     <string name="login_google_error_no_credentials">No Google account found on this device. Add one from Settings → Accounts and try again.</string>
     <string name="login_google_error_unknown">Google sign-in failed. Please try again or use email.</string>
     <string name="login_error_empty_fields">Please enter your email and password.</string>
+    <string name="login_signup_check_email">Check your email to confirm your account, then sign in.</string>
+    <string name="login_signup_failed">Couldn\'t create that account. Try signing in or use a different email.</string>
 
     <!-- Onboarding: recording folder -->
     <string name="onb_recording_folder_title">Recording Folder</string>

@@ -170,6 +170,7 @@ class AuthScreenTest {
                     isLoading = false,
                     googleSignInEnabled = false,
                     onSignIn = { _, _ -> },
+                    onSignUp = { _, _ -> },
                     onGoogleSignIn = {},
                 )
             }
@@ -195,6 +196,7 @@ class AuthScreenTest {
                         submittedEmail = email
                         submittedPassword = password
                     },
+                    onSignUp = { _, _ -> },
                     onGoogleSignIn = {},
                 )
             }
@@ -207,6 +209,36 @@ class AuthScreenTest {
         composeTestRule.runOnIdle {
             assertEquals("user@example.com", submittedEmail)
             assertEquals("secret", submittedPassword)
+        }
+    }
+
+    @Test
+    fun login_form_forwards_entered_credentials_to_signup() {
+        var submittedEmail: String? = null
+        var submittedPassword: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    onSignIn = { _, _ -> },
+                    onSignUp = { email, password ->
+                        submittedEmail = email
+                        submittedPassword = password
+                    },
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("login-email").performTextInput("new@example.com")
+        composeTestRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
+        composeTestRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("new@example.com", submittedEmail)
+            assertEquals("ValidPass1!", submittedPassword)
         }
     }
 
@@ -224,6 +256,7 @@ class AuthScreenTest {
                         onboardingCompleted = false,
                     ),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = { destination = it },
@@ -255,6 +288,7 @@ class AuthScreenTest {
                         onboardingCompleted = true,
                     ),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = { destination = it },
@@ -282,6 +316,7 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.Error("bad credentials"),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},
@@ -309,6 +344,7 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = { launchCount += 1 },
                     onSignedInNavigate = {},
@@ -335,6 +371,7 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
+                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},

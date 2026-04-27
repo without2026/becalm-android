@@ -14,6 +14,15 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-001A
+    type: api
+    description: "가입되지 않은 사용자는 LoginScreen에서 이메일+비밀번호로 계정을 생성할 수 있다. Supabase가 즉시 세션을 반환하면 로그인 성공과 동일하게 세션을 저장하고, 이메일 확인이 필요한 설정이면 확인 안내를 표시한 뒤 LoginScreen에 머문다"
+    endpoint: "POST /auth/v1/signup"
+    precondition: "Supabase 프로젝트 초기화, email signup 허용"
+    expected: "세션 반환 시 AUTH-001과 동일하게 access_token + refresh_token 저장. 세션 미반환 시 '이메일 확인 후 로그인' 안내 표시. raw backend error는 노출하지 않음"
+    source: phase2-acceptance
+    tests: []
+
   - id: AUTH-002
     type: api
     description: "잘못된 비밀번호로 로그인 시 Supabase Auth가 400을 반환하고 앱은 LoginScreen에 에러 메시지를 표시한다"

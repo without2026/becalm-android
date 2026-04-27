@@ -64,6 +64,7 @@ public fun LoginScreen(
     onboardingViewModel: OnboardingViewModel? = null,
     stateOverride: AuthUiState? = null,
     onEmailSignIn: ((String, String) -> Unit)? = null,
+    onEmailSignUp: ((String, String) -> Unit)? = null,
     googleSignInEnabledOverride: Boolean? = null,
     onGoogleSignInLaunch: (() -> Unit)? = null,
     onSignedInNavigate: ((String) -> Unit)? = null,
@@ -74,6 +75,7 @@ public fun LoginScreen(
 ) {
     val needsAuthViewModel = stateOverride == null ||
         onEmailSignIn == null ||
+        onEmailSignUp == null ||
         onGoogleIdToken == null ||
         onErrorDismissed == null ||
         (onGoogleSignInLaunch == null && googleSignInEnabledOverride == null)
@@ -164,6 +166,10 @@ public fun LoginScreen(
                 onEmailSignIn?.invoke(email, password)
                     ?: requireNotNull(authViewModel).onEmailSignIn(email, password)
             },
+            onSignUp = { email, password ->
+                onEmailSignUp?.invoke(email, password)
+                    ?: requireNotNull(authViewModel).onEmailSignUp(email, password)
+            },
             onGoogleSignIn = launchGoogleSignIn,
         )
     }
@@ -210,6 +216,7 @@ internal fun LoginForm(
     isLoading: Boolean,
     googleSignInEnabled: Boolean,
     onSignIn: (String, String) -> Unit,
+    onSignUp: (String, String) -> Unit,
     onGoogleSignIn: () -> Unit,
 ) {
     // Local UI state only — no PII stored in remembered state
@@ -273,6 +280,20 @@ internal fun LoginForm(
             enabled = googleSignInEnabled && !isLoading,
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(modifier = Modifier.height(12.dp))
+        BecalmButton(
+            text = stringResource(R.string.login_signup_cta),
+            onClick = {
+                if (email.isBlank() || password.isBlank()) {
+                    showEmptyError = true
+                } else {
+                    onSignUp(email, password)
+                }
+            },
+            variant = BecalmButtonVariant.Text,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -289,6 +310,7 @@ private fun PreviewLoginScreen() {
                 isLoading = false,
                 googleSignInEnabled = true,
                 onSignIn = { _, _ -> },
+                onSignUp = { _, _ -> },
                 onGoogleSignIn = {},
             )
         }

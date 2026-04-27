@@ -44,6 +44,15 @@ public interface SupabaseAuthClient {
     public suspend fun signInWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
 
     /**
+     * Creates an email/password account (AUTH-001A).
+     *
+     * Supabase may return a session immediately or require email confirmation first.
+     * This client returns [BecalmError.Validation] with `message=email_confirmation_required`
+     * for the confirmation-required branch so the UI can show a stable product string.
+     */
+    public suspend fun signUpWithEmail(email: String, password: String): BecalmResult<SupabaseSession>
+
+    /**
      * Authenticates using a Google ID token obtained from the Google Sign-In SDK (AUTH-002 / AUTH-003).
      *
      * On success the session is persisted to [SupabaseSessionStore] before returning.
@@ -133,6 +142,24 @@ public class SupabaseAuthClientImpl @Inject constructor(
             this.password = password
         }
         val session = requireCurrentSession()
+        sessionStore.save(session)
+        session
+    }
+
+    override suspend fun signUpWithEmail(
+        email: String,
+        password: String,
+    ): BecalmResult<SupabaseSession> = runCatchingAuth(
+        tag = "signUpWithEmail",
+        restExceptionMapper = ::mapEmailSignUpRestException,
+    ) {
+        client.auth.signUpWith(Email) {
+            this.email = email
+            this.password = password
+        }
+        val rawSession = client.auth.currentSessionOrNull()
+            ?: throw EmailConfirmationRequiredException()
+        val session = rawSession.toSupabaseSession()
         sessionStore.save(session)
         session
     }
@@ -241,6 +268,9 @@ public class SupabaseAuthClientImpl @Inject constructor(
     } catch (e: IOException) {
         logger.e(TAG, "[$tag] IOException: ${e.message}")
         BecalmResult.Failure(BecalmError.Network(code = -1, message = e.message ?: "Network error"))
+    } catch (e: EmailConfirmationRequiredException) {
+        logger.d(TAG, "[$tag] email confirmation required")
+        BecalmResult.Failure(BecalmError.Validation(field = "email", message = e.message ?: "email_confirmation_required"))
     } catch (e: Exception) {
         logger.e(TAG, "[$tag] Unexpected: ${e.message}")
         BecalmResult.Failure(BecalmError.Unknown(e))
@@ -251,6 +281,11 @@ public class SupabaseAuthClientImpl @Inject constructor(
         else -> mapDefaultRestException(e)
     }
 
+    private fun mapEmailSignUpRestException(e: RestException): BecalmError = when (e.statusCode) {
+        400, 401, 422 -> BecalmError.Validation(field = "email", message = "signup_failed")
+        else -> mapDefaultRestException(e)
+    }
+
     private fun mapDefaultRestException(e: RestException): BecalmError = when (e.statusCode) {
         401 -> BecalmError.Unauthorized
         429 -> BecalmError.RateLimited(retryAfterSeconds = null)
@@ -258,6 +293,8 @@ public class SupabaseAuthClientImpl @Inject constructor(
         else -> BecalmError.Network(code = e.statusCode, message = e.message ?: "Auth error")
     }
 }
+
+private class EmailConfirmationRequiredException : Exception("email_confirmation_required")
 
 // ─── Extension ───────────────────────────────────────────────────────────────
 

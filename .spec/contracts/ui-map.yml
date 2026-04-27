@@ -31,6 +31,9 @@ routes:
     data: ["POST https://<supabase-project>.supabase.co/auth/v1/token"]
     components: [EmailField, PasswordField, LoginButton, GoogleSignInButton, SignUpLink]
     auth: public
+    # SignUpLink creates an email account from the same email/password fields.
+    # If the auth provider requires email confirmation, the shell shows a
+    # confirmation-required message and stays on /login.
 
   - path: /onboarding/recording-folder
     screen: RecordingFolderScreen

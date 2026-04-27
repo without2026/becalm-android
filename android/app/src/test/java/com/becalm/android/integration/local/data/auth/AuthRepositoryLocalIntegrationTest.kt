@@ -148,6 +148,25 @@ class AuthRepositoryLocalIntegrationTest {
     }
 
     @Test
+    fun `AUTH-001A sign up writes current user id and opens user-scoped database`() = runTest {
+        val session = LocalIntegrationSupport.authenticatedSession(userId = USER_ID, email = "new@example.com")
+        every { processRestarter.restart() } answers { throw AssertionError("restart not expected") }
+        coEvery { authClient.signUpWithEmail("new@example.com", "pw") } returns BecalmResult.Success(session)
+
+        repository.observeAuthState().test {
+            assertTrue(awaitItem() is AuthState.Unauthenticated)
+            val result = repository.signUpWithEmail("new@example.com", "pw")
+            assertTrue(result is BecalmResult.Success)
+            assertEquals(USER_ID, userPrefsStore.observeCurrentUserId().first())
+            assertEquals(BeCalmDatabase.deriveUserIdHash(USER_ID), databaseProvider.currentUserIdHash())
+            verify(exactly = 1) { appRuntimeSyncCoordinator.start() }
+            val authenticated = awaitItem()
+            assertTrue(authenticated is AuthState.Authenticated)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `AUTH-005 routine invalidateSession preserves room rows while clearing session mirror`() = runTest {
         val session = LocalIntegrationSupport.authenticatedSession(userId = USER_ID)
         sessionStore.save(session)
