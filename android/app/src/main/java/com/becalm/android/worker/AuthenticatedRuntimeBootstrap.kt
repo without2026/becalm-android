@@ -1,6 +1,7 @@
 package com.becalm.android.worker
 
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
@@ -26,6 +27,7 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
 ) {
 
     public suspend fun startIfSignedIn() {
@@ -47,7 +49,9 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
             }.onFailure { logger.e(TAG, "database warm-open failed", it) }
 
             workScheduler.cleanupLegacyWorkNames()
-            appRuntimeSyncCoordinator.start()
+            withContext(mainDispatcher) {
+                appRuntimeSyncCoordinator.start()
+            }
         }
     }
 

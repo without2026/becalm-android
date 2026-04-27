@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Provider
 import timber.log.Timber
 
 /**
@@ -36,7 +37,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
     public lateinit var workerFactory: HiltWorkerFactory
 
     @Inject
-    public lateinit var authenticatedRuntimeBootstrap: AuthenticatedRuntimeBootstrap
+    public lateinit var authenticatedRuntimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap>
 
     /**
      * One-shot migrator that promotes the pre-wave-2 single-tuple IMAP credential
@@ -45,7 +46,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
      * by a `UserPrefsStore` flag), so repeat invocations are safe no-ops.
      */
     @Inject
-    public lateinit var imapCredentialStoreMigrator: ImapCredentialStoreMigrator
+    public lateinit var imapCredentialStoreMigratorProvider: Provider<ImapCredentialStoreMigrator>
 
     /**
      * [SyncCursorStore] — hosts the one-shot Outlook mail cursor v2 migration that
@@ -55,7 +56,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
      * the read/write after a single pass.
      */
     @Inject
-    public lateinit var syncCursorStore: SyncCursorStore
+    public lateinit var syncCursorStoreProvider: Provider<SyncCursorStore>
 
     /**
      * Unstructured scope for startup fire-and-forget work that must outlive individual
@@ -64,9 +65,9 @@ public class BecalmApplication : Application(), Configuration.Provider {
      * receives no structured error propagation back to the caller.
      *
      * Dispatched on [Dispatchers.IO] because startup migrations and authenticated runtime
-     * bootstrap perform DataStore, Room, and WorkManager I/O. Keeping this scope off main
-     * is required for WorkManager-launched processes where Application.onCreate must return
-     * before SystemJobService.onStartJob times out.
+     * bootstrap perform DataStore, Room, and WorkManager I/O. The heavier Hilt graph is
+     * also resolved from this scope via [Provider.get], keeping Application.onCreate small
+     * for WorkManager-launched processes.
      */
     private val applicationScope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -99,7 +100,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // by invoking [ImapCredentialStoreMigrator.migrateIfNeeded] at the top of their
         // own [ImapNaverWorker.doWork] / [ImapDaumWorker.doWork].
         applicationScope.launch {
-            runCatching { imapCredentialStoreMigrator.migrateIfNeeded() }
+            runCatching { imapCredentialStoreMigratorProvider.get().migrateIfNeeded() }
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP migration launch failed") }
         }
 
@@ -110,7 +111,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // other startup migrations — a rare DataStore corruption must not crash
         // the process before the UI is reachable; the next launch retries.
         applicationScope.launch {
-            runCatching { syncCursorStore.runOutlookMailCursorMigrationV2() }
+            runCatching { syncCursorStoreProvider.get().runOutlookMailCursorMigrationV2() }
                 .onFailure { Timber.e(it, "BecalmApplication: Outlook mail cursor v2 migration failed") }
         }
 
@@ -122,7 +123,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // runCatching mirrors the other startup migrations — a DataStore corruption
         // must not crash the process before the UI is reachable.
         applicationScope.launch {
-            runCatching { syncCursorStore.runImapCursorMigrationV2() }
+            runCatching { syncCursorStoreProvider.get().runImapCursorMigrationV2() }
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
         }
 
@@ -130,7 +131,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // Application.onCreate on DataStore, Room, or WorkManager calls; JobService must
         // get back to onStartJob promptly even under cold-start I/O pressure (AUTH-009).
         applicationScope.launch {
-            authenticatedRuntimeBootstrap.startIfSignedIn()
+            authenticatedRuntimeBootstrapProvider.get().startIfSignedIn()
         }
     }
 

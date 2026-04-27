@@ -70,5 +70,6 @@ class AuthenticatedRuntimeBootstrapSpecTest {
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
         logger = logger,
         ioDispatcher = Dispatchers.Unconfined,
+        mainDispatcher = Dispatchers.Unconfined,
     )
 }
