@@ -12,6 +12,7 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 
 /**
  * Periodic and on-demand [CoroutineWorker] that drains pending rows from
@@ -62,29 +63,31 @@ import dagger.assisted.AssistedInject
 public class UploadWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted private val workerParams: WorkerParameters,
-    private val authRepository: AuthRepository,
-    rawIngestionRepository: RawIngestionRepository,
-    commitmentRepository: CommitmentRepository,
-    private val sourceStatusRepository: SourceStatusRepository,
+    private val authRepositoryProvider: Provider<AuthRepository>,
+    private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+    private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    private val rawEventUploader: RawEventUploader = RawEventUploader(
-        rawIngestionRepository = rawIngestionRepository,
-        logger = logger,
-    )
-
-    private val commitmentUploader: CommitmentUploader = CommitmentUploader(
-        commitmentRepository = commitmentRepository,
-        logger = logger,
-    )
-
-    private val coordinator: UploadWorkerCoordinator = UploadWorkerCoordinator(
-        authRepository = authRepository,
-        rawEventUploader = rawEventUploader,
-        commitmentUploader = commitmentUploader,
-        sourceStatusRepository = sourceStatusRepository,
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        authRepository: AuthRepository,
+        rawIngestionRepository: RawIngestionRepository,
+        commitmentRepository: CommitmentRepository,
+        sourceStatusRepository: SourceStatusRepository,
+        processingPauseGate: ProcessingPauseGate,
+        logger: Logger,
+    ) : this(
+        appContext = appContext,
+        workerParams = workerParams,
+        authRepositoryProvider = Provider { authRepository },
+        rawIngestionRepositoryProvider = Provider { rawIngestionRepository },
+        commitmentRepositoryProvider = Provider { commitmentRepository },
+        sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        processingPauseGate = processingPauseGate,
         logger = logger,
     )
 
@@ -93,11 +96,26 @@ public class UploadWorker @AssistedInject constructor(
             return Result.success()
         }
         val attempt = workerParams.inputData.getInt(INPUT_KEY_ATTEMPT, 0)
-        return coordinator.run(
+        return createCoordinator().run(
             attempt = attempt,
             maxRetriesExceeded = hasExceededMaxRetries(logger, TAG, MAX_RETRIES),
         )
     }
+
+    private fun createCoordinator(): UploadWorkerCoordinator =
+        UploadWorkerCoordinator(
+            authRepository = authRepositoryProvider.get(),
+            rawEventUploader = RawEventUploader(
+                rawIngestionRepository = rawIngestionRepositoryProvider.get(),
+                logger = logger,
+            ),
+            commitmentUploader = CommitmentUploader(
+                commitmentRepository = commitmentRepositoryProvider.get(),
+                logger = logger,
+            ),
+            sourceStatusRepository = sourceStatusRepositoryProvider.get(),
+            logger = logger,
+        )
 
     public companion object {
         private const val TAG = "UploadWorker"

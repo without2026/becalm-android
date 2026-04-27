@@ -13,6 +13,7 @@ import com.becalm.android.ui.today.ColdSyncRuntimeCoordinator
 import com.becalm.android.ui.today.DefaultColdSyncRuntimeCoordinator
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.Clock
 
@@ -23,12 +24,31 @@ import kotlinx.datetime.Clock
 public class ColdSyncStage2Worker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val runtimeCoordinator: ColdSyncRuntimeCoordinator,
-    private val sourceStatusRepository: SourceStatusRepository,
+    private val runtimeCoordinatorProvider: Provider<ColdSyncRuntimeCoordinator>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        runtimeCoordinator: ColdSyncRuntimeCoordinator,
+        sourceStatusRepository: SourceStatusRepository,
+        userPrefsStore: UserPrefsStore,
+        logger: Logger,
+    ) : this(
+        appContext = appContext,
+        workerParams = workerParams,
+        runtimeCoordinatorProvider = Provider { runtimeCoordinator },
+        sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        userPrefsStore = userPrefsStore,
+        logger = logger,
+    )
+
     override suspend fun doWork(): Result {
+        val runtimeCoordinator = runtimeCoordinatorProvider.get()
+        val sourceStatusRepository = sourceStatusRepositoryProvider.get()
+
         when (runtimeCoordinator.startStage2(Clock.System.now())) {
             is com.becalm.android.core.result.BecalmResult.Failure -> return Result.retry()
             is com.becalm.android.core.result.BecalmResult.Success -> Unit

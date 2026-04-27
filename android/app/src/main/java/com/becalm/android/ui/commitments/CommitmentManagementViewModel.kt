@@ -2,6 +2,7 @@ package com.becalm.android.ui.commitments
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -14,6 +15,8 @@ import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -218,6 +221,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
     private val _uiState: MutableStateFlow<CommitmentUiState> =
@@ -388,7 +392,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     public fun onPullRefresh() {
         if (_uiState.value.refreshing) return
         _uiState.update { it.copy(refreshing = true) }
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
             if (userId == null) {
                 _uiState.update { it.copy(refreshing = false) }
@@ -514,7 +518,7 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-013
     public fun onUndo(snapshot: CommitmentUndoSnapshot) {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             val result = commitmentRepository.updateActionState(
                 id = snapshot.commitmentId,
                 newState = snapshot.priorState.wireValue,
@@ -568,7 +572,7 @@ public class CommitmentManagementViewModel @Inject constructor(
         effect: (suspend () -> Unit)? = null,
         block: suspend () -> BecalmResult<*>,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             when (val result = block()) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "$name succeeded id=${hashId(id)}")

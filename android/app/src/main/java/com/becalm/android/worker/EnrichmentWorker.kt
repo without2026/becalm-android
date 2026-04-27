@@ -73,7 +73,7 @@ import kotlin.time.Duration.Companion.days
 public class EnrichmentWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val authRepository: AuthRepository,
+    private val authRepositoryProvider: Provider<AuthRepository>,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val personEnrichmentRepositoryProvider: Provider<PersonEnrichmentRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
@@ -82,6 +82,28 @@ public class EnrichmentWorker @AssistedInject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        authRepository: AuthRepository,
+        rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+        personEnrichmentRepositoryProvider: Provider<PersonEnrichmentRepository>,
+        sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+        processingPauseGate: ProcessingPauseGate,
+        logger: Logger,
+        ioDispatcher: CoroutineDispatcher,
+    ) : this(
+        appContext = appContext,
+        workerParams = workerParams,
+        authRepositoryProvider = Provider { authRepository },
+        rawIngestionRepositoryProvider = rawIngestionRepositoryProvider,
+        personEnrichmentRepositoryProvider = personEnrichmentRepositoryProvider,
+        sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
+        processingPauseGate = processingPauseGate,
+        logger = logger,
+        ioDispatcher = ioDispatcher,
+    )
+
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         if (processingPauseGate.shouldSkip(TAG)) {
             return@withContext Result.success()
@@ -89,7 +111,7 @@ public class EnrichmentWorker @AssistedInject constructor(
         if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return@withContext Result.failure()
 
         // ENR-003: resolve userId; null session → terminal failure
-        val userId = authRepository.currentSession()?.userId
+        val userId = authRepositoryProvider.get().currentSession()?.userId
         if (userId == null) {
             logger.w(TAG, "doWork aborted — no authenticated session")
             return@withContext Result.failure()

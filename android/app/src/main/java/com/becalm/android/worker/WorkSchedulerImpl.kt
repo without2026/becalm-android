@@ -175,16 +175,23 @@ public class WorkSchedulerImpl @Inject constructor(
             workManager.cancelUniqueWork(key)
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
-        logger.d(TAG, "cancelAll — cancelled ${ALL_KEYS.size} unique chains + voice uploads by tag")
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+        logger.d(
+            TAG,
+            "cancelAll — cancelled ${ALL_KEYS.size} unique chains + " +
+                "voice uploads and commitment extractions by tag",
+        )
     }
 
     override fun cleanupLegacyWorkNames() {
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY)
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_UPLOAD_KEY)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,
             "cleanupLegacyWorkNames — cancelled legacy keys=" +
-                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY}",
+                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY} " +
+                "and stale commitment extractions by tag",
         )
     }
 

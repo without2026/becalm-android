@@ -15,11 +15,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
 public class DefaultAuthTokenProvider @Inject constructor(
-    private val authClient: SupabaseAuthClient,
+    private val authClientProvider: Provider<SupabaseAuthClient>,
     private val sessionStore: SupabaseSessionStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
@@ -48,7 +49,7 @@ public class DefaultAuthTokenProvider @Inject constructor(
                 return@withLock AuthTokenProvider.RefreshResult.Refreshed(cached)
             }
 
-            val result = authClient.refresh(current.refreshToken)
+            val result = authClientProvider.get().refresh(current.refreshToken)
             val refreshed = result.getOrNull()
             if (refreshed != null) {
                 sessionStore.save(refreshed)

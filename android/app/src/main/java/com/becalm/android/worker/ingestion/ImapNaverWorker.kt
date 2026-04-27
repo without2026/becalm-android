@@ -44,6 +44,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
@@ -100,9 +101,9 @@ public class ImapNaverWorker @AssistedInject constructor(
     private val imapCredentialStoreMigrator: ImapCredentialStoreMigrator,
     private val syncCursorStore: SyncCursorStore,
     private val imapClient: ImapClient,
-    private val rawIngestionRepository: RawIngestionRepository,
-    private val emailBodyRepository: EmailBodyRepository,
-    private val sourceStatusRepository: SourceStatusRepository,
+    private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+    private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
     private val processingPauseGate: ProcessingPauseGate,
@@ -119,6 +120,12 @@ public class ImapNaverWorker @AssistedInject constructor(
         val listType = Types.newParameterizedType(List::class.java, String::class.java)
         moshi.adapter<List<String>>(listType)
     }
+    private val rawIngestionRepository: RawIngestionRepository
+        get() = rawIngestionRepositoryProvider.get()
+    private val emailBodyRepository: EmailBodyRepository
+        get() = emailBodyRepositoryProvider.get()
+    private val sourceStatusRepository: SourceStatusRepository
+        get() = sourceStatusRepositoryProvider.get()
 
     public override suspend fun doWork(): Result {
         if (processingPauseGate.shouldSkip(TAG)) {
@@ -143,7 +150,11 @@ public class ImapNaverWorker @AssistedInject constructor(
         // userId is stored separately from the IMAP email; it may differ (Supabase UUID).
         val userId = userPrefs.data
             .map { it[stringPreferencesKey(PREF_KEY_CURRENT_USER_ID)] }
-            .first() ?: ""
+            .first()
+        if (userId.isNullOrBlank()) {
+            logger.w(TAG, "no active userId — draining stale work")
+            return Result.success()
+        }
 
         sourceStatusRepository.recordSyncStart(SourceType.NAVER_IMAP)
 

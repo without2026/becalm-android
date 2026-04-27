@@ -309,7 +309,7 @@ class CommitmentManagementViewModelSpecTest {
         every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
         coEvery { commitmentRepository.transitionState("remind-1", CommitmentEvent.Remind) } returns
             BecalmResult.Success(pending.copy(actionState = "reminded"))
-        every { reminderScheduler.schedule(any(), any()) } just runs
+        coEvery { reminderScheduler.schedule(any(), any()) } just runs
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -318,7 +318,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
-        verify(exactly = 1) { reminderScheduler.schedule("remind-1", dueAt) }
+        coVerify(exactly = 1) { reminderScheduler.schedule("remind-1", dueAt) }
     }
 
     @Test
@@ -327,7 +327,7 @@ class CommitmentManagementViewModelSpecTest {
         every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
         coEvery { commitmentRepository.transitionState("remind-2", CommitmentEvent.Remind) } returns
             BecalmResult.Success(pending.copy(actionState = "reminded"))
-        every { reminderScheduler.schedule(any(), any()) } just runs
+        coEvery { reminderScheduler.schedule(any(), any()) } just runs
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -336,7 +336,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
-        verify(exactly = 1) { reminderScheduler.schedule("remind-2", null) }
+        coVerify(exactly = 1) { reminderScheduler.schedule("remind-2", null) }
     }
 
     @Test
@@ -351,7 +351,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.error?.contains("illegal") == true)
-        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
     @Test
@@ -366,7 +366,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertNull(viewModel.uiState.value.error)
-        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
         verify(exactly = 0) { reminderScheduler.cancel(any()) }
     }
 
@@ -479,7 +479,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.onUndo(CommitmentUndoSnapshot.Completed("undo-2", CommitmentState.REMINDED))
         advanceUntilIdle()
 
-        verify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
+        coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
     private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(

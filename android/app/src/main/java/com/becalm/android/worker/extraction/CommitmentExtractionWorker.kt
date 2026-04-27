@@ -30,6 +30,7 @@ import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
 import kotlinx.datetime.Clock
 import java.util.UUID
+import javax.inject.Provider
 
 /**
  * WorkManager worker that extracts commitments from a freshly-ingested email via the
@@ -59,6 +60,8 @@ import java.util.UUID
  *   [MetricsStore.incrementSubjectOnlySkipped] for monitoring (EMAIL-003).
  * - [BecalmError.ExtractorUnavailable] with reason `AICORE_NOT_AVAILABLE` — device does not
  *   support Gemini Nano; no amount of retry will fix it.
+ * - No active user id — stale WorkManager work restored after sign-out; this is a success
+ *   no-op and intentionally avoids opening user-scoped Room dependencies.
  *
  * ## Failure paths
  * - Missing `rawEventId` input → `Result.failure()`; likely a test misconfiguration.
@@ -93,14 +96,14 @@ import java.util.UUID
 public class CommitmentExtractionWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val rawIngestionEventDao: RawIngestionEventDao,
-    private val emailBodyDao: EmailBodyDao,
-    private val commitmentDao: CommitmentDao,
+    private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
+    private val emailBodyDaoProvider: Provider<EmailBodyDao>,
+    private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val userPrefsStore: UserPrefsStore,
-    private val metricsStore: MetricsStore,
-    private val promptBuilder: EmailPromptBuilder,
-    private val quotedBlockSplitter: QuotedBlockSplitter,
-    private val geminiNanoExtractor: GeminiNanoExtractor,
+    private val metricsStoreProvider: Provider<MetricsStore>,
+    private val promptBuilderProvider: Provider<EmailPromptBuilder>,
+    private val quotedBlockSplitterProvider: Provider<QuotedBlockSplitter>,
+    private val geminiNanoExtractorProvider: Provider<GeminiNanoExtractor>,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -117,16 +120,18 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
 
         val userId = userPrefsStore.observeCurrentUserId().first()
         if (userId.isNullOrBlank()) {
-            logger.e(TAG, "no active userId — failing id=${redact(rawEventId)}")
-            return Result.failure()
+            logger.d(TAG, "no active userId — stale extraction no-op id=${redact(rawEventId)}")
+            return Result.success()
         }
 
+        val rawIngestionEventDao = rawIngestionEventDaoProvider.get()
         val rawEvent = rawIngestionEventDao.findById(id = rawEventId, userId = userId)
         if (rawEvent == null) {
             logger.e(TAG, "raw event not found id=${redact(rawEventId)}")
             return Result.failure()
         }
 
+        val emailBodyDao = emailBodyDaoProvider.get()
         val emailBody = emailBodyDao.getByRawEventId(rawEventId)
         if (emailBody == null) {
             logger.d(
@@ -142,13 +147,14 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                 TAG,
                 "subject-only email id=${redact(rawEventId)} — skipping LLM, bumping metric",
             )
-            metricsStore.incrementSubjectOnlySkipped()
+            metricsStoreProvider.get().incrementSubjectOnlySkipped()
             return Result.success()
         }
 
-        val split = quotedBlockSplitter.split(bodyForPrompt)
+        val split = quotedBlockSplitterProvider.get().split(bodyForPrompt)
         val folder = rawEvent.folder ?: FOLDER_INBOX_DEFAULT
 
+        val promptBuilder = promptBuilderProvider.get()
         val systemContext = promptBuilder.buildSystemContext(
             folder = folder,
             phoneE164Self = null,
@@ -163,7 +169,7 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
             quotedText = split.quoted,
         )
 
-        return when (val extractResult = geminiNanoExtractor.extract(systemContext, userContext)) {
+        return when (val extractResult = geminiNanoExtractorProvider.get().extract(systemContext, userContext)) {
             is BecalmResult.Success -> handleDrafts(
                 rawEvent = rawEvent,
                 userId = userId,
@@ -215,11 +221,12 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                     now = now,
                 )
             }
+            val commitmentDao = commitmentDaoProvider.get()
             commitmentDao.insertAll(entities)
         }
 
         val updated = rawEvent.copy(commitmentsExtractedCount = drafts.size)
-        rawIngestionEventDao.update(updated)
+        rawIngestionEventDaoProvider.get().update(updated)
 
         logger.d(
             TAG,

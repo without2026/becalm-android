@@ -2,21 +2,35 @@ package com.becalm.android.worker
 
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 
 @Singleton
 public class ProcessingPauseGate @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) {
+    @Volatile
+    private var pausedSnapshot: Boolean = false
+
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            userPrefsStore.observeProcessingPaused().collect { paused ->
+                pausedSnapshot = paused
+            }
+        }
+    }
+
     public suspend fun isPaused(): Boolean =
         userPrefsStore.observeProcessingPaused().first()
 
     public fun isPausedBlocking(): Boolean =
-        runBlocking { isPaused() }
+        pausedSnapshot
 
     public suspend fun shouldSkip(owner: String): Boolean {
         val paused = isPaused()

@@ -42,10 +42,10 @@ internal class AuthSessionCleanupPlanner(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     suspend fun buildSignOutSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
-        add(NamedAuthStep("cancelAllWorkers") { workScheduler.cancelAll() })
-        add(NamedAuthStep("stopContentObservers") { contentObserverBootstrap.stop() })
+        add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
+        add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
-        add(NamedAuthStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
+        add(ioStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
         add(NamedAuthStep("sessionStoreClear") { sessionStore.clear() })
@@ -53,13 +53,13 @@ internal class AuthSessionCleanupPlanner(
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })
         add(NamedAuthStep("syncCursorClear") { syncCursorStore.clearAll() })
         add(NamedAuthStep("userPrefsClearAll") { userPrefsStore.clearAll() })
-        add(NamedAuthStep("databaseClearAll") { withContext(ioDispatcher) { databaseProvider.current().clearAllTables() } })
-        add(NamedAuthStep("databaseClose") { withContext(ioDispatcher) { databaseProvider.close() } })
+        add(ioStep("databaseClearAll") { databaseProvider.current().clearAllTables() })
+        add(ioStep("databaseClose") { databaseProvider.close() })
     }
 
     suspend fun buildInvalidateSessionSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
-        add(NamedAuthStep("cancelAllWorkers") { workScheduler.cancelAll() })
-        add(NamedAuthStep("stopContentObservers") { contentObserverBootstrap.stop() })
+        add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
+        add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
@@ -68,6 +68,9 @@ internal class AuthSessionCleanupPlanner(
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })
         add(NamedAuthStep("currentUserIdClear") { userPrefsStore.setCurrentUserId(null) })
     }
+
+    private fun ioStep(name: String, block: suspend () -> Any?): NamedAuthStep =
+        NamedAuthStep(name) { withContext(ioDispatcher) { block() } }
 }
 
 internal object AuthRepositoryRunner {
