@@ -44,6 +44,7 @@ import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Onboarding step: IMAP provider selector (Naver / Daum) with app-password save (S6-H).
@@ -68,8 +69,36 @@ import kotlinx.coroutines.flow.filter
 @Composable
 public fun ImapSetupScreen(
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    emailConnectEventsOverride: Flow<EmailConnectEvent>? = null,
+    onSaveCredentials: ((ImapProvider, String, String) -> Unit)? = null,
+    onSkipStep: (() -> Unit)? = null,
+    onNavigateToGoogleCalendar: (() -> Unit)? = null,
 ) {
+    val resolvedViewModel = if (
+        emailConnectEventsOverride == null || onSaveCredentials == null || onSkipStep == null
+    ) {
+        viewModel ?: hiltViewModel()
+    } else {
+        viewModel
+    }
+    val navigateToGoogleCalendar = onNavigateToGoogleCalendar ?: {
+        navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+    }
+    val saveCredentials = onSaveCredentials ?: { provider: ImapProvider, username: String, appPassword: String ->
+        requireNotNull(resolvedViewModel).saveImapCredentials(
+            sourceType = provider.sourceType,
+            credentials = ImapCredentials(
+                host = provider.host,
+                port = provider.port,
+                username = username,
+                appPassword = appPassword,
+            ),
+        )
+    }
+    val skipStep = onSkipStep ?: {
+        requireNotNull(resolvedViewModel).onSkipStep(OnboardingStep.LINK_IMAP)
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // FLAG_SECURE: credentials screen — prevent screenshot capture (PIPA Article 29).
@@ -88,12 +117,11 @@ public fun ImapSetupScreen(
     )
 
     LaunchedEffect(viewModel) {
-        viewModel.emailConnectEvents
+        (emailConnectEventsOverride ?: requireNotNull(resolvedViewModel).emailConnectEvents)
             .filter { it.provider in EmailPipaProvider.IMAP_GROUP }
             .collect { event ->
                 when (event) {
-                    is EmailConnectEvent.Connected ->
-                        navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+                    is EmailConnectEvent.Connected -> navigateToGoogleCalendar()
                     is EmailConnectEvent.PendingIntentRequired -> Unit // IMAP never emits this.
                     is EmailConnectEvent.Failed -> snackbarHostState.showSnackbar(
                         errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
@@ -109,19 +137,11 @@ public fun ImapSetupScreen(
         ImapForm(
             modifier = Modifier.padding(padding),
             onSave = { provider, username, appPassword ->
-                viewModel.saveImapCredentials(
-                    sourceType = provider.sourceType,
-                    credentials = ImapCredentials(
-                        host = provider.host,
-                        port = provider.port,
-                        username = username,
-                        appPassword = appPassword,
-                    ),
-                )
+                saveCredentials(provider, username, appPassword)
             },
             onSkip = {
-                viewModel.onSkipStep(OnboardingStep.LINK_IMAP)
-                navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+                skipStep()
+                navigateToGoogleCalendar()
             },
         )
     }

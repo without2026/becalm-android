@@ -12,13 +12,11 @@ import androidx.work.PeriodicWorkRequest
 import androidx.work.workDataOf
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.extraction.CommitmentExtractionWorker
-import com.becalm.android.worker.ingestion.GmailWorker
 import com.becalm.android.worker.ingestion.GoogleCalendarWorker
 import com.becalm.android.worker.ingestion.ImapDaumWorker
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import com.becalm.android.worker.ingestion.MediaStoreWorker
 import com.becalm.android.worker.ingestion.OutlookCalendarWorker
-import com.becalm.android.worker.ingestion.OutlookMailWorker
 import java.util.concurrent.TimeUnit
 
 internal data class SourceWorkSpec(
@@ -52,10 +50,8 @@ internal object WorkSchedulerRequests {
 
     fun resolveSource(sourceKey: String): SourceWorkSpec? =
         when (sourceKey) {
-            SourceType.GMAIL -> SourceWorkSpec(GmailWorker::class.java, UniqueWorkKeys.GMAIL)
             SourceType.NAVER_IMAP -> SourceWorkSpec(ImapNaverWorker::class.java, UniqueWorkKeys.NAVER_IMAP)
             SourceType.DAUM_IMAP -> SourceWorkSpec(ImapDaumWorker::class.java, UniqueWorkKeys.DAUM_IMAP)
-            SourceType.OUTLOOK_MAIL -> SourceWorkSpec(OutlookMailWorker::class.java, UniqueWorkKeys.OUTLOOK_MAIL)
             SourceType.GOOGLE_CALENDAR -> SourceWorkSpec(GoogleCalendarWorker::class.java, UniqueWorkKeys.GCAL)
             SourceType.OUTLOOK_CALENDAR -> SourceWorkSpec(OutlookCalendarWorker::class.java, UniqueWorkKeys.OUTLOOK_CAL)
             else -> null
@@ -139,10 +135,8 @@ internal object WorkSchedulerRequests {
 
     fun allStaticKeys(): List<String> = listOf(
         UniqueWorkKeys.MEDIA_STORE,
-        UniqueWorkKeys.GMAIL,
         UniqueWorkKeys.NAVER_IMAP,
         UniqueWorkKeys.DAUM_IMAP,
-        UniqueWorkKeys.OUTLOOK_MAIL,
         UniqueWorkKeys.GCAL,
         UniqueWorkKeys.OUTLOOK_CAL,
         UniqueWorkKeys.ENRICHMENT,

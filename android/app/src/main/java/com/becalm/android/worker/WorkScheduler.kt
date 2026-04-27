@@ -128,9 +128,9 @@ public interface WorkScheduler {
      *
      * @param rawEventId UUID of the
      *   [com.becalm.android.data.local.db.entity.RawIngestionEventEntity] whose body should be
-     *   extracted. Callers are ingestion workers (`GmailWorker`, `OutlookMailWorker`,
-     *   `ImapNaverWorker`, `ImapDaumWorker`) — wiring those call-sites is out of scope for
-     *   this PR (see `feat/worker/email-*` PRs).
+     *   extracted. Current callers are the IMAP ingestion workers
+     *   (`ImapNaverWorker`, `ImapDaumWorker`). Gmail / Outlook Mail moved to backend-managed
+     *   sync and no longer enqueue on-device mail workers.
      */
     public fun enqueueCommitmentExtraction(rawEventId: String)
 

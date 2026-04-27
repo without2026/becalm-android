@@ -39,7 +39,7 @@ behaviors:
     screen: "PrivacyManagementScreen | ConsentWithdrawScreen"
     interaction: "[동의 철회] 탭"
     precondition: "DataStore에 최소 1개 consent flag=true"
-    expected: "ConsentWithdrawScreen 표시됨. Switch 항목 및 off 시 영향: (1) PIPA 제3자 제공 동의 off → DataStore pipa_third_party_consent=false + 모든 voice raw event sync_status='awaiting_consent'로 즉시 전환(이미 synced된 것은 유지), VoiceUploadWorker 후속 호출 차단. (2) Gmail OAuth 연결 해제 → DataStore gmail_connected=false, token revoke(Google OAuth revocation endpoint 호출), 이후 Gmail 어댑터 실행 중단. (3) Outlook / IMAP / Calendar 동일 패턴. 이용약관 철회는 사실상 '계정 삭제'와 동등하므로 PIPA-005로 안내. 각 토글 off 시 해당 소스의 sync_status는 그대로 두되 새 업로드 차단 + UI 배너 '이 소스는 동의가 철회되어 동기화가 중단되었습니다'"
+    expected: "ConsentWithdrawScreen 표시됨. Switch 항목 및 off 시 영향: (1) PIPA 제3자 제공 동의 off → DataStore pipa_third_party_consent=false + 모든 voice raw event sync_status='awaiting_consent'로 즉시 전환(이미 synced된 것은 유지), VoiceUploadWorker 후속 호출 차단. (2) Gmail OAuth 연결 해제 → DataStore gmail_connected=false, token revoke(Google OAuth revocation endpoint 호출), 이후 Gmail backend sync 실행 중단. (3) Outlook / IMAP / Calendar 동일 패턴. 이용약관 철회는 사실상 '계정 삭제'와 동등하므로 PIPA-005로 안내. 각 토글 off 시 해당 소스의 sync_status는 그대로 두되 새 업로드 차단 + UI 배너 '이 소스는 동의가 철회되어 동기화가 중단되었습니다'"
     source: phase2-acceptance
     tests: []
 

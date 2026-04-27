@@ -18,16 +18,14 @@ SourceDetailScreen
    ├─ last_sync_at / events_synced_count / last_error
    ├─ [다시 연결] → OAuth 재인증 or IMAP 비밀번호 or SAF folder
    ├─ [연결 해제] → SourcesListViewModel.disconnectSource(sourceType)
-   └─ [지금 동기화] → WorkScheduler.enqueueUniqueWork('sync-<source>', REPLACE)
+   └─ [지금 동기화] → source owner별 수동 sync (backend endpoint 또는 local worker)
 ```
 
-Adapter workers (per-source):
-- Gmail: `worker/ingestion/GmailWorker.kt:59`
-- Outlook Mail: `worker/ingestion/OutlookMailWorker.kt`
-- IMAP: `worker/ingestion/ImapNaverWorker.kt`
-- Google Calendar: `worker/ingestion/GoogleCalendarWorker.kt`
-- Outlook Calendar: `worker/ingestion/OutlookCalendarWorker.kt`
-- Voice (MediaStore): `worker/ingestion/MediaStoreWorker.kt:84`
+Source owners:
+- Gmail / Outlook Mail: backend-managed OAuth + sync (`EmailOAuthConnector` → Railway)
+- Google Calendar / Outlook Calendar: backend-managed OAuth + sync
+- IMAP: local worker (`ImapNaverWorker.kt`, `ImapDaumWorker.kt`)
+- Voice (MediaStore): local worker (`MediaStoreWorker.kt`)
 
 ---
 
@@ -61,7 +59,7 @@ API gap 주의 — `SourceDetailViewModel.kt:110/141` 의 "API gap: filter by so
 | IMAP | `ui/onboarding/ImapSetupScreen.kt` (앱 비밀번호 재입력) |
 | Voice | `ui/onboarding/RecordingFolderScreen.kt` (SAF 폴더 재선택) |
 
-**Verify**: `SourceDetailScreen` 의 `[다시 연결]` 콜백이 Nav 로 각 화면에 재진입하는지 (`BecalmNavHost.kt:110/114/118/122/126`).
+**Verify**: `SourceDetailScreen` 의 `[다시 연결]` 콜백이 Nav 로 각 화면에 재진입하는지. Mail/Calendar OAuth 는 브라우저를 열고 Railway `:status` polling 후 connected 상태로 돌아와야 한다.
 
 ---
 
@@ -73,7 +71,7 @@ API gap 주의 — `SourceDetailViewModel.kt:110/141` 의 "API gap: filter by so
 | Cursor clear | `data/local/datastore/SyncCursorStore.kt:88/96` | `clearCursor(source)` / `clearAll()` |
 | Gmail history clear | `SyncCursorStore.kt:116` | `setGmailHistoryId(null)` |
 | IMAP clear | `SyncCursorStore.kt:140` | `setImapState(mailbox, null)` |
-| Keystore clear | `data/local/secure/EncryptedTokenStore.kt` / `ImapCredentialStore.kt` | clear 메서드 |
+| Credential clear | `data/local/secure/OAuthCredentialStore.kt` / `ImapCredentialStore.kt` | clear 메서드 |
 | Room 유지 | `RawIngestionEventDao.kt` | DELETE 호출 **없어야** 함 |
 
 **Verify invariant**:
@@ -90,8 +88,8 @@ grep -n "disconnectSource" becalm-android/android/app/src/main/java/com/becalm/a
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
 | Button | `ui/sources/SourceDetailScreen.kt` | [지금 동기화] 버튼 |
-| Trigger | `worker/WorkSchedulerImpl.kt` | `enqueueUniqueWork('sync-<source>', REPLACE, OneTimeWorkRequest<Worker>)` |
-| Unique key | `worker/UniqueWorkKeys.kt:11` | `UniqueWorkKeys.UPLOAD` 등 상수 |
+| Local sources | `worker/WorkSchedulerImpl.kt` | IMAP/voice one-shot |
+| Backend-managed sources | `ui/sources/SourceSyncPort.kt` | Gmail/Outlook Mail → `syncMailSource`, Calendar → `triggerServerSync` |
 
 **Verify invariant — dashboard 에서 소스별 수동 트리거 금지**:
 ```
@@ -117,4 +115,4 @@ grep -rn "enqueueUniqueWork.*sync-" becalm-android/android/app/src/main/java/com
 | --- | --- |
 | `ui/sources/SourcesListViewModelTest.kt` | SMG-001/004 |
 | `ui/sources/SourceDetailViewModelTest.kt` | SMG-002/005 |
-| `worker/ingestion/OutlookCalendarWorkerTest.kt` | SMG-005 worker path (partial) |
+| `unit/ui/sources/SourceDetailViewModelSpecTest.kt` | SMG-005 owner-based manual sync dispatch |

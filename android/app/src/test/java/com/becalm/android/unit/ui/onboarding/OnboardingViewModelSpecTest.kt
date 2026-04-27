@@ -7,14 +7,14 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
-import com.becalm.android.data.remote.gmail.OAuthSignInResult
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.ui.onboarding.ContactsPermissionEffect
 import com.becalm.android.ui.onboarding.CalendarConnectEvent
 import com.becalm.android.ui.onboarding.CalendarOAuthConnector
 import com.becalm.android.ui.onboarding.CalendarOAuthProvider
 import com.becalm.android.ui.onboarding.CalendarOAuthResult
+import com.becalm.android.ui.onboarding.EmailOAuthConnector
+import com.becalm.android.ui.onboarding.EmailOAuthProvider
+import com.becalm.android.ui.onboarding.EmailOAuthResult
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingNavigationEvent
 import com.becalm.android.ui.onboarding.OnboardingViewModel
@@ -48,9 +48,8 @@ class OnboardingViewModelSpecTest {
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val observability: ObservabilityClient = mockk(relaxed = true)
-    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl = mockk(relaxed = true)
-    private val msGraphTokenProvider: MsGraphTokenProviderImpl = mockk(relaxed = true)
     private val imapCredentialStore: ImapCredentialStore = mockk(relaxed = true)
+    private val emailOAuthConnector: EmailOAuthConnector = mockk(relaxed = true)
     private val calendarOAuthConnector: CalendarOAuthConnector = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
 
@@ -331,13 +330,14 @@ class OnboardingViewModelSpecTest {
     fun `ONB gmail oauth success marks gmail complete and persists connected flag`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
-        coEvery { googleAuthTokenProvider.startSignIn(activity) } returns OAuthSignInResult.Success
+        coEvery { emailOAuthConnector.startSignIn(EmailOAuthProvider.GMAIL, activity) } returns EmailOAuthResult.Connected
         val viewModel = buildViewModel()
 
         viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, activity)
         advanceUntilIdle()
 
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true) }
+        coVerify(exactly = 1) { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true) }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
@@ -345,7 +345,7 @@ class OnboardingViewModelSpecTest {
         verify(exactly = 1) {
             observability.captureMessage(
                 message = "onboarding_email_connected",
-                tags = mapOf("provider" to "gmail"),
+                tags = mapOf("provider" to "gmail", "owner" to "backend"),
             )
         }
     }
@@ -354,8 +354,8 @@ class OnboardingViewModelSpecTest {
     fun `ONB outlook oauth failure marks skipped and reports network failure`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL) } returns flowOf(true)
-        coEvery { msGraphTokenProvider.startSignIn(activity) } returns
-            OAuthSignInResult.Failure(com.becalm.android.data.remote.gmail.FailureReason.NETWORK)
+        coEvery { emailOAuthConnector.startSignIn(EmailOAuthProvider.OUTLOOK_MAIL, activity) } returns
+            EmailOAuthResult.Failed("network")
         val viewModel = buildViewModel()
 
         viewModel.onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, activity)
@@ -421,7 +421,7 @@ class OnboardingViewModelSpecTest {
         viewModel.onConnectEmailProvider(EmailPipaProvider.GMAIL, activity)
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { googleAuthTokenProvider.startSignIn(activity) }
+        coVerify(exactly = 0) { emailOAuthConnector.startSignIn(EmailOAuthProvider.GMAIL, activity) }
         assertEquals(
             StepStatus.SKIPPED,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
@@ -599,9 +599,8 @@ class OnboardingViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         logger = logger,
         observability = observability,
-        googleAuthTokenProvider = googleAuthTokenProvider,
-        msGraphTokenProvider = msGraphTokenProvider,
         imapCredentialStore = imapCredentialStore,
+        emailOAuthConnector = emailOAuthConnector,
         calendarOAuthConnector = calendarOAuthConnector,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
     )

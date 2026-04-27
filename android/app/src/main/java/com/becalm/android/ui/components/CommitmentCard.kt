@@ -8,6 +8,9 @@
  */
 package com.becalm.android.ui.components
 
+import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,9 +118,12 @@ import kotlinx.datetime.toLocalDateTime
  */
 @Composable
 public fun CommitmentCard(
+    itemType: String,
     title: String,
-    direction: String,
-    derivedStatus: String,
+    direction: String?,
+    scheduleStatus: String?,
+    decisionStatus: String?,
+    derivedStatus: String?,
     dueAt: Instant?,
     counterpartyDisplayName: String?,
     modifier: Modifier = Modifier,
@@ -129,9 +135,13 @@ public fun CommitmentCard(
 ) {
     val colors = MaterialTheme.becalmColors
     val colorScheme = MaterialTheme.colorScheme
+    val normalizedItemType = itemType.lowercase()
+    val normalizedDirection = direction?.lowercase()
+    val normalizedScheduleStatus = scheduleStatus?.lowercase()
+    val normalizedDecisionStatus = decisionStatus?.lowercase()
 
     // Direction stripe color
-    val stripeColor = when (direction.lowercase()) {
+    val stripeColor = when (normalizedDirection) {
         "give" -> colors.directionGive.border
         "take" -> colors.directionTake.border
         else -> colorScheme.outline
@@ -140,13 +150,45 @@ public fun CommitmentCard(
     // Status → alpha; chip visibility. COMPLETED and CANCELLED both dim per spec
     // CMT-009 — the user has closed the row one way or the other. OVERDUE stays at
     // full alpha so it keeps pulling the user's attention (they still need to act).
-    val normalized = derivedStatus.uppercase()
+    val normalized = derivedStatus?.uppercase().orEmpty()
     val isCompleted = normalized == "COMPLETED"
     val isCancelled = normalized == "CANCELLED"
     val isTerminal = isCompleted || isCancelled
     val cardAlpha = if (isTerminal) 0.6f else 1.0f
     // Chip is always shown so the terminal-state reason is visible even when dimmed.
-    val showChip = true
+    val showChip = normalizedItemType == CommitmentItemType.ACTION
+    val itemTypeLabel = remember(normalizedItemType) {
+        when (normalizedItemType) {
+            CommitmentItemType.ACTION -> R.string.commitment_item_type_action
+            CommitmentItemType.SCHEDULE -> R.string.commitment_item_type_schedule
+            CommitmentItemType.DECISION -> R.string.commitment_item_type_decision
+            else -> R.string.commitment_item_type_action
+        }
+    }
+    val subtypeLabel = when (normalizedItemType) {
+        CommitmentItemType.ACTION -> when (normalizedDirection) {
+            "give" -> stringResource(R.string.commitments_filter_give)
+            "take" -> stringResource(R.string.commitments_filter_take)
+            else -> null
+        }
+        CommitmentItemType.SCHEDULE -> when (normalizedScheduleStatus) {
+            CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+            CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
+            CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
+            CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)
+            CommitmentScheduleStatus.FOLLOW_UP -> stringResource(R.string.commitment_subtype_schedule_follow_up)
+            else -> null
+        }
+        CommitmentItemType.DECISION -> when (normalizedDecisionStatus) {
+            CommitmentDecisionStatus.APPROVED -> stringResource(R.string.commitment_subtype_decision_approved)
+            CommitmentDecisionStatus.REJECTED -> stringResource(R.string.commitment_subtype_decision_rejected)
+            CommitmentDecisionStatus.CHOSEN -> stringResource(R.string.commitment_subtype_decision_chosen)
+            CommitmentDecisionStatus.DEFERRED -> stringResource(R.string.commitment_subtype_decision_deferred)
+            CommitmentDecisionStatus.ONGOING -> stringResource(R.string.commitment_subtype_decision_ongoing)
+            else -> null
+        }
+        else -> null
+    }
 
     // D-N badge — single computation memoised on dueAt. Convert dueAt to an Asia/Seoul
     // calendar date, diff against today-in-KST, and render per
@@ -264,6 +306,28 @@ public fun CommitmentCard(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PillBadge(
+                        label = stringResource(itemTypeLabel),
+                        stateColors = colors.actionStatePending,
+                        horizontalPadding = 6.dp,
+                        verticalPadding = 2.dp,
+                    )
+                    if (!subtypeLabel.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        PillBadge(
+                            label = subtypeLabel,
+                            stateColors = colors.actionStateFollowedUp,
+                            horizontalPadding = 6.dp,
+                            verticalPadding = 2.dp,
+                        )
+                    }
+                }
+
                 // Due-hint line — original verbatim expression from the source event
                 // (e.g. "월말"). Gated to approximate deadlines per
                 // commitment-management.spec.yml:9,13: on exact deadlines the D-N
@@ -279,10 +343,17 @@ public fun CommitmentCard(
                 }
 
                 // Counterparty
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = counterpartyDisplayName ?: stringResource(R.string.commitment_counterparty_unknown),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+
                 if (counterpartyDisplayName != null) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = counterpartyDisplayName,
+                        text = stringResource(R.string.commitment_detail_counterparty_label),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -310,7 +381,7 @@ public fun CommitmentCard(
                     ) {
                         Spacer(modifier = Modifier.weight(1f))
                         PillBadge(
-                            label = derivedStatus,
+                            label = requireNotNull(derivedStatus),
                             stateColors = stateColors,
                             horizontalPadding = 8.dp,
                             verticalPadding = 3.dp,
@@ -443,8 +514,11 @@ private fun PreviewScaffold(content: @Composable () -> Unit) {
 private fun PreviewCommitmentCardGivePendingD2() {
     PreviewScaffold {
         CommitmentCard(
+            itemType = CommitmentItemType.ACTION,
             title = "Send contract draft",
             direction = "give",
+            scheduleStatus = null,
+            decisionStatus = null,
             derivedStatus = "REMINDED",
             dueAt = Instant.parse("2026-04-18T00:00:00+09:00"),
             counterpartyDisplayName = "Alice Kim",
@@ -459,8 +533,11 @@ private fun PreviewCommitmentCardGivePendingD2() {
 private fun PreviewCommitmentCardTakeCompleted() {
     PreviewScaffold {
         CommitmentCard(
+            itemType = CommitmentItemType.ACTION,
             title = "Review budget proposal",
             direction = "take",
+            scheduleStatus = null,
+            decisionStatus = null,
             derivedStatus = "COMPLETED",
             dueAt = null,
             counterpartyDisplayName = "Bob Lee",
@@ -473,8 +550,11 @@ private fun PreviewCommitmentCardTakeCompleted() {
 private fun PreviewCommitmentCardOverdueReminded() {
     PreviewScaffold {
         CommitmentCard(
+            itemType = CommitmentItemType.ACTION,
             title = "Submit expense report",
             direction = "give",
+            scheduleStatus = null,
+            decisionStatus = null,
             derivedStatus = "OVERDUE",
             dueAt = Instant.parse("2026-04-10T00:00:00+09:00"),
             counterpartyDisplayName = null,
@@ -490,8 +570,11 @@ private fun PreviewCommitmentCardOverdueReminded() {
 private fun PreviewCommitmentCardNoDueDate() {
     PreviewScaffold {
         CommitmentCard(
+            itemType = CommitmentItemType.ACTION,
             title = "Follow up on proposal",
             direction = "take",
+            scheduleStatus = null,
+            decisionStatus = null,
             derivedStatus = "PENDING",
             dueAt = null,
             counterpartyDisplayName = "Carol Park",

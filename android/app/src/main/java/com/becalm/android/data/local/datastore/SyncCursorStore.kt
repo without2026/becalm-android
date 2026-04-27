@@ -32,11 +32,11 @@ public const val OUTLOOK_MAIL_INBOX_CURSOR_KEY: String = "outlook_mail_inbox_del
 public const val OUTLOOK_MAIL_SENT_CURSOR_KEY: String = "outlook_mail_sent_delta"
 
 /**
- * Legacy cursor key used by Wave 1 OutlookMailWorker before folder-scoped deltas
- * landed. Retained here (private to this package) only for the one-shot migration
- * in [SyncCursorStoreImpl.runOutlookMailCursorMigrationV2]; new code must NOT
- * reference this value — the grep invariant `grep -rn "CURSOR_KEY = \"outlook_mail_delta\""`
- * must remain zero outside this file.
+ * Legacy cursor key used before folder-scoped Outlook Mail deltas landed.
+ *
+ * Retained here only for the one-shot migration in
+ * [SyncCursorStoreImpl.runOutlookMailCursorMigrationV2]; new code must NOT reference
+ * this value.
  */
 internal const val LEGACY_OUTLOOK_MAIL_CURSOR_KEY: String = "outlook_mail_delta"
 
@@ -98,24 +98,24 @@ public data class ImapCursorState(val uidValidity: Long, val lastSeenUid: Long)
  * Persistent store for per-source incremental-sync cursors.
  *
  * Each sync source tracks a different cursor shape; this interface exposes:
- * - A **generic string API** ([observeCursor] / [setCursor] / [clearCursor]) for sources
- *   that use opaque string tokens (MS Graph delta links, Google Calendar sync tokens).
+ * - A **generic string API** ([observeCursor] / [setCursor] / [clearCursor]) for app-side
+ *   feed cursors such as paged mirror refresh chains.
  * - **Typed convenience functions** for sources with structured numeric cursors (Gmail
  *   historyId, IMAP UIDVALIDITY+UID pairs, MediaStore timestamps).
  *
  * ## Cursor invalidation (HTTP 410 / UIDVALIDITY change)
- * When a sync engine receives an HTTP 410 Gone from the Gmail or MS Graph API, or detects
- * a UIDVALIDITY change on an IMAP connection, it must call [clearCursor] (or
- * [setImapState] with the new state) before the next sync pass so the engine falls back
- * to a full re-sync rather than resuming from a stale cursor.
+ * When a sync engine receives an HTTP 410 Gone from the Gmail API, or detects a
+ * UIDVALIDITY change on an IMAP connection, it must call [clearCursor] (or [setImapState]
+ * with the new state) before the next sync pass so the engine falls back to a full re-sync
+ * rather than resuming from a stale cursor.
  *
  * ## Logout
  * [clearAll] wipes every cursor atomically. Call it from the sign-out flow before any
  * session state is removed.
  *
  * ## Source identifiers used for generic API
- * "gmail" | "imap_naver" | "imap_daum" | "outlook_mail" | "google_calendar" |
- * "outlook_calendar" | "sms_mms" | "voice"
+ * "calendar_events" | "commitments_cursor" | "outlook_mail" (legacy migration only) |
+ * "sms_mms" | "voice"
  */
 public interface SyncCursorStore {
 
@@ -125,9 +125,10 @@ public interface SyncCursorStore {
      * Emits the raw cursor string stored for [source], or `null` if no cursor has been
      * persisted yet (first run or after [clearCursor]).
      *
-     * Applicable to sources with opaque string cursors:
-     * - "outlook_mail" / "outlook_calendar" — MS Graph `deltaLink` URL
-     * - "google_calendar" — Google Calendar `syncToken`
+     * Applicable to app-side opaque cursors such as:
+     * - "calendar_events" — backend mirror pagination cursor
+     * - "commitments_cursor" — commitments feed pagination cursor
+     * - "outlook_mail" — legacy migration key retained for upgrade cleanup only
      *
      * @param source Source identifier string, e.g. "google_calendar".
      */
@@ -146,8 +147,8 @@ public interface SyncCursorStore {
      * Erases the cursor for [source], forcing the next sync pass to perform a full
      * re-sync from the beginning.
      *
-     * Call this when a sync engine receives HTTP 410 Gone (Gmail history expiry,
-     * MS Graph delta token expiry) or any other invalidation signal.
+     * Call this when a sync engine receives HTTP 410 Gone, pagination invalidation,
+     * or any other signal that requires a bounded full refresh.
      *
      * @param source Source identifier string.
      */
@@ -240,8 +241,7 @@ public interface SyncCursorStore {
      * - If a value exists under the legacy key AND the INBOX key is still unset:
      *   copy legacy → INBOX, delete the legacy key.
      * - The SENT key is intentionally left null — Wave 1 never indexed sent mail,
-     *   so the first Wave 3 run performs a bounded cold full-sync of that folder
-     *   via the 30-day lookback applied by [MsGraphClientImpl].
+     *   so the first Wave 3 run performed a bounded cold full-sync of that folder.
      *
      * Safe to call from BecalmApplication.onCreate on every launch; performs at
      * most one DataStore read after the migration has completed.

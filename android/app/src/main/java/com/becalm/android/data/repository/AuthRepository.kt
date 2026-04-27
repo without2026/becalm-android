@@ -12,9 +12,8 @@ import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -142,19 +141,7 @@ public class AuthRepositoryImpl @Inject constructor(
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val imapCredentialStore: ImapCredentialStore,
-    // Concrete type (not the [com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider]
-    // interface) so the sign-out cleanup hook [GoogleAuthTokenProviderImpl.signOutCleanup]
-    // is reachable. Without wiping the Gmail OAuth credential on sign-out, a second account
-    // on the same device would inherit the previous user's Gmail grant on the next cold
-    // start after [com.becalm.android.BecalmApplication] calls
-    // [GoogleAuthTokenProviderImpl.warmUp] (cross-account data leak).
-    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
-    // Concrete type for the same reason as [googleAuthTokenProvider] — the interface
-    // deliberately does not expose [MsGraphTokenProviderImpl.signOut] because the MSAL
-    // disk cache / [OAuthCredentialStore] wipe is an implementation concern. Without this
-    // hook, logout leaves the MS Graph grant on device and the next account inherits
-    // Outlook mailbox authorization on the same phone (PIPA cross-account leakage).
-    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
+    private val oauthCredentialStore: OAuthCredentialStore,
     private val processRestarter: ProcessRestarter,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -173,8 +160,7 @@ public class AuthRepositoryImpl @Inject constructor(
         contentObserverBootstrap = contentObserverBootstrap,
         personEnrichmentRepository = personEnrichmentRepository,
         imapCredentialStore = imapCredentialStore,
-        googleAuthTokenProvider = googleAuthTokenProvider,
-        msGraphTokenProvider = msGraphTokenProvider,
+        oauthCredentialStore = oauthCredentialStore,
         ioDispatcher = ioDispatcher,
     )
 

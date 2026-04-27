@@ -61,8 +61,6 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
             STAGE1_SOURCE_TYPES.forEach { sourceStatusRepository.recordSyncStart(it) }
             foregroundWorkScheduler.enqueueGCalOneShotNow(STAGE1_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueOutlookCalOneShotNow(STAGE1_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueGmailOneShotNow(STAGE1_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueOutlookMailOneShotNow(STAGE1_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE1_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE1_LOOKBACK_DAYS)
             workScheduler.enqueueUpload(attempt = 0)
@@ -76,8 +74,6 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
         runCatching {
             requireCurrentUserId()
             STAGE2_SOURCE_TYPES.forEach { sourceStatusRepository.recordSyncStart(it) }
-            foregroundWorkScheduler.enqueueGmailOneShotNow(STAGE2_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueOutlookMailOneShotNow(STAGE2_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE2_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE2_LOOKBACK_DAYS)
             foregroundWorkScheduler.enqueueMediaStoreOneShotNow(STAGE2_LOOKBACK_DAYS)
@@ -112,14 +108,10 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
         public val STAGE1_SOURCE_TYPES: List<String> = listOf(
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
-            SourceType.GMAIL,
-            SourceType.OUTLOOK_MAIL,
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
         )
         public val STAGE2_SOURCE_TYPES: List<String> = listOf(
-            SourceType.GMAIL,
-            SourceType.OUTLOOK_MAIL,
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
             SourceType.VOICE,

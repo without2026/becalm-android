@@ -4,9 +4,8 @@ import androidx.work.CoroutineWorker
 import com.becalm.android.core.util.Logger
 
 /**
- * 여섯 개 CoroutineWorker (UploadWorker / EnrichmentWorker / MediaStoreWorker /
- * OutlookMailWorker / OutlookCalendarWorker / ImapNaverWorker) 에 동일하게 존재하던
- * `runAttemptCount >= MAX_RETRIES` 가드를 한 곳으로 모은 확장 함수.
+ * 여러 CoroutineWorker 에서 공유하던 `runAttemptCount >= MAX_RETRIES` 가드를 한 곳으로
+ * 모은 확장 함수.
  *
  * 반환값이 `true`이면 호출자는 즉시 `Result.failure()`를 반환해야 한다. 로그 문자열
  * `"Exceeded $max attempts, failing permanently"`과 로그 레벨(error)은 기존

@@ -5,6 +5,7 @@ import app.cash.turbine.test
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -154,6 +155,25 @@ class CommitmentDetailViewModelSpecTest {
         assertEquals("사용자 직접 추가 2026-04-18 14:30 KST", source.sourceLabel)
     }
 
+    @Test
+    fun `non action detail state exposes read only trackable with no action buttons`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "schedule-1") } returns flowOf(
+            entity(
+                id = "schedule-1",
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+            ),
+        )
+
+        val viewModel = buildViewModel("schedule-1")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.actionButtons.availableActions.isEmpty())
+        assertFalse(state.actionButtons.editEnabled)
+        assertEquals(CommitmentItemType.SCHEDULE, state.entity?.itemType)
+    }
+
     private fun buildViewModel(id: String): CommitmentDetailViewModel = CommitmentDetailViewModel(
         commitmentRepository = commitmentRepository,
         personEnrichmentRepository = personEnrichmentRepository,
@@ -167,6 +187,8 @@ class CommitmentDetailViewModelSpecTest {
 
     private fun entity(
         id: String,
+        itemType: String = CommitmentItemType.ACTION,
+        direction: String? = "give",
         quote: String = "quote body",
         sourceEventTitle: String? = "Standup",
         sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T06:00:00Z"),
@@ -181,7 +203,10 @@ class CommitmentDetailViewModelSpecTest {
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
-        direction = "give",
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = null,
+        decisionStatus = null,
         counterpartyRaw = null,
         personRef = "lee@corp.com",
         title = "Title",

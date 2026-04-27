@@ -11,6 +11,9 @@ import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
 import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
+import com.becalm.android.data.remote.dto.MailOAuthStartResponse
+import com.becalm.android.data.remote.dto.MailOAuthStatusResponse
+import com.becalm.android.data.remote.dto.MailSyncResponse
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
@@ -228,6 +231,16 @@ public interface RailwayApi {
     public suspend fun syncCalendarEvents(): Response<CalendarSyncResponse>
 
     /**
+     * Triggers a server-side Gmail / Outlook Mail sync for the authenticated user.
+     *
+     * @param provider Optional provider scope: `"gmail"` or `"outlook_mail"`.
+     */
+    @POST("v1/mail_sources:sync")
+    public suspend fun syncMailSource(
+        @Query("provider") provider: String? = null,
+    ): Response<MailSyncResponse>
+
+    /**
      * Starts the backend-managed calendar OAuth flow for [provider].
      *
      * Returns the provider authorization URL and the Railway callback URI that has been
@@ -246,6 +259,22 @@ public interface RailwayApi {
     public suspend fun getCalendarOAuthStatus(
         @Path("provider") provider: String,
     ): Response<CalendarOAuthStatusResponse>
+
+    /**
+     * Starts the backend-managed Gmail / Outlook Mail OAuth flow for [provider].
+     */
+    @GET("v1/oauth/mail/{provider}:start")
+    public suspend fun startMailOAuth(
+        @Path("provider") provider: String,
+    ): Response<MailOAuthStartResponse>
+
+    /**
+     * Returns whether the current authenticated user has completed mail OAuth for [provider].
+     */
+    @GET("v1/oauth/mail/{provider}:status")
+    public suspend fun getMailOAuthStatus(
+        @Path("provider") provider: String,
+    ): Response<MailOAuthStatusResponse>
 
     // =========================================================================
     // PERSONS

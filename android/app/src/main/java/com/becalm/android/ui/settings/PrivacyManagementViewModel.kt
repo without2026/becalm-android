@@ -280,6 +280,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     private suspend fun withdrawEmailProvider(provider: EmailPipaProvider) {
         userPrefsStore.setEmailPipaConsent(provider, granted = false)
         userPrefsStore.setEmailSourceConnected(provider, connected = false)
+        userPrefsStore.setEmailSourceManagedByBackend(provider, managed = false)
         userPrefsStore.appendPipaActionLog(
             PipaActionLogEntry(
                 action = "consent_withdraw",

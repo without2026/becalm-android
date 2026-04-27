@@ -21,17 +21,11 @@ import javax.inject.Singleton
  */
 public interface ForegroundWorkScheduler : WorkSchedulerCompat {
 
-    /** Enqueues an expedited one-shot GmailWorker. */
-    public fun enqueueGmailOneShotNow(lookbackDays: Int? = null)
-
     /** Enqueues an expedited one-shot ImapNaverWorker. */
     public fun enqueueImapNaverOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot ImapDaumWorker. */
     public fun enqueueImapDaumOneShotNow(lookbackDays: Int? = null)
-
-    /** Enqueues an expedited one-shot OutlookMailWorker. */
-    public fun enqueueOutlookMailOneShotNow(lookbackDays: Int? = null)
 
     /** Enqueues an expedited one-shot GCalWorker. */
     public fun enqueueGCalOneShotNow(lookbackDays: Int? = null)
@@ -61,10 +55,8 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  *
  * | Source type     | Worker class            |
  * |-----------------|-------------------------|
- * | `gmail`         | `GmailWorker`           |
  * | `naver_imap`    | `ImapNaverWorker`       |
  * | `daum_imap`     | `ImapDaumWorker`        |
- * | `outlook_mail`  | `OutlookMailWorker`     |
  * | `google_calendar` | `GCalWorker`          |
  * | `outlook_calendar` | `OutlookCalWorker`   |
  * | `voice`         | `MediaStoreWorker`      |
@@ -188,14 +180,10 @@ public class ForegroundCatchUpScheduler @Inject constructor(
      * change required to extend foreground catch-up fan-out.
      */
     private val dispatchTable: Map<String, Pair<String, () -> Unit>> = mapOf(
-        SourceType.GMAIL to
-            ("enqueueing GmailWorker catch-up" to { workScheduler.enqueueGmailOneShotNow() }),
         SourceType.NAVER_IMAP to
             ("enqueueing ImapNaverWorker catch-up" to { workScheduler.enqueueImapNaverOneShotNow() }),
         SourceType.DAUM_IMAP to
             ("enqueueing ImapDaumWorker catch-up" to { workScheduler.enqueueImapDaumOneShotNow() }),
-        SourceType.OUTLOOK_MAIL to
-            ("enqueueing OutlookMailWorker catch-up" to { workScheduler.enqueueOutlookMailOneShotNow() }),
         SourceType.GOOGLE_CALENDAR to
             ("enqueueing GCalWorker catch-up" to { workScheduler.enqueueGCalOneShotNow() }),
         SourceType.OUTLOOK_CALENDAR to

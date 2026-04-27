@@ -103,6 +103,18 @@ class CommitmentManagementViewModelSpecTest {
                 entity(id = "give-1", direction = "give"),
                 entity(id = "give-2", direction = "give"),
                 entity(id = "take-1", direction = "take"),
+                entity(
+                    id = "schedule-1",
+                    itemType = "schedule",
+                    direction = null,
+                    scheduleStatus = "changed",
+                ),
+                entity(
+                    id = "decision-1",
+                    itemType = "decision",
+                    direction = null,
+                    decisionStatus = "chosen",
+                ),
             ),
         )
 
@@ -112,24 +124,48 @@ class CommitmentManagementViewModelSpecTest {
             awaitItem()
             val initial = awaitItem()
             assertEquals(CommitmentFilter.ALL, initial.filter)
-            assertEquals(listOf("give-1", "give-2", "take-1"), initial.items.map { it.id })
+            assertEquals(
+                listOf("give-1", "give-2", "take-1", "schedule-1", "decision-1"),
+                initial.items.map { it.id },
+            )
+
+            viewModel.onFilterChange(CommitmentFilter.ACTION)
+            val actionOnly = awaitItem()
+            assertEquals(CommitmentFilter.ACTION, actionOnly.filter)
+            assertEquals(listOf("give-1", "give-2", "take-1"), actionOnly.items.map { it.id })
+            assertTrue(actionOnly.items.all { it.itemType == "action" })
 
             viewModel.onFilterChange(CommitmentFilter.GIVE)
             val giveOnly = awaitItem()
             assertEquals(CommitmentFilter.GIVE, giveOnly.filter)
             assertEquals(listOf("give-1", "give-2"), giveOnly.items.map { it.id })
-            assertTrue(giveOnly.items.all { it.direction == "give" })
+            assertTrue(giveOnly.items.all { it.itemType == "action" && it.direction == "give" })
 
             viewModel.onFilterChange(CommitmentFilter.TAKE)
             val takeOnly = awaitItem()
             assertEquals(CommitmentFilter.TAKE, takeOnly.filter)
             assertEquals(listOf("take-1"), takeOnly.items.map { it.id })
-            assertTrue(takeOnly.items.all { it.direction == "take" })
+            assertTrue(takeOnly.items.all { it.itemType == "action" && it.direction == "take" })
+
+            viewModel.onFilterChange(CommitmentFilter.SCHEDULE)
+            val scheduleOnly = awaitItem()
+            assertEquals(CommitmentFilter.SCHEDULE, scheduleOnly.filter)
+            assertEquals(listOf("schedule-1"), scheduleOnly.items.map { it.id })
+            assertTrue(scheduleOnly.items.all { it.itemType == "schedule" && it.scheduleStatus == "changed" })
+
+            viewModel.onFilterChange(CommitmentFilter.DECISION)
+            val decisionOnly = awaitItem()
+            assertEquals(CommitmentFilter.DECISION, decisionOnly.filter)
+            assertEquals(listOf("decision-1"), decisionOnly.items.map { it.id })
+            assertTrue(decisionOnly.items.all { it.itemType == "decision" && it.decisionStatus == "chosen" })
 
             viewModel.onFilterChange(CommitmentFilter.ALL)
             val allAgain = awaitItem()
             assertEquals(CommitmentFilter.ALL, allAgain.filter)
-            assertEquals(listOf("give-1", "give-2", "take-1"), allAgain.items.map { it.id })
+            assertEquals(
+                listOf("give-1", "give-2", "take-1", "schedule-1", "decision-1"),
+                allAgain.items.map { it.id },
+            )
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -201,7 +237,53 @@ class CommitmentManagementViewModelSpecTest {
         val items = viewModel.uiState.value.items.associateBy { it.id }
         assertEquals(true, items.getValue("manual-1").isManual)
         assertEquals(false, items.getValue("voice-1").isManual)
-        assertEquals("PENDING", items.getValue("manual-1").derivedStatus.toString())
+        assertEquals("PENDING", items.getValue("manual-1").derivedStatus)
+    }
+
+    @Test
+    fun `CMT-001 rows preserve type subtype and counterparty display`() = runTest {
+        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
+            listOf(
+                entity(id = "action-1", direction = "give", personRef = "lee@corp.com"),
+                entity(
+                    id = "schedule-1",
+                    itemType = "schedule",
+                    direction = null,
+                    personRef = "park@corp.com",
+                    scheduleStatus = "changed",
+                ),
+                entity(
+                    id = "decision-1",
+                    itemType = "decision",
+                    direction = null,
+                    personRef = null,
+                    counterpartyRaw = "Legacy Person",
+                    decisionStatus = "ongoing",
+                ),
+            ),
+        )
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
+            mapOf(
+                "lee@corp.com" to enrichment("lee@corp.com", displayName = "이대리", nickname = "lee"),
+                "park@corp.com" to enrichment("park@corp.com", displayName = "박과장", nickname = null),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        val rows = viewModel.uiState.value.items.associateBy { it.id }
+        assertEquals("action", rows.getValue("action-1").itemType)
+        assertEquals("give", rows.getValue("action-1").direction)
+        assertEquals("이대리", rows.getValue("action-1").counterpartyDisplayName)
+        assertEquals("schedule", rows.getValue("schedule-1").itemType)
+        assertEquals("changed", rows.getValue("schedule-1").scheduleStatus)
+        assertEquals("박과장", rows.getValue("schedule-1").counterpartyDisplayName)
+        assertEquals("decision", rows.getValue("decision-1").itemType)
+        assertEquals("ongoing", rows.getValue("decision-1").decisionStatus)
+        assertEquals("Legacy Person", rows.getValue("decision-1").counterpartyDisplayName)
+        assertEquals(null, rows.getValue("schedule-1").derivedStatus)
+        assertEquals(null, rows.getValue("decision-1").derivedStatus)
     }
 
     @Test
@@ -429,16 +511,22 @@ class CommitmentManagementViewModelSpecTest {
 
     private fun entity(
         id: String,
-        direction: String = "give",
+        itemType: String = "action",
+        direction: String? = "give",
         actionState: String = "pending",
         personRef: String? = null,
         counterpartyRaw: String? = null,
         dueAt: Instant? = null,
         sourceType: String = "voice",
+        scheduleStatus: String? = null,
+        decisionStatus: String? = null,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
+        itemType = itemType,
         direction = direction,
+        scheduleStatus = scheduleStatus,
+        decisionStatus = decisionStatus,
         counterpartyRaw = counterpartyRaw,
         personRef = personRef,
         title = "title-$id",

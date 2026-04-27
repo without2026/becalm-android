@@ -129,7 +129,8 @@ routes:
     data: ["Room commitments query", "PATCH /v1/commitments/{id}", "ING-011 foreground catch-up", "SYNC-006 upload flush"]
     components: [CommitmentFilterTabs, CommitmentCard, DNBadge, BottomNavigationBar]
     auth: required
-    # Tab 3: 약속관리. Filter tabs: 전체 / 내가 한 / 상대가 한. Expandable completed section.
+    # Tab 3: tracked item 관리. Filter tabs: 전체 / 액션 / 내가 한 / 상대가 한 / 일정 / 결정.
+    # Cards show type+subtype chips, title, primary counterparty/person label, and due info.
 
   # -------- SETTINGS --------
 

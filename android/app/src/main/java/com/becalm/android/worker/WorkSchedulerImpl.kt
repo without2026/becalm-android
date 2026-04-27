@@ -197,15 +197,6 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
-    override fun enqueueGmailOneShotNow(lookbackDays: Int?) {
-        oneShotEnqueuer.enqueueForKey(
-            requireSource(com.becalm.android.data.remote.dto.SourceType.GMAIL).workerClass,
-            UniqueWorkKeys.GMAIL,
-            "enqueueGmailOneShotNow",
-            lookbackDays = lookbackDays,
-        )
-    }
-
     override fun enqueueImapNaverOneShotNow(lookbackDays: Int?) {
         oneShotEnqueuer.enqueueForKey(
             requireSource(com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP).workerClass,
@@ -220,15 +211,6 @@ public class WorkSchedulerImpl @Inject constructor(
             requireSource(com.becalm.android.data.remote.dto.SourceType.DAUM_IMAP).workerClass,
             UniqueWorkKeys.DAUM_IMAP,
             "enqueueImapDaumOneShotNow",
-            lookbackDays = lookbackDays,
-        )
-    }
-
-    override fun enqueueOutlookMailOneShotNow(lookbackDays: Int?) {
-        oneShotEnqueuer.enqueueForKey(
-            requireSource(com.becalm.android.data.remote.dto.SourceType.OUTLOOK_MAIL).workerClass,
-            UniqueWorkKeys.OUTLOOK_MAIL,
-            "enqueueOutlookMailOneShotNow",
             lookbackDays = lookbackDays,
         )
     }

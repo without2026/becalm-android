@@ -37,18 +37,24 @@ import javax.inject.Inject
 /**
  * Display filter applied in-memory to the full commitment list.
  *
- * - [ALL]  — no filter; shows every row for the current user.
- * - [GIVE] — direction == "give".
- * - [TAKE] — direction == "take".
+ * - [ALL]      — no filter; shows every trackable item for the current user.
+ * - [ACTION]   — action rows only.
+ * - [GIVE]     — action rows where direction == "give".
+ * - [TAKE]     — action rows where direction == "take".
+ * - [SCHEDULE] — schedule rows only.
+ * - [DECISION] — decision rows only.
  *
- * Due-today and overdue state is surfaced per-card as a DN badge rather than as a
- * top-level filter (CTO Q5).
+ * Action-specific lifecycle (due-today / overdue / completed / cancelled) is surfaced
+ * per-card and in the terminal sections rather than as a top-level filter.
  */
-// spec: CMT-001
+// spec: CMT-001, CMT-002
 public enum class CommitmentFilter {
     ALL,
+    ACTION,
     GIVE,
     TAKE,
+    SCHEDULE,
+    DECISION,
 }
 
 // ─── Row model ────────────────────────────────────────────────────────────────
@@ -69,9 +75,12 @@ public enum class CommitmentFilter {
 // spec: CMT-001
 public data class CommitmentRow(
     val id: String,
+    val itemType: String,
     val title: String,
-    val direction: String,
-    val derivedStatus: String,
+    val direction: String?,
+    val scheduleStatus: String?,
+    val decisionStatus: String?,
+    val derivedStatus: String?,
     val actionState: CommitmentState,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,

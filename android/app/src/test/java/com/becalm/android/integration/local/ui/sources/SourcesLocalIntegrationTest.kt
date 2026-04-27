@@ -2,6 +2,7 @@ package com.becalm.android.integration.local.ui.sources
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.SyncCursorStoreImpl
@@ -26,9 +27,9 @@ import com.becalm.android.ui.sources.ContactsSourceDetailViewModel
 import com.becalm.android.ui.sources.DefaultSourceAdministrationPort
 import com.becalm.android.ui.sources.SourceAdministrationPort
 import com.becalm.android.ui.sources.SourceDetailViewModel
+import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
-import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -89,7 +91,7 @@ class SourcesLocalIntegrationTest {
         logger = logger,
     )
     private val contactsPermissionChecker = FakeContactsPermissionChecker(granted = true)
-    private val workScheduler = RecordingWorkScheduler()
+    private val sourceSyncPort = RecordingSourceSyncPort()
 
     @Before
     fun setUp() = runTest {
@@ -196,7 +198,7 @@ class SourcesLocalIntegrationTest {
             sourceAdministrationPort = object : SourceAdministrationPort {
                 override suspend fun disconnect(sourceType: String) = error("not used")
             },
-            workScheduler = workScheduler,
+            sourceSyncPort = sourceSyncPort,
             logger = logger,
         )
         sourceDetailViewModel.setUserId(USER_ID)
@@ -217,7 +219,8 @@ class SourcesLocalIntegrationTest {
             assertEquals(listOf("gmail-1", "gmail-2"), state.recentEvents.map { it.id })
 
             sourceDetailViewModel.onManualSync()
-            assertEquals(listOf(SourceType.GMAIL), workScheduler.expeditedSources)
+            advanceUntilIdle()
+            assertEquals(listOf(SourceType.GMAIL), sourceSyncPort.manualSyncSources)
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -286,7 +289,7 @@ class SourcesLocalIntegrationTest {
                 imapCredentialStore = imapCredentialStore,
                 logger = logger,
             ),
-            workScheduler = workScheduler,
+            sourceSyncPort = sourceSyncPort,
             logger = logger,
         )
         sourceDetailViewModel.setUserId(USER_ID)
@@ -342,36 +345,13 @@ class SourcesLocalIntegrationTest {
         override fun observeGrantState(): Flow<Boolean> = state
     }
 
-    private class RecordingWorkScheduler : WorkScheduler {
-        val expeditedSources: MutableList<String> = mutableListOf()
+    private class RecordingSourceSyncPort : SourceSyncPort {
+        val manualSyncSources: MutableList<String> = mutableListOf()
 
-        override fun enqueueExpedited(sourceKey: String) {
-            expeditedSources += sourceKey
+        override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> {
+            manualSyncSources += sourceType
+            return BecalmResult.Success(Unit)
         }
-
-        override fun enqueuePeriodic(sourceKey: String) = Unit
-        override fun enqueueUpload(attempt: Int) = Unit
-        override fun scheduleUploadRedundancy() = Unit
-        override fun enqueueEnrichment() = Unit
-        override fun scheduleEnrichmentSweep() = Unit
-        override fun cancelEnrichmentSweep() = Unit
-        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
-        override fun enqueueVoiceUploadWithDelay(
-            rawEventId: String,
-            audioUri: String,
-            initialDelaySec: Long,
-            rateLimitedAttempt: Int,
-        ) = Unit
-
-        override fun enqueueCommitmentExtraction(rawEventId: String) = Unit
-        override fun scheduleRetentionSweep() = Unit
-        override fun scheduleOverdueSweep() = Unit
-        override fun enqueueDeferredColdSyncStage1() = Unit
-        override fun enqueueColdSyncStage2() = Unit
-        override fun cancelColdSyncStage2() = Unit
-        override fun cancelVoiceUpload(rawEventId: String) = Unit
-        override fun cancelAll() = Unit
-        override fun cleanupLegacyWorkNames() = Unit
     }
 
     private companion object {

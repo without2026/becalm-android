@@ -9,12 +9,9 @@ package com.becalm.android.data.remote.dto
  * user is the sender (`person_ref` derives from the first `To` header). Non-email
  * sources leave `folder = null`.
  *
- * These are top-level `const val` — not members of an object — so that bytecode-level
- * references from [com.becalm.android.worker.ingestion.GmailWorker],
- * [com.becalm.android.worker.ingestion.OutlookMailWorker],
- * [com.becalm.android.worker.ingestion.ImapNaverWorker], and
- * [com.becalm.android.worker.ingestion.ImapDaumWorker] are inlined as plain string
- * literals and do not create an import-cycle risk with `email_body` types.
+ * These are top-level `const val` — not members of an object — so that local IMAP
+ * adapters and email-body code can inline plain string literals without import-cycle
+ * risk.
  */
 public const val FOLDER_INBOX: String = "INBOX"
 

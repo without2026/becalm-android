@@ -10,9 +10,9 @@ import com.squareup.moshi.JsonClass
  * Per EMAIL-005 (`.spec/email-pipeline.spec.yml:49-54`) every email row stores a
  * JSON blob `{message_id, in_reply_to?, references?}` as `source_ref` so the
  * extraction and thread-view layers can reconstruct RFC 5322 threading without
- * a second fetch. The three email provider workers (Gmail, Outlook / MS Graph,
- * IMAP) all serialise through this single type so Supabase mirrors, device-side
- * dedupe queries, and any future migration script observe one canonical shape.
+ * a second fetch. Gmail, Outlook Mail, and IMAP ingestion all serialise through
+ * this single type so Supabase mirrors, device-side dedupe queries, and any future
+ * migration script observe one canonical shape.
  *
  * ## JSON field names
  * [inReplyTo] and [references] use snake_case on the wire
@@ -28,11 +28,10 @@ import com.squareup.moshi.JsonClass
  * `serializeNulls`, so nulls are dropped on the wire by default — matching the
  * spec "omit when null" note.
  *
- * ## Coordination with `feat/worker/gmail`
+ * ## Coordination
  * This type is the canonical placement agreed during Wave 3 planning — both
- * the Gmail and Outlook ingestion workers import from `data/remote/email/`
- * rather than duplicating per-provider envelopes. First writer wins; the later
- * agent imports the existing file.
+ * backend-managed Gmail / Outlook Mail ingestion and local IMAP ingestion import
+ * from `data/remote/email/` rather than duplicating per-provider envelopes.
  */
 @JsonClass(generateAdapter = true)
 public data class SourceRefEnvelope(

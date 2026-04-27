@@ -37,10 +37,11 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         userPrefsStore.setCurrentUserId("user-1")
         userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
         userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true)
+        userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true)
         userPrefsStore.setEmailSourceConnected(EmailPipaProvider.DAUM_IMAP, true)
         userPrefsStore.setSourceEnabled(SourceType.GOOGLE_CALENDAR, true)
         assertEquals(
-            setOf(SourceType.VOICE, SourceType.GMAIL, SourceType.DAUM_IMAP, SourceType.GOOGLE_CALENDAR),
+            setOf(SourceType.VOICE, SourceType.DAUM_IMAP, SourceType.GOOGLE_CALENDAR),
             userPrefsStore.observeEnabledSources().first(),
         )
 
@@ -48,11 +49,9 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         advanceUntilIdle()
 
         assertEquals(1, workScheduler.mediaStoreCount)
-        assertEquals(1, workScheduler.gmailCount)
         assertEquals(1, workScheduler.imapDaumCount)
         assertEquals(1, workScheduler.gCalCount)
         assertEquals(0, workScheduler.imapNaverCount)
-        assertEquals(0, workScheduler.outlookMailCount)
         assertEquals(0, workScheduler.outlookCalCount)
     }
 
@@ -73,8 +72,9 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         userPrefsStore.setCurrentUserId("user-1")
         userPrefsStore.setSourceEnabled(SourceType.OUTLOOK_CALENDAR, true)
         userPrefsStore.setEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL, true)
+        userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.OUTLOOK_MAIL, true)
         assertEquals(
-            setOf(SourceType.OUTLOOK_MAIL, SourceType.OUTLOOK_CALENDAR),
+            setOf(SourceType.OUTLOOK_CALENDAR),
             userPrefsStore.observeEnabledSources().first(),
         )
 
@@ -82,8 +82,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         advanceUntilIdle()
 
         assertEquals(1, workScheduler.outlookCalCount)
-        assertEquals(1, workScheduler.outlookMailCount)
-        assertTrue(workScheduler.enqueuedSources.containsAll(listOf("outlook_calendar", "outlook_mail")))
+        assertTrue(workScheduler.enqueuedSources.containsAll(listOf("outlook_calendar")))
     }
 
     private object FakeLifecycleOwner : LifecycleOwner {
@@ -93,21 +92,14 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
     private class FakeForegroundWorkScheduler : ForegroundWorkScheduler {
         val enqueuedSources: MutableList<String> = mutableListOf()
         var mediaStoreCount: Int = 0
-        var gmailCount: Int = 0
         var imapNaverCount: Int = 0
         var imapDaumCount: Int = 0
-        var outlookMailCount: Int = 0
         var gCalCount: Int = 0
         var outlookCalCount: Int = 0
 
         override fun enqueueMediaStoreOneShotNow(lookbackDays: Int?) {
             mediaStoreCount += 1
             enqueuedSources += SourceType.VOICE
-        }
-
-        override fun enqueueGmailOneShotNow(lookbackDays: Int?) {
-            gmailCount += 1
-            enqueuedSources += SourceType.GMAIL
         }
 
         override fun enqueueImapNaverOneShotNow(lookbackDays: Int?) {
@@ -118,11 +110,6 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         override fun enqueueImapDaumOneShotNow(lookbackDays: Int?) {
             imapDaumCount += 1
             enqueuedSources += SourceType.DAUM_IMAP
-        }
-
-        override fun enqueueOutlookMailOneShotNow(lookbackDays: Int?) {
-            outlookMailCount += 1
-            enqueuedSources += SourceType.OUTLOOK_MAIL
         }
 
         override fun enqueueGCalOneShotNow(lookbackDays: Int?) {

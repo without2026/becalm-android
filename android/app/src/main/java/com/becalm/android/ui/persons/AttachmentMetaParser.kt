@@ -10,9 +10,9 @@ import com.squareup.moshi.Types
  * list of [AttachmentMeta].
  *
  * The column shape is `[{filename, mime, size_bytes}, ...]` per
- * `.spec/contracts/data-model.yml:327-390 § attachments_meta`; this parser mirrors
- * the existing on-wire shapes (`ImapAttachmentMeta`, `GmailAttachmentMeta`,
- * `GraphAttachmentMeta`) without creating a new UI-owned wire contract.
+ * `.spec/contracts/data-model.yml:327-390 § attachments_meta`; this parser intentionally
+ * mirrors the persisted provider-neutral JSON shape without creating a new UI-owned
+ * wire contract.
  *
  * Failure policy — **graceful degrade** (EMAIL-007): a malformed or unexpected
  * JSON payload yields an empty list rather than surfacing an error, so the sheet
@@ -41,8 +41,7 @@ internal object AttachmentMetaParser {
 
 /**
  * Metadata-only descriptor for a single email attachment rendered by the raw-event
- * detail sheet. Mirrors the on-disk JSON shape produced by ingestion workers
- * (`ImapAttachmentMeta`, `GmailAttachmentMeta`, `GraphAttachmentMeta`).
+ * detail sheet. Mirrors the on-disk JSON shape produced by ingestion workers.
  */
 @JsonClass(generateAdapter = true)
 internal data class AttachmentMeta(

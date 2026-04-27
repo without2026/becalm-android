@@ -5,7 +5,6 @@ import com.becalm.android.data.remote.api.ApiFactory
 import com.becalm.android.data.remote.api.HttpTimeouts
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.api.VoiceApi
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProvider
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
 import com.becalm.android.data.remote.supabase.SupabaseConfig
@@ -100,18 +99,6 @@ public object NetworkProvidersModule {
         return ApiFactory.createVoiceApi(voiceRetrofit)
     }
 
-    @Provides
-    @Singleton
-    public fun provideGmailClient(
-        okHttpClient: OkHttpClient,
-        moshi: Moshi,
-        authTokenProvider: GoogleAuthTokenProvider,
-    ): com.becalm.android.data.remote.gmail.GmailClient =
-        com.becalm.android.data.remote.gmail.GmailClientImpl(
-            okHttpClient = okHttpClient,
-            moshi = moshi,
-            authTokenProvider = authTokenProvider,
-        )
 }
 
 public data class BecalmApiConfig(val baseUrl: String)

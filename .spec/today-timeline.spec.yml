@@ -29,7 +29,7 @@ behaviors:
     description: "SourceStatusStrip은 읽기 전용 진단 표시다. 7개 칩(voice/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "Gmail 어댑터 synced 상태, Outlook 어댑터 error 상태, voice/naver_email/daum_email/google_calendar/outlook_calendar idle"
+    precondition: "gmail source synced 상태, outlook_mail source error 상태, voice/naver_email/daum_email/google_calendar/outlook_calendar idle"
     expected: "Gmail 칩: 초록 체크 + 마지막 sync 시각 표시됨. Outlook 칩: 빨간 점 표시됨. 나머지 5개 칩: 회색 idle. 어떤 칩도 탭 시 네비게이션 없음"
     source: phase2-acceptance
     tests: []

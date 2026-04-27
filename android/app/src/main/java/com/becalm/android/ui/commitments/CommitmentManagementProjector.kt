@@ -40,11 +40,17 @@ internal object CommitmentManagementProjector {
         filter: CommitmentFilter,
         enrichment: Map<String, PersonEnrichmentEntity>,
     ): List<CommitmentRow> {
-        val actionEntities = entities.filter { it.itemType == CommitmentItemType.ACTION }
         val filtered = when (filter) {
-            CommitmentFilter.ALL -> actionEntities
-            CommitmentFilter.GIVE -> actionEntities.filter { it.direction == "give" }
-            CommitmentFilter.TAKE -> actionEntities.filter { it.direction == "take" }
+            CommitmentFilter.ALL -> entities
+            CommitmentFilter.ACTION -> entities.filter { it.itemType == CommitmentItemType.ACTION }
+            CommitmentFilter.GIVE -> entities.filter {
+                it.itemType == CommitmentItemType.ACTION && it.direction == "give"
+            }
+            CommitmentFilter.TAKE -> entities.filter {
+                it.itemType == CommitmentItemType.ACTION && it.direction == "take"
+            }
+            CommitmentFilter.SCHEDULE -> entities.filter { it.itemType == CommitmentItemType.SCHEDULE }
+            CommitmentFilter.DECISION -> entities.filter { it.itemType == CommitmentItemType.DECISION }
         }
         return filtered.map { entity -> entity.toRow(enrichment) }
     }
@@ -55,9 +61,12 @@ internal object CommitmentManagementProjector {
         val state = CommitmentState.fromWire(actionState)
         return CommitmentRow(
             id = id,
+            itemType = itemType,
             title = title,
-            direction = requireNotNull(direction) { "Action commitment rows must have direction" },
-            derivedStatus = state.name,
+            direction = direction,
+            scheduleStatus = scheduleStatus,
+            decisionStatus = decisionStatus,
+            derivedStatus = direction?.let { state.name },
             actionState = state,
             dueAt = dueAt,
             dueIsApproximate = dueIsApproximate,
@@ -95,6 +104,7 @@ internal object CommitmentManagementProjector {
     }
 
     fun isTerminalRow(row: CommitmentRow): Boolean =
-        row.actionState == CommitmentState.COMPLETED ||
-            row.actionState == CommitmentState.CANCELLED
+        row.itemType == CommitmentItemType.ACTION &&
+            (row.actionState == CommitmentState.COMPLETED ||
+                row.actionState == CommitmentState.CANCELLED)
 }

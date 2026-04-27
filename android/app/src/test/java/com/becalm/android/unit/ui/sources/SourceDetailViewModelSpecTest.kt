@@ -14,10 +14,12 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.ARG_SOURCE_TYPE
 import com.becalm.android.ui.sources.SourceAdministrationPort
 import com.becalm.android.ui.sources.SourceDetailEffect
+import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourceDetailViewModel
 import com.becalm.android.ui.sources.SourceDisconnectOutcome
 import com.becalm.android.ui.sources.SourceReconnectDestination
-import com.becalm.android.worker.WorkScheduler
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -45,7 +47,7 @@ class SourceDetailViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val sourceStatusRepository: SourceStatusRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
-    private val workScheduler: WorkScheduler = mockk(relaxed = true)
+    private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
@@ -308,16 +310,18 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
-    fun `SMG-005 manual sync triggers expedited work for the selected source only`() = runTest {
+    fun `SMG-005 manual sync delegates to the active source sync owner only`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
             flowOf(status(sourceType = SourceType.GMAIL, status = SourceConnectionStatus.CONNECTED))
+        coEvery { sourceSyncPort.requestManualSync(SourceType.GMAIL) } returns BecalmResult.Success(Unit)
 
         val viewModel = buildViewModel(SourceType.GMAIL)
         viewModel.onManualSync()
+        advanceUntilIdle()
 
-        verify(exactly = 1) { workScheduler.enqueueExpedited(SourceType.GMAIL) }
-        verify(exactly = 0) { workScheduler.enqueueExpedited(SourceType.OUTLOOK_MAIL) }
-        verify(exactly = 0) { workScheduler.enqueueExpedited(SourceType.GOOGLE_CALENDAR) }
+        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
+        coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
+        coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.GOOGLE_CALENDAR) }
     }
 
     @Test
@@ -333,6 +337,7 @@ class SourceDetailViewModelSpecTest {
             ),
         )
         every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns statuses
+        coEvery { sourceSyncPort.requestManualSync(SourceType.GMAIL) } returns BecalmResult.Success(Unit)
 
         val viewModel = buildViewModel(SourceType.GMAIL)
 
@@ -346,7 +351,8 @@ class SourceDetailViewModelSpecTest {
             assertEquals(initialSyncAt, state.lastSyncAt)
 
             viewModel.onManualSync()
-            verify(exactly = 1) { workScheduler.enqueueExpedited(SourceType.GMAIL) }
+            advanceUntilIdle()
+            coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
 
             statuses.value = SourceStatus(
                 sourceType = SourceType.GMAIL,
@@ -432,13 +438,13 @@ class SourceDetailViewModelSpecTest {
     private fun buildViewModel(
         sourceType: String,
         sourceAdministrationPort: SourceAdministrationPort = FakeSourceAdministrationPort(),
-        workScheduler: WorkScheduler = this.workScheduler,
+        sourceSyncPort: SourceSyncPort = this.sourceSyncPort,
     ): SourceDetailViewModel = SourceDetailViewModel(
         savedStateHandle = SavedStateHandle(mapOf(ARG_SOURCE_TYPE to sourceType)),
         sourceStatusRepository = sourceStatusRepository,
         rawIngestionRepository = rawIngestionRepository,
         sourceAdministrationPort = sourceAdministrationPort,
-        workScheduler = workScheduler,
+        sourceSyncPort = sourceSyncPort,
         logger = logger,
     )
 

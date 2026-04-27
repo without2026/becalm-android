@@ -58,8 +58,19 @@ import kotlinx.coroutines.launch
 public fun OnboardingEmailPipaConsentScreen(
     providerSlug: String,
     navController: NavHostController,
-    viewModel: OnboardingViewModel = hiltViewModel(),
+    viewModel: OnboardingViewModel? = null,
+    onPersistConsent: (suspend (List<EmailPipaProvider>, Boolean) -> Boolean)? = null,
+    onReportUnknownProvider: ((OnboardingStep, String) -> Unit)? = null,
+    onNavigate: ((String) -> Unit)? = null,
 ) {
+    val resolvedViewModel = if (onPersistConsent == null || onReportUnknownProvider == null) {
+        viewModel ?: hiltViewModel()
+    } else {
+        viewModel
+    }
+    val persistConsent = onPersistConsent ?: requireNotNull(resolvedViewModel)::onEmailPipaConsent
+    val reportUnknownProvider = onReportUnknownProvider ?: requireNotNull(resolvedViewModel)::reportOnboardingStepFailed
+    val navigate = onNavigate ?: { route: String -> navController.navigate(route) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val writeFailedCopy = stringResource(R.string.onb_pipa_email_error_write_failed)
@@ -67,8 +78,8 @@ public fun OnboardingEmailPipaConsentScreen(
     val copy = pipaCopyForSlug(providerSlug) ?: run {
         // Unknown slug — advance to Gmail to avoid trapping the user. An audit
         // message is logged via the ViewModel so this path is never silent.
-        viewModel.reportOnboardingStepFailed(OnboardingStep.LINK_GMAIL, "pipa_email_unknown_provider")
-        navController.navigate(BecalmRoute.OnboardingGmail.path)
+        reportUnknownProvider(OnboardingStep.LINK_GMAIL, "pipa_email_unknown_provider")
+        navigate(BecalmRoute.OnboardingGmail.path)
         return
     }
 
@@ -80,9 +91,9 @@ public fun OnboardingEmailPipaConsentScreen(
             providerSlug = providerSlug,
             onAgree = {
                 scope.launch {
-                    val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = true)
+                    val ok = persistConsent(copy.recipients, true)
                     if (ok) {
-                        navController.navigate(copy.connectRoute)
+                        navigate(copy.connectRoute)
                     } else {
                         snackbarHostState.showSnackbar(writeFailedCopy)
                     }
@@ -90,9 +101,9 @@ public fun OnboardingEmailPipaConsentScreen(
             },
             onDeny = {
                 scope.launch {
-                    val ok = viewModel.onEmailPipaConsent(copy.recipients, granted = false)
+                    val ok = persistConsent(copy.recipients, false)
                     if (ok) {
-                        navController.navigate(copy.skipAheadRoute)
+                        navigate(copy.skipAheadRoute)
                     } else {
                         snackbarHostState.showSnackbar(writeFailedCopy)
                     }

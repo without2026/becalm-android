@@ -41,11 +41,9 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   Stage-5 UI flows.
  * - v6: introduces the `email_body` room-only table (14 columns, 2 indices, FK to
  *   `raw_ingestion_events` with `ON DELETE CASCADE`) and adds `raw_ingestion_events.folder`
- *   (nullable TEXT) as the EMAIL-001 direction hint. Enables EMAIL-001..007
- *   (`.spec/email-pipeline.spec.yml`) and ING-006..008. The new table is PIPA room-only
- *   per EMAIL-006 — body_plain / body_html / attachments_meta / raw_headers MUST NEVER
- *   leave the device. Spec refs: `.spec/contracts/data-model.yml:327-390`,
- *   `.spec/email-pipeline.spec.yml:15-18,58-64`.
+ *   (nullable TEXT) as the EMAIL-001 direction hint. The table remains the local owner
+ *   for IMAP body capture and on-device extraction. Spec refs:
+ *   `.spec/contracts/data-model.yml:327-390`, `.spec/email-pipeline.spec.yml:15-18,58-64`.
  * - v7: introduces the `user_profile` local mirror table used by Cold Sync Stage 1
  *   bootstrap. Android creates this row from the authenticated session plus default
  *   timezone / locale before any external `PATCH /v1/user_profile` mirror runs.
@@ -130,11 +128,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
      * serializes an [EmailBodyEntity] into a network DTO is a production-blocking
      * privacy regression — see `.spec/email-pipeline.spec.yml:58-64`.
      *
-     * `internal` visibility because no production consumer exists yet — the schema
-     * and DAO land in Wave 1 so future ADAPT-EMAIL-* workers (`GmailWorker`,
-     * `OutlookMailWorker`, IMAP workers, `RetentionSweepWorker`) can wire against a
-     * stable shape. Making this public now would breach DEADCODE-02; the accessor is
-     * promoted to `public` in the PR that adds the first real caller.
+     * `internal` visibility because only local IMAP / extraction paths consume this
+     * table today. Keeping the accessor non-public avoids accidental network-mirror
+     * style callers while the room-only ownership remains explicit.
      */
     internal abstract fun emailBodyDao(): EmailBodyDao
 

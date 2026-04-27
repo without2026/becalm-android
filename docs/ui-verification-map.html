@@ -1,0 +1,2657 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BeCalm UI Verification Map</title>
+  <style>
+    :root {
+      --bg: #0a1020;
+      --panel: #111a31;
+      --panel-2: #16213d;
+      --line: #2b3b66;
+      --text: #ecf2ff;
+      --muted: #aebbd7;
+      --green: #38d39f;
+      --amber: #ffcf5a;
+      --red: #ff7a90;
+      --blue: #78b8ff;
+      --lav: #b5a8ff;
+      --chip: #1d2a4e;
+      --card-shadow: 0 18px 48px rgba(0, 0, 0, 0.26);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(120, 184, 255, 0.12), transparent 24rem),
+        radial-gradient(circle at top right, rgba(181, 168, 255, 0.1), transparent 20rem),
+        linear-gradient(180deg, #08101f 0%, #0b1324 100%);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1600px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 60px;
+    }
+
+    header.hero,
+    section,
+    details.screen-card {
+      background: rgba(17, 26, 49, 0.92);
+      border: 1px solid rgba(120, 184, 255, 0.12);
+      border-radius: 20px;
+      box-shadow: var(--card-shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    header.hero {
+      padding: 28px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, h3, h4 {
+      margin: 0;
+      line-height: 1.2;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      max-width: 95ch;
+    }
+
+    .meta {
+      margin-top: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--muted);
+      font-size: 0.9rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .warn {
+      color: var(--amber);
+    }
+
+    .good {
+      color: var(--green);
+    }
+
+    .bad {
+      color: var(--red);
+    }
+
+    section {
+      padding: 22px;
+      margin-bottom: 22px;
+    }
+
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .legend-box,
+    .ops-box {
+      padding: 16px;
+      background: var(--panel-2);
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .coverage-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: #172647;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .badge.on {
+      color: var(--text);
+      border-color: rgba(56, 211, 159, 0.35);
+      box-shadow: inset 0 0 0 1px rgba(56, 211, 159, 0.18);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #5b698d;
+    }
+
+    .badge.on .dot {
+      background: var(--green);
+    }
+
+    .flow-section + .flow-section {
+      margin-top: 20px;
+    }
+
+    .flow-title {
+      margin-bottom: 12px;
+      color: var(--blue);
+      font-size: 0.96rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .flow-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .flow-arrow {
+      display: flex;
+      align-items: center;
+      color: var(--muted);
+      padding: 0 2px;
+      font-size: 1.2rem;
+    }
+
+    .flow-box {
+      min-width: 180px;
+      flex: 1 1 180px;
+      text-decoration: none;
+      color: var(--text);
+      background: linear-gradient(180deg, rgba(20, 32, 61, 0.98), rgba(14, 24, 44, 0.98));
+      border: 1px solid rgba(120, 184, 255, 0.14);
+      border-radius: 16px;
+      padding: 14px;
+      display: block;
+    }
+
+    .flow-box small {
+      display: block;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .flow-box .coverage-row {
+      margin-top: 10px;
+    }
+
+    .details-grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    details.screen-card {
+      overflow: hidden;
+    }
+
+    details.screen-card > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 18px 22px;
+      background: linear-gradient(180deg, rgba(18, 30, 57, 0.95), rgba(14, 24, 44, 0.95));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      border-bottom: 1px solid rgba(120, 184, 255, 0.1);
+    }
+
+    details.screen-card > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .summary-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .summary-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+
+    .route {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+    }
+
+    .screen-body {
+      padding: 20px 22px 22px;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 18px;
+    }
+
+    .wireframe,
+    .panel-block {
+      background: var(--panel-2);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .wf-screen {
+      min-height: 300px;
+      border: 2px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)),
+        rgba(8, 14, 30, 0.75);
+    }
+
+    .wf-bar,
+    .wf-block,
+    .wf-btn,
+    .wf-chip-row span,
+    .wf-list-item {
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-size: 0.8rem;
+      padding: 8px 10px;
+    }
+
+    .wf-bar {
+      min-height: 34px;
+    }
+
+    .wf-block {
+      min-height: 56px;
+    }
+
+    .wf-btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .wf-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .wf-chip-row span {
+      padding: 5px 9px;
+      min-width: 64px;
+      text-align: center;
+    }
+
+    .wf-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .wf-list-item {
+      min-height: 42px;
+    }
+
+    .body-right {
+      display: grid;
+      gap: 14px;
+    }
+
+    .panel-block h4 {
+      margin-bottom: 10px;
+      color: var(--blue);
+      font-size: 0.95rem;
+    }
+
+    .panel-block ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+    }
+
+    .panel-block li + li {
+      margin-top: 6px;
+    }
+
+    .test-list li,
+    .gap-list li {
+      color: var(--muted);
+    }
+
+    .branch-list li strong,
+    .test-list li strong,
+    .gap-list li strong {
+      color: var(--text);
+    }
+
+    .group-anchor {
+      scroll-margin-top: 16px;
+    }
+
+    @media (max-width: 1100px) {
+      .screen-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100vw - 16px, 1600px);
+      }
+
+      header.hero,
+      section,
+      details.screen-card > summary,
+      .screen-body {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <h1>BeCalm UI Verification Map</h1>
+    <p class="subtitle">
+      실제 <code>becalm-android</code> 코드베이스와 테스트 파일 기준으로 만든 화면 와이어프레임형 검증 지도입니다.
+      각 박스는 실제 route/sheet 단위 화면이며, 내부 UI 요소가 어떤 ViewModel, effect, port, repository, backend path에 연결되는지와
+      happy path / error path / skip / empty / not-found 같은 주요 분기를 함께 표시합니다.
+    </p>
+    <div class="meta">
+      <span class="pill">기준 repo: <code>/home/jakek/without/becalm-android</code></span>
+      <span class="pill">생성 기준일: 2026-04-27</span>
+      <span class="pill warn">자동 검증 완료 표시는 unit / local integration / local UI / androidTest 근거가 있는 것만 사용</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Legend</h2>
+    <div class="legend-grid">
+      <div class="legend-box">
+        <p><strong>U</strong> = Unit test</p>
+        <p><strong>I</strong> = Local integration test</p>
+        <p><strong>UI</strong> = Local Compose UI test (<code>src/test</code>)</p>
+        <p><strong>A</strong> = Instrumented <code>androidTest</code></p>
+        <p>배지는 <strong>해당 화면에서 성립하는 테스트 축만</strong> 표시합니다. 회색은 <strong>가능하지만 아직 자동화되지 않은 축</strong>만 의미합니다.</p>
+        <div class="coverage-row">
+          <span class="badge on"><span class="dot"></span>U</span>
+          <span class="badge on"><span class="dot"></span>I</span>
+          <span class="badge"><span class="dot"></span>UI</span>
+          <span class="badge"><span class="dot"></span>A</span>
+        </div>
+      </div>
+      <div class="legend-box">
+        <p><strong>자동 검증 완료</strong>는 위 네 축에서 직접 근거가 있는 경우만 표시합니다.</p>
+        <p><strong>미검증 / 별도 확인</strong>에는 다음이 포함됩니다.</p>
+        <ul>
+          <li>실제 OS permission / SAF / Activity launcher</li>
+          <li>실제 브라우저 OAuth / provider callback</li>
+          <li>실제 실기기 전용 동작</li>
+        </ul>
+      </div>
+      <div class="ops-box">
+        <h3>External/Live 현재 상태</h3>
+        <p class="good">live smoke 완료: voice, google_calendar, outlook_calendar, gmail, outlook_mail</p>
+        <p class="warn">live pending: naver_imap, daum_imap</p>
+        <p class="subtitle" style="margin-top:8px;">
+          아래 카드의 검증 배지에는 live smoke를 섞지 않았습니다. 필요 시 각 카드의 "미검증 / 별도 확인"에 운영 상태를 적었습니다.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Overview Flow Diagram</h2>
+
+    <div class="flow-section">
+      <div class="flow-title">Auth</div>
+      <div class="flow-row">
+        <a class="flow-box" href="#splash">
+          <strong>Splash</strong>
+          <small>AuthUiState gate</small>
+          <div class="coverage-row">
+            <span class="badge on"><span class="dot"></span>U</span>
+            <span class="badge on"><span class="dot"></span>UI</span>
+            <span class="badge on"><span class="dot"></span>A</span>
+          </div>
+        </a>
+        <div class="flow-arrow">→</div>
+        <a class="flow-box" href="#terms">
+          <strong>Terms</strong>
+          <small>약관 + checkbox + decline</small>
+          <div class="coverage-row">
+            <span class="badge on"><span class="dot"></span>U</span>
+            <span class="badge on"><span class="dot"></span>UI</span>
+            <span class="badge on"><span class="dot"></span>A</span>
+          </div>
+        </a>
+        <div class="flow-arrow">→</div>
+        <a class="flow-box" href="#login">
+          <strong>Login</strong>
+          <small>Email/Password + Google</small>
+          <div class="coverage-row">
+            <span class="badge on"><span class="dot"></span>U</span>
+            <span class="badge on"><span class="dot"></span>UI</span>
+            <span class="badge on"><span class="dot"></span>A</span>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <div class="flow-title">Onboarding</div>
+      <div class="flow-row">
+        <a class="flow-box" href="#pipa-third-party"><strong>PIPA Consent</strong><small>제3자 제공 동의</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <div class="flow-arrow">→</div>
+        <a class="flow-box" href="#recording-folder"><strong>Recording Folder</strong><small>voice source gate</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <div class="flow-arrow">→</div>
+        <a class="flow-box" href="#contacts-permission"><strong>Contacts Permission</strong><small>permission effect</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <div class="flow-arrow">→</div>
+        <a class="flow-box" href="#email-pipa"><strong>Email PIPA</strong><small>provider-specific disclosure</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+      <div class="flow-row" style="margin-top:10px;">
+        <a class="flow-box" href="#gmail-oauth"><strong>Gmail</strong><small>backend mail OAuth</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#outlook-mail-oauth"><strong>Outlook Mail</strong><small>backend mail OAuth</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#imap-setup"><strong>IMAP</strong><small>Naver / Daum credentials</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#google-calendar-oauth"><strong>Google Calendar</strong><small>backend calendar OAuth</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#outlook-calendar-oauth"><strong>Outlook Calendar</strong><small>backend calendar OAuth</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+      <div class="flow-row" style="margin-top:10px;">
+        <a class="flow-box" href="#notification-permission"><strong>Notification</strong><small>API 33+ or auto-skip</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#battery-optimization"><strong>Battery</strong><small>OS settings handoff</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#cold-sync"><strong>Cold Sync</strong><small>stage 1/skip/finish</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <div class="flow-title">Main Surfaces</div>
+      <div class="flow-row">
+        <a class="flow-box" href="#today"><strong>Today</strong><small>timeline + sync strip</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#persons"><strong>Persons</strong><small>people + offline/unassigned</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#persons-unassigned"><strong>Persons Unassigned</strong><small>separate route bucket</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#commitment-management"><strong>Commitments</strong><small>action / schedule / decision inbox</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#settings"><strong>Settings</strong><small>toggles + sources/privacy</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+    </div>
+
+    <div class="flow-section">
+      <div class="flow-title">Details / Sheets / Subroutes</div>
+      <div class="flow-row">
+        <a class="flow-box" href="#person-detail"><strong>Person Detail</strong><small>pending/completed/history</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#raw-event-detail"><strong>Raw Event Detail</strong><small>email/voice/calendar branches</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#sources-list"><strong>Sources List</strong><small>SettingsSources route</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#contacts-source-detail"><strong>Contacts Source</strong><small>permission state</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#source-detail"><strong>Source Detail</strong><small>sync / reconnect / disconnect</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+      <div class="flow-row" style="margin-top:10px;">
+        <a class="flow-box" href="#commitment-detail"><strong>Commitment Detail</strong><small>typed chips + read-only non-action</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#commitment-create"><strong>Commitment Create</strong><small>manual / supersede</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#commitment-edit"><strong>Commitment Edit</strong><small>save / delete / dispute</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#privacy-management"><strong>Privacy Mgmt</strong><small>export + privacy actions</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#privacy-subscreens"><strong>Privacy Subscreens</strong><small>withdraw/pause/delete/log</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="group-anchor" id="detail-cards">
+    <h2>Detailed Screen Cards</h2>
+    <div class="details-grid">
+
+      <details class="screen-card" id="splash" open>
+        <summary>
+          <div class="summary-left">
+            <h3>Splash</h3>
+            <div class="route">Route: <code>/splash</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-block">Brand Title</div>
+              <div class="wf-block">Tagline</div>
+              <div class="wf-list">
+                <div class="wf-list-item">No visible CTA</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>브랜드 타이틀/태그라인은 <code>SplashContent()</code> 고정 렌더.</li>
+                <li>실제 분기 로직은 <code>splashDestinationFor(state)</code>와 <code>LaunchedEffect(state)</code>.</li>
+                <li><code>AuthViewModel.uiState</code> 또는 <code>stateOverride</code>를 읽고 <code>onNavigate</code> 또는 <code>NavHostController.navigate</code> 호출.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: 아무 route도 열지 않고 splash에 머무름.</li>
+                <li><strong>SignedOut + termsAccepted=false</strong>: <code>Terms</code>로 이동.</li>
+                <li><strong>SignedOut + termsAccepted=true</strong>: <code>Login</code>으로 이동.</li>
+                <li><strong>SignedIn + onboardingCompleted=false</strong>: <code>OnboardingPipaConsent</code>로 이동.</li>
+                <li><strong>SignedIn + onboardingCompleted=true</strong>: <code>Today</code>로 이동.</li>
+                <li><strong>Error</strong>: 보수적으로 <code>Terms</code>로 이동.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>SplashRouteResolverSpecTest</code>가 Loading, Terms, Login, PIPA, Today, Error fallback route 결정을 검증.</li>
+                <li><strong>UI</strong>: <code>AuthUiTest</code>가 브랜딩/태그라인과 <code>stateOverride</code> 기반 Terms/Login/PIPA/Today/Error route seam을 검증.</li>
+                <li><strong>androidTest</strong>: <code>AuthScreenTest</code>가 Loading 제외 모든 route 분기와 Error fallback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 popUpTo back-stack effect</strong>: wrapper seam 경유 분기는 검증됐지만 실 NavHost stack mutation 자체는 별도 통합 시나리오가 아님.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="terms">
+        <summary>
+          <div class="summary-left">
+            <h3>Terms</h3>
+            <div class="route">Route: <code>/terms</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header: 약관 / PIPA 안내</div>
+              <div class="wf-block">Disclosure Panel</div>
+              <div class="wf-block">Checkbox: 동의</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Continue</div>
+                <div class="wf-btn">Decline</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>체크박스는 로컬 state <code>accepted</code>를 바꿈.</li>
+                <li><strong>Continue</strong>는 <code>OnboardingViewModel.onAcceptTermsAndContinue()</code> 또는 seam callback 호출.</li>
+                <li><strong>Decline</strong>은 <code>AuthViewModel.onDeclineTerms()</code> 또는 seam callback 호출.</li>
+                <li><code>navigationEvents</code>의 <code>NavigateToLogin</code>을 collect 해서 <code>Login</code> route로 전환.</li>
+                <li><code>authEffects</code>의 <code>FinishApp</code>을 collect 해서 <code>Activity.finish()</code> 또는 seam callback 호출.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Unchecked</strong>: Continue 비활성.</li>
+                <li><strong>Checked + Continue</strong>: 약관 승인 저장 성공 후 Login 이동.</li>
+                <li><strong>Decline</strong>: 앱 종료 effect 발생.</li>
+                <li><strong>Persist failure</strong>: <code>OnboardingViewModel.uiState.error</code>에 남지만 이 screen 자체에서 별도 경고 UI를 적극 surface 하진 않음.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>OnboardingViewModelSpecTest</code>가 terms persist + navigation 성공을 검증. <code>AuthViewModelSpecTest</code>가 decline 시 <code>FinishApp</code> effect를 검증.</li>
+                <li><strong>UI</strong>: <code>AuthUiTest</code>가 checkbox gating, Continue disabled, Decline callback을 검증.</li>
+                <li><strong>androidTest</strong>: <code>AuthScreenTest</code>가 <code>TermsScreen</code>의 navigation/finish effect 소비를 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 static route 등록을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>persist failure UI</strong>: 저장 실패가 최종 사용자에게 어떻게 보이는지 자동 검증 근거가 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="login">
+        <summary>
+          <div class="summary-left">
+            <h3>Login</h3>
+            <div class="route">Route: <code>/login</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header: Sign In</div>
+              <div class="wf-block">Email Field</div>
+              <div class="wf-block">Password Field</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Email Sign In</div>
+                <div class="wf-btn">Google Sign In</div>
+              </div>
+              <div class="wf-block">Snackbar / inline validation</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Email Sign In</strong> → <code>AuthViewModel.onEmailSignIn(email, password)</code>.</li>
+                <li><strong>Google Sign In</strong> → <code>rememberGoogleSignInLauncher()</code> 또는 seam callback. Success 시 <code>onGoogleIdToken()</code>로 전달.</li>
+                <li>SignedIn 상태가 되면 <code>OnboardingViewModel.onMarkStepStatus(LOGIN, GRANTED)</code> 후 Today 또는 OnboardingPipaConsent로 이동.</li>
+                <li>Error 상태는 snackbar에 띄운 뒤 <code>onErrorDismissed()</code> 호출.</li>
+                <li>화면 표시 중 <code>FLAG_SECURE</code>를 window에 적용.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Empty email/password</strong>: inline validation만 띄우고 sign-in 호출 안 함.</li>
+                <li><strong>Email sign-in success</strong>: observer 경유 SignedIn 상태 → Today 또는 PIPA.</li>
+                <li><strong>Email unauthorized</strong>: <code>Invalid email or password</code>.</li>
+                <li><strong>Google sign-in Success</strong>: idToken 전달.</li>
+                <li><strong>Google user_cancelled</strong>: 무시.</li>
+                <li><strong>Google no_credentials / launcher error</strong>: snackbar.</li>
+                <li><strong>SignedIn + onboardingCompleted=false</strong>: Onboarding PIPA로.</li>
+                <li><strong>SignedIn + onboardingCompleted=true</strong>: Today로.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>AuthViewModelSpecTest</code>가 email/google sign-in 성공/실패, sign-out, clear error를 검증.</li>
+                <li><strong>UI</strong>: <code>AuthUiTest</code>가 empty validation, disabled Google CTA, credential forwarding을 검증.</li>
+                <li><strong>androidTest</strong>: <code>AuthScreenTest</code>가 SignedIn 후 Today/PIPA route 및 login-granted 마킹을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 Credential Manager / Google picker</strong>: launcher seam으로는 닫혔지만 실제 provider UI는 자동화 안 됨.</li>
+                <li><strong>실제 FLAG_SECURE OS 효과</strong>: 기기/에뮬레이터 단 스크린샷 방지 자체는 별도 실기기 확인 필요.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="pipa-third-party">
+        <summary>
+          <div class="summary-left">
+            <h3>Onboarding PIPA Third-Party Consent</h3>
+            <div class="route">Route: <code>/onboarding/pipa-consent</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">PIPA Disclosure Header</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Bullet 1</div>
+                <div class="wf-list-item">Bullet 2</div>
+                <div class="wf-list-item">Bullet 3</div>
+                <div class="wf-list-item">Bullet 4</div>
+              </div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">동의</div>
+                <div class="wf-btn">동의 안 함</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>동의</strong> → <code>OnboardingViewModel.onPipaConsentGranted()</code>.</li>
+                <li><strong>동의 안 함</strong> → <code>OnboardingViewModel.onPipaConsentDeclined()</code>.</li>
+                <li><code>PipaConsentEvents</code>를 collect 해 저장 성공 시 route 이동, 실패 시 snackbar.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Granted</strong>: DataStore 저장 후 <code>PIPA_CONSENT=GRANTED</code>, <code>RECORDING_FOLDER</code>로 진행.</li>
+                <li><strong>Declined</strong>: DataStore 저장 후 <code>PIPA_CONSENT=DENIED</code>, <code>RECORDING_FOLDER=SKIPPED</code>, <code>CONTACTS_PERM</code>로 점프.</li>
+                <li><strong>Save failure</strong>: snackbar 표시, route 이동 안 함.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>OnboardingViewModelSpecTest</code>가 grant/decline 상태 변화와 event 방출을 검증.</li>
+                <li><strong>UI</strong>: <code>PipaConsentUiTest</code>가 disclosure bullet과 agree/decline callback을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PipaConsentScreenTest</code>가 동일 content/action을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 DataStore write failure UI</strong>: 실패 시 snackbar 분기는 unit 수준 근거는 있으나 end-to-end screen 상태 증거는 제한적.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="recording-folder">
+        <summary>
+          <div class="summary-left">
+            <h3>Recording Folder</h3>
+            <div class="route">Route: <code>/onboarding/recording-folder</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Detected Path / Summary</div>
+              <div class="wf-block">Voice folder detected?</div>
+              <div class="wf-block">Call folder detected?</div>
+              <div class="wf-block">Manual picker fallback note</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Grant</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>Detection summary는 <code>RecordingFolderDetection</code> 또는 runtime detection 결과를 표시.</li>
+                <li><strong>Grant</strong> → audio permission launcher → tree picker → <code>onRecordingFolderTreeGranted(uri)</code>.</li>
+                <li><strong>Skip</strong> → <code>onSkipRecordingFolder()</code>.</li>
+                <li>권한 거부 시 <code>onRecordingFolderPermissionResult(false)</code>로 voice source 비활성화.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Folder detected</strong>: 탐지 경로 및 detected 상태 표기.</li>
+                <li><strong>Requires manual picker</strong>: fallback 문구 노출.</li>
+                <li><strong>Grant success</strong>: tree URI 저장, voice source enabled, step GRANTED.</li>
+                <li><strong>Permission denied / picker cancelled</strong>: voice source disabled, step DENIED 또는 skip branch.</li>
+                <li><strong>Explicit Skip</strong>: URI null, source disabled, step SKIPPED.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>OnboardingViewModelSpecTest</code>가 permission denied / SAF tree grant 상태 갱신을 검증.</li>
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 detection summary, fallback, CTA 렌더를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 detection override와 grant/skip callback dispatch를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 SAF tree picker 및 persistable URI grant</strong>: launcher seam은 검증됐지만 OS picker 실동작은 실기기/에뮬레이터 확인 필요.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="contacts-permission">
+        <summary>
+          <div class="summary-left">
+            <h3>Contacts Permission</h3>
+            <div class="route">Route: <code>/onboarding/contacts</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Rationale + PIPA note</div>
+              <div class="wf-block">Why contacts are needed</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Grant</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Grant</strong> → <code>onAllowContacts()</code> → effect <code>RequestSystemPermission</code>.</li>
+                <li>OS permission result → <code>onContactsPermissionResult(granted)</code>.</li>
+                <li><strong>Skip</strong> → <code>onSkipContacts()</code>.</li>
+                <li>grant/deny/skip 후 모두 <code>NavigateToEmailPipa(gmail)</code> effect로 email PIPA route 이동.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Grant button</strong>: 실제 시스템 permission launcher 실행.</li>
+                <li><strong>Permission granted</strong>: step GRANTED, next route로 이동.</li>
+                <li><strong>Permission denied</strong>: step DENIED, next route로 이동.</li>
+                <li><strong>Skip</strong>: step SKIPPED, next route로 이동.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 rationale와 CTA 렌더를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 effect 소비, permission launcher seam, grant/skip callback을 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 route 등록을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 READ_CONTACTS OS dialog</strong>: runtime permission system dialog 그 자체는 자동화 안 됨.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="email-pipa">
+        <summary>
+          <div class="summary-left">
+            <h3>Email PIPA Disclosure</h3>
+            <div class="route">Route: <code>/onboarding/email-pipa/{provider}</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Provider-specific headline</div>
+              <div class="wf-block">Recipient / purpose / items / retention</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">동의</div>
+                <div class="wf-btn">동의 안 함</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>providerSlug</code>로 copy 세트를 결정. Gmail / Outlook Mail / IMAP / Calendar downstream이 다름.</li>
+                <li><strong>동의</strong> → <code>onEmailPipaConsent(recipients, true)</code> 성공 시 <code>agreeRoute</code>로 이동.</li>
+                <li><strong>동의 안 함</strong> → <code>onEmailPipaConsent(recipients, false)</code> 성공 시 <code>skipAheadRoute</code>로 이동.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Valid providerSlug</strong>: provider별 recipient/copy/next route 사용.</li>
+                <li><strong>Unknown providerSlug</strong>: VM에 <code>onboarding_step_failed(..., pipa_email_unknown_provider)</code> 보고.</li>
+                <li><strong>Agree</strong>: consent 저장 성공 후 downstream connect screen으로 이동.</li>
+                <li><strong>Deny</strong>: consent 저장 성공 후 downstream step은 SKIPPED 상태로 다음 route로 이동.</li>
+                <li><strong>Persist failure</strong>: snackbar.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>OnboardingViewModelSpecTest</code>가 provider deny, IMAP group grant, batch failure를 검증.</li>
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 Gmail disclosure와 agree/deny callback을 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 agree success route, persist failure snackbar, unknown slug fallback을 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 <code>providerSlug</code> arg parsing을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>각 providerSlug 전체 조합</strong>: androidTest는 representative slug와 fallback 중심. 모든 provider copy를 exhaustive하게 누르진 않음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="gmail-oauth">
+        <summary>
+          <div class="summary-left">
+            <h3>Gmail OAuth Screen</h3>
+            <div class="route">Route: <code>/onboarding/gmail</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Provider headline + rationale</div>
+              <div class="wf-block">What Gmail access enables</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Connect</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">Snackbar / PendingIntent branch</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Connect</strong> → <code>OnboardingViewModel.onConnectEmailProvider(GMAIL, activity)</code>.</li>
+                <li>실행 owner는 <code>EmailOAuthConnector.startSignIn(EmailOAuthProvider.GMAIL)</code>이며, backend <code>/v1/oauth/mail/gmail:start</code> → browser → callback → <code>:status</code> poll → <code>mail_sources:sync</code> 구조.</li>
+                <li><code>EmailConnectEvent</code>를 collect 해 Connected / PendingIntentRequired / Failed 분기 처리.</li>
+                <li><strong>Skip</strong> → <code>onSkipStep(LINK_GMAIL)</code> 후 downstream 이메일 PIPA로 진행.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Connected</strong>: 다음 provider disclosure로 이동.</li>
+                <li><strong>PendingIntentRequired</strong>: intent launcher 호출 후 재시도.</li>
+                <li><strong>Failed(network / scope_denied / unknown)</strong>: snackbar + step은 VM에서 SKIPPED 처리.</li>
+                <li><strong>Failed(user_cancelled)</strong>: snackbar 없이 조용히 무시.</li>
+                <li><strong>No host Activity</strong>: <code>unknown</code> snackbar.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 placeholder content와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 Connected, PendingIntentRequired, Failed, user_cancelled, connect/skip callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 브라우저 OAuth</strong>: 자동 UI test 범위 밖.</li>
+                <li><strong>운영 live 상태</strong>: 별도로 Railway dev에서 <span class="good">완료</span>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="outlook-mail-oauth">
+        <summary>
+          <div class="summary-left">
+            <h3>Outlook Mail OAuth Screen</h3>
+            <div class="route">Route: <code>/onboarding/outlook-mail</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Provider headline + rationale</div>
+              <div class="wf-block">What Outlook Mail access enables</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Connect</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">Snackbar / PendingIntent branch</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Connect</strong> → <code>onConnectEmailProvider(OUTLOOK_MAIL)</code>.</li>
+                <li>실 owner는 backend <code>/v1/oauth/mail/outlook_mail:start</code> → callback → status → sync.</li>
+                <li><strong>Skip</strong> → <code>onSkipStep(LINK_OUTLOOK_MAIL)</code> 후 IMAP disclosure로 진행.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Connected</strong>: 다음 step으로 이동.</li>
+                <li><strong>PendingIntentRequired</strong>: 방어적으로 launcher 호출.</li>
+                <li><strong>Failed(network / unknown / scope_denied)</strong>: snackbar + VM에서 step SKIPPED.</li>
+                <li><strong>Failed(user_cancelled)</strong>: 조용히 무시.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 placeholder content와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 PendingIntentRequired, Failed, Connected, connect/skip callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 Entra 브라우저 flow</strong>: 자동 UI test 범위 밖.</li>
+                <li><strong>운영 live 상태</strong>: 별도로 Railway dev에서 <span class="good">완료</span>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="imap-setup">
+        <summary>
+          <div class="summary-left">
+            <h3>IMAP Setup</h3>
+            <div class="route">Route: <code>/onboarding/imap</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Provider selector</div>
+              <div class="wf-block">Username / app password</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Save</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">Snackbar on credential failure</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>Provider selector는 <code>ImapProvider</code> preset을 바꿈.</li>
+                <li><strong>Save</strong> → <code>OnboardingViewModel.saveImapCredentials(sourceType, ImapCredentials)</code>.</li>
+                <li><strong>Skip</strong> → <code>onSkipStep(LINK_IMAP)</code>.</li>
+                <li><code>EmailConnectEvent.Connected</code>면 Google Calendar step으로 이동, Failed면 error code 매핑 snackbar.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Incomplete form</strong>: Save 비활성.</li>
+                <li><strong>Connected</strong>: 다음 step 이동.</li>
+                <li><strong>Failed(save_failed / network / unknown_provider)</strong>: snackbar.</li>
+                <li><strong>PendingIntentRequired</strong>: IMAP은 never emit.</li>
+                <li><strong>Skip</strong>: IMAP step SKIPPED.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 provider selector, validation, save callback을 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 connected event navigation, failed event snackbar, skip+navigate callback을 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 static route를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 IMAP 서버 연결</strong>: live smoke pending (naver_imap, daum_imap).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="google-calendar-oauth">
+        <summary>
+          <div class="summary-left">
+            <h3>Google Calendar OAuth Screen</h3>
+            <div class="route">Route: <code>/onboarding/google-calendar</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Calendar headline</div>
+              <div class="wf-block">Connect explanation</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Connect</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">Snackbar on failure</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Connect</strong> → <code>OnboardingViewModel.onConnectCalendarProvider(GOOGLE_CALENDAR)</code>.</li>
+                <li>실 owner는 <code>CalendarOAuthConnector.startSignIn()</code>, backend <code>/v1/oauth/calendar/google_calendar:start</code> 경유.</li>
+                <li><strong>Skip</strong> → <code>onSkipCalendarSource(GOOGLE_CALENDAR)</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Connected</strong>: Outlook Calendar step으로 이동.</li>
+                <li><strong>Failed(not_implemented / network / unknown)</strong>: snackbar.</li>
+                <li><strong>No host Activity</strong>: unknown snackbar.</li>
+                <li><strong>Skip</strong>: step SKIPPED.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 placeholder content와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 Failed/Connected 및 connect/skip callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 browser callback / status poll</strong>: 자동 UI test 밖.</li>
+                <li><strong>운영 live 상태</strong>: Railway dev에서 <span class="good">완료</span>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="outlook-calendar-oauth">
+        <summary>
+          <div class="summary-left">
+            <h3>Outlook Calendar OAuth Screen</h3>
+            <div class="route">Route: <code>/onboarding/outlook-calendar</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Calendar headline</div>
+              <div class="wf-block">Connect explanation</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Connect</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">Snackbar on failure</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Connect</strong> → <code>onConnectCalendarProvider(OUTLOOK_CALENDAR)</code>.</li>
+                <li>실 owner는 backend <code>/v1/oauth/calendar/outlook_calendar:start</code> / callback / status / sync.</li>
+                <li><strong>Skip</strong> → <code>onSkipCalendarSource(OUTLOOK_CALENDAR)</code> → Notification step.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Connected</strong>: 다음 step 이동.</li>
+                <li><strong>Failed</strong>: snackbar.</li>
+                <li><strong>Skip</strong>: step SKIPPED.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 placeholder content와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 Failed/Connected 및 connect/skip callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 browser callback / status poll</strong>: 자동 UI test 밖.</li>
+                <li><strong>운영 live 상태</strong>: Railway dev에서 <span class="good">완료</span>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="notification-permission">
+        <summary>
+          <div class="summary-left">
+            <h3>Notification Permission</h3>
+            <div class="route">Route: <code>/onboarding/notification</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Permission rationale</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Grant</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+              <div class="wf-block">API level dependent auto-advance</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>API 33+ 에서는 <code>POST_NOTIFICATIONS</code> launcher 사용.</li>
+                <li>API 32 이하에서는 <code>LaunchedEffect</code>로 즉시 <code>StepStatus.SKIPPED</code> 마킹 후 advance.</li>
+                <li><strong>Grant</strong>/<strong>Skip</strong> 모두 결국 <code>onAdvance</code>로 Battery step 진입.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>API &lt; 33</strong>: auto-skip + auto-advance.</li>
+                <li><strong>API 33+ granted</strong>: step GRANTED + advance.</li>
+                <li><strong>API 33+ denied</strong>: step DENIED + advance.</li>
+                <li><strong>Explicit Skip</strong>: step SKIPPED + advance.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 rationale와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 API 33+ callback dispatch와 API 32 auto-skip/advance를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 POST_NOTIFICATIONS system dialog</strong>: 자동화 안 됨.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="battery-optimization">
+        <summary>
+          <div class="summary-left">
+            <h3>Battery Optimization</h3>
+            <div class="route">Route: <code>/onboarding/battery</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Battery rationale / Samsung note</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">배터리 최적화 제외</div>
+                <div class="wf-btn">Skip</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Grant</strong> → OS settings intent launcher.</li>
+                <li>launcher result 후 <code>BATTERY_OPT=COMPLETE</code> 마킹, Cold Sync로 advance.</li>
+                <li><strong>Skip</strong> → <code>onSkipStep(BATTERY_OPT)</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Grant / result returned</strong>: 결과 값과 관계 없이 COMPLETE + advance.</li>
+                <li><strong>Skip</strong>: SKIPPED + advance.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>OnboardingViewModelSpecTest</code>가 battery skip 진행을 검증.</li>
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 copy와 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 request/skip callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 OS settings 화면 진입 및 return path</strong>: launcher seam까지만 자동화됨.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="cold-sync">
+        <summary>
+          <div class="summary-left">
+            <h3>Cold Sync</h3>
+            <div class="route">Route: <code>/onboarding/cold-sync</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Progress headline</div>
+              <div class="wf-block">Per-source progress / overall percent</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Continue</div>
+                <div class="wf-btn">Skip for now</div>
+              </div>
+              <div class="wf-block">Done state / transition snapshot</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>ColdSyncViewModel.state</code>가 progress, done, skipEnabled, lastTransition을 제공.</li>
+                <li>화면 진입 시 <code>onScreenVisible()</code>가 Stage1을 시작.</li>
+                <li><strong>Continue</strong> → <code>onStage1Completed()</code>.</li>
+                <li><strong>Skip for now</strong> → <code>onSkipForNow()</code>.</li>
+                <li><code>ColdSyncEffect.NavigateToToday</code>를 collect 해 Today로 이동.</li>
+                <li><code>state.done=true</code>가 되면 wrapper가 <code>onComplete()</code>를 자동 호출.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>In progress</strong>: progress 및 skip countdown 노출.</li>
+                <li><strong>Skip disabled</strong>: 초기 5초 동안 skip 불가.</li>
+                <li><strong>Skip enabled</strong>: deferred stage1로 전환 후 Today 이동.</li>
+                <li><strong>Done</strong>: Continue CTA 또는 auto-complete path.</li>
+                <li><strong>Stage1 completion failure / defer failure</strong>: logger 경유, 사용자용 강한 surface는 제한적.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>ColdSyncRouteResolverSpecTest</code>, <code>ColdSyncRuntimeCoordinatorSpecTest</code>, <code>ColdSyncViewModelSpecTest</code>가 route, progress, skip timer, complete/defer effect를 검증.</li>
+                <li><strong>Integration</strong>: <code>ColdSyncLocalIntegrationTest</code>가 stage1 complete/defer persistence와 stage2 resume banner를 검증.</li>
+                <li><strong>UI</strong>: <code>OnboardingUiTest</code>가 in-progress/done content 및 CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>OnboardingScreenTest</code>가 visible/complete/navigate/skip callback과 done auto-complete를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 WorkManager/OS scheduling</strong>: coordinator와 state projection은 검증됐지만 기기 OS scheduling 자체는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="today">
+        <summary>
+          <div class="summary-left">
+            <h3>Today</h3>
+            <div class="route">Route: <code>/today</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header + Settings icon</div>
+              <div class="wf-chip-row"><span>Voice</span><span>Gmail</span><span>Outlook</span><span>Calendar</span></div>
+              <div class="wf-block">Overall sync banner</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Timeline item</div>
+                <div class="wf-list-item">Timeline item</div>
+                <div class="wf-list-item">Timeline item</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>TodayViewModel.uiState</code>는 commitments, calendar, source status, processing pause를 합쳐 timeline을 생성.</li>
+                <li>Settings 아이콘 → <code>TodayEffect.NavigateSettings</code>.</li>
+                <li>Pull refresh → <code>TodayViewModel.onPullRefresh()</code>.</li>
+                <li>Source strip / overall sync는 <code>TodayOverallSync</code> 계산 결과 사용.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>Error</strong>: generic error state.</li>
+                <li><strong>Empty</strong>: empty state.</li>
+                <li><strong>Populated</strong>: timeline list with section labels.</li>
+                <li><strong>processingPaused=true</strong>: 상단 배너 노출.</li>
+                <li><strong>overall sync</strong>: Idle / Syncing(n/7) / PartialFailure / Synced label 분기.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>TodayViewModelSpecTest</code>와 <code>TodayOverallSyncSpecTest</code>가 timeline merge, day window, chip order, overall sync branch를 검증.</li>
+                <li><strong>Integration</strong>: <code>ColdSyncLocalIntegrationTest</code>가 today-stage2 resume banner state를 검증.</li>
+                <li><strong>UI</strong>: <code>TodayTimelineUiTest</code>가 banner, settings action, error, empty, strip를 검증.</li>
+                <li><strong>androidTest</strong>: <code>TodayTimelineScreenTest</code>가 동일 화면 분기와 settings action을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 backend refresh round-trip</strong>: UI는 local Room/state 기준으로 검증됨. live network refresh는 별도 smoke.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="persons">
+        <summary>
+          <div class="summary-left">
+            <h3>Persons</h3>
+            <div class="route">Route: <code>/persons</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header + search</div>
+              <div class="wf-block">Offline badge</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Person card</div>
+                <div class="wf-list-item">Person card</div>
+                <div class="wf-list-item">Unassigned section</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>PersonsViewModel.uiState</code>가 people, query, offline badge, unassignedEvents를 제공.</li>
+                <li>Person row tap → <code>PersonDetail(personRef)</code> route.</li>
+                <li><code>HandleSnackbarMessage(state.error)</code>로 error 소비.</li>
+                <li>Pull refresh → app runtime refresh coordinator.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>Empty</strong>: empty state.</li>
+                <li><strong>Offline</strong>: last sync 기반 offline badge.</li>
+                <li><strong>People list</strong>: enrichment, pending count, last snippet, interaction count.</li>
+                <li><strong>Unassigned bucket present</strong>: 별도 section 렌더.</li>
+                <li><strong>Query</strong>: name/email/phone substring debounce filter.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PersonsViewModelSpecTest</code>가 aggregate fields, nickname fallback, query filter, unassigned bucket, offline badge, refresh snapshot을 검증.</li>
+                <li><strong>Integration</strong>: <code>PersonsScreenStateSourceLocalIntegrationTest</code>가 offline/unassigned projection과 source snapshot 반영을 검증.</li>
+                <li><strong>UI</strong>: <code>PersonsUiTest</code>가 offline badge, unassigned section, enriched card meta를 검증.</li>
+                <li><strong>androidTest</strong>: <code>PersonsScreenTest</code>가 offline badge, unassigned section, person card meta를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>full pagination flow</strong>: state contract는 unit에서 검증되지만 실제 multi-page UI interaction은 별도 시나리오 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="persons-unassigned">
+        <summary>
+          <div class="summary-left">
+            <h3>Persons Unassigned</h3>
+            <div class="route">Route: <code>/persons/unassigned</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header: 미분류 이벤트</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Event row</div>
+                <div class="wf-list-item">Event row</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>UnassignedEventsContent</code>는 Persons projection의 <code>unassignedEvents</code>만 표시.</li>
+                <li>Event row는 source badge와 title/timestamp를 보여줌.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Empty</strong>: empty state.</li>
+                <li><strong>Populated</strong>: unassigned rows.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PersonsViewModelSpecTest</code>가 unassigned bucket page contract를 검증.</li>
+                <li><strong>Integration</strong>: <code>PersonsScreenStateSourceLocalIntegrationTest</code>가 unassigned snapshot projection을 검증.</li>
+                <li><strong>UI</strong>: <code>PersonDetailSupplementUiTest</code>가 empty/populated content를 검증.</li>
+                <li><strong>androidTest</strong>: <code>PersonDetailSupplementScreenTest</code>가 empty/populated content를 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 <code>/persons/unassigned</code> literal route를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>row tap → downstream detail</strong>: 별도 dedicated route action test는 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="person-detail">
+        <summary>
+          <div class="summary-left">
+            <h3>Person Detail</h3>
+            <div class="route">Route: <code>/persons/{personId}</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Person header + counts</div>
+              <div class="wf-block">Pending commitments</div>
+              <div class="wf-block">Completed commitments (expand/collapse)</div>
+              <div class="wf-list">
+                <div class="wf-list-item">History row: event / meeting</div>
+                <div class="wf-list-item">History row: event / meeting</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>PersonDetailViewModel.uiState</code>가 enrichment, counts, pending/completed items, history, expansion 상태를 제공.</li>
+                <li>History의 event tap → <code>RawEventDetail(personId, eventId)</code>.</li>
+                <li>Completed section header tap → <code>onToggleCompletedExpanded()</code>.</li>
+                <li>pending section에는 <strong>action + schedule + decision</strong> item이 모두 들어감.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Missing personId</strong>: immediate error state.</li>
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>Error with no interactions</strong>: generic error state.</li>
+                <li><strong>Empty interactions</strong>: empty interactions state.</li>
+                <li><strong>Completed collapsed</strong>: 헤더만 보임.</li>
+                <li><strong>Completed expanded</strong>: 완료 약속 row 렌더.</li>
+                <li><strong>History row type</strong>: raw event vs calendar meeting.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PersonDetailViewModelSpecTest</code>가 missing id, header projection, history sort, pending schedule/decision inclusion, fallback display를 검증.</li>
+                <li><strong>Integration</strong>: <code>PersonDetailLocalIntegrationTest</code>가 Room timeline projection과 enrichment join, raw event detail room join을 검증.</li>
+                <li><strong>UI</strong>: <code>PersonsUiTest</code>가 section/expansion/tap을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PersonDetailScreenTest</code>가 section header, collapsed/expanded, raw event tap을 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 <code>personId</code> arg parsing을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>history calendar meeting tap path</strong>: 현재 tap은 raw event row에 초점. meeting row click은 별도 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="raw-event-detail">
+        <summary>
+          <div class="summary-left">
+            <h3>Raw Event Detail</h3>
+            <div class="route">Route: <code>/persons/{personId}/events/{eventId}</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Title + timestamp + source badge</div>
+              <div class="wf-block">Email body or non-email summary</div>
+              <div class="wf-block">Attachments / commitments extracted badge</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Expand body</div>
+                <div class="wf-btn">View original</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>RawEventDetailViewModel</code>는 <code>RawIngestionRepository.findById()</code>와 email body projection을 조합.</li>
+                <li>Email source면 body/attachments branch, non-email이면 voice/calendar/call summary branch.</li>
+                <li><strong>View original</strong>은 HTML-only degrade action callback.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Missing eventId</strong>: immediate error.</li>
+                <li><strong>No signed-in user / entity missing</strong>: not found state.</li>
+                <li><strong>Email</strong>: plain body, html, attachment count, extracted badge.</li>
+                <li><strong>Email HTML-only</strong>: degrade notice + view-original action.</li>
+                <li><strong>Voice / call recording</strong>: title, duration, extracted quotes.</li>
+                <li><strong>Calendar</strong>: location, attendees, no email body.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>RawEventDetailViewModelSpecTest</code>가 missing id, not found, email, voice, call recording, calendar branch를 검증.</li>
+                <li><strong>Integration</strong>: <code>PersonDetailLocalIntegrationTest</code>가 Room-only email body join을 검증.</li>
+                <li><strong>UI</strong>: <code>PersonDetailSupplementUiTest</code>가 email sections, expandable body, html-only degrade action을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PersonDetailSupplementScreenTest</code>가 동일 content branches를 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 <code>personId</code>와 <code>eventId</code> arg parsing을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 HTML 원문 viewer</strong>: degrade action callback까지만 검증, 외부 viewer/intent는 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="sources-list">
+        <summary>
+          <div class="summary-left">
+            <h3>Sources List / SettingsSources</h3>
+            <div class="route">Routes: <code>/settings/sources</code> and source list content</div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Source rows</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Contacts pseudo source</div>
+                <div class="wf-list-item">Gmail row</div>
+                <div class="wf-list-item">Calendar row</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>SourcesListViewModel</code>는 <code>SourceStatusRepository</code> + contacts permission/enrichment를 합쳐 row를 생성.</li>
+                <li>Contacts row tap → permission granted면 ContactsSourceDetail, 아니면 ContactsPermission route.</li>
+                <li>일반 source tap → <code>SourceDetail(sourceType)</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Empty</strong>: empty state.</li>
+                <li><strong>Contacts pseudo source</strong>: connected/disconnected + enriched count.</li>
+                <li><strong>Regular source rows</strong>: status label, error label, last sync.</li>
+                <li><strong>Contacts permission denied</strong>: row tap이 permission route로 분기.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>SourcesListViewModelSpecTest</code>가 8개 row, contacts row 상태, contacts 선택 분기, source detail 분기를 검증.</li>
+                <li><strong>Integration</strong>: <code>SourcesLocalIntegrationTest</code>가 status repository와 contacts pseudo source projection을 검증.</li>
+                <li><strong>UI</strong>: <code>SourcesUiTest</code>가 contacts row와 empty state를 검증.</li>
+                <li><strong>androidTest</strong>: <code>SourcesListScreenTest</code>가 contacts pseudo source, empty state, row click을 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 SettingsSources static route를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 repository refresh from backend</strong>: local projection 위주 검증.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="contacts-source-detail">
+        <summary>
+          <div class="summary-left">
+            <h3>Contacts Source Detail</h3>
+            <div class="route">Route: <code>/sources/contacts</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Connection state / count / last sync</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Grant</div>
+                <div class="wf-btn">Open settings</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>ContactsSourceDetailViewModel</code>는 permission granted 여부에 따라 connection state와 CTA를 조정.</li>
+                <li>CTA → granted 상태면 revoke/settings 경로, 아니면 permission request route.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Permission denied</strong>: DISCONNECTED + Grant CTA.</li>
+                <li><strong>Permission granted</strong>: CONNECTED + permission settings/revoke action.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>SourcesListViewModelSpecTest</code> 하단 contacts detail spec이 permission granted state를 검증.</li>
+                <li><strong>Integration</strong>: <code>SourcesLocalIntegrationTest</code>가 contacts detail payload와 effect를 검증.</li>
+                <li><strong>UI</strong>: <code>ContactsSourceDetailUiTest</code>가 summary와 action CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>ContactsSourceDetailScreenTest</code>가 동일 summary와 CTA를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 system settings deep-link</strong>: CTA dispatch까지만 검증.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="source-detail">
+        <summary>
+          <div class="summary-left">
+            <h3>Source Detail</h3>
+            <div class="route">Route: <code>/sources/{sourceType}</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Status + last sync + last error</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Reconnect</div>
+                <div class="wf-btn">Sync now</div>
+              </div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Disconnect</div>
+                <div class="wf-btn">Confirm dialog</div>
+              </div>
+              <div class="wf-list">
+                <div class="wf-list-item">Recent event</div>
+                <div class="wf-list-item">Recent event</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Reconnect</strong> → <code>SourceDetailActionResolver.reconnectDestinationFor()</code>로 provider별 route 결정:
+                  voice→RecordingFolder, gmail→Gmail OAuth, outlook_mail→Outlook Mail OAuth, imap→IMAP, google_calendar→Google Calendar OAuth, outlook_calendar→Outlook Calendar OAuth.</li>
+                <li><strong>Sync now</strong> → <code>SourceSyncPort.requestManualSync(sourceType)</code>. backend-managed mail/calendar는 server sync, IMAP/voice는 local worker.</li>
+                <li><strong>Disconnect</strong> → confirm dialog → <code>SourceAdministrationPort.disconnect()</code>.</li>
+                <li>최근 이벤트 목록은 Room mirror 기준.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Blank sourceType</strong>: explicit error state.</li>
+                <li><strong>Invalid sourceType / contacts</strong>: explicit error state.</li>
+                <li><strong>Connected source</strong>: manual sync + disconnect 보임.</li>
+                <li><strong>Error/disconnected source</strong>: reconnect 버튼 보임.</li>
+                <li><strong>Disconnect dialog open</strong>: confirm/cancel 분기.</li>
+                <li><strong>Manual sync failure</strong>: action error surface.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>SourceDetailViewModelSpecTest</code>가 blank/invalid arg, connected state, error reconnect, IMAP reconnect, voice reconnect, dialog toggle, disconnect outcome를 검증.</li>
+                <li><strong>Integration</strong>: <code>SourcesLocalIntegrationTest</code>가 sync metadata, manual sync source owner, contacts detail, disconnect success clear를 검증.</li>
+                <li><strong>UI</strong>: <code>SourcesUiTest</code>가 reconnect/sync/disconnect/cancel dialog를 검증.</li>
+                <li><strong>androidTest</strong>: <code>SourceDetailScreenTest</code>가 actions, recent events, dialog confirm/hide를 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 <code>sourceType</code> arg parsing을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 backend manual sync 결과 UI round-trip</strong>: port 호출 contract는 검증됐지만 live provider 결과까지는 별도 external smoke.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="commitment-management">
+        <summary>
+          <div class="summary-left">
+            <h3>Commitment Management</h3>
+            <div class="route">Route: <code>/commitments</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header + FAB</div>
+              <div class="wf-chip-row"><span>ALL</span><span>ACTION</span><span>GIVE</span><span>TAKE</span><span>SCHEDULE</span><span>DECISION</span></div>
+              <div class="wf-block">Completed / cancelled action section</div>
+              <div class="wf-block">Schedule / decision stay in active trackable list</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Trackable card with type + subtype + person</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>filter chip → <code>onFilterChange()</code>.</li>
+                <li>row tap → <code>onCommitmentSelected(id)</code> → detail route.</li>
+                <li>카드는 <code>itemType</code>, <code>direction</code>, <code>scheduleStatus</code>, <code>decisionStatus</code>, <code>counterpartyDisplayName</code>를 함께 표시.</li>
+                <li>completed/cancelled section header → action-only terminal rows expand/collapse.</li>
+                <li>FAB → create sheet route.</li>
+                <li>undo snackbar는 <code>undoFlow</code>를 collect 해서 <code>onUndo()</code> 호출.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>Empty</strong>: empty state.</li>
+                <li><strong>Filter</strong>: ALL / ACTION / GIVE / TAKE / SCHEDULE / DECISION.</li>
+                <li><strong>Action row</strong>: give/take subtype와 pending/completed/cancelled 상태 pill 표시.</li>
+                <li><strong>Schedule row</strong>: changed/confirmed/postponed/cancelled/follow_up subtype 표시, action 상태 pill 없음.</li>
+                <li><strong>Decision row</strong>: approved/rejected/chosen/deferred/ongoing subtype 표시, action 상태 pill 없음.</li>
+                <li><strong>Counterparty</strong>: person display name 우선, 없으면 raw counterparty 또는 미지정 상대 fallback.</li>
+                <li><strong>Completed / Cancelled</strong>: action terminal rows만 기본 collapsed, independent expand.</li>
+                <li><strong>Undo snackbar</strong>: Complete/Cancel 후 action 수행 시 복원.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>CommitmentManagementViewModelSpecTest</code>가 counterparty resolution, action/schedule/decision filter, detail nav, section toggle, refresh failure, reminder scheduling을 검증.</li>
+                <li><strong>Integration</strong>: <code>CommitmentLocalIntegrationTest</code>가 local persistence/update contract를 검증.</li>
+                <li><strong>UI</strong>: <code>CommitmentManagementUiTest</code>가 empty, type filters, person-visible row, FAB, detail tap을 검증.</li>
+                <li><strong>androidTest</strong>: <code>CommitmentManagementScreenTest</code>가 동일 interaction을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 reminder scheduling side-effect</strong>: ViewModel contract는 검증됐지만 OS notification delivery는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="commitment-detail">
+        <summary>
+          <div class="summary-left">
+            <h3>Commitment Detail Sheet</h3>
+            <div class="route">Route: <code>/commitments/{id}</code> (sheet)</div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Title / type / subtype / person</div>
+              <div class="wf-block">Quote + source attribution</div>
+              <div class="wf-chip-row"><span>Action only: Remind</span><span>Follow-up</span><span>Complete</span><span>Edit</span></div>
+              <div class="wf-block">History / supersede / dispute</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>state는 <code>CommitmentDetailViewModel</code>, action lifecycle은 <code>CommitmentManagementViewModel</code>에 위임.</li>
+                <li>상단 chip은 <code>itemType</code> + subtype(<code>direction</code> 또는 <code>scheduleStatus</code> 또는 <code>decisionStatus</code>)를 표시.</li>
+                <li><strong>Edit</strong> → <code>CommitmentDetailEffect.OpenEdit</code> → dismiss 후 edit route.</li>
+                <li><strong>Remind / Follow-up / Complete / Cancel</strong> → action item일 때만 management VM action.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>Missing/soft-deleted</strong>: empty error state.</li>
+                <li><strong>Action detail</strong>: give/take chip + pending/completed/cancelled state chip + lifecycle CTA.</li>
+                <li><strong>Schedule / Decision detail</strong>: typed chip만 표시, read-only trackable로 열림.</li>
+                <li><strong>Read-only</strong>: non-action 또는 cancelled/deleted면 edit/action strip 비활성.</li>
+                <li><strong>Manual source</strong>: source label이 "사용자 직접 추가".</li>
+                <li><strong>History flags</strong>: last edited, dispute label, supersede link 표시 여부.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>CommitmentDetailViewModelSpecTest</code>가 full projection, edit effect, non-action read-only state, history markers, manual source badge를 검증.</li>
+                <li><strong>UI</strong>: <code>CommitmentSheetsUiTest</code>가 action detail, schedule read-only detail, edit/remind CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>CommitmentSheetsTest</code>가 detail content, schedule read-only branch, open-edit effect consumption을 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 commitment id arg parsing을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 sheet stack pop + edit push</strong>: effect seam은 검증됐지만 full nav animation/stack 감성은 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="commitment-create">
+        <summary>
+          <div class="summary-left">
+            <h3>Commitment Create Sheet</h3>
+            <div class="route">Route: <code>/commitments/create[?supersedeOf=...]</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Mode header: manual / supersede</div>
+              <div class="wf-block">Title / direction / person / due</div>
+              <div class="wf-block">Quote or read-only supersede quote</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Cancel</div>
+                <div class="wf-btn">Save</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>모든 form field는 <code>CommitmentCreateViewModel</code> draft를 수정.</li>
+                <li><strong>Save</strong> → validator → repository create → dismiss event.</li>
+                <li><strong>Cancel</strong> → dismiss.</li>
+                <li>supersede mode면 원문 quote를 read-only로 유지.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Manual mode</strong>: 빈 draft, direction 기본 give.</li>
+                <li><strong>Supersede mode</strong>: source quote immutable.</li>
+                <li><strong>Validation failure</strong>: fieldErrors 노출, save 막힘.</li>
+                <li><strong>Save success</strong>: dismiss flow.</li>
+                <li><strong>Save failure</strong>: saveError banner.</li>
+                <li><strong>Supersede source missing</strong>: explicit saveError.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>CommitmentCreateViewModelSpecTest</code>가 manual defaults, valid save, supersede mode, missing source, save failure를 검증.</li>
+                <li><strong>UI</strong>: <code>CommitmentSheetsUiTest</code>가 required inputs, direction, save CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>CommitmentSheetsTest</code>가 create content와 dismiss event consumption을 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 optional <code>supersedeOf</code> query arg를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 date picker OS dialog</strong>: open/clear field는 UI에서 보이지만 picker 자체는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="commitment-edit">
+        <summary>
+          <div class="summary-left">
+            <h3>Commitment Edit Sheet</h3>
+            <div class="route">Route: <code>/commitments/edit/{id}</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Existing values + read-only quote/source</div>
+              <div class="wf-block">Editable fields</div>
+              <div class="wf-block">Danger zone: delete / dispute</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Cancel</div>
+                <div class="wf-btn">Save</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>fields는 <code>CommitmentEditViewModel</code> state를 편집.</li>
+                <li><strong>Save</strong> → validator → repository edit.</li>
+                <li><strong>Delete</strong> → confirm dialog → <code>onConfirmDelete()</code>.</li>
+                <li><strong>Dispute toggle</strong> → mark/clear quote dispute.</li>
+                <li><code>dismiss</code> flow와 <code>state.notFound</code>가 wrapper dismiss를 유발.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: spinner.</li>
+                <li><strong>notFound</strong>: 즉시 dismiss.</li>
+                <li><strong>Invalid save</strong>: fieldErrors.</li>
+                <li><strong>Save success</strong>: dismiss event Saved.</li>
+                <li><strong>Delete success</strong>: dismiss event Deleted.</li>
+                <li><strong>Delete/save failure</strong>: saveError.</li>
+                <li><strong>Dispute on/off</strong>: readOnly badge flip.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>CommitmentEditViewModelSpecTest</code>가 load, invalid save, not-found mapping, save success, dispute set/clear, delete success를 검증.</li>
+                <li><strong>UI</strong>: <code>CommitmentSheetsUiTest</code>가 initial values, delete affordance, save CTA를 검증.</li>
+                <li><strong>androidTest</strong>: <code>CommitmentSheetsTest</code>가 initial values, delete dialog, save/delete callbacks를 검증.</li>
+                <li><strong>Route parsing</strong>: <code>BecalmNavHostTest</code>가 edit id arg를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 sheet dismiss animation chain</strong>: dismiss event는 닫혔지만 실제 UX timing은 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="settings">
+        <summary>
+          <div class="summary-left">
+            <h3>Settings</h3>
+            <div class="route">Route: <code>/settings</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header + banners</div>
+              <div class="wf-block">Notification toggle</div>
+              <div class="wf-block">PIPA consent toggle</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Sources row</div>
+                <div class="wf-list-item">Privacy row</div>
+              </div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Sign out</div>
+                <div class="wf-btn">Wipe local data</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>SettingsViewModel</code>가 email, toggles, processingPaused, signedOut, error를 제공.</li>
+                <li>Notification toggle → <code>onToggleNotifications()</code>.</li>
+                <li>PIPA toggle → enable/disable confirm dialog 후 <code>onTogglePipaConsent()</code>.</li>
+                <li>Sources/Privacy row → 해당 route로 navigate.</li>
+                <li>Sign out / wipe local data → confirm dialog 후 action.</li>
+                <li><code>signedOut=true</code>가 되면 <code>navigateAfterSignOut()</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: shimmer/loader.</li>
+                <li><strong>processingPaused</strong>: banner.</li>
+                <li><strong>PIPA enable</strong>: confirm dialog → optimistic toggle / possible revert on failure.</li>
+                <li><strong>PIPA disable</strong>: confirm dialog → voice rows park + uploads cancel branch.</li>
+                <li><strong>Sign out</strong>: confirm dialog → signedOut navigation.</li>
+                <li><strong>Wipe data</strong>: confirm dialog → full local wipe action.</li>
+                <li><strong>Error</strong>: snackbar via <code>HandleSnackbarMessage</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>SettingsViewModelSpecTest</code>가 initial load, notification toggle, PIPA grant/withdraw, write failure revert, sign out를 검증.</li>
+                <li><strong>UI</strong>: <code>SettingsUiTest</code>가 banners, rows, wipe action, PIPA toggle를 검증.</li>
+                <li><strong>androidTest</strong>: <code>SettingsScreenTest</code>가 signOut/wipe confirm, signedOut navigation, error consume를 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 Settings route를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 sign-out 후 app process/session handoff</strong>: state navigation은 검증됐지만 multi-process resume는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="privacy-management">
+        <summary>
+          <div class="summary-left">
+            <h3>Privacy Management</h3>
+            <div class="route">Route: <code>/settings/privacy</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Privacy summary counts</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Export data</div>
+                <div class="wf-list-item">Withdraw consent</div>
+                <div class="wf-list-item">Processing pause</div>
+                <div class="wf-list-item">Account deletion</div>
+                <div class="wf-list-item">Activity log</div>
+              </div>
+              <div class="wf-block">Export confirm dialog / snackbar</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><strong>Export</strong> → confirm dialog → <code>PrivacyManagementViewModel.onExportRequested()</code> → <code>CreateExportDocument</code> effect → launcher writes ZIP → success/failure callback.</li>
+                <li>Withdraw / Pause / Delete / ActivityLog card는 각 subroute로 navigate.</li>
+                <li><code>signedOut=true</code>면 sign-out after navigation.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Loading</strong>: loader.</li>
+                <li><strong>Export requested</strong>: exporter success → launcher effect.</li>
+                <li><strong>Export save success</strong>: exporting=false, error clear.</li>
+                <li><strong>Export save failure</strong>: error message.</li>
+                <li><strong>signedOut</strong>: navigateAfterSignOut.</li>
+                <li><strong>Error</strong>: snackbar consume.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PrivacyManagementViewModelSpecTest</code>가 export effect, resume, withdraw voice consent, account delete signOut를 검증.</li>
+                <li><strong>Integration</strong>: <code>PrivacyDataExporterLocalIntegrationTest</code>가 ZIP payload contents와 token exclusion을 검증.</li>
+                <li><strong>UI</strong>: <code>SettingsUiTest</code>가 all action cards와 count subtitle을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacyManagementScreenTest</code>가 all cards, signOut nav, export confirm, launcher success/failure callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 file picker/DocumentProvider 저장</strong>: launcher seam까지 검증, OS file write UI는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="privacy-subscreens">
+        <summary>
+          <div class="summary-left">
+            <h3>Privacy Subroutes Index</h3>
+            <div class="route">Routes: <code>/settings/privacy/withdraw</code>, <code>/pause</code>, <code>/delete</code>, <code>/activity-log</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-block">Consent Withdraw screen</div>
+              <div class="wf-block">Processing Pause screen</div>
+              <div class="wf-block">Account Deletion screen</div>
+              <div class="wf-block">Activity Log screen</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>이 index 카드의 역할</h4>
+              <ul>
+                <li>아래 4개 subroute를 별도 화면 단위로 다시 펼쳐서 보기 위한 요약 카드입니다.</li>
+                <li>검증 배지는 네 하위 화면 전체에 대한 공통 coverage 지도를 요약합니다.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>포함되는 실제 화면</h4>
+              <ul class="branch-list">
+                <li><strong>Consent Withdraw</strong></li>
+                <li><strong>Processing Pause</strong></li>
+                <li><strong>Account Deletion</strong></li>
+                <li><strong>Activity Log</strong></li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PrivacyManagementViewModelSpecTest</code>가 withdraw voice, pause resume, account delete signOut를 검증.</li>
+                <li><strong>UI</strong>: <code>PrivacySubscreensUiTest</code>가 withdraw toggles, pause confirm, account delete form, activity log empty/populated를 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacySubscreensTest</code>가 동일 4개 subcontent를 검증.</li>
+                <li><strong>Route 등록</strong>: <code>BecalmNavHostTest</code>가 withdraw/pause/delete/activity-log route 등록을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>provider별 모든 withdraw target</strong>: UI는 Gmail 등 대표 target tap 위주. 모든 target 조합을 exhaustive하게 누르진 않음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="consent-withdraw">
+        <summary>
+          <div class="summary-left">
+            <h3>Consent Withdraw</h3>
+            <div class="route">Route: <code>/settings/privacy/withdraw</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Consent categories</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Voice auto processing</div>
+                <div class="wf-list-item">Gmail / Outlook Mail</div>
+                <div class="wf-list-item">Naver / Daum IMAP</div>
+                <div class="wf-list-item">Google / Outlook Calendar</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>각 row tap은 <code>PrivacyManagementViewModel.onWithdrawConsent(target)</code> 호출.</li>
+                <li>target은 <code>VOICE</code>, <code>GMAIL</code>, <code>OUTLOOK_MAIL</code>, <code>NAVER_IMAP</code>, <code>DAUM_IMAP</code>, <code>GOOGLE_CALENDAR</code>, <code>OUTLOOK_CALENDAR</code> 중 하나.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Voice</strong>: pending voice row park + queued upload cancel.</li>
+                <li><strong>Mail / Calendar providers</strong>: source disconnect/consent off branch.</li>
+                <li><strong>Unavailable target</strong>: VM error surface 가능.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PrivacyManagementViewModelSpecTest</code>가 voice withdraw path를 검증.</li>
+                <li><strong>UI</strong>: <code>PrivacySubscreensUiTest</code>가 toggle list와 Gmail withdraw callback을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacySubscreensTest</code>가 동일 content/callback을 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>모든 provider target 개별 tap</strong>: 대표적으로 Gmail tap 기준 자동 검증. 나머지 target은 동일 패턴으로 간주되지만 개별 exhaustiveness는 없음.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="processing-pause">
+        <summary>
+          <div class="summary-left">
+            <h3>Processing Pause</h3>
+            <div class="route">Route: <code>/settings/privacy/pause</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Pause description + startedAt</div>
+              <div class="wf-block">Switch</div>
+              <div class="wf-block">Confirm dialog</div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>pause switch는 <code>onSetProcessingPaused(paused)</code>로 연결.</li>
+                <li>pause on/off 전환 전에 confirm dialog를 거침.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Pause on</strong>: processingPaused=true 저장.</li>
+                <li><strong>Resume</strong>: processingPaused=false + catch-up trigger.</li>
+                <li><strong>Cancel confirm</strong>: 상태 유지.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PrivacyManagementViewModelSpecTest</code>가 resume clears pause and triggers catch-up을 검증.</li>
+                <li><strong>UI</strong>: <code>PrivacySubscreensUiTest</code>가 startedAt와 confirm dialog를 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacySubscreensTest</code>가 동일 branch를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 background scheduler pause/resume 효과</strong>: state write와 coordinator contract는 검증됐지만 장시간 runtime effect는 별도.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="account-deletion">
+        <summary>
+          <div class="summary-left">
+            <h3>Account Deletion</h3>
+            <div class="route">Route: <code>/settings/privacy/delete</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Destructive warning + counts</div>
+              <div class="wf-block">Email input</div>
+              <div class="wf-block">Confirmation keyword input</div>
+              <div class="wf-btn-row">
+                <div class="wf-btn">Delete account</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li>email + keyword 입력 후 <code>onConfirmDeletion(email, keyword)</code>.</li>
+                <li>VM은 email match, confirmation text match, <code>authRepository.signOut()</code> 순으로 처리.</li>
+                <li><code>signedOut=true</code>가 되면 wrapper가 <code>navigateAfterSignOut()</code>.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Email mismatch</strong>: error.</li>
+                <li><strong>Confirmation text mismatch</strong>: error.</li>
+                <li><strong>Delete success</strong>: signedOut navigation.</li>
+                <li><strong>Delete failure</strong>: account deletion failed error.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>Unit</strong>: <code>PrivacyManagementViewModelSpecTest</code>가 account delete signOut을 검증.</li>
+                <li><strong>UI</strong>: <code>PrivacySubscreensUiTest</code>가 warning, field input, callback dispatch를 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacySubscreensTest</code>가 동일 content를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>실제 backend account deletion semantics</strong>: 여기서는 local half/signOut surface 검증이 중심.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="screen-card" id="activity-log">
+        <summary>
+          <div class="summary-left">
+            <h3>Activity Log</h3>
+            <div class="route">Route: <code>/settings/privacy/activity-log</code></div>
+          </div>
+          <div class="summary-right">
+            <div class="coverage-row"><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div>
+          </div>
+        </summary>
+        <div class="screen-body">
+          <div class="wireframe">
+            <div class="wf-screen">
+              <div class="wf-bar">Header</div>
+              <div class="wf-list">
+                <div class="wf-list-item">Action log row</div>
+                <div class="wf-list-item">Action log row</div>
+              </div>
+            </div>
+          </div>
+          <div class="body-right">
+            <div class="panel-block">
+              <h4>UI 요소 → 로직</h4>
+              <ul>
+                <li><code>PrivacyManagementUiState.activityLog</code>를 단순 렌더.</li>
+                <li>별도 write action 없이 read-only list.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>분기</h4>
+              <ul class="branch-list">
+                <li><strong>Empty</strong>: empty message.</li>
+                <li><strong>Populated</strong>: action + timestamp row list.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>검증 완료</h4>
+              <ul class="test-list">
+                <li><strong>UI</strong>: <code>PrivacySubscreensUiTest</code>가 empty/populated rendering을 검증.</li>
+                <li><strong>androidTest</strong>: <code>PrivacySubscreensTest</code>가 동일 empty/populated branch를 검증.</li>
+              </ul>
+            </div>
+            <div class="panel-block">
+              <h4>미검증 / 별도 확인</h4>
+              <ul class="gap-list">
+                <li><strong>activity log sourcing logic</strong>: 전용 unit contract 표시는 없음. 화면은 read-only projection 검증 중심.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Cross-Path Gaps That Still Exist</h2>
+    <div class="legend-grid">
+      <div class="legend-box">
+        <h3>OS / Framework</h3>
+        <ul>
+          <li>Notification permission system dialog</li>
+          <li>Recording folder SAF picker</li>
+          <li>Battery optimization settings return path</li>
+          <li>FLAG_SECURE 실장 효과</li>
+          <li>Document provider 실제 export save</li>
+        </ul>
+      </div>
+      <div class="legend-box">
+        <h3>Provider OAuth / External</h3>
+        <ul>
+          <li>Gmail / Outlook Mail / Calendar actual browser loop는 automated UI 범위 밖</li>
+          <li>Calendar, Gmail, Outlook Mail live smoke는 별도 완료</li>
+          <li>Naver / Daum IMAP live smoke는 아직 남음</li>
+        </ul>
+      </div>
+      <div class="legend-box">
+        <h3>Nav / Shell</h3>
+        <ul>
+          <li>대부분 route registration과 arg parsing은 닫혔지만, 모든 route의 full back-stack animation/gesture UX가 exhaustive하게 검증된 것은 아님</li>
+          <li>sheet dismiss timing과 nested route transition은 effect seam 수준까지 주로 닫힘</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Design Polish Priorities</h2>
+    <div class="legend-grid">
+      <div class="legend-box">
+        <h3>Priority 1: Main Surfaces</h3>
+        <ul>
+          <li><strong>Today</strong>: 정보량이 가장 많고, source strip / sync banner / timeline hierarchy가 앱 인상을 좌우합니다.</li>
+          <li><strong>Persons</strong>: card density, pending badge, snippet spacing, offline badge tone 정리가 효과가 큽니다.</li>
+          <li><strong>Person Detail</strong>: pending/completed/history의 시각적 대비와 section rhythm을 강화할 여지가 큽니다.</li>
+        </ul>
+      </div>
+      <div class="legend-box">
+        <h3>Priority 2: High-Frequency Task Surfaces</h3>
+        <ul>
+          <li><strong>Commitment Management / Detail / Edit / Create</strong>: 상태칩, destructive action, due 표현의 hierarchy를 통일하면 제품 완성도가 크게 올라갑니다.</li>
+          <li><strong>Sources / Source Detail</strong>: source owner가 정리된 만큼, status/action hierarchy를 더 product-like 하게 정돈할 수 있습니다.</li>
+        </ul>
+      </div>
+      <div class="legend-box">
+        <h3>Priority 3: Onboarding Funnel</h3>
+        <ul>
+          <li><strong>Login + PIPA + provider connect screens</strong>: 기능은 닫혔으므로 이제 typography, copy density, CTA emphasis를 다듬기 좋습니다.</li>
+          <li><strong>Cold Sync</strong>: progress 피드백과 “지금은 건너뛰기”의 위계가 제품 신뢰감에 영향을 줍니다.</li>
+        </ul>
+      </div>
+      <div class="legend-box">
+        <h3>Immediate Low-Cost Wins</h3>
+        <ul>
+          <li>실제 브랜드 폰트 적용</li>
+          <li>section spacing / vertical rhythm pass</li>
+          <li>status chip / badge / secondary text contrast 조정</li>
+          <li>sheet 등장/닫힘과 section expand의 motion grammar 보강</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

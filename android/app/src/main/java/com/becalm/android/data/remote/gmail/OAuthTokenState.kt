@@ -3,11 +3,10 @@ package com.becalm.android.data.remote.gmail
 import android.app.PendingIntent
 
 /**
- * Lifecycle of the Google OAuth session as seen by the UI layer.
+ * Provider-agnostic OAuth session lifecycle as seen by the UI layer.
  *
- * Consumed via `GoogleAuthTokenProviderImpl.observeTokenState()`. UI composables subscribe
- * to this flow so that a [ReauthRequired] emission can surface the sign-in prompt without
- * the UI polling `currentToken()` directly.
+ * This enum and result model started in the old Gmail device-side flow, but they are kept
+ * as small shared auth-state types for remaining local OAuth consumers.
  *
  * State machine:
  * - [Unauthenticated] — no credential has ever been saved, or [clearGoogle] was invoked.
@@ -22,7 +21,7 @@ public enum class OAuthTokenState {
 }
 
 /**
- * Outcome of a foreground sign-in attempt (`GoogleAuthTokenProviderImpl.startSignIn`).
+ * Outcome of a foreground sign-in attempt for a local OAuth consumer.
  *
  * Returning a sealed result rather than throwing lets UI callers render error copy
  * without `try/catch` boilerplate.
@@ -33,12 +32,12 @@ public sealed interface OAuthSignInResult {
     public data object Success : OAuthSignInResult
 
     /**
-     * First-time consent path: Google Play Services returned without an access token but
+     * First-time consent path: the provider returned without an access token but
      * with a [pendingIntent] that, when launched from the UI, presents the Google account
      * picker + scope grant sheet. Callers MUST invoke
      * [androidx.activity.result.ActivityResultLauncher.launch] (or
      * `Activity.startIntentSenderForResult`) with the pending intent and then call
-     * `GoogleAuthTokenProviderImpl.startSignIn` again once the user completes the flow.
+     * the provider sign-in call again once the user completes the flow.
      *
      * Without this branch the provider has no way to drive first-time consent, and
      * [OAuthSignInResult.Failure] (with [FailureReason.USER_CANCELLED]) would be emitted

@@ -8,8 +8,6 @@ import com.becalm.android.data.remote.imap.ImapClientImpl
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.DefaultIdempotencyKeyProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
-import com.becalm.android.data.remote.msgraph.MsGraphClient
-import com.becalm.android.data.remote.msgraph.MsGraphClientImpl
 import com.becalm.android.data.remote.network.AndroidNetworkMonitor
 import com.becalm.android.data.remote.network.NetworkMonitor
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
@@ -56,9 +54,5 @@ public abstract class NetworkBindingsModule {
     @Binds
     @Singleton
     public abstract fun bindImapClient(impl: ImapClientImpl): ImapClient
-
-    @Binds
-    @Singleton
-    public abstract fun bindMsGraphClient(impl: MsGraphClientImpl): MsGraphClient
 
 }

@@ -10,9 +10,8 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.DeviceKeyStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
+import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
@@ -39,8 +38,7 @@ internal class AuthSessionCleanupPlanner(
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val imapCredentialStore: ImapCredentialStore,
-    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
-    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
+    private val oauthCredentialStore: OAuthCredentialStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     suspend fun buildSignOutSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
@@ -49,8 +47,7 @@ internal class AuthSessionCleanupPlanner(
         if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
         add(NamedAuthStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
-        add(NamedAuthStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
-        add(NamedAuthStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
+        add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
         add(NamedAuthStep("sessionStoreClear") { sessionStore.clear() })
         add(NamedAuthStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })
@@ -65,8 +62,7 @@ internal class AuthSessionCleanupPlanner(
         add(NamedAuthStep("stopContentObservers") { contentObserverBootstrap.stop() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
-        add(NamedAuthStep("googleOAuthCleanup") { googleAuthTokenProvider.signOutCleanup() })
-        add(NamedAuthStep("msGraphSignOut") { msGraphTokenProvider.signOut() })
+        add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
         add(NamedAuthStep("sessionStoreClear") { sessionStore.clear() })
         add(NamedAuthStep("tokenProviderInvalidate") { tokenProvider.invalidate() })
         add(NamedAuthStep("deviceKeyClear") { deviceKeyStore.clear() })

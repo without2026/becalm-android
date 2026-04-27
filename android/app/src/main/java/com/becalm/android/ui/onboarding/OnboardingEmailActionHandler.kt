@@ -1,22 +1,15 @@
 package com.becalm.android.ui.onboarding
 
-import android.app.Activity
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
-import com.becalm.android.data.remote.gmail.FailureReason
-import com.becalm.android.data.remote.gmail.GoogleAuthTokenProviderImpl
-import com.becalm.android.data.remote.gmail.OAuthSignInResult
-import com.becalm.android.data.remote.msgraph.MsGraphTokenProviderImpl
 import kotlinx.coroutines.flow.first
 
 internal class OnboardingEmailActionHandler(
     private val userPrefsStore: UserPrefsStore,
-    private val googleAuthTokenProvider: GoogleAuthTokenProviderImpl,
-    private val msGraphTokenProvider: MsGraphTokenProviderImpl,
     private val imapCredentialStore: ImapCredentialStore,
     private val observability: ObservabilityClient,
     private val logger: Logger,
@@ -57,52 +50,6 @@ internal class OnboardingEmailActionHandler(
         }
     }
 
-    suspend fun connectEmailProvider(
-        provider: EmailPipaProvider,
-        activity: Activity,
-        updateState: ((OnboardingUiState) -> OnboardingUiState) -> Unit,
-        emitEvent: suspend (EmailConnectEvent) -> Unit,
-        reportStepFailed: (OnboardingStep, String) -> Unit,
-    ) {
-        require(
-            provider == EmailPipaProvider.GMAIL ||
-                provider == EmailPipaProvider.OUTLOOK_MAIL,
-        ) {
-            "${provider.storageKey} uses saveImapCredentials(), not onConnectEmailProvider()"
-        }
-
-        val consented = userPrefsStore.observeEmailPipaConsent(provider).first()
-        if (!consented) {
-            val step = linkStepFor(provider)
-            reportStepFailed(step, "pipa_consent_missing")
-            updateState {
-                it.copy(stepStates = it.stepStates + (step to StepStatus.SKIPPED))
-            }
-            emitEvent(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
-            return
-        }
-
-        val result = runCatching {
-            when (provider) {
-                EmailPipaProvider.GMAIL -> googleAuthTokenProvider.startSignIn(activity)
-                EmailPipaProvider.OUTLOOK_MAIL -> msGraphTokenProvider.startSignIn(activity)
-                EmailPipaProvider.NAVER_IMAP,
-                EmailPipaProvider.DAUM_IMAP -> error("unreachable — filtered by require guard")
-            }
-        }.getOrElse { t ->
-            logger.e(TAG, "OAuth startSignIn threw for ${provider.storageKey}", t)
-            OAuthSignInResult.Failure(FailureReason.UNKNOWN, t)
-        }
-
-        handleOAuthResult(
-            provider = provider,
-            result = result,
-            updateState = updateState,
-            emitEvent = emitEvent,
-            reportStepFailed = reportStepFailed,
-        )
-    }
-
     suspend fun saveImapCredentials(
         sourceType: String,
         credentials: ImapCredentials,
@@ -133,6 +80,7 @@ internal class OnboardingEmailActionHandler(
         val result = runCatching { imapCredentialStore.save(sourceType, credentials) }
         if (result.isSuccess) {
             userPrefsStore.setEmailSourceConnected(pipaProvider, true)
+            userPrefsStore.setEmailSourceManagedByBackend(pipaProvider, false)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
             }
@@ -157,59 +105,18 @@ internal class OnboardingEmailActionHandler(
         }
     }
 
-    private suspend fun handleOAuthResult(
-        provider: EmailPipaProvider,
-        result: OAuthSignInResult,
-        updateState: ((OnboardingUiState) -> OnboardingUiState) -> Unit,
-        emitEvent: suspend (EmailConnectEvent) -> Unit,
-        reportStepFailed: (OnboardingStep, String) -> Unit,
-    ) {
-        when (result) {
-            is OAuthSignInResult.Success -> {
-                userPrefsStore.setEmailSourceConnected(provider, true)
-                val step = linkStepFor(provider)
-                updateState {
-                    it.copy(stepStates = it.stepStates + (step to StepStatus.COMPLETE))
-                }
-                observability.captureMessage(
-                    message = "onboarding_email_connected",
-                    tags = mapOf("provider" to provider.storageKey),
-                )
-                emitEvent(EmailConnectEvent.Connected(provider))
-            }
-            is OAuthSignInResult.ResolutionRequired -> {
-                emitEvent(EmailConnectEvent.PendingIntentRequired(provider, result.pendingIntent))
-            }
-            is OAuthSignInResult.Failure -> {
-                val errorCode = failureReasonCode(result.reason)
-                val step = linkStepFor(provider)
-                reportStepFailed(step, errorCode)
-                updateState {
-                    it.copy(stepStates = it.stepStates + (step to StepStatus.SKIPPED))
-                }
-                emitEvent(EmailConnectEvent.Failed(provider, errorCode))
-            }
-        }
-    }
-
-    private fun failureReasonCode(reason: FailureReason): String = when (reason) {
-        FailureReason.USER_CANCELLED -> "user_cancelled"
-        FailureReason.PLAY_SERVICES_UNAVAILABLE -> "play_services_unavailable"
-        FailureReason.NETWORK -> "network"
-        FailureReason.SCOPE_DENIED -> "scope_denied"
-        FailureReason.UNKNOWN -> "unknown"
+    private fun imapProviderFor(sourceType: String): EmailPipaProvider? = when (sourceType) {
+        com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP -> EmailPipaProvider.NAVER_IMAP
+        com.becalm.android.data.remote.dto.SourceType.DAUM_IMAP -> EmailPipaProvider.DAUM_IMAP
+        else -> null
     }
 
     private fun linkStepFor(provider: EmailPipaProvider): OnboardingStep = when (provider) {
         EmailPipaProvider.GMAIL -> OnboardingStep.LINK_GMAIL
         EmailPipaProvider.OUTLOOK_MAIL -> OnboardingStep.LINK_OUTLOOK_MAIL
-        EmailPipaProvider.NAVER_IMAP, EmailPipaProvider.DAUM_IMAP -> OnboardingStep.LINK_IMAP
-    }
-
-    private fun imapProviderFor(sourceType: String): EmailPipaProvider? = when (sourceType) {
-        com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP -> EmailPipaProvider.NAVER_IMAP
-        com.becalm.android.data.remote.dto.SourceType.DAUM_IMAP -> EmailPipaProvider.DAUM_IMAP
-        else -> null
+        EmailPipaProvider.NAVER_IMAP,
+        EmailPipaProvider.DAUM_IMAP,
+        -> OnboardingStep.LINK_IMAP
     }
 
     private companion object {

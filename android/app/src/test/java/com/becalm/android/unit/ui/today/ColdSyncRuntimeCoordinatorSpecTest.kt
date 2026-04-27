@@ -59,15 +59,13 @@ class ColdSyncRuntimeCoordinatorSpecTest {
         coVerify(exactly = 0) { sourceStatusRepository.recordSyncStart(SourceType.VOICE) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueGCalOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueOutlookCalOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
-        verify(exactly = 1) { foregroundWorkScheduler.enqueueGmailOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
-        verify(exactly = 1) { foregroundWorkScheduler.enqueueOutlookMailOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { workScheduler.enqueueUpload(0) }
     }
 
     @Test
-    fun `COLD-004 startStage2 marks stage2 syncing and fans out email plus voice sources`() = runTest {
+    fun `COLD-004 startStage2 marks stage2 syncing and fans out IMAP plus voice sources`() = runTest {
         val coordinator = buildCoordinator()
 
         val result = coordinator.startStage2(Instant.parse("2026-04-23T01:00:00Z"))
@@ -76,8 +74,6 @@ class ColdSyncRuntimeCoordinatorSpecTest {
         DefaultColdSyncRuntimeCoordinator.STAGE2_SOURCE_TYPES.forEach { sourceType ->
             coVerify(exactly = 1) { sourceStatusRepository.recordSyncStart(sourceType) }
         }
-        verify(exactly = 1) { foregroundWorkScheduler.enqueueGmailOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
-        verify(exactly = 1) { foregroundWorkScheduler.enqueueOutlookMailOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueMediaStoreOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE2_LOOKBACK_DAYS) }
