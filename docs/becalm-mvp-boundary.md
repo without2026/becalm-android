@@ -127,6 +127,7 @@ Implications:
 - account switch must not leak local rows across users
 - disconnected sources should render as read-only where applicable
 - before a cloud account session exists, no background worker, DAO, or source sync path may touch the user-scoped Room database
+- this also applies to stale persisted WorkManager rows restored after process death; worker construction itself must remain Room-safe until authenticated state is confirmed
 - foreground catch-up, periodic redundancy, and source-specific manual sync are all gated behind authenticated session state
 
 ## 9. Voice Pipeline Authority

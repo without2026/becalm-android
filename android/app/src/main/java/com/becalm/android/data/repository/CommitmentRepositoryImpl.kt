@@ -42,6 +42,7 @@ import retrofit2.Response
 import java.io.IOException
 import java.util.UUID
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 // ─── Cursor key ──────────────────────────────────────────────────────────────
@@ -70,10 +71,28 @@ public class CommitmentRepositoryImpl @Inject constructor(
     private val api: RailwayApi,
     private val cursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
-    private val database: BeCalmDatabase,
+    private val databaseProvider: Provider<BeCalmDatabase>,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CommitmentRepository {
+
+    public constructor(
+        dao: CommitmentDao,
+        api: RailwayApi,
+        cursorStore: SyncCursorStore,
+        userPrefsStore: UserPrefsStore,
+        database: BeCalmDatabase,
+        logger: Logger,
+        ioDispatcher: CoroutineDispatcher,
+    ) : this(
+        dao = dao,
+        api = api,
+        cursorStore = cursorStore,
+        userPrefsStore = userPrefsStore,
+        databaseProvider = Provider { database },
+        logger = logger,
+        ioDispatcher = ioDispatcher,
+    )
 
     // ── Reactive reads ────────────────────────────────────────────────────────
 
@@ -385,7 +404,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
         // inserted but old row not tombstoned) or an orphaned tombstone (old row
         // tombstoned but new row not inserted).
         val result: BecalmResult<String> = try {
-            database.withTransaction {
+            databaseProvider.get().withTransaction {
                 dao.insert(newRow)
                 val deletedRows = dao.softDelete(id = oldId, actor = actorId, at = editedAt)
                 if (deletedRows == 0) {

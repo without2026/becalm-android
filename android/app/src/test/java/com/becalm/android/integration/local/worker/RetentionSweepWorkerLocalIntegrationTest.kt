@@ -34,8 +34,11 @@ class RetentionSweepWorkerLocalIntegrationTest {
     private val db = LocalIntegrationSupport.inMemoryDatabase()
     private val clock = FakeClock(Instant.parse("2026-04-22T00:00:00Z"))
     private val logger = RecordingLogger()
+    private val userPrefsStore = UserPrefsStoreImpl(
+        LocalIntegrationSupport.prefsDataStore("retention-sweep-user-prefs"),
+    )
     private val processingPauseGate = ProcessingPauseGate(
-        userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("retention-sweep-pause")),
+        userPrefsStore = userPrefsStore,
         logger = logger,
     )
 
@@ -47,6 +50,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
     @Test
     fun `EMAIL-006 local retention sweep prunes only synced rows older than thirty days and leaves commitments calendar intact`() = runTest {
         val userId = "user-a"
+        userPrefsStore.setCurrentUserId(userId)
         val expiredRaw = rawEvent("raw-expired", userId, Instant.parse("2026-03-20T00:00:00Z"), "synced", SourceType.GMAIL)
         val retainedPending = rawEvent("raw-pending", userId, Instant.parse("2026-03-20T00:00:00Z"), "pending", SourceType.GMAIL)
         val retainedAwaiting = rawEvent("raw-awaiting", userId, Instant.parse("2026-03-20T00:00:00Z"), "awaiting_consent", SourceType.VOICE)
@@ -86,6 +90,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
         emailBodyDao = db.emailBodyDao(),
         clock = clock,
         db = db,
+        userPrefsStore = userPrefsStore,
         processingPauseGate = processingPauseGate,
         logger = logger,
     )
