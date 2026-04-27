@@ -78,8 +78,18 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-009
+    type: lifecycle
+    description: "인증 전(pre-login) 또는 로그아웃 직후에는 user-scoped Room에 의존하는 startup/background 경로가 실행되면 안 된다. WorkManager/Hilt worker 생성, foreground catch-up, periodic redundancy, source manual sync는 모두 AuthState.Authenticated 이후에만 열릴 수 있다"
+    trigger: "앱 cold start, 프로세스 foreground 진입, 로그아웃 직후"
+    precondition: "current_user_id == null 또는 AuthRepository.observeAuthState() != Authenticated"
+    expected: "BeCalmDatabaseProvider.current() 가 호출되지 않음. AppRuntimeSyncCoordinator는 auth-gated no-op 상태를 유지한다. ForegroundCatchUpScheduler / periodic source workers / manual source sync CTA는 enqueue를 수행하지 않는다. UI는 Terms/Login 또는 cached read-only shell로만 진입하며 background worker crash가 발생하지 않는다"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "인증 토큰은 EncryptedSharedPreferences 또는 Android Keystore에만 저장된다 — plaintext 저장 금지"
   - "로그아웃 시 Room DB 데이터는 삭제하지 않는다 (로컬 데이터 보존)"
   - "모든 Railway API 호출에는 Authorization: Bearer <supabase_jwt> 헤더가 첨부된다"
   - "Room DB 파일은 user_id 기반으로 분리된다 — 한 디바이스에서 여러 계정 사용 시에도 데이터 격리가 보장된다 (AUTH-008)"
+  - "AuthState.Authenticated 이전에는 어떤 worker/DAO 경로도 user-scoped Room을 lazy-open 하거나 source sync enqueue를 시작하면 안 된다 (AUTH-009)"

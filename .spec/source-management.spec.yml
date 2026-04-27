@@ -53,12 +53,13 @@ behaviors:
     description: "소스 상세 화면의 [지금 동기화] 버튼이 source owner에 맞는 수동 동기화를 실행한다. backend-managed source는 Railway sync endpoint를, local source는 WorkManager worker를 사용한다. 이것이 앱에서 유일한 소스별 수동 트리거다"
     screen: "SourceDetailScreen"
     interaction: "[지금 동기화] 버튼 탭"
-    precondition: "SourceDetailScreen에서 Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
-    expected: "Railway `POST /v1/mail_sources:sync?provider=gmail` 이 호출됨. 다른 소스는 영향받지 않는다. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨. IMAP/voice 같은 local source는 기존처럼 해당 WorkManager worker만 실행된다"
+    precondition: "인증 완료 상태에서 SourceDetailScreen 표시됨, Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
+    expected: "Railway `POST /v1/mail_sources:sync?provider=gmail` 이 호출됨. 다른 소스는 영향받지 않는다. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨. IMAP/voice 같은 local source는 기존처럼 해당 WorkManager worker만 실행된다. 인증 전이면 CTA는 숨김 또는 비활성화되어 enqueue가 발생하지 않는다"
     source: phase2-acceptance
     tests: []
 
 invariants:
+  - "수동 source sync는 authenticated session이 있을 때만 허용된다 — pre-login 상태에서는 backend endpoint 호출과 WorkManager enqueue 모두 금지"
   - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, commitments/quotes)는 삭제하지 않는다"
   - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"
   - "[지금 동기화]는 소스 상세 화면에서만 접근 가능하다 — 대시보드에서 소스별 개별 동기화 불가"

@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import javax.inject.Provider
 import kotlin.time.Duration.Companion.days
 
 /**
@@ -40,7 +41,10 @@ import kotlin.time.Duration.Companion.days
  *
  * ## ENR-003 — Auth guard
  * Resolves the current userId from [AuthRepository.currentSession]. Returns
- * [Result.failure] immediately when no session is present.
+ * [Result.failure] immediately when no session is present. DAO-backed repositories are
+ * intentionally injected as [Provider]s and resolved only after this check so a stale
+ * WorkManager row cannot crash pre-auth startup by forcing Room open during worker
+ * construction.
  *
  * ## ENR-004 — Permission guard
  * Checks [android.Manifest.permission.READ_CONTACTS] before any ContactsContract access.
@@ -70,9 +74,9 @@ public class EnrichmentWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
     private val authRepository: AuthRepository,
-    private val rawIngestionRepository: RawIngestionRepository,
-    private val personEnrichmentRepository: PersonEnrichmentRepository,
-    private val sourceStatusRepository: SourceStatusRepository,
+    private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+    private val personEnrichmentRepositoryProvider: Provider<PersonEnrichmentRepository>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -102,6 +106,9 @@ public class EnrichmentWorker @AssistedInject constructor(
             return@withContext Result.failure()
         }
 
+        val rawIngestionRepository = rawIngestionRepositoryProvider.get()
+        val personEnrichmentRepository = personEnrichmentRepositoryProvider.get()
+        val sourceStatusRepository = sourceStatusRepositoryProvider.get()
         val now = Clock.System.now()
 
         // ENR-005: one-shot snapshot of distinct non-null personRefs for this user

@@ -32,20 +32,21 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     /** Recomputes runtime registrations after same-process auth or permission changes. */
     public fun refresh() {
         if (hasSignedInUser()) {
-            schedulePeriodicRedundancy()
+            scheduleAuthenticatedRecurringWork()
         }
         refreshPermissionManagedRegistrations()
     }
 
-    private fun schedulePeriodicRedundancy() {
+    private fun scheduleAuthenticatedRecurringWork() {
         PERIODIC_SOURCES.forEach(workScheduler::enqueuePeriodic)
         workScheduler.scheduleUploadRedundancy()
+        workScheduler.scheduleRetentionSweep()
+        workScheduler.scheduleOverdueSweep()
     }
 
     private fun refreshPermissionManagedRegistrations() {
         if (!hasSignedInUser()) {
             contentObserverBootstrap.stop()
-            workScheduler.cancelEnrichmentSweep()
             logger.d(TAG, "runtime sync disabled — no signed-in user")
             return
         }

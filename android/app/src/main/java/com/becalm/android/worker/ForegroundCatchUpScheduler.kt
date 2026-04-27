@@ -44,7 +44,10 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  * arrived while the app was absent are captured before TodayScreen is visible.
  *
  * ## Lifecycle registration
- * Call [start] from `BeCalmApp.onCreate` (SP-69). Internally this adds [this] as a
+ * Call [start] only after an authenticated session is mirrored into
+ * [UserPrefsStore.observeCurrentUserId]. Signed-in cold starts do this from
+ * [com.becalm.android.BecalmApplication.onCreate]; same-process sign-in does it from
+ * [com.becalm.android.data.repository.AuthRepository]. Internally this adds [this] as a
  * [DefaultLifecycleObserver] on [ProcessLifecycleOwner], which survives configuration
  * changes.
  *
@@ -95,7 +98,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
      * Registers this scheduler as a [ProcessLifecycleOwner] observer.
      *
      * Safe to call more than once; [ProcessLifecycleOwner] deduplicates observer
-     * registrations by reference. Call from `BeCalmApp.onCreate`.
+     * registrations by reference. Must only be called after auth activation.
      */
     public fun start() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
@@ -114,6 +117,10 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     public fun triggerCatchUp() {
         scope.launch {
             try {
+                if (!hasSignedInUser()) {
+                    logger.d(TAG, "triggerCatchUp: no authenticated user — skipping")
+                    return@launch
+                }
                 if (processingPauseGate.isPaused()) {
                     logger.d(TAG, "triggerCatchUp: processing paused — skipping")
                     return@launch
@@ -146,6 +153,10 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     override fun onStart(owner: LifecycleOwner) {
         scope.launch {
             try {
+                if (!hasSignedInUser()) {
+                    logger.d(TAG, "onStart: no authenticated user — skipping catch-up enqueue")
+                    return@launch
+                }
                 if (processingPauseGate.isPaused()) {
                     logger.d(TAG, "onStart: processing paused — skipping catch-up enqueue")
                     return@launch
@@ -216,6 +227,9 @@ public class ForegroundCatchUpScheduler @Inject constructor(
             }
         }
     }
+
+    private suspend fun hasSignedInUser(): Boolean =
+        !userPrefsStore.observeCurrentUserId().first().isNullOrBlank()
 
     // ── Companion ─────────────────────────────────────────────────────────────
 

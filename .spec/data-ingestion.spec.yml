@@ -149,6 +149,7 @@ behaviors:
     tests: []
 
 invariants:
+  - "인증 완료 전(current_user_id == null)에는 foreground catch-up, periodic redundancy, manual source sync가 어떤 source worker도 enqueue하면 안 된다. pre-login startup은 worker no-op 이어야 한다"
   - "raw_ingestion_events는 Railway durable result(sync_status='synced') 확인 전까지 Room에서 DELETE되지 않는다"
   - "Transcript 및 EmailBody는 Railway 또는 Supabase로 업로드되지 않는다 (로컬 only). voice에서 서버로 나가는 텍스트는 consent 이후의 quote/event_snippet 최소치뿐이다"
   - "Gmail/Outlook OAuth 토큰 및 IMAP 앱 비밀번호는 Android Keystore에만 저장되며 Railway 서버로 전송되지 않는다"
