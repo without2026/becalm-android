@@ -12,6 +12,8 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import timber.log.Timber
@@ -99,6 +101,9 @@ public class EncryptedTokenStore @Inject constructor(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
+    private val cacheMutex = Mutex()
+    private var cacheLoaded: Boolean = false
+    private var cachedSession: SupabaseSession? = null
 
     /**
      * Loads the persisted [SupabaseSession], or returns `null` if no complete session exists.
@@ -106,23 +111,12 @@ public class EncryptedTokenStore @Inject constructor(
      * Returns `null` on first launch, after [clear], or if any mandatory field is absent.
      * Disk access is performed on [Dispatchers.IO].
      */
-    override suspend fun load(): SupabaseSession? = withContext(ioDispatcher) {
-        val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null) ?: return@withContext null
-        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null) ?: return@withContext null
-        val userId = prefs.getString(KEY_USER_ID, null) ?: return@withContext null
-        val email = prefs.getString(KEY_EMAIL, null) ?: return@withContext null
-        if (!prefs.contains(KEY_EXPIRES_AT_EPOCH_MILLIS)) return@withContext null
-        val expiresAtMillis = prefs.getLong(KEY_EXPIRES_AT_EPOCH_MILLIS, 0L)
-
-        Timber.d("EncryptedTokenStore: session loaded, expires=%d", expiresAtMillis)
-
-        SupabaseSession(
-            accessToken = accessToken,
-            refreshToken = refreshToken,
-            userId = userId,
-            email = email,
-            expiresAt = Instant.fromEpochMilliseconds(expiresAtMillis),
-        )
+    override suspend fun load(): SupabaseSession? = cacheMutex.withLock {
+        if (cacheLoaded) return cachedSession
+        readSessionFromDisk().also { session ->
+            cachedSession = session
+            cacheLoaded = true
+        }
     }
 
     /**
@@ -141,6 +135,10 @@ public class EncryptedTokenStore @Inject constructor(
             .putLong(KEY_EXPIRES_AT_EPOCH_MILLIS, session.expiresAt.toEpochMilliseconds())
             .apply()
         Timber.d("EncryptedTokenStore: session saved, expires=%d", session.expiresAt.toEpochMilliseconds())
+        cacheMutex.withLock {
+            cachedSession = session
+            cacheLoaded = true
+        }
         // Emit AFTER apply() so subscribers never observe a session that isn't yet persisted.
         sessionChanges.tryEmit(session)
     }
@@ -158,9 +156,32 @@ public class EncryptedTokenStore @Inject constructor(
         // right-to-erasure wipe.
         prefs.edit().clear().apply()
         Timber.d("EncryptedTokenStore: session cleared")
+        cacheMutex.withLock {
+            cachedSession = null
+            cacheLoaded = true
+        }
         // Emit AFTER apply() so subscribers never observe a cleared state that isn't persisted.
         sessionChanges.tryEmit(null)
     }
 
     override fun observe(): SharedFlow<SupabaseSession?> = sessionChanges.asSharedFlow()
+
+    private suspend fun readSessionFromDisk(): SupabaseSession? = withContext(ioDispatcher) {
+        val accessToken = prefs.getString(KEY_ACCESS_TOKEN, null) ?: return@withContext null
+        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null) ?: return@withContext null
+        val userId = prefs.getString(KEY_USER_ID, null) ?: return@withContext null
+        val email = prefs.getString(KEY_EMAIL, null) ?: return@withContext null
+        if (!prefs.contains(KEY_EXPIRES_AT_EPOCH_MILLIS)) return@withContext null
+        val expiresAtMillis = prefs.getLong(KEY_EXPIRES_AT_EPOCH_MILLIS, 0L)
+
+        Timber.d("EncryptedTokenStore: session loaded, expires=%d", expiresAtMillis)
+
+        SupabaseSession(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            userId = userId,
+            email = email,
+            expiresAt = Instant.fromEpochMilliseconds(expiresAtMillis),
+        )
+    }
 }

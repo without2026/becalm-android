@@ -10,7 +10,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
@@ -34,9 +33,14 @@ public class DefaultAuthTokenProvider @Inject constructor(
         startSessionObservation()
     }
 
-    override fun currentAccessToken(): String? {
-        cachedAccessToken.get()?.let { return it }
-        return seedCacheFromStore()
+    override fun currentAccessToken(): String? = cachedAccessToken.get()
+
+    override suspend fun primeCache() {
+        updateCache(sessionStore.load()?.accessToken)
+    }
+
+    override fun invalidate() {
+        updateCache(null)
     }
 
     override suspend fun refresh(previousAccessToken: String): AuthTokenProvider.RefreshResult =
@@ -73,6 +77,7 @@ public class DefaultAuthTokenProvider @Inject constructor(
     private fun startSessionObservation() {
         observerScope.launch {
             try {
+                primeCache()
                 sessionStore.observe().collect { session ->
                     updateCache(session?.accessToken)
                 }
@@ -80,12 +85,6 @@ public class DefaultAuthTokenProvider @Inject constructor(
                 logger.e("DefaultAuthTokenProvider", "session observer died — cache will stale", e)
             }
         }
-    }
-
-    private fun seedCacheFromStore(): String? {
-        val loaded = runBlocking { sessionStore.load()?.accessToken }
-        loaded?.let { cachedAccessToken.compareAndSet(null, it) }
-        return loaded
     }
 
     private fun updateCache(accessToken: String?) {

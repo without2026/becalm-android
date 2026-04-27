@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import java.io.IOException
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 // ─── Supporting types ────────────────────────────────────────────────────────
@@ -185,10 +186,27 @@ private const val TAG = "SourceStatusRepository"
 public class SourceStatusRepositoryImpl @Inject constructor(
     private val cursorStore: SyncCursorStore,
     @UserPrefs private val userPrefs: DataStore<Preferences>,
-    private val api: RailwayApi,
+    private val apiProvider: Provider<RailwayApi>,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : SourceStatusRepository {
+
+    private val api: RailwayApi
+        get() = apiProvider.get()
+
+    public constructor(
+        cursorStore: SyncCursorStore,
+        userPrefs: DataStore<Preferences>,
+        api: RailwayApi,
+        ioDispatcher: CoroutineDispatcher,
+        logger: Logger,
+    ) : this(
+        cursorStore = cursorStore,
+        userPrefs = userPrefs,
+        apiProvider = Provider { api },
+        ioDispatcher = ioDispatcher,
+        logger = logger,
+    )
 
     // ─── Observation ─────────────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.squareup.moshi.Moshi
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.delay
 
@@ -19,10 +20,13 @@ import kotlinx.coroutines.delay
  */
 @Singleton
 public class EmailOAuthConnector @Inject constructor(
-    private val railwayApi: RailwayApi,
+    private val railwayApiProvider: Provider<RailwayApi>,
     private val moshi: Moshi,
     private val logger: Logger,
 ) {
+
+    private val railwayApi: RailwayApi
+        get() = railwayApiProvider.get()
 
     public suspend fun startSignIn(
         provider: EmailOAuthProvider,

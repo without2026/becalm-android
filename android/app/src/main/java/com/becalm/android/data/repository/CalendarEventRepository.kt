@@ -17,6 +17,7 @@ import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 // ─── Interface ───────────────────────────────────────────────────────────────
@@ -129,10 +130,25 @@ private val EPOCH_END: Instant = Instant.fromEpochMilliseconds(Long.MAX_VALUE)
 @Singleton
 public class CalendarEventRepositoryImpl @Inject constructor(
     private val dao: CalendarEventDao,
-    private val api: RailwayApi,
+    private val apiProvider: Provider<RailwayApi>,
     private val cursorStore: SyncCursorStore,
     private val logger: Logger,
 ) : CalendarEventRepository {
+
+    private val api: RailwayApi
+        get() = apiProvider.get()
+
+    public constructor(
+        dao: CalendarEventDao,
+        api: RailwayApi,
+        cursorStore: SyncCursorStore,
+        logger: Logger,
+    ) : this(
+        dao = dao,
+        apiProvider = Provider { api },
+        cursorStore = cursorStore,
+        logger = logger,
+    )
 
     override fun observeForUser(
         userId: String,
