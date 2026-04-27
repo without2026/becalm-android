@@ -55,6 +55,12 @@ class OnboardingViewModelSpecTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-123")
+        every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
+        every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(emptyMap())
+        EmailPipaProvider.entries.forEach { provider ->
+            every { userPrefsStore.observeEmailPipaConsent(provider) } returns flowOf(false)
+        }
     }
 
     @After
@@ -245,6 +251,41 @@ class OnboardingViewModelSpecTest {
 
         assertEquals(
             StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
+        )
+        assertEquals(
+            OnboardingStep.LINK_OUTLOOK_MAIL,
+            viewModel.steps[viewModel.uiState.value.currentStepIndex],
+        )
+        coVerify(exactly = 1) {
+            userPrefsStore.setOnboardingStepStatuses(mapOf("LINK_GMAIL" to "SKIPPED"))
+        }
+    }
+
+    @Test
+    fun `ONB-009 process recreation restores durable terminal step states`() = runTest {
+        every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(
+            mapOf(
+                "PIPA_CONSENT" to "GRANTED",
+                "RECORDING_FOLDER" to "GRANTED",
+                "CONTACTS_PERM" to "DENIED",
+                "LINK_GMAIL" to "COMPLETE",
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            StepStatus.GRANTED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.TERMS),
+        )
+        assertEquals(
+            StepStatus.GRANTED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LOGIN),
+        )
+        assertEquals(
+            StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
         )
         assertEquals(

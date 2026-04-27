@@ -84,7 +84,7 @@ internal fun splashDestinationFor(state: AuthUiState): String? =
             if (state.onboardingCompleted) {
                 BecalmRoute.Today.path
             } else {
-                BecalmRoute.OnboardingPipaConsent.path
+                state.onboardingResumeRoute
             }
         is AuthUiState.SignedOut ->
             if (state.termsAccepted) {

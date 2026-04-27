@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -11,6 +12,7 @@ import com.becalm.android.data.repository.AuthState
 import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.AuthViewModel
+import com.becalm.android.ui.navigation.BecalmRoute
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -53,8 +55,13 @@ class AuthViewModelSpecTest {
         Dispatchers.setMain(testDispatcher)
         coEvery { authRepository.currentSession() } returns null
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Unauthenticated)
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-123")
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
+        every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(emptyMap())
+        EmailPipaProvider.entries.forEach { provider ->
+            every { userPrefsStore.observeEmailPipaConsent(provider) } returns flowOf(false)
+        }
     }
 
     @After
@@ -193,6 +200,34 @@ class AuthViewModelSpecTest {
             viewModel.uiState.value,
         )
         coVerify(exactly = 1) { authRepository.currentSession() }
+    }
+
+    @Test
+    fun `AUTH-010 bootstrap resumes first incomplete onboarding provider after email PIPA consent`() = runTest {
+        coEvery { authRepository.currentSession() } returns session
+        every { authRepository.observeAuthState() } returns emptyFlow()
+        every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(
+            mapOf(
+                "TERMS" to "GRANTED",
+                "LOGIN" to "GRANTED",
+                "PIPA_CONSENT" to "GRANTED",
+                "RECORDING_FOLDER" to "GRANTED",
+                "CONTACTS_PERM" to "DENIED",
+            ),
+        )
+        every { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.SignedIn(
+                userId = "user-123",
+                onboardingCompleted = false,
+                onboardingResumeRoute = BecalmRoute.OnboardingGmail.path,
+            ),
+            viewModel.uiState.value,
+        )
     }
 
     @Test

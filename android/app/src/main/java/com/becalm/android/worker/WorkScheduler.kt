@@ -121,8 +121,9 @@ public interface WorkScheduler {
      * - [androidx.work.Constraints.Builder.setRequiresBatteryNotLow] — AICore inference is
      *   power-intensive, so work defers when the device is running low on battery.
      *
-     * Expedited + [androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST] so the
-     * request still runs (eventually) on devices that have exhausted their foreground quota.
+     * This request is intentionally not expedited: WorkManager expedited requests only
+     * support network and storage constraints, and battery-not-low is required for this
+     * power-intensive on-device extraction path.
      *
      * Spec refs: EMAIL-001, EMAIL-008, ADAPT-EMAIL-010.
      *

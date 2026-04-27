@@ -74,6 +74,17 @@ public interface UserPrefsStore {
      */
     public suspend fun setOnboardingCompleted(completed: Boolean)
 
+    /**
+     * Emits the durable per-step onboarding status map.
+     *
+     * Keys and values are intentionally stored as stable strings so the data layer does
+     * not depend on UI enums. The UI layer maps these to OnboardingStep / StepStatus.
+     */
+    public fun observeOnboardingStepStatuses(): Flow<Map<String, String>>
+
+    /** Persists multiple onboarding step statuses atomically for multi-step branches. */
+    public suspend fun setOnboardingStepStatuses(statuses: Map<String, String>)
+
     /** Emits the epoch-millisecond timestamp when Stage 1 first completed, or null. */
     public fun observeColdSyncStage1CompletedAt(): Flow<Long?>
 
@@ -498,6 +509,22 @@ public class UserPrefsStoreImpl @Inject constructor(
         editUserBoolean(completed) { onboardingCompletedKey }
     }
 
+    override fun observeOnboardingStepStatuses(): Flow<Map<String, String>> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map emptyMap()
+            decodeStringMap(prefs[userScoped(userId).onboardingStepStatusesKey])
+        }
+
+    override suspend fun setOnboardingStepStatuses(statuses: Map<String, String>) {
+        if (statuses.isEmpty()) return
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).onboardingStepStatusesKey
+            val merged = decodeStringMap(prefs[key]) + statuses
+            prefs[key] = encodeStringMap(merged)
+        }
+    }
+
     override fun observeColdSyncStage1CompletedAt(): Flow<Long?> =
         observeUserLong { coldSyncStage1CompletedAtKey }
 
@@ -735,6 +762,8 @@ public class UserPrefsStoreImpl @Inject constructor(
 
         val onboardingCompletedKey: Preferences.Key<Boolean> =
             booleanKey("onboarding_completed")
+        val onboardingStepStatusesKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "onboarding_step_statuses_v1"))
         val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =
             longKey("cold_sync_stage1_completed_at")
         val coldSyncStage1DeferredKey: Preferences.Key<Boolean> =
@@ -790,6 +819,25 @@ public class UserPrefsStoreImpl @Inject constructor(
                     },
                 )
             }
+        }.toString()
+
+    private fun decodeStringMap(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val json = JSONObject(raw)
+            buildMap {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    put(key, json.optString(key))
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeStringMap(values: Map<String, String>): String =
+        JSONObject().apply {
+            values.forEach { (key, value) -> put(key, value) }
         }.toString()
 
     private fun decodePipaActionLog(raw: String?): List<PipaActionLogEntry> {

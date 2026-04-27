@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import com.becalm.android.core.util.Logger
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.WorkSchedulerImpl
+import com.becalm.android.worker.extraction.CommitmentExtractionWorker
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -17,6 +18,8 @@ import io.mockk.unmockkStatic
 import io.mockk.verify
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -67,5 +70,20 @@ class WorkSchedulerImplSpecTest {
             workManager.enqueueUniqueWork(any(), any(), capture(request))
         }
         assertEquals(7, request.captured.workSpec.input.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, -1))
+    }
+
+    @Test
+    fun `EMAIL-001 commitment extraction keeps battery constraint without expedited request`() {
+        val request = slot<OneTimeWorkRequest>()
+
+        WorkSchedulerImpl(appContext, logger).enqueueCommitmentExtraction("raw-1")
+
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork(any(), any(), capture(request))
+        }
+        val workSpec = request.captured.workSpec
+        assertTrue(workSpec.constraints.requiresBatteryNotLow())
+        assertFalse(workSpec.expedited)
+        assertEquals("raw-1", workSpec.input.getString(CommitmentExtractionWorker.KEY_RAW_EVENT_ID))
     }
 }

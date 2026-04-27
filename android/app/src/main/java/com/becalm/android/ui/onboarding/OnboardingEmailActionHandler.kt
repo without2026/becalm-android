@@ -35,8 +35,13 @@ internal class OnboardingEmailActionHandler(
                 )
             }
             if (!granted) {
+                val skipped = providers.map(::linkStepFor).toSet()
+                userPrefsStore.setOnboardingStepStatuses(
+                    OnboardingProgressResolver.encodeStepStatuses(
+                        skipped.associateWith { StepStatus.SKIPPED },
+                    ),
+                )
                 updateState { state ->
-                    val skipped = providers.map(::linkStepFor).toSet()
                     state.copy(
                         stepStates = state.stepStates + skipped.associateWith { StepStatus.SKIPPED },
                     )
@@ -60,6 +65,7 @@ internal class OnboardingEmailActionHandler(
         val pipaProvider = imapProviderFor(sourceType)
         if (pipaProvider == null) {
             reportStepFailed(OnboardingStep.LINK_IMAP, "unknown_provider")
+            persistImapStepStatus(StepStatus.SKIPPED)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
@@ -70,6 +76,7 @@ internal class OnboardingEmailActionHandler(
         val consented = userPrefsStore.observeEmailPipaConsent(pipaProvider).first()
         if (!consented) {
             reportStepFailed(OnboardingStep.LINK_IMAP, "pipa_consent_missing")
+            persistImapStepStatus(StepStatus.SKIPPED)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
@@ -81,6 +88,7 @@ internal class OnboardingEmailActionHandler(
         if (result.isSuccess) {
             userPrefsStore.setEmailSourceConnected(pipaProvider, true)
             userPrefsStore.setEmailSourceManagedByBackend(pipaProvider, false)
+            persistImapStepStatus(StepStatus.COMPLETE)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
             }
@@ -98,6 +106,7 @@ internal class OnboardingEmailActionHandler(
             }
             logger.e(TAG, "IMAP save failed sourceType=$sourceType", throwable)
             reportStepFailed(OnboardingStep.LINK_IMAP, errorCode)
+            persistImapStepStatus(StepStatus.SKIPPED)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
@@ -117,6 +126,14 @@ internal class OnboardingEmailActionHandler(
         EmailPipaProvider.NAVER_IMAP,
         EmailPipaProvider.DAUM_IMAP,
         -> OnboardingStep.LINK_IMAP
+    }
+
+    private suspend fun persistImapStepStatus(status: StepStatus) {
+        userPrefsStore.setOnboardingStepStatuses(
+            OnboardingProgressResolver.encodeStepStatuses(
+                mapOf(OnboardingStep.LINK_IMAP to status),
+            ),
+        )
     }
 
     private companion object {
