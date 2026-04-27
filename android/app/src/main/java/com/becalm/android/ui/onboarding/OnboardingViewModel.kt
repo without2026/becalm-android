@@ -214,6 +214,10 @@ public class OnboardingViewModel @Inject constructor(
         logger = logger,
     )
 
+    init {
+        hydrateDurableProgress()
+    }
+
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
     public val steps: List<OnboardingStep> = OnboardingStep.entries
 
@@ -316,6 +320,7 @@ public class OnboardingViewModel @Inject constructor(
             logger.d(TAG, "onSkipStep: $step skipped")
             OnboardingStateReducer.skipStep(state, step, steps)
         }
+        persistStepStatus(step, StepStatus.SKIPPED)
     }
 
     // spec: ONB-004, ONB-CONTACTS
@@ -333,6 +338,7 @@ public class OnboardingViewModel @Inject constructor(
         _uiState.update { state ->
             OnboardingStateReducer.markStepStatus(state, step, status)
         }
+        persistStepStatus(step, status)
     }
 
     /**
@@ -512,6 +518,7 @@ public class OnboardingViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(stepStates = it.stepStates + (oauthProvider.step to StepStatus.SKIPPED))
                 }
+                persistStepStatus(oauthProvider.step, StepStatus.SKIPPED)
                 _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, "pipa_consent_missing"))
                 return@launch
             }
@@ -531,6 +538,7 @@ public class OnboardingViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(stepStates = it.stepStates + (oauthProvider.step to StepStatus.SKIPPED))
                     }
+                    persistStepStatus(oauthProvider.step, StepStatus.SKIPPED)
                     _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, result.errorCode))
                 }
             }
@@ -597,6 +605,16 @@ public class OnboardingViewModel @Inject constructor(
                     logger.i(TAG, "PIPA third-party provision consent DECLINED — voice auto-upload disabled")
                 }
                 _uiState.update { state -> computePipaStateAfterWrite(state, granted, caller) }
+                persistStepStatuses(
+                    if (granted) {
+                        mapOf(OnboardingStep.PIPA_CONSENT to StepStatus.GRANTED)
+                    } else {
+                        mapOf(
+                            OnboardingStep.PIPA_CONSENT to StepStatus.DENIED,
+                            OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED,
+                        )
+                    },
+                )
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = granted))
             } catch (e: Exception) {
                 logger.e(TAG, "$caller: DataStore write failed", e)
@@ -675,6 +693,7 @@ public class OnboardingViewModel @Inject constructor(
                         stepStates = state.stepStates + (OnboardingStep.COLD_SYNC to StepStatus.COMPLETE),
                     )
                 }
+                persistStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist onboarding completion", e)
                 _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
@@ -694,5 +713,42 @@ public class OnboardingViewModel @Inject constructor(
      */
     private fun isTerminalGatePassed(stepStates: Map<OnboardingStep, StepStatus>): Boolean {
         return OnboardingStateReducer.isTerminalGatePassed(stepStates)
+    }
+
+    private fun hydrateDurableProgress() {
+        viewModelScope.launch {
+            val restored = OnboardingProgressResolver.hydrateStepStates(
+                persisted = userPrefsStore.observeOnboardingStepStatuses().first(),
+                termsAccepted = userPrefsStore.observeTermsAccepted().first(),
+                signedIn = userPrefsStore.observeCurrentUserId().first() != null,
+            )
+            val firstIncomplete = OnboardingProgressResolver.firstIncompleteStep(restored)
+            _uiState.update { state ->
+                val inMemoryProgress = state.stepStates.filterValues { it != StepStatus.NOT_STARTED }
+                val merged = restored + inMemoryProgress
+                val hasUserAction = inMemoryProgress.isNotEmpty()
+                state.copy(
+                    currentStepIndex = if (hasUserAction) {
+                        state.currentStepIndex
+                    } else {
+                        steps.indexOf(firstIncomplete).coerceAtLeast(0)
+                    },
+                    stepStates = merged,
+                )
+            }
+        }
+    }
+
+    private fun persistStepStatus(step: OnboardingStep, status: StepStatus) {
+        persistStepStatuses(mapOf(step to status))
+    }
+
+    private fun persistStepStatuses(statuses: Map<OnboardingStep, StepStatus>) {
+        viewModelScope.launch {
+            userPrefsStore.setOnboardingStepStatuses(
+                statuses.mapKeys { (step, _) -> step.name }
+                    .mapValues { (_, status) -> status.name },
+            )
+        }
     }
 }

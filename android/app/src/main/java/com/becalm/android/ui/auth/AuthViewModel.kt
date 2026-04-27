@@ -7,8 +7,10 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
+import com.becalm.android.ui.onboarding.OnboardingProgressResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +50,7 @@ public sealed class AuthUiState {
     public data class SignedIn(
         val userId: String,
         val onboardingCompleted: Boolean = false,
+        val onboardingResumeRoute: String = com.becalm.android.ui.navigation.BecalmRoute.OnboardingPipaConsent.path,
     ) : AuthUiState()
 
     /**
@@ -295,6 +298,7 @@ public class AuthViewModel @Inject constructor(
             AuthUiState.SignedIn(
                 userId = session.userId,
                 onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
+                onboardingResumeRoute = onboardingResumeRoute(),
             )
         } else {
             AuthUiState.SignedOut(
@@ -308,9 +312,22 @@ public class AuthViewModel @Inject constructor(
             is AuthState.Authenticated -> AuthUiState.SignedIn(
                 userId = session.userId,
                 onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
+                onboardingResumeRoute = onboardingResumeRoute(),
             )
             is AuthState.Unauthenticated -> AuthUiState.SignedOut(
                 termsAccepted = userPrefsStore.observeTermsAccepted().first(),
             )
         }
+
+    private suspend fun onboardingResumeRoute(): String {
+        val stepStates = OnboardingProgressResolver.hydrateStepStates(
+            persisted = userPrefsStore.observeOnboardingStepStatuses().first(),
+            termsAccepted = userPrefsStore.observeTermsAccepted().first(),
+            signedIn = true,
+        )
+        val emailConsents = EmailPipaProvider.entries.associateWith { provider ->
+            userPrefsStore.observeEmailPipaConsent(provider).first()
+        }
+        return OnboardingProgressResolver.resumeRoute(stepStates, emailConsents)
+    }
 }

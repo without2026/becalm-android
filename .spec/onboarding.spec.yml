@@ -102,10 +102,20 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: ONB-009
+    type: lifecycle
+    description: "외부 브라우저/OAuth/설정 앱 왕복 또는 프로세스 재생성 후에도 완료한 온보딩 step은 완료 상태로 복원되고, 앱은 첫 미완료 step부터 재개한다"
+    trigger: "온보딩 중 OAuth 브라우저 또는 OS Settings로 이동한 뒤 앱으로 복귀"
+    precondition: "DataStore onboarding_completed=false, 하나 이상의 onboarding step terminal status가 저장됨"
+    expected: "SplashScreen은 onboarding step status와 provider consent/connected flag를 읽어 첫 미완료 step으로 이동한다. 이미 GRANTED/COMPLETE/SKIPPED/DENIED인 step은 다시 요구하지 않는다. 이메일 PIPA consent를 이미 수락했지만 provider 연결이 미완료인 경우 PIPA 화면이 아니라 해당 connect 화면으로 재개한다"
+    source: runtime-debug
+    tests: []
+
 invariants:
   - "이용약관 미동의 시 절대 앱 기능에 접근할 수 없다"
   - "온보딩은 순차 진행이며 건너뛴 OAuth 소스는 설정 화면에서 재연결 가능하다"
   - "DataStore onboarding_completed=true는 ColdSyncScreen 완료 또는 [나중에 하기] 후에 기록된다 — 온보딩 step 완료 시점이 아님"
+  - "DataStore는 onboarding_completed와 별도로 per-step terminal status를 저장한다 — 외부 OAuth/설정 화면 왕복이나 프로세스 재생성 후 이미 완료한 step을 다시 요구하지 않는다"
   - "CONTACTS 권한 거부는 온보딩을 중단시키지 않는다 — graceful skip"
   - "PIPA 제3자 제공 + 국외 이전 동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화되고 Settings에서 추후 변경 가능"
   - "온보딩은 고정 12-step 선형 플로우가 아니라 조건부 step graph다: 약관 → 로그인 → PIPA제3자제공 → (동의 시 녹음폴더, 거부 시 스킵) → 연락처 → Gmail → Outlook메일 → IMAP → Google캘린더 → Outlook캘린더 → 배터리최적화 → ColdSync"

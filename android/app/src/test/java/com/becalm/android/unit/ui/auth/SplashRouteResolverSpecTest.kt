@@ -40,6 +40,20 @@ class SplashRouteResolverSpecTest {
     }
 
     @Test
+    fun `signed in without completed onboarding routes to persisted resume route`() {
+        assertEquals(
+            BecalmRoute.OnboardingGmail.path,
+            splashDestinationFor(
+                AuthUiState.SignedIn(
+                    userId = "user-1",
+                    onboardingCompleted = false,
+                    onboardingResumeRoute = BecalmRoute.OnboardingGmail.path,
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `signed in with completed onboarding routes to today`() {
         assertEquals(
             BecalmRoute.Today.path,

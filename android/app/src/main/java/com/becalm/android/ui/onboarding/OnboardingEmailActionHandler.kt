@@ -35,6 +35,11 @@ internal class OnboardingEmailActionHandler(
                 )
             }
             if (!granted) {
+                userPrefsStore.setOnboardingStepStatuses(
+                    providers.map(::linkStepFor)
+                        .toSet()
+                        .associate { step -> step.name to StepStatus.SKIPPED.name },
+                )
                 updateState { state ->
                     val skipped = providers.map(::linkStepFor).toSet()
                     state.copy(
@@ -60,6 +65,7 @@ internal class OnboardingEmailActionHandler(
         val pipaProvider = imapProviderFor(sourceType)
         if (pipaProvider == null) {
             reportStepFailed(OnboardingStep.LINK_IMAP, "unknown_provider")
+            userPrefsStore.setOnboardingStepStatus(OnboardingStep.LINK_IMAP.name, StepStatus.SKIPPED.name)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
@@ -70,6 +76,7 @@ internal class OnboardingEmailActionHandler(
         val consented = userPrefsStore.observeEmailPipaConsent(pipaProvider).first()
         if (!consented) {
             reportStepFailed(OnboardingStep.LINK_IMAP, "pipa_consent_missing")
+            userPrefsStore.setOnboardingStepStatus(OnboardingStep.LINK_IMAP.name, StepStatus.SKIPPED.name)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
@@ -81,6 +88,7 @@ internal class OnboardingEmailActionHandler(
         if (result.isSuccess) {
             userPrefsStore.setEmailSourceConnected(pipaProvider, true)
             userPrefsStore.setEmailSourceManagedByBackend(pipaProvider, false)
+            userPrefsStore.setOnboardingStepStatus(OnboardingStep.LINK_IMAP.name, StepStatus.COMPLETE.name)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.COMPLETE))
             }
@@ -98,6 +106,7 @@ internal class OnboardingEmailActionHandler(
             }
             logger.e(TAG, "IMAP save failed sourceType=$sourceType", throwable)
             reportStepFailed(OnboardingStep.LINK_IMAP, errorCode)
+            userPrefsStore.setOnboardingStepStatus(OnboardingStep.LINK_IMAP.name, StepStatus.SKIPPED.name)
             updateState {
                 it.copy(stepStates = it.stepStates + (OnboardingStep.LINK_IMAP to StepStatus.SKIPPED))
             }
