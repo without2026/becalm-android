@@ -1,5 +1,6 @@
 package com.becalm.android.ui.auth
 
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -58,6 +60,9 @@ public fun TermsScreen(
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        Log.d("TermsDebug", "TermsScreen composed")
+    }
     val resolvedAuthViewModel = if (authEffects == null || onContinue == null || onDecline == null) {
         authViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
     } else {

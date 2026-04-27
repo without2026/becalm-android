@@ -1,5 +1,6 @@
 package com.becalm.android.ui.auth
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,10 +63,12 @@ public fun SplashScreen(
     }
 
     LaunchedEffect(state, navigated) {
+        Log.d("SplashDebug", "state=$state navigated=$navigated")
         if (navigated) return@LaunchedEffect
         when (val destination = splashDestinationFor(state)) {
-            null -> Unit
+            null -> Log.d("SplashDebug", "destination=null")
             else -> {
+                Log.d("SplashDebug", "navigate -> $destination")
                 navigated = true
                 navigate(destination)
             }
