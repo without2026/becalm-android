@@ -1,5 +1,6 @@
 package com.becalm.android.ui.auth
 
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,29 +14,27 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
-import com.becalm.android.ui.onboarding.OnboardingNavigationEvent
-import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
-import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.coroutines.flow.Flow
 
 /**
  * Terms and Privacy Policy acceptance screen.
@@ -53,30 +52,25 @@ import kotlinx.coroutines.flow.Flow
 @Composable
 public fun TermsScreen(
     navController: NavHostController,
-    onboardingViewModel: OnboardingViewModel? = null,
     authViewModel: AuthViewModel? = null,
-    onboardingNavigationEvents: Flow<OnboardingNavigationEvent>? = null,
-    authEffects: Flow<AuthEffect>? = null,
+    authEffects: kotlinx.coroutines.flow.Flow<AuthEffect>? = null,
     onContinue: (() -> Unit)? = null,
     onDecline: (() -> Unit)? = null,
     onNavigateToLogin: (() -> Unit)? = null,
     onFinishApp: (() -> Unit)? = null,
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
+    var firstLayoutLogged by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
-    val resolvedOnboardingViewModel = if (
-        onboardingNavigationEvents == null || onContinue == null
-    ) {
-        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
-    } else {
-        onboardingViewModel
+    LaunchedEffect(Unit) {
+        Log.d("TermsDebug", "TermsScreen composed")
     }
-    val resolvedAuthViewModel = if (authEffects == null || onDecline == null) {
+    val resolvedAuthViewModel = if (authEffects == null || onContinue == null || onDecline == null) {
         authViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
     } else {
         authViewModel
     }
-    val resolvedOnContinue = onContinue ?: requireNotNull(resolvedOnboardingViewModel)::onAcceptTermsAndContinue
+    val resolvedOnContinue = onContinue ?: requireNotNull(resolvedAuthViewModel)::onAcceptTermsAndContinue
     val resolvedOnDecline = onDecline ?: requireNotNull(resolvedAuthViewModel)::onDeclineTerms
     val resolvedNavigateToLogin = onNavigateToLogin ?: {
         navController.navigate(BecalmRoute.Login.path)
@@ -85,14 +79,9 @@ public fun TermsScreen(
         (context as? android.app.Activity)?.finish()
     }
 
-    CollectFlowEffect(onboardingNavigationEvents ?: requireNotNull(resolvedOnboardingViewModel).navigationEvents) { event ->
-        when (event) {
-            OnboardingNavigationEvent.NavigateToLogin -> resolvedNavigateToLogin()
-        }
-    }
-
     CollectFlowEffect(authEffects ?: requireNotNull(resolvedAuthViewModel).effects) { effect ->
         when (effect) {
+            AuthEffect.NavigateToLogin -> resolvedNavigateToLogin()
             AuthEffect.FinishApp -> resolvedFinishApp()
         }
     }
@@ -104,6 +93,12 @@ public fun TermsScreen(
             onContinue = resolvedOnContinue,
             onDecline = resolvedOnDecline,
             modifier = Modifier.padding(padding),
+            onFirstLayout = { width, height ->
+                if (!firstLayoutLogged) {
+                    firstLayoutLogged = true
+                    Log.d("TermsDebug", "TermsContent first layout size=${width}x$height")
+                }
+            },
         )
     }
 }
@@ -115,9 +110,13 @@ internal fun TermsContent(
     onContinue: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
+    onFirstLayout: (width: Int, height: Int) -> Unit = { _, _ -> },
 ) {
     Column(
         modifier = modifier
+            .onGloballyPositioned { coordinates ->
+                onFirstLayout(coordinates.size.width, coordinates.size.height)
+            }
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

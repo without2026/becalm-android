@@ -16,7 +16,6 @@ import com.becalm.android.ui.onboarding.EmailOAuthConnector
 import com.becalm.android.ui.onboarding.EmailOAuthProvider
 import com.becalm.android.ui.onboarding.EmailOAuthResult
 import com.becalm.android.ui.onboarding.OnboardingStep
-import com.becalm.android.ui.onboarding.OnboardingNavigationEvent
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.PipaConsentEvent
 import com.becalm.android.ui.onboarding.StepStatus
@@ -83,25 +82,6 @@ class OnboardingViewModelSpecTest {
             cancelAndIgnoreRemainingEvents()
         }
         coVerify(exactly = 1) { userPrefsStore.setThirdPartyProvisionConsent(true) }
-    }
-
-    @Test
-    fun `ONB-001 accept terms and continue persists consent marks terms granted and navigates to login`() = runTest {
-        val viewModel = buildViewModel()
-
-        viewModel.navigationEvents.test {
-            viewModel.onAcceptTermsAndContinue()
-            advanceUntilIdle()
-
-            assertEquals(OnboardingNavigationEvent.NavigateToLogin, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        coVerify(exactly = 1) { userPrefsStore.setTermsAccepted(true) }
-        assertEquals(
-            StepStatus.GRANTED,
-            viewModel.uiState.value.stepStates.getValue(OnboardingStep.TERMS),
-        )
     }
 
     @Test

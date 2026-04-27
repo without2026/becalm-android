@@ -237,6 +237,21 @@ class AuthViewModelSpecTest {
         }
     }
 
+    @Test
+    fun `AUTH-011 accepting terms persists flag and emits NavigateToLogin`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.effects.test {
+            viewModel.onAcceptTermsAndContinue()
+            advanceUntilIdle()
+
+            assertEquals(AuthEffect.NavigateToLogin, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { userPrefsStore.setTermsAccepted(true) }
+    }
+
     private fun buildViewModel(): AuthViewModel = AuthViewModel(
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
