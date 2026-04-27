@@ -126,6 +126,8 @@ Implications:
 - Room and DataStore keys must be isolated by user scope
 - account switch must not leak local rows across users
 - disconnected sources should render as read-only where applicable
+- before a cloud account session exists, no background worker, DAO, or source sync path may touch the user-scoped Room database
+- foreground catch-up, periodic redundancy, and source-specific manual sync are all gated behind authenticated session state
 
 ## 9. Voice Pipeline Authority
 

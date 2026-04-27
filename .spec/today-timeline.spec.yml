@@ -108,3 +108,4 @@ invariants:
   - "SourceStatusStrip 칩은 탭 인터랙션이 없다 — 읽기 전용 진단 표시"
   - "ColdSyncScreen은 Room 전체가 비어있는 최초 1회만 표시된다 — 이후 앱 오픈은 항상 즉시 TodayTimelineScreen (cold-sync.spec.yml COLD-008이 onboarding_completed 전환 시점을 정의)"
   - "TodayTimelineScreen에는 사이드 드로어(HamburgerMenu)가 없다 — 설정 접근은 우상단 아이콘 탭"
+  - "Foreground catch-up과 pull-to-refresh source fan-out은 authenticated session이 있을 때만 열린다. pre-login 상태에서는 Today 진입 자체가 일어나지 않으며, worker enqueue도 금지된다"

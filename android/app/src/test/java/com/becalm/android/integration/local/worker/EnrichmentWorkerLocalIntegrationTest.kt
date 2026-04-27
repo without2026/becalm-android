@@ -10,7 +10,9 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -23,6 +25,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import javax.inject.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -41,12 +44,12 @@ class EnrichmentWorkerLocalIntegrationTest {
     private val db = LocalIntegrationSupport.inMemoryDatabase()
     private val logger = RecordingLogger()
     private val api = mockk<RailwayApi>(relaxed = true)
-    private val rawIngestionRepository = RawIngestionRepositoryImpl(
+    private val rawIngestionRepository: RawIngestionRepository = RawIngestionRepositoryImpl(
         dao = db.rawIngestionEventDao(),
         api = api,
         logger = logger,
     )
-    private val enrichmentRepository = PersonEnrichmentRepositoryImpl(
+    private val enrichmentRepository: PersonEnrichmentRepository = PersonEnrichmentRepositoryImpl(
         dao = db.personEnrichmentDao(),
         logger = logger,
     )
@@ -56,6 +59,9 @@ class EnrichmentWorkerLocalIntegrationTest {
         userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("enrichment-worker-pause")),
         logger = logger,
     )
+    private val rawIngestionRepositoryProvider = Provider { rawIngestionRepository }
+    private val enrichmentRepositoryProvider = Provider { enrichmentRepository }
+    private val sourceStatusRepositoryProvider = Provider { sourceStatusRepository }
 
     @After
     fun tearDown() {
@@ -70,9 +76,9 @@ class EnrichmentWorkerLocalIntegrationTest {
             appContext = LocalIntegrationSupport.appContext(),
             workerParams = LocalIntegrationSupport.workerParams(),
             authRepository = authRepository,
-            rawIngestionRepository = rawIngestionRepository,
-            personEnrichmentRepository = enrichmentRepository,
-            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepositoryProvider = rawIngestionRepositoryProvider,
+            personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
+            sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
             processingPauseGate = processingPauseGate,
             logger = logger,
             ioDispatcher = UnconfinedTestDispatcher(),
@@ -117,9 +123,9 @@ class EnrichmentWorkerLocalIntegrationTest {
             appContext = context,
             workerParams = LocalIntegrationSupport.workerParams(),
             authRepository = authRepository,
-            rawIngestionRepository = rawIngestionRepository,
-            personEnrichmentRepository = enrichmentRepository,
-            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepositoryProvider = rawIngestionRepositoryProvider,
+            personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
+            sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
             processingPauseGate = processingPauseGate,
             logger = logger,
             ioDispatcher = UnconfinedTestDispatcher(),
@@ -143,9 +149,9 @@ class EnrichmentWorkerLocalIntegrationTest {
             appContext = context,
             workerParams = LocalIntegrationSupport.workerParams(),
             authRepository = authRepository,
-            rawIngestionRepository = rawIngestionRepository,
-            personEnrichmentRepository = enrichmentRepository,
-            sourceStatusRepository = sourceStatusRepository,
+            rawIngestionRepositoryProvider = rawIngestionRepositoryProvider,
+            personEnrichmentRepositoryProvider = enrichmentRepositoryProvider,
+            sourceStatusRepositoryProvider = sourceStatusRepositoryProvider,
             processingPauseGate = processingPauseGate,
             logger = logger,
             ioDispatcher = UnconfinedTestDispatcher(),

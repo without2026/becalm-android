@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import timber.log.Timber
 
@@ -122,11 +123,6 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // this channel after re-querying Room for the commitment's live state.
         registerCommitmentDueSoonChannel()
         VoiceFailureNotifier.ensureChannel(this)
-        // Fire-and-forget upgrade compat: cancel WorkManager unique-work under the pre-#13
-        // `ingest.sms_call` name so devices upgrading from that build don't run duplicate
-        // MediaStore scans alongside the new `ingest.media_store` key. Idempotent — cancelling
-        // a non-existent unique-work name is a no-op on subsequent cold starts.
-        workScheduler.cleanupLegacyWorkNames()
 
         // Promote the legacy single-tuple IMAP credential layout to the per-provider
         // namespaced schema (ING-011 parallel-execution invariant). Idempotent via
@@ -165,28 +161,32 @@ public class BecalmApplication : Application(), Configuration.Provider {
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
         }
 
-        // Bind the per-user Room file before any other startup job lands on a DAO
-        // injection path (S6-A). When `current_user_id` is present (signed-in cold start)
-        // this pre-opens the correct file; when it is null (pre-login boot) the provider
-        // stays unopened so the lazy-bootstrap guard throws if a misbehaving worker
-        // sneaks past the auth gate. Wrapped in runCatching for the same reason as the
-        // other startup migrations — a rare DataStore corruption must not crash the
-        // process before the UI can drive recovery; the worker-level sign-in path will
-        // re-attempt [BeCalmDatabaseProvider.ensureOpenFor] on the next successful auth.
-        applicationScope.launch {
-            runCatching {
-                val userId = userPrefsStore.observeCurrentUserId().first()
-                if (!userId.isNullOrBlank()) {
-                    databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
-                }
-            }.onFailure { Timber.e(it, "BecalmApplication: database warm-open failed") }
+        // Resolve the persisted auth mirror before touching any WorkManager-backed
+        // startup path. Pre-login boots must not initialize auth-bound workers or
+        // user-scoped DAO graphs (AUTH-009).
+        val persistedUserId = runCatching {
+            runBlocking { userPrefsStore.observeCurrentUserId().first() }
+        }.getOrElse { error ->
+            Timber.e(error, "BecalmApplication: failed to read persisted current user")
+            null
         }
 
-        appRuntimeSyncCoordinator.start()
+        if (!persistedUserId.isNullOrBlank()) {
+            // Bind the per-user Room file before WorkManager can instantiate any
+            // DAO-bearing worker. Signed-in cold starts must resolve the correct
+            // file synchronously; post-login flows repeat this in AuthRepository.
+            runCatching {
+                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(persistedUserId))
+            }.onFailure { Timber.e(it, "BecalmApplication: database warm-open failed") }
 
-        // Enroll background lifecycle sweeps that must survive process restarts.
-        enrollOverdueSweep()
-        enrollRetentionSweep()
+            // Fire-and-forget upgrade compat: cancel WorkManager unique-work under the
+            // pre-#13 names only after we know an authenticated session exists. This
+            // avoids initializing auth-bound worker graphs on pre-login boots.
+            workScheduler.cleanupLegacyWorkNames()
+            appRuntimeSyncCoordinator.start()
+        } else {
+            Timber.d("BecalmApplication: pre-auth startup — runtime sync deferred")
+        }
     }
 
     /**
@@ -210,18 +210,4 @@ public class BecalmApplication : Application(), Configuration.Provider {
         manager.createNotificationChannel(channel)
     }
 
-    private fun enrollRetentionSweep() {
-        // Enroll the daily 30-day retention sweep (EMAIL-006,
-        // `.spec/data-ingestion.spec.yml:160`). `enqueueUniquePeriodicWork` with
-        // `ExistingPeriodicWorkPolicy.KEEP` is idempotent: repeated cold-start calls
-        // never reset the period timer, so invoking it unconditionally here is the
-        // simplest single-entry-point guarantee that the sweep stays scheduled.
-        workScheduler.scheduleRetentionSweep()
-    }
-
-    private fun enrollOverdueSweep() {
-        // Enroll the CMT-011 overdue lifecycle sweep. KEEP semantics on the
-        // scheduler side make this cold-start call idempotent.
-        workScheduler.scheduleOverdueSweep()
-    }
 }

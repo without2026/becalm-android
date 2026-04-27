@@ -206,11 +206,11 @@ public class AuthRepositoryImpl @Inject constructor(
         databaseProvider.ensureOpenFor(newHash)
         sessionFlow.value = session
         tokenProvider.primeCache()
-        appRuntimeSyncCoordinator.refresh()
         if (priorHash != null && priorHash != newHash) {
             logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
             processRestarter.restart()
         }
+        appRuntimeSyncCoordinator.start()
     }
 
     override suspend fun signOut(): BecalmResult<Unit> {

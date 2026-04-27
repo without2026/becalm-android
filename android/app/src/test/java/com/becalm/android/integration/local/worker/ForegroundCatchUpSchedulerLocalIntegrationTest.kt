@@ -85,6 +85,35 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         assertTrue(workScheduler.enqueuedSources.containsAll(listOf("outlook_calendar")))
     }
 
+    @Test
+    fun `pre-auth catch-up paths do not enqueue any workers`() = runTest {
+        val userPrefsStore = UserPrefsStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("foreground-preauth"),
+        )
+        val workScheduler = FakeForegroundWorkScheduler()
+        val scheduler = ForegroundCatchUpScheduler(
+            scope = this,
+            workScheduler = workScheduler,
+            userPrefsStore = userPrefsStore,
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger()),
+            logger = RecordingLogger(),
+        )
+
+        userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
+        userPrefsStore.setSourceEnabled(SourceType.GOOGLE_CALENDAR, true)
+
+        scheduler.triggerCatchUp()
+        scheduler.onStart(FakeLifecycleOwner)
+        advanceUntilIdle()
+
+        assertTrue(workScheduler.enqueuedSources.isEmpty())
+        assertEquals(0, workScheduler.mediaStoreCount)
+        assertEquals(0, workScheduler.gCalCount)
+        assertEquals(0, workScheduler.outlookCalCount)
+        assertEquals(0, workScheduler.imapNaverCount)
+        assertEquals(0, workScheduler.imapDaumCount)
+    }
+
     private object FakeLifecycleOwner : LifecycleOwner {
         override val lifecycle = androidx.lifecycle.LifecycleRegistry(this)
     }

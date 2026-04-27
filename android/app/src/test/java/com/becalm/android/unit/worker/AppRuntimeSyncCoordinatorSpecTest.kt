@@ -41,13 +41,14 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { foregroundCatchUpScheduler.start() }
         verify(exactly = 1) { contentObserverBootstrap.start() }
         verify(exactly = 1) { workScheduler.scheduleUploadRedundancy() }
+        verify(exactly = 1) { workScheduler.scheduleRetentionSweep() }
+        verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
         verify(exactly = 1) { workScheduler.scheduleEnrichmentSweep() }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.NAVER_IMAP) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.DAUM_IMAP) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.GOOGLE_CALENDAR) }
         verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.OUTLOOK_CALENDAR) }
         verify(exactly = 0) { contentObserverBootstrap.stop() }
-        verify(exactly = 0) { workScheduler.cancelEnrichmentSweep() }
     }
 
     @Test
@@ -64,10 +65,11 @@ class AppRuntimeSyncCoordinatorSpecTest {
 
         verify(exactly = 1) { foregroundCatchUpScheduler.start() }
         verify(exactly = 1) { contentObserverBootstrap.stop() }
-        verify(exactly = 1) { workScheduler.cancelEnrichmentSweep() }
         verify(exactly = 0) { contentObserverBootstrap.start() }
         verify(exactly = 0) { workScheduler.scheduleEnrichmentSweep() }
         verify(exactly = 1) { workScheduler.scheduleUploadRedundancy() }
+        verify(exactly = 1) { workScheduler.scheduleRetentionSweep() }
+        verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
     }
 
     @Test
@@ -114,9 +116,11 @@ class AppRuntimeSyncCoordinatorSpecTest {
 
         verify(exactly = 1) { foregroundCatchUpScheduler.start() }
         verify(exactly = 1) { contentObserverBootstrap.stop() }
-        verify(exactly = 1) { workScheduler.cancelEnrichmentSweep() }
         verify(exactly = 0) { workScheduler.scheduleUploadRedundancy() }
+        verify(exactly = 0) { workScheduler.scheduleRetentionSweep() }
+        verify(exactly = 0) { workScheduler.scheduleOverdueSweep() }
         verify(exactly = 0) { workScheduler.enqueuePeriodic(any()) }
+        verify(exactly = 0) { workScheduler.scheduleEnrichmentSweep() }
     }
 
     private fun buildCoordinator(): AppRuntimeSyncCoordinator = AppRuntimeSyncCoordinator(
