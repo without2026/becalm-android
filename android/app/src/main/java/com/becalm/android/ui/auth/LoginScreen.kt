@@ -82,11 +82,6 @@ public fun LoginScreen(
     } else {
         viewModel
     }
-    val resolvedOnboardingViewModel = if (onMarkLoginGranted == null) {
-        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
-    } else {
-        onboardingViewModel
-    }
     val state = if (stateOverride != null) {
         stateOverride
     } else {
@@ -107,28 +102,20 @@ public fun LoginScreen(
         }
     }
 
-    // Navigate away when session is established
+    // Navigate away when session is established. The onboarding VM is resolved only
+    // after SignedIn so the public Login shell can render pre-auth without runtime owners.
+    val signedInState = state as? AuthUiState.SignedIn
+    if (signedInState != null) {
+        LoginSignedInNavigationEffect(
+            signedIn = signedInState,
+            navController = navController,
+            onboardingViewModel = onboardingViewModel,
+            onMarkLoginGranted = onMarkLoginGranted,
+            onSignedInNavigate = onSignedInNavigate,
+        )
+    }
+
     LaunchedEffect(state) {
-        if (state is AuthUiState.SignedIn) {
-            val signedIn = state as AuthUiState.SignedIn
-            // Mark the onboarding LOGIN step terminal before leaving this screen so the
-            // onCompleteOnboarding() gate can ever pass (LOGIN is step 2 of the canonical 12).
-            onMarkLoginGranted?.invoke() ?: requireNotNull(resolvedOnboardingViewModel)
-                .onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
-            val destination = if (signedIn.onboardingCompleted) {
-                BecalmRoute.Today.path
-            } else {
-                // ONB-PIPA: first post-login screen must be the PIPA 제3자 제공 consent screen
-                // (finding #3 fix). RecordingFolder is reached only after the user acts on
-                // the PIPA disclosure — the OnboardingPipaConsent composable handles that hop.
-                BecalmRoute.OnboardingPipaConsent.path
-            }
-            (onSignedInNavigate ?: { target ->
-                navController.navigate(target) {
-                    popUpTo(BecalmRoute.Login.path) { inclusive = true }
-                }
-            })(destination)
-        }
         if (state is AuthUiState.Error) {
             scope.launch {
                 snackbarHostState.showSnackbar((state as AuthUiState.Error).message)
@@ -179,6 +166,41 @@ public fun LoginScreen(
             },
             onGoogleSignIn = launchGoogleSignIn,
         )
+    }
+}
+
+@Composable
+private fun LoginSignedInNavigationEffect(
+    signedIn: AuthUiState.SignedIn,
+    navController: NavHostController,
+    onboardingViewModel: OnboardingViewModel?,
+    onMarkLoginGranted: (() -> Unit)?,
+    onSignedInNavigate: ((String) -> Unit)?,
+) {
+    val resolvedOnboardingViewModel = if (onMarkLoginGranted == null) {
+        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
+    } else {
+        onboardingViewModel
+    }
+
+    LaunchedEffect(signedIn) {
+        // Mark the onboarding LOGIN step terminal before leaving this screen so the
+        // onCompleteOnboarding() gate can ever pass (LOGIN is step 2 of the canonical 12).
+        onMarkLoginGranted?.invoke() ?: requireNotNull(resolvedOnboardingViewModel)
+            .onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
+        val destination = if (signedIn.onboardingCompleted) {
+            BecalmRoute.Today.path
+        } else {
+            // ONB-PIPA: first post-login screen must be the PIPA 제3자 제공 consent screen
+            // (finding #3 fix). RecordingFolder is reached only after the user acts on
+            // the PIPA disclosure — the OnboardingPipaConsent composable handles that hop.
+            BecalmRoute.OnboardingPipaConsent.path
+        }
+        (onSignedInNavigate ?: { target ->
+            navController.navigate(target) {
+                popUpTo(BecalmRoute.Login.path) { inclusive = true }
+            }
+        })(destination)
     }
 }
 

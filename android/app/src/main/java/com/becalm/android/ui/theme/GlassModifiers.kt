@@ -5,10 +5,9 @@
  * Each recipe is a precise port of a CSS pattern from v3 global.css:
  *   - translucent fill + hairline border + outer drop-shadow + inset highlight
  *
- * Blur implementation:
- *   - API 31+ (Android 12+): [Modifier.blur] with [BlurredEdgeTreatment.Unbounded]
- *   - SDK 28–30 fallback: blur is omitted; background fill alpha is raised to
- *     partially compensate for the absent backdrop effect (spec §3 fallback values).
+ * Compose [Modifier.blur] blurs the foreground layer, not the backdrop behind a
+ * panel. These recipes therefore omit foreground blur and use the higher-opacity
+ * fallback fills so text fields, buttons, and disclosures remain readable.
  *
  * The recipes:
  *   1. [glassPanel]         — default cards and list items (12 dp corners)
@@ -18,14 +17,11 @@
  */
 package com.becalm.android.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -35,14 +31,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
-
-/**
- * True when the device supports [Modifier.blur] (renderEffect-backed, API 31+).
- * The property is evaluated at call-site, not stored, to survive configuration
- * changes correctly.
- */
-private val canBlur: Boolean
-    get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
 /**
  * Draws a soft outer drop-shadow behind the composable by painting a blurred
@@ -111,18 +99,17 @@ private fun Modifier.glassInsetHighlight(
  * Default glass surface recipe — cards and list items.
  *
  * Property stack (spec §3 `glassPanel`):
- * - Background fill: `0x0AFFFFFF` (α=0.04); SDK 28–30 raises to `0x1AFFFFFF` (α=0.10)
+ * - Background fill: `0x1AFFFFFF` (α=0.10) to compensate for omitted backdrop blur
  * - Border: 1 dp `0x14FFFFFF` (α=0.08)
  * - Corner radius: 12 dp (matches [BecalmShapes.medium])
  * - Outer shadow: y-offset 4 dp, blur 24 dp, `rgba(0,0,0,0.30)`
- * - Blur: 10 dp (API 31+ only; omitted on SDK 28–30)
  *
  * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (12 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modifier {
     val colors = MaterialTheme.becalmColors
-    val fill = if (canBlur) colors.glassPanelFill else colors.glassPanelFillSdkLegacy
+    val fill = colors.glassPanelFillSdkLegacy
     val cornerRadius = 12.dp
 
     return this
@@ -132,9 +119,6 @@ public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modi
             yOffset = 4.dp,
             blur = 24.dp,
         )
-        .then(
-            if (canBlur) Modifier.blur(10.dp, BlurredEdgeTreatment.Unbounded) else Modifier
-        )
         .background(fill, shape)
         .border(1.dp, colors.glassBorder, shape)
 }
@@ -143,19 +127,18 @@ public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modi
  * Elevated glass surface recipe — modals and bottom sheets.
  *
  * Property stack (spec §3 `glassPanelElevated`):
- * - Background fill: `0x0FFFFFFF` (α=0.06); SDK 28–30 raises to `0x26FFFFFF` (α=0.15)
+ * - Background fill: `0x26FFFFFF` (α=0.15) to compensate for omitted backdrop blur
  * - Border: 1 dp `0x14FFFFFF` (α=0.08)
  * - Corner radius: 20 dp (matches [BecalmShapes.large])
  * - Outer shadow: y-offset 8 dp, blur 32 dp, `rgba(0,0,0,0.40)`
  * - Inset highlight: 1 dp top-edge `0x0DFFFFFF` (α=0.05)
- * - Blur: 14 dp (API 31+ only; omitted on SDK 28–30)
  *
  * @param shape Override shape; defaults to [MaterialTheme.shapes.large] (20 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large): Modifier {
     val colors = MaterialTheme.becalmColors
-    val fill = if (canBlur) colors.glassPanelFillElevated else colors.glassPanelFillElevatedLegacy
+    val fill = colors.glassPanelFillElevatedLegacy
     val cornerRadius = 20.dp
 
     return this
@@ -169,10 +152,6 @@ public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large
             highlightColor = colors.glassInsetElevated,
             cornerRadius = cornerRadius,
         )
-        .then(
-            if (canBlur) Modifier.blur(14.dp, BlurredEdgeTreatment.Unbounded) else Modifier
-        )
         .background(fill, shape)
         .border(1.dp, colors.glassBorder, shape)
 }
-

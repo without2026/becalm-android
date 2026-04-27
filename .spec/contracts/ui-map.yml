@@ -4,6 +4,8 @@ version: 1
 # Language: Korean only
 # Bottom navigation: 3-tab BottomNavigationBar (오늘의 타임라인 / 인물 / 약속관리)
 # Total routes: 22
+# Glass surfaces must preserve foreground legibility. Compose implementations
+# must not apply foreground blur to panel contents, text fields, or buttons.
 
 routes:
   # -------- AUTH / ONBOARDING (public + first-run) --------

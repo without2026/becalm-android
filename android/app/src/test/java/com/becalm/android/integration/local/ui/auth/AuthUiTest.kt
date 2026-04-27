@@ -17,6 +17,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.LoginForm
+import com.becalm.android.ui.auth.LoginScreen
 import com.becalm.android.ui.auth.SplashContent
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsContent
@@ -145,6 +146,28 @@ class AuthUiTest {
             assertEquals("user@example.com", submittedEmail)
             assertEquals("secret", submittedPassword)
         }
+    }
+
+    @Test
+    fun `login screen signed out shell renders without onboarding owner callback`() {
+        composeRule.setContent {
+            BecalmTheme {
+                LoginScreen(
+                    navController = rememberNavController(),
+                    stateOverride = AuthUiState.SignedOut(termsAccepted = true),
+                    onEmailSignIn = { _, _ -> },
+                    googleSignInEnabledOverride = false,
+                    onGoogleSignInLaunch = {},
+                    onSignedInNavigate = {},
+                    onGoogleIdToken = {},
+                    onErrorDismissed = {},
+                    applySecureFlag = false,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.login_email_label)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
     }
 
     @Test
