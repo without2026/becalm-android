@@ -175,6 +175,8 @@
     <string name="persons_unassigned_empty_message">모든 이벤트가 특정 사람과 연결되었습니다.</string>
     <string name="persons_interactions_count">%d회 상호작용</string>
     <string name="persons_pending_commitments_fmt">미이행 %1$d건</string>
+    <string name="persons_section_pending_commitments">미이행 약속</string>
+    <string name="persons_section_recent_contacts">최근 연락</string>
     <string name="persons_offline_badge_fmt">오프라인 - 마지막 동기화 %1$s</string>
     <string name="persons_offline_badge_no_sync">오프라인</string>
     <string name="sources_contacts_title">연락처</string>
@@ -185,6 +187,10 @@
     <string name="person_detail_history_section">상호작용 기록</string>
     <string name="person_detail_empty_interactions">아직 기록된 상호작용이 없습니다.</string>
     <string name="person_detail_source_label">출처: %s</string>
+    <string name="person_detail_stat_email">이메일</string>
+    <string name="person_detail_stat_call">통화</string>
+    <string name="person_detail_stat_meeting">미팅</string>
+    <string name="person_detail_stat_commitment">약속</string>
 
     <!-- Raw event detail -->
     <string name="raw_event_detail_title">이벤트 상세</string>
@@ -255,6 +261,8 @@
     <string name="commitment_subtype_decision_deferred">보류</string>
     <string name="commitment_subtype_decision_ongoing">논의중</string>
     <string name="commitment_counterparty_unknown">미지정 상대</string>
+    <string name="commitment_source_context_fmt">%1$s · %2$s</string>
+    <string name="commitment_source_manual">사용자 직접 추가</string>
     <string name="commitments_empty_title">약속 없음</string>
     <string name="commitments_empty_message">회의와 이메일에서 추출된 약속이 여기에 표시됩니다.</string>
 

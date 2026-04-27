@@ -188,6 +188,8 @@
     <string name="persons_unassigned_empty_message">All events have been matched to a person.</string>
     <string name="persons_interactions_count">%d interactions</string>
     <string name="persons_pending_commitments_fmt">Pending %1$d</string>
+    <string name="persons_section_pending_commitments">Pending commitments</string>
+    <string name="persons_section_recent_contacts">Recent contacts</string>
     <string name="persons_offline_badge_fmt">Offline - last sync %1$s</string>
     <string name="persons_offline_badge_no_sync">Offline</string>
     <string name="contacts_source_connection_state_fmt">Status: %1$s</string>
@@ -200,6 +202,10 @@
     <string name="person_detail_history_section">Interaction History</string>
     <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
     <string name="person_detail_source_label">Source: %s</string>
+    <string name="person_detail_stat_email">Email</string>
+    <string name="person_detail_stat_call">Call</string>
+    <string name="person_detail_stat_meeting">Meeting</string>
+    <string name="person_detail_stat_commitment">Commitment</string>
     <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
     <string name="source_detail_events_synced_fmt">%1$d synced items</string>
     <string name="source_detail_last_error_fmt">Last error: %1$s</string>
@@ -275,6 +281,8 @@
     <string name="commitment_subtype_decision_deferred">Deferred</string>
     <string name="commitment_subtype_decision_ongoing">Ongoing</string>
     <string name="commitment_counterparty_unknown">Unassigned counterparty</string>
+    <string name="commitment_source_context_fmt">%1$s · %2$s</string>
+    <string name="commitment_source_manual">Manual entry</string>
     <string name="commitments_empty_title">No commitments</string>
     <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
 

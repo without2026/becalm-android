@@ -111,14 +111,19 @@ routes:
     data: ["Room person_ref grouping query", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
     components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
     auth: required
-    # Tab 2: 인물. PersonCard에 enriched 표시명 + DNBadge(미이행 약속 수) 표시.
+    # Tab 2: 인물. Prototype-aligned person-first layout: "미이행 약속" 섹션을
+    # 먼저 배치하고 나머지는 "최근 연락"으로 배치한다. PersonCard에 enriched
+    # 표시명 + DNBadge(미이행 약속 수) + 최근 이벤트 미리보기를 표시한다.
+    # 직접 녹음 UI는 이 화면에 추가하지 않는다.
 
   - path: /persons/{person_id}
     screen: PersonDetailScreen
     data: ["Room raw_ingestion_events query by person_ref", "Room commitments query by person_ref"]
     components: [PersonHeader, CommitmentCard, InteractionHistoryRow, RawEventRow]
     auth: required
-    # 3-section body: 미이행 약속 / 이행 완료 / 상호작용 히스토리 (SRC-002, SRC-008)
+    # Prototype-aligned person detail: profile header + derived stats(이메일/통화/미팅/약속)
+    # + 3-section body: 미이행 약속 / 이행 완료 / 상호작용 히스토리 (SRC-002, SRC-008).
+    # Stats are derived from existing Room raw/calendar/commitment rows only.
 
   - path: /persons/{person_id}/events/{event_id}
     screen: RawEventDetailSheet
@@ -140,7 +145,8 @@ routes:
     components: [CommitmentFilterTabs, CommitmentCard, DNBadge, BottomNavigationBar]
     auth: required
     # Tab 3: tracked item 관리. Filter tabs: 전체 / 액션 / 내가 한 / 상대가 한 / 일정 / 결정.
-    # Cards show type+subtype chips, title, primary counterparty/person label, and due info.
+    # Cards show person/counterparty first, type+subtype chips, title, due info, and
+    # source context from existing source_event_* fields. No new collection/storage is required.
 
   # -------- SETTINGS --------
 

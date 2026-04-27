@@ -88,6 +88,9 @@ public data class CommitmentRow(
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
     val counterpartyDisplayName: String?,
+    val sourceType: String? = null,
+    val sourceTitle: String? = null,
+    val sourceOccurredAt: Instant? = null,
     /**
      * Verbatim due-date expression captured from the source event
      * (e.g. "다음주", "월말"). Surfaced alongside the rendered due date so users

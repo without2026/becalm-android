@@ -1,5 +1,7 @@
 package com.becalm.android.ui.persons
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,10 +30,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -135,27 +141,34 @@ private fun PersonList(
     onPersonClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val pendingPeople = state.people.filter { it.pendingCommitmentCount > 0 }
+    val recentPeople = state.people.filter { it.pendingCommitmentCount <= 0 }
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("persons-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        items(items = state.people, key = { it.personRef }) { person ->
-            PersonRowItem(
-                person = person,
-                onClick = { onPersonClick(person.personRef) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-            )
+        personSection(
+            key = "pending-people",
+            titleRes = R.string.persons_section_pending_commitments,
+            people = pendingPeople,
+            onPersonClick = onPersonClick,
+        )
+        personSection(
+            key = "recent-people",
+            titleRes = R.string.persons_section_recent_contacts,
+            people = recentPeople,
+            onPersonClick = onPersonClick,
+        )
+        if (state.unassignedEvents.isNotEmpty()) {
+            item(key = "unassigned-spacer") {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
         }
         if (state.unassignedEvents.isNotEmpty()) {
             item(key = "unassigned-header") {
-                Text(
-                    text = stringResource(R.string.persons_unassigned_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
-                )
+                PersonListSectionHeader(text = stringResource(R.string.persons_unassigned_title))
             }
             items(items = state.unassignedEvents, key = { it.id }) { event ->
                 UnassignedEventRow(
@@ -167,6 +180,37 @@ private fun PersonList(
             }
         }
     }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
+    key: String,
+    titleRes: Int,
+    people: List<PersonRow>,
+    onPersonClick: (String) -> Unit,
+) {
+    if (people.isEmpty()) return
+    item(key = "$key-header") {
+        PersonListSectionHeader(text = stringResource(titleRes))
+    }
+    items(items = people, key = { "$key-${it.personRef}" }) { person ->
+        PersonRowItem(
+            person = person,
+            onClick = { onPersonClick(person.personRef) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun PersonListSectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
+    )
 }
 
 @Composable
@@ -183,34 +227,26 @@ private fun PersonRowItem(
             .semantics { role = Role.Button },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = Icons.Filled.Person,
-            contentDescription = null,
-            modifier = Modifier.size(36.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        PersonAvatar(person = person)
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = buildDisplayHeadline(person),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (person.pendingCommitmentCount > 0) {
-                Text(
-                    text = stringResource(
-                        R.string.persons_pending_commitments_fmt,
-                        person.pendingCommitmentCount,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                PendingCommitmentBadge(count = person.pendingCommitmentCount)
             }
             if (!person.lastInteractionSnippet.isNullOrBlank()) {
                 Text(
                     text = person.lastInteractionSnippet,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (person.interactionCount > 0) {
@@ -222,6 +258,47 @@ private fun PersonRowItem(
             }
         }
     }
+}
+
+@Composable
+private fun PersonAvatar(person: PersonRow) {
+    val seed = person.displayLabel.ifBlank { person.personRef }
+    val colors = listOf(
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.secondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer,
+    )
+    val index = (seed.hashCode() and Int.MAX_VALUE) % colors.size
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(colors[index])
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = avatarInitial(seed),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun PendingCommitmentBadge(count: Int) {
+    Text(
+        text = stringResource(R.string.persons_pending_commitments_fmt, count),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .background(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.extraSmall,
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
 }
 
 @Composable
@@ -275,6 +352,9 @@ private fun OfflineBadge(lastSyncAt: Instant?) {
         color = MaterialTheme.colorScheme.primary,
     )
 }
+
+private fun avatarInitial(seed: String): String =
+    seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
 
 private fun buildDisplayHeadline(person: PersonRow): String {
     val parts = buildList {
