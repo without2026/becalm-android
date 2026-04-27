@@ -18,6 +18,7 @@ import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
 import java.io.IOException
+import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 
@@ -27,7 +28,7 @@ internal data class NamedAuthStep(
 )
 
 internal class AuthSessionCleanupPlanner(
-    private val authClient: SupabaseAuthClient,
+    private val authClientProvider: Provider<SupabaseAuthClient>,
     private val sessionStore: SupabaseSessionStore,
     private val tokenProvider: AuthTokenProvider,
     private val deviceKeyStore: DeviceKeyStore,
@@ -44,7 +45,7 @@ internal class AuthSessionCleanupPlanner(
     suspend fun buildSignOutSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
         add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
         add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
-        if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
+        if (session != null) add(NamedAuthStep("serverRevoke") { authClientProvider.get().signOut(session.accessToken) })
         add(ioStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
@@ -60,7 +61,7 @@ internal class AuthSessionCleanupPlanner(
     suspend fun buildInvalidateSessionSteps(session: SupabaseSession?): List<NamedAuthStep> = buildList {
         add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
         add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
-        if (session != null) add(NamedAuthStep("serverRevoke") { authClient.signOut(session.accessToken) })
+        if (session != null) add(NamedAuthStep("serverRevoke") { authClientProvider.get().signOut(session.accessToken) })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })
         add(NamedAuthStep("sessionStoreClear") { sessionStore.clear() })

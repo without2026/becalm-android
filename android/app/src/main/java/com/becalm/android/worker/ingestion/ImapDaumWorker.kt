@@ -118,7 +118,7 @@ public class ImapDaumWorker @AssistedInject constructor(
         // Idempotent legacy-tuple credential migration (see ImapNaverWorker.doWork §0).
         imapCredentialStoreMigrator.migrateIfNeeded()
 
-        val credentials = loadCredentials() ?: return Result.failure()
+        val credentials = loadCredentials() ?: return Result.success()
         val imapEmail = credentials.username
         val imapPassword = credentials.appPassword
 

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import javax.inject.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,7 +99,7 @@ class AuthRepositoryLocalIntegrationTest {
     private val oauthCredentialStore = mockk<OAuthCredentialStore>(relaxed = true)
     private val processRestarter = mockk<ProcessRestarter>()
     private val repository: AuthRepository = AuthRepositoryImpl(
-        authClient = authClient,
+        authClientProvider = Provider { authClient },
         sessionStore = sessionStore,
         tokenProvider = tokenProvider,
         deviceKeyStore = deviceKeyStore,
