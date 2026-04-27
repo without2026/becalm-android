@@ -78,6 +78,7 @@ public class AuthInterceptor(
         val bufferedResponse = response.newBuilder()
             .body(bodyBytes.toResponseBody(bodyContentType))
             .build()
+        response.close()
 
         // Pass the token we attached to the failing request so the provider can detect
         // "cache already advanced past this 401" and coalesce duplicate refreshes.

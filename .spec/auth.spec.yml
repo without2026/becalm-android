@@ -74,7 +74,7 @@ behaviors:
     description: "Railway API 호출 시 401 수신하면 Supabase Auth로 토큰 갱신 후 동일 요청을 1회 재시도한다. 재시도도 401이면 로그인 화면으로 이동한다"
     endpoint: "POST /auth/v1/token?grant_type=refresh_token"
     precondition: "Railway API 호출 → HTTP 401 수신, refresh_token 유효"
-    expected: "Supabase Auth refresh 성공 → 동일 Railway API 요청 재시도 1회 수행됨. 재시도 성공 시 정상 응답 반환됨. 재시도도 401이면 LoginScreen으로 이동됨"
+    expected: "Supabase Auth refresh 성공 → 최초 401 response를 닫은 뒤 동일 Railway API 요청 재시도 1회 수행됨. 재시도 성공 시 정상 응답 반환됨. 재시도도 401이면 LoginScreen으로 이동됨"
     source: phase2-acceptance
     tests: []
 

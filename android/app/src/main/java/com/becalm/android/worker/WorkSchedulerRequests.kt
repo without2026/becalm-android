@@ -124,7 +124,6 @@ internal object WorkSchedulerRequests {
                     .setRequiresBatteryNotLow(true)
                     .build(),
             )
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
             .setInputData(
                 workDataOf(

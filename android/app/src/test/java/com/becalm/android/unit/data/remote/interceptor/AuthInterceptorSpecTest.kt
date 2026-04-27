@@ -14,9 +14,12 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import java.util.concurrent.TimeUnit
 
 class AuthInterceptorSpecTest {
@@ -118,6 +121,40 @@ class AuthInterceptorSpecTest {
         assertEquals("Bearer fresh-token", chain.proceededRequests[1].header("Authorization"))
         coVerify(exactly = 1) { authTokenProvider.refresh("expired-token") }
         coVerify(exactly = 0) { invalidator.invalidate() }
+    }
+
+    @Test
+    fun `AUTH-007 closes the first 401 response before retrying on the same call`() {
+        every { authTokenProvider.currentAccessToken() } returns "expired-token"
+        coEvery { authTokenProvider.refresh("expired-token") } returns
+            AuthTokenProvider.RefreshResult.Refreshed("fresh-token")
+
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(401).setBody("expired"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
+        server.start()
+        try {
+            val url = server.url("/v1/resource")
+            val interceptor = AuthInterceptor(
+                authTokenProvider = authTokenProvider,
+                authFailureSessionInvalidator = invalidator,
+                railwayHost = url.host,
+            )
+            val client = OkHttpClient.Builder()
+                .addInterceptor(interceptor)
+                .build()
+
+            client.newCall(Request.Builder().url(url).build()).execute().use { result ->
+                assertEquals(200, result.code)
+                assertEquals("ok", result.body!!.string())
+            }
+
+            assertEquals("Bearer expired-token", server.takeRequest().getHeader("Authorization"))
+            assertEquals("Bearer fresh-token", server.takeRequest().getHeader("Authorization"))
+            coVerify(exactly = 1) { authTokenProvider.refresh("expired-token") }
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
