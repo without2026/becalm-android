@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
@@ -91,6 +92,8 @@ public class AuthViewModel @Inject constructor(
 
     /** One-shot authentication effects such as AUTH-006 app finish. */
     public val effects: SharedFlow<AuthEffect> = _effects.asSharedFlow()
+
+    private var sessionObservationJob: Job? = null
 
     init {
         onObserveSession()
@@ -206,21 +209,22 @@ public class AuthViewModel @Inject constructor(
      * after an error recovery.
      */
     public fun onObserveSession() {
-        viewModelScope.launch {
+        sessionObservationJob?.cancel()
+        sessionObservationJob = viewModelScope.launch {
+            try {
+                _uiState.value = bootstrapUiState()
+                logger.d(TAG, "startup auth bootstrap resolved to ${_uiState.value}")
+            } catch (e: Exception) {
+                logger.w(TAG, "startup auth bootstrap failed")
+                _uiState.value = AuthUiState.Error(e.message ?: "session bootstrap failed")
+            }
+
             authRepository.observeAuthState()
                 .catch { e ->
                     _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
                 }
                 .collect { authState ->
-                    _uiState.value = when (authState) {
-                        is AuthState.Authenticated -> AuthUiState.SignedIn(
-                            userId = authState.session.userId,
-                            onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
-                        )
-                        is AuthState.Unauthenticated -> AuthUiState.SignedOut(
-                            termsAccepted = userPrefsStore.observeTermsAccepted().first(),
-                        )
-                    }
+                    _uiState.value = authState.toUiState()
                 }
         }
     }
@@ -232,4 +236,29 @@ public class AuthViewModel @Inject constructor(
     public fun onErrorDismissed() {
         _uiState.value = AuthUiState.SignedOut()
     }
+
+    private suspend fun bootstrapUiState(): AuthUiState {
+        val session = authRepository.currentSession()
+        return if (session != null) {
+            AuthUiState.SignedIn(
+                userId = session.userId,
+                onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
+            )
+        } else {
+            AuthUiState.SignedOut(
+                termsAccepted = userPrefsStore.observeTermsAccepted().first(),
+            )
+        }
+    }
+
+    private suspend fun AuthState.toUiState(): AuthUiState =
+        when (this) {
+            is AuthState.Authenticated -> AuthUiState.SignedIn(
+                userId = session.userId,
+                onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
+            )
+            is AuthState.Unauthenticated -> AuthUiState.SignedOut(
+                termsAccepted = userPrefsStore.observeTermsAccepted().first(),
+            )
+        }
 }
