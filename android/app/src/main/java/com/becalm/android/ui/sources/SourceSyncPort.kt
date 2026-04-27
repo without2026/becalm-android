@@ -13,6 +13,7 @@ import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.datetime.Clock
 import retrofit2.Response
@@ -30,12 +31,15 @@ public interface SourceSyncPort {
 
 @Singleton
 public class DefaultSourceSyncPort @Inject constructor(
-    private val api: RailwayApi,
+    private val apiProvider: Provider<RailwayApi>,
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) : SourceSyncPort {
+
+    private val api: RailwayApi
+        get() = apiProvider.get()
 
     override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> =
         when (sourceType) {

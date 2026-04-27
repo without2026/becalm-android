@@ -16,6 +16,7 @@ import retrofit2.Response
 import java.io.IOException
 import java.util.UUID
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 // ─── Interface ────────────────────────────────────────────────────────────────
@@ -202,9 +203,22 @@ private const val TAG = "RawIngestionRepository"
 @Singleton
 public class RawIngestionRepositoryImpl @Inject constructor(
     private val dao: RawIngestionEventDao,
-    private val api: RailwayApi,
+    private val apiProvider: Provider<RailwayApi>,
     private val logger: Logger,
 ) : RawIngestionRepository {
+
+    private val api: RailwayApi
+        get() = apiProvider.get()
+
+    public constructor(
+        dao: RawIngestionEventDao,
+        api: RailwayApi,
+        logger: Logger,
+    ) : this(
+        dao = dao,
+        apiProvider = Provider { api },
+        logger = logger,
+    )
 
     // ── Write ─────────────────────────────────────────────────────────────────
 

@@ -68,13 +68,16 @@ private val ALLOWED_ACTION_STATES: Set<String> =
 @Singleton
 public class CommitmentRepositoryImpl @Inject constructor(
     private val dao: CommitmentDao,
-    private val api: RailwayApi,
+    private val apiProvider: Provider<RailwayApi>,
     private val cursorStore: SyncCursorStore,
     private val userPrefsStore: UserPrefsStore,
     private val databaseProvider: Provider<BeCalmDatabase>,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CommitmentRepository {
+
+    private val api: RailwayApi
+        get() = apiProvider.get()
 
     public constructor(
         dao: CommitmentDao,
@@ -86,7 +89,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
         ioDispatcher: CoroutineDispatcher,
     ) : this(
         dao = dao,
-        api = api,
+        apiProvider = Provider { api },
         cursorStore = cursorStore,
         userPrefsStore = userPrefsStore,
         databaseProvider = Provider { database },
