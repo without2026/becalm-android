@@ -82,9 +82,6 @@ public interface UserPrefsStore {
      */
     public fun observeOnboardingStepStatuses(): Flow<Map<String, String>>
 
-    /** Persists a single onboarding [step] status string. */
-    public suspend fun setOnboardingStepStatus(step: String, status: String)
-
     /** Persists multiple onboarding step statuses atomically for multi-step branches. */
     public suspend fun setOnboardingStepStatuses(statuses: Map<String, String>)
 
@@ -517,10 +514,6 @@ public class UserPrefsStoreImpl @Inject constructor(
             val userId = prefs[currentUserIdKey] ?: return@map emptyMap()
             decodeStringMap(prefs[userScoped(userId).onboardingStepStatusesKey])
         }
-
-    override suspend fun setOnboardingStepStatus(step: String, status: String) {
-        setOnboardingStepStatuses(mapOf(step to status))
-    }
 
     override suspend fun setOnboardingStepStatuses(statuses: Map<String, String>) {
         if (statuses.isEmpty()) return

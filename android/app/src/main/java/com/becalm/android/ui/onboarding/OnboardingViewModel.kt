@@ -746,8 +746,7 @@ public class OnboardingViewModel @Inject constructor(
     private fun persistStepStatuses(statuses: Map<OnboardingStep, StepStatus>) {
         viewModelScope.launch {
             userPrefsStore.setOnboardingStepStatuses(
-                statuses.mapKeys { (step, _) -> step.name }
-                    .mapValues { (_, status) -> status.name },
+                OnboardingProgressResolver.encodeStepStatuses(statuses),
             )
         }
     }

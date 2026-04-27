@@ -22,8 +22,9 @@ internal object OnboardingProgressResolver {
             }
         }
 
-    fun encodeStepStatus(step: OnboardingStep, status: StepStatus): Pair<String, String> =
-        step.name to status.name
+    fun encodeStepStatuses(statuses: Map<OnboardingStep, StepStatus>): Map<String, String> =
+        statuses.mapKeys { (step, _) -> step.name }
+            .mapValues { (_, status) -> status.name }
 
     fun hydrateStepStates(
         persisted: Map<String, String>,
