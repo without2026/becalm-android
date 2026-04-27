@@ -29,6 +29,9 @@ internal object PersonDetailProjector {
             companyName = enrichment?.company,
             jobTitle = enrichment?.title,
             eventCount = rawEvents.size,
+            emailInteractionCount = rawEvents.count { it.sourceType.isEmailSource() },
+            callInteractionCount = rawEvents.count { it.sourceType.isCallSource() },
+            meetingCount = calendarEvents.size,
             pendingCommitmentCount = sections.pendingCommitments.size,
             channelSources = (rawEvents.map { it.sourceType } + calendarEvents.map { it.sourceType }).toSet(),
             completedExpanded = completedExpanded,
@@ -93,6 +96,19 @@ internal object PersonDetailProjector {
             timestamp = meeting.startAt,
             title = meeting.title,
         )
+
+    private fun String.isEmailSource(): Boolean =
+        equals("gmail", ignoreCase = true) ||
+            equals("outlook_mail", ignoreCase = true) ||
+            equals("naver_imap", ignoreCase = true) ||
+            equals("daum_imap", ignoreCase = true) ||
+            contains("email", ignoreCase = true) ||
+            contains("mail", ignoreCase = true) ||
+            contains("imap", ignoreCase = true)
+
+    private fun String.isCallSource(): Boolean =
+        equals("call_recording", ignoreCase = true) ||
+            contains("call", ignoreCase = true)
 
     private data class InteractionSections(
         val pendingCommitments: List<InteractionRow.Commitment>,

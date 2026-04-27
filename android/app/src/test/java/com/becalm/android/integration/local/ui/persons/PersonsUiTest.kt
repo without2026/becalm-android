@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -74,7 +75,9 @@ class PersonsUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
+        composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
         composeRule.onNodeWithText("미분류 이벤트").assertExists()
         composeRule.onNodeWithText(string(R.string.persons_offline_badge_no_sync)).assertIsDisplayed()
         composeRule.onNodeWithText("김철수 · ABC Corp · 팀장").assertExists()
@@ -134,7 +137,9 @@ class PersonsUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.person_detail_section_pending_fmt, 1)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.person_detail_section_completed_fmt, 1)).assertIsDisplayed()
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_section_completed_fmt, 1)))
+        composeRule.onNodeWithText(string(R.string.person_detail_section_completed_fmt, 1)).assertExists()
         composeRule.onAllNodesWithText("완료된 약속").assertCountEquals(0)
     }
 

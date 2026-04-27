@@ -7,17 +7,17 @@ version: 1
 behaviors:
   - id: SRC-001
     type: ui_interaction
-    description: "PersonsScreen 진입 시 인터랙션이 있는 인물 목록이 most_recent_event_time 내림차순으로 표시된다. 각 카드에 persons_enrichment 기반 표시명(display_name 또는 nickname, 없으면 person_ref 원본값) + company/title(있을 경우) + 채널 아이콘 클러스터 + 미이행 약속 건수 DNBadge + 최근 이벤트 미리보기 + 타임스탬프 표시됨"
+    description: "PersonsScreen 진입 시 인터랙션이 있는 인물 목록이 인물 중심 섹션으로 표시된다. 미이행 약속이 있는 인물을 '미이행 약속' 섹션에 먼저 표시하고, 나머지는 most_recent_event_time 내림차순 '최근 연락' 섹션에 표시한다. 각 카드에 persons_enrichment 기반 표시명(display_name 또는 nickname, 없으면 person_ref 원본값) + company/title(있을 경우) + 채널 아이콘 클러스터 + 미이행 약속 건수 DNBadge + 최근 이벤트 미리보기 + 타임스탬프 표시됨"
     screen: "PersonsScreen"
     interaction: "화면 진입"
     precondition: "인증 완료, Room에 person_ref='+821012345678' raw_ingestion_events 2건(voice 1, gmail 1) + persons_enrichment {display_name='김철수', company='ABC Corp', title='팀장'} + 미이행 Commitment 2건 존재"
-    expected: "인물 카드 표시됨. 표시명: '김철수 · ABC Corp · 팀장'. 채널 아이콘: 음성+이메일. DNBadge: '미이행 2'. 더 최근 이벤트를 가진 인물이 상단. 커서 기반 페이지네이션(limit=20)"
+    expected: "'미이행 약속' 섹션에 인물 카드 표시됨. 표시명: '김철수 · ABC Corp · 팀장'. 채널 아이콘: 음성+이메일. DNBadge: '미이행 2건'. 같은 섹션 안에서는 더 최근 이벤트를 가진 인물이 상단. 커서 기반 페이지네이션(limit=20)"
     source: phase2-acceptance
     tests: []
 
   - id: SRC-002
     type: ui_interaction
-    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 헤더에 enriched 정보(full_name, nickname, company, title, 이벤트 수, 미이행 약속 수)가 표시되고, 본문에 3개 섹션(미이행 약속 / 이행 완료 / 상호작용 히스토리)이 표시된다"
+    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 헤더에 enriched 정보(full_name, nickname, company, title, 이벤트 수, 미이행 약속 수)와 기존 raw/calendar/commitment에서 파생한 이메일/통화/미팅/약속 통계가 표시되고, 본문에 3개 섹션(미이행 약속 / 이행 완료 / 상호작용 히스토리)이 표시된다"
     screen: "PersonDetailScreen"
     interaction: "인물 카드 탭"
     precondition: "PersonsScreen에 person_ref='+821012345678' 카드 표시됨. persons_enrichment {display_name='김철수', nickname='철수', company='ABC Corp', title='팀장'}. Room에 voice 1건 + gmail 1건 + give Commitment 1건(pending) + take Commitment 1건(completed)"
@@ -90,3 +90,4 @@ invariants:
   - "persons_enrichment 조인은 순수 온디바이스 Room LEFT JOIN — Railway/Supabase로 연락처 정보 전송 없음"
   - "enrichment 없는 person_ref는 원본값(전화번호/이메일/표시이름)으로 fallback 표시됨 — 크래시 없음"
   - "voice detail은 transcript viewer가 아니라 commitment evidence viewer다 — full transcript는 저장/표시하지 않는다"
+  - "teamwithout.com 프로토타입은 강한 UI reference로만 사용한다 — 직접 녹음 UI와 신규 데이터 수집/스키마 추가는 이 모듈 범위가 아니다"

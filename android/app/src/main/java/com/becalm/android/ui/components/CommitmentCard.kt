@@ -106,6 +106,9 @@ import kotlinx.datetime.toLocalDateTime
  *                      Never pass a raw email address, phone number, or internal
  *                      identifier — the TalkBack accessibility description and the
  *                      on-screen text render this value verbatim.
+ * @param sourceContextLabel Optional display-safe source context prepared by the
+ *                      caller from existing `source_event_*` fields. This composable
+ *                      only renders it and does not resolve source metadata.
  * @param modifier      Optional [Modifier] applied to the card root.
  * @param onClick       Optional click handler; when non-null the card is tappable.
  * @param onMarkDone    Optional callback for the inline check icon button. The button
@@ -130,6 +133,7 @@ public fun CommitmentCard(
     dueIsApproximate: Boolean = false,
     dueHint: String? = null,
     isManual: Boolean = false,
+    sourceContextLabel: String? = null,
     onClick: (() -> Unit)? = null,
     onMarkDone: (() -> Unit)? = null,
 ) {
@@ -356,6 +360,17 @@ public fun CommitmentCard(
                         text = stringResource(R.string.commitment_detail_counterparty_label),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                if (!sourceContextLabel.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = sourceContextLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
 

@@ -157,6 +157,9 @@ private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues
                 jobTitle = state.jobTitle,
                 personRef = state.personRef,
                 eventCount = state.eventCount,
+                emailInteractionCount = state.emailInteractionCount,
+                callInteractionCount = state.callInteractionCount,
+                meetingCount = state.meetingCount,
                 pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
@@ -185,7 +188,9 @@ private fun PersonDetailList(
 
     LazyColumn(
         contentPadding = padding,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("person-detail-list"),
     ) {
         item(key = "header") {
             PersonHeader(
@@ -195,6 +200,9 @@ private fun PersonDetailList(
                 jobTitle = state.jobTitle,
                 personRef = state.personRef,
                 eventCount = state.eventCount,
+                emailInteractionCount = state.emailInteractionCount,
+                callInteractionCount = state.callInteractionCount,
+                meetingCount = state.meetingCount,
                 pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
@@ -347,6 +355,9 @@ private fun PreviewPersonDetailScreenWithHistory() {
                         jobTitle = "Product Lead",
                         personRef = "alice@acme.com",
                         eventCount = 2,
+                        emailInteractionCount = 1,
+                        callInteractionCount = 0,
+                        meetingCount = 1,
                         pendingCommitmentCount = 1,
                     )
                 }

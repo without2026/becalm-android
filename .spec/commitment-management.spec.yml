@@ -6,11 +6,11 @@ version: 1
 behaviors:
   - id: CMT-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 진입 시 전체 tracked item 목록이 표시된다. 기본 탭: '전체'. 각 카드에는 item_type(action|schedule|decision), subtype(direction|schedule_status|decision_status), title, person_ref 기반 표시명, due_at(KST 표시) 또는 due_hint, 그리고 action item일 때만 action_state가 표시된다. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
+    description: "CommitmentManagementScreen 진입 시 전체 tracked item 목록이 표시된다. 기본 탭: '전체'. 각 카드는 프로토타입처럼 person_ref 기반 표시명과 source_event_* 맥락을 먼저 인지할 수 있게 표시하고, item_type(action|schedule|decision), subtype(direction|schedule_status|decision_status), title, due_at(KST 표시) 또는 due_hint, 그리고 action item일 때만 action_state를 표시한다. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
     screen: "CommitmentManagementScreen"
     interaction: "하단 탭 '약속관리' 탭"
     precondition: "인증 완료, Room에 trackable item 5건(action give 2건 + action take 1건 + schedule 1건 + decision 1건) 존재"
-    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/액션/내가 한/상대가 한/일정/결정) 표시됨. 5건 모두 표시됨. 각 카드에 type chip + subtype chip + title + person_ref 기반 표시명 + due_at(M/d HH:mm KST) 또는 due_hint 표시됨. action item은 action_state와 direction(give/take) 표시, schedule item은 schedule_status 표시, decision item은 decision_status 표시"
+    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/액션/내가 한/상대가 한/일정/결정) 표시됨. 5건 모두 표시됨. 각 카드에 person_ref 기반 표시명 + source_event_title/source_type 맥락 + type chip + subtype chip + title + due_at(M/d HH:mm KST) 또는 due_hint 표시됨. action item은 action_state와 direction(give/take) 표시, schedule item은 schedule_status 표시, decision item은 decision_status 표시"
     source: phase2-acceptance
     tests: []
 

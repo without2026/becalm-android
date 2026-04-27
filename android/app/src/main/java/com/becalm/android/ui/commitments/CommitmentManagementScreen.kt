@@ -26,7 +26,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
+import com.becalm.android.core.util.KST
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
 import com.becalm.android.ui.components.CollectFlowEffect
@@ -50,6 +50,7 @@ import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Instant
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Commitment management screen — full list with filter tabs.
@@ -296,6 +297,7 @@ private fun CommitmentRowCard(
         dueIsApproximate = row.dueIsApproximate,
         dueHint = row.dueHint,
         isManual = row.isManual,
+        sourceContextLabel = commitmentSourceContextLabel(row),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
@@ -304,6 +306,38 @@ private fun CommitmentRowCard(
         // onMarkDone stays unset so the card stays visually minimal.
         onClick = { onOpenDetail(row.id) },
     )
+}
+
+@Composable
+private fun commitmentSourceContextLabel(row: CommitmentRow): String? {
+    if (row.isManual) return stringResource(R.string.commitment_source_manual)
+    val source = row.sourceTitle?.takeIf { it.isNotBlank() }
+        ?: row.sourceType?.let { readableSourceType(it) }
+        ?: return null
+    val date = row.sourceOccurredAt?.toMonthDayLabel()
+    return if (date == null) {
+        source
+    } else {
+        stringResource(R.string.commitment_source_context_fmt, date, source)
+    }
+}
+
+@Composable
+private fun readableSourceType(sourceType: String): String = when (sourceType) {
+    "gmail" -> stringResource(R.string.raw_event_source_badge_gmail)
+    "outlook_mail" -> stringResource(R.string.raw_event_source_badge_outlook_mail)
+    "naver_imap" -> stringResource(R.string.raw_event_source_badge_naver_imap)
+    "daum_imap" -> stringResource(R.string.raw_event_source_badge_daum_imap)
+    "google_calendar" -> stringResource(R.string.raw_event_source_badge_google_calendar)
+    "outlook_calendar" -> stringResource(R.string.raw_event_source_badge_outlook_calendar)
+    "voice" -> stringResource(R.string.raw_event_source_badge_voice)
+    "call_recording" -> stringResource(R.string.raw_event_source_badge_call_recording)
+    else -> sourceType
+}
+
+private fun Instant.toMonthDayLabel(): String {
+    val date = toLocalDateTime(KST).date
+    return "${date.monthNumber}/${date.dayOfMonth}"
 }
 
 @Composable

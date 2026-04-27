@@ -9,9 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -167,182 +166,196 @@ internal fun CreateSheetContent(
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val scrollState = rememberScrollState()
     var showDatePicker by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp)
-            .verticalScroll(scrollState),
+            .fillMaxWidth(),
     ) {
-        // ── Header ──
-        val headerRes = when (state.mode) {
-            CommitmentCreateMode.MANUAL -> R.string.commitment_manual_sheet_title_new
-            CommitmentCreateMode.SUPERSEDE -> R.string.commitment_manual_sheet_title_supersede
-        }
-        Text(
-            text = stringResource(headerRes),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ── Title ──
-        OutlinedTextField(
-            value = state.draft.title,
-            onValueChange = onTitleChange,
-            label = { Text(text = stringResource(R.string.commitment_manual_field_title)) },
-            isError = state.fieldErrors.containsKey(Field.TITLE),
-            supportingText = {
-                state.fieldErrors[Field.TITLE]?.let { Text(text = it) }
-            },
-            singleLine = true,
-            enabled = !state.saving,
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("commitment-create-title"),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+                .weight(1f, fill = false)
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                val headerRes = when (state.mode) {
+                    CommitmentCreateMode.MANUAL -> R.string.commitment_manual_sheet_title_new
+                    CommitmentCreateMode.SUPERSEDE -> R.string.commitment_manual_sheet_title_supersede
+                }
+                Text(
+                    text = stringResource(headerRes),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
 
-        // ── Direction ──
-        SectionLabel(text = stringResource(R.string.commitment_edit_field_direction))
-        Spacer(modifier = Modifier.height(4.dp))
-        DirectionRow(
-            current = state.draft.direction,
-            enabled = !state.saving,
-            onChange = onDirectionChange,
-        )
-        state.fieldErrors[Field.DIRECTION]?.let {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // ── Quote ──
-        // In SUPERSEDE mode the quote is legally evidentiary (EDIT-007
-        // invariant 1) — render as read-only text, never as TextField.
-        when (state.mode) {
-            CommitmentCreateMode.MANUAL -> {
+            item {
                 OutlinedTextField(
-                    value = state.draft.quote,
-                    onValueChange = onQuoteChange,
-                    label = { Text(text = stringResource(R.string.commitment_manual_quote_hint)) },
-                    isError = state.fieldErrors.containsKey(Field.QUOTE),
+                    value = state.draft.title,
+                    onValueChange = onTitleChange,
+                    label = { Text(text = stringResource(R.string.commitment_manual_field_title)) },
+                    isError = state.fieldErrors.containsKey(Field.TITLE),
                     supportingText = {
-                        state.fieldErrors[Field.QUOTE]?.let { Text(text = it) }
+                        state.fieldErrors[Field.TITLE]?.let { Text(text = it) }
                     },
+                    singleLine = true,
+                    enabled = !state.saving,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("commitment-create-title"),
+                )
+            }
+
+            item {
+                Column {
+                    SectionLabel(text = stringResource(R.string.commitment_edit_field_direction))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    DirectionRow(
+                        current = state.draft.direction,
+                        enabled = !state.saving,
+                        onChange = onDirectionChange,
+                    )
+                    state.fieldErrors[Field.DIRECTION]?.let {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+
+            item {
+                // In SUPERSEDE mode the quote is legally evidentiary (EDIT-007
+                // invariant 1) — render as read-only text, never as TextField.
+                when (state.mode) {
+                    CommitmentCreateMode.MANUAL -> {
+                        OutlinedTextField(
+                            value = state.draft.quote,
+                            onValueChange = onQuoteChange,
+                            label = { Text(text = stringResource(R.string.commitment_manual_quote_hint)) },
+                            isError = state.fieldErrors.containsKey(Field.QUOTE),
+                            supportingText = {
+                                state.fieldErrors[Field.QUOTE]?.let { Text(text = it) }
+                            },
+                            enabled = !state.saving,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    CommitmentCreateMode.SUPERSEDE -> {
+                        SectionLabel(
+                            text = stringResource(R.string.commitment_manual_supersede_quote_label),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = state.supersedeSource?.quote.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+
+            item {
+                OutlinedTextField(
+                    value = state.draft.personRef.orEmpty(),
+                    onValueChange = onPersonRefChange,
+                    label = { Text(text = stringResource(R.string.commitment_manual_field_person_ref)) },
+                    placeholder = {
+                        Text(text = stringResource(R.string.commitment_edit_field_person_placeholder))
+                    },
+                    isError = state.fieldErrors.containsKey(Field.PERSON_REF),
+                    supportingText = {
+                        state.fieldErrors[Field.PERSON_REF]?.let { Text(text = it) }
+                    },
+                    singleLine = true,
                     enabled = !state.saving,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            CommitmentCreateMode.SUPERSEDE -> {
-                SectionLabel(
-                    text = stringResource(R.string.commitment_manual_supersede_quote_label),
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = state.supersedeSource?.quote.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(12.dp))
 
-        // ── Person ref (optional) ──
-        OutlinedTextField(
-            value = state.draft.personRef.orEmpty(),
-            onValueChange = onPersonRefChange,
-            label = { Text(text = stringResource(R.string.commitment_manual_field_person_ref)) },
-            placeholder = {
-                Text(text = stringResource(R.string.commitment_edit_field_person_placeholder))
-            },
-            isError = state.fieldErrors.containsKey(Field.PERSON_REF),
-            supportingText = {
-                state.fieldErrors[Field.PERSON_REF]?.let { Text(text = it) }
-            },
-            singleLine = true,
-            enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // ── Due at (optional) ──
-        SectionLabel(text = stringResource(R.string.commitment_edit_field_due))
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = state.draft.dueAtMillis?.let { formatKstFromMillis(it) }
-                    ?: stringResource(R.string.commitment_manual_no_due_date),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(
-                onClick = { showDatePicker = true },
-                enabled = !state.saving,
-            ) {
-                Text(text = stringResource(R.string.commitment_manual_field_due_pick))
-            }
-            if (state.draft.dueAtMillis != null) {
-                OutlinedButton(
-                    onClick = { onDueAtMillisChange(null) },
-                    enabled = !state.saving,
-                ) {
-                    Text(text = stringResource(R.string.commitment_edit_field_due_clear))
+            item {
+                Column {
+                    SectionLabel(text = stringResource(R.string.commitment_edit_field_due))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = state.draft.dueAtMillis?.let { formatKstFromMillis(it) }
+                                ?: stringResource(R.string.commitment_manual_no_due_date),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(
+                            onClick = { showDatePicker = true },
+                            enabled = !state.saving,
+                        ) {
+                            Text(text = stringResource(R.string.commitment_manual_field_due_pick))
+                        }
+                        if (state.draft.dueAtMillis != null) {
+                            OutlinedButton(
+                                onClick = { onDueAtMillisChange(null) },
+                                enabled = !state.saving,
+                            ) {
+                                Text(text = stringResource(R.string.commitment_edit_field_due_clear))
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.commitment_manual_field_due_approximate),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = state.draft.dueIsApproximate,
+                            onCheckedChange = onApproxChange,
+                            enabled = !state.saving,
+                        )
+                    }
                 }
             }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.commitment_manual_field_due_approximate),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(
-                checked = state.draft.dueIsApproximate,
-                onCheckedChange = onApproxChange,
-                enabled = !state.saving,
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = state.draft.dueHint.orEmpty(),
-            onValueChange = onDueHintChange,
-            label = { Text(text = stringResource(R.string.commitment_manual_field_due_hint)) },
-            singleLine = true,
-            enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(16.dp))
 
-        // ── Save error ──
+            item {
+                OutlinedTextField(
+                    value = state.draft.dueHint.orEmpty(),
+                    onValueChange = onDueHintChange,
+                    label = { Text(text = stringResource(R.string.commitment_manual_field_due_hint)) },
+                    singleLine = true,
+                    enabled = !state.saving,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(4.dp)) }
+        }
+
         state.saveError?.let {
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 20.dp),
             )
-            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // ── Action buttons ──
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TextButton(
@@ -369,8 +382,6 @@ internal fun CreateSheetContent(
                 Text(text = stringResource(R.string.commitment_manual_save))
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 
     // ── Date picker dialog ──

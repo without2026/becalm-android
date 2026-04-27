@@ -71,6 +71,9 @@ internal object CommitmentManagementProjector {
             dueAt = dueAt,
             dueIsApproximate = dueIsApproximate,
             counterpartyDisplayName = resolveCounterpartyDisplay(this, enrichment),
+            sourceType = sourceType,
+            sourceTitle = sourceEventTitle,
+            sourceOccurredAt = sourceEventOccurredAt,
             dueHint = dueHint,
             isManual = sourceType == SourceType.MANUAL,
         )

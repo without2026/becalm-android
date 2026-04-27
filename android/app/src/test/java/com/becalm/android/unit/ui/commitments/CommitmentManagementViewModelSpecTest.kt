@@ -66,7 +66,14 @@ class CommitmentManagementViewModelSpecTest {
 
     @Test
     fun `CMT-001 counterparty display resolution follows enrichment precedence`() = runTest {
-        val displayNameEntity = entity(id = "a", direction = "give", personRef = "lee@corp.com")
+        val displayNameEntity = entity(
+            id = "a",
+            direction = "give",
+            personRef = "lee@corp.com",
+            sourceType = "gmail",
+            sourceEventTitle = "Kickoff mail",
+            sourceEventOccurredAt = Instant.parse("2026-04-24T01:00:00Z"),
+        )
         val nicknameEntity = entity(id = "b", direction = "take", personRef = "kim@corp.com")
         val fallbackPersonRefEntity = entity(id = "c", direction = "give", personRef = "park@corp.com")
         val legacyRawEntity = entity(id = "d", direction = "take", personRef = null, counterpartyRaw = "Legacy Raw Name")
@@ -88,6 +95,12 @@ class CommitmentManagementViewModelSpecTest {
             val settled = awaitItem()
             assertEquals(4, settled.items.size)
             assertEquals("이대리", settled.items.single { it.id == "a" }.counterpartyDisplayName)
+            assertEquals("gmail", settled.items.single { it.id == "a" }.sourceType)
+            assertEquals("Kickoff mail", settled.items.single { it.id == "a" }.sourceTitle)
+            assertEquals(
+                Instant.parse("2026-04-24T01:00:00Z"),
+                settled.items.single { it.id == "a" }.sourceOccurredAt,
+            )
             assertEquals("김팀장", settled.items.single { it.id == "b" }.counterpartyDisplayName)
             assertEquals("park@corp.com", settled.items.single { it.id == "c" }.counterpartyDisplayName)
             assertEquals("Legacy Raw Name", settled.items.single { it.id == "d" }.counterpartyDisplayName)
@@ -518,6 +531,8 @@ class CommitmentManagementViewModelSpecTest {
         counterpartyRaw: String? = null,
         dueAt: Instant? = null,
         sourceType: String = "voice",
+        sourceEventTitle: String? = null,
+        sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T00:00:00Z"),
         scheduleStatus: String? = null,
         decisionStatus: String? = null,
     ): CommitmentEntity = CommitmentEntity(
@@ -532,8 +547,8 @@ class CommitmentManagementViewModelSpecTest {
         title = "title-$id",
         description = null,
         quote = "quote",
-        sourceEventTitle = null,
-        sourceEventOccurredAt = Instant.parse("2026-04-18T00:00:00Z"),
+        sourceEventTitle = sourceEventTitle,
+        sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
         dueHint = null,
         dueIsApproximate = false,
