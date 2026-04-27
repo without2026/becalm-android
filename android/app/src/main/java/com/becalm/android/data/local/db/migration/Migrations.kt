@@ -346,9 +346,9 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
         // 3. EMAIL-001 direction hint column on raw_ingestion_events. Nullable because
         //    (a) SQLite `ALTER TABLE ADD COLUMN` forbids NOT NULL without a DEFAULT and
         //    the valid values INBOX | SENT have no sensible default for non-email sources,
-        //    and (b) only the four email workers (gmail / outlook_mail / naver_imap /
-        //    daum_imap) populate this column. Application-layer invariant: email workers
-        //    MUST populate; all other workers MUST leave null.
+        //    and (b) only email ingestion owners populate this column. Current Android
+        //    local owners are the IMAP workers; backend-managed mail rows may arrive
+        //    through mirror/import code. Non-email sources MUST leave null.
         db.execSQL("ALTER TABLE `raw_ingestion_events` ADD COLUMN `folder` TEXT")
     }
 }

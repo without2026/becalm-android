@@ -49,12 +49,26 @@ It is not the source of truth for endpoint fields, schema columns, or per-screen
 - `Supabase = Room mirror`
 - Android does not use Supabase REST directly for app data writes
 - Railway is the server write surface for mirrored data
-- There is no server-to-Room reverse sync in MVP
+- Provider fetch owner is source-specific and is not the same thing as UI source of truth
 
 This means:
 - the app must be correct even if the mirror is temporarily behind
 - local user-visible state is not blocked on server read-back
 - server durability matters for mirror health, not for immediate UI authorship
+- backend-managed providers may fetch from Google/Microsoft on Railway first, but Android UI still reads the local Room projection rather than reading provider APIs or Supabase directly
+- local providers fetch on Android first and then mirror outward
+
+Current provider fetch owners:
+
+| Source | Provider fetch owner | UI source of truth |
+| --- | --- | --- |
+| `voice` | Android local `MediaStoreWorker` / `VoiceUploadWorker` | Room |
+| `naver_imap` | Android local `ImapNaverWorker` | Room |
+| `daum_imap` | Android local `ImapDaumWorker` | Room |
+| `gmail` | Railway `mail_sync.py` | Room projection / source status cache |
+| `outlook_mail` | Railway `mail_sync.py` | Room projection / source status cache |
+| `google_calendar` | Railway `calendar_sync.py`, triggered by thin Android worker or manual sync | Room `calendar_events` |
+| `outlook_calendar` | Railway `calendar_sync.py`, triggered by thin Android worker or manual sync | Room `calendar_events` |
 
 ## 4. Success Criteria
 
