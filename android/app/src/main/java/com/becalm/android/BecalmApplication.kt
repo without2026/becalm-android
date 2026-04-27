@@ -6,21 +6,15 @@ import android.app.NotificationManager
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.data.local.datastore.SyncCursorStore
-import com.becalm.android.data.local.datastore.UserPrefsStore
-import com.becalm.android.data.local.db.BeCalmDatabase
-import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.secure.ImapCredentialStoreMigrator
 import com.becalm.android.receiver.ReminderBroadcastReceiver
-import com.becalm.android.worker.AppRuntimeSyncCoordinator
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import com.becalm.android.worker.VoiceFailureNotifier
-import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import timber.log.Timber
 
@@ -41,17 +35,8 @@ public class BecalmApplication : Application(), Configuration.Provider {
     @Inject
     public lateinit var workerFactory: HiltWorkerFactory
 
-    /**
-     * One-release upgrade compat shim for the #13 MediaStore unique-work rename.
-     *
-     * TODO(wave-N+2): Remove alongside [com.becalm.android.worker.UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY]
-     * and [WorkScheduler.cleanupLegacyWorkNames] once the pre-#13 install base has drained.
-     */
     @Inject
-    public lateinit var workScheduler: WorkScheduler
-
-    @Inject
-    public lateinit var appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator
+    public lateinit var authenticatedRuntimeBootstrap: AuthenticatedRuntimeBootstrap
 
     /**
      * One-shot migrator that promotes the pre-wave-2 single-tuple IMAP credential
@@ -73,35 +58,15 @@ public class BecalmApplication : Application(), Configuration.Provider {
     public lateinit var syncCursorStore: SyncCursorStore
 
     /**
-     * Persisted-preferences façade — queried at cold start to discover whether a
-     * previous sign-in is still active, so that [databaseProvider] can bind to the
-     * correct per-user SQLite file before any worker or Hilt-injected repository
-     * accesses a DAO (S6-A PIPA cross-account leak defence).
-     */
-    @Inject
-    public lateinit var userPrefsStore: UserPrefsStore
-
-    /**
-     * Application-scoped holder of the user-scoped Room database (S6-A). On cold start
-     * this is primed from the persisted `current_user_id` so downstream DAO injections
-     * hit the right file on first access instead of tripping the lazy-bootstrap
-     * `error("signed-in user required")` guard inside [BeCalmDatabaseProvider.current].
-     */
-    @Inject
-    public lateinit var databaseProvider: BeCalmDatabaseProvider
-
-    /**
      * Unstructured scope for startup fire-and-forget work that must outlive individual
      * component lifecycles but fail independently ([SupervisorJob]). Work submitted
      * here MUST be strictly idempotent — the scope is never explicitly cancelled and
      * receives no structured error propagation back to the caller.
      *
-     * Dispatched on [Dispatchers.IO] because the only current consumer
-     * ([ImapCredentialStoreMigrator.migrateIfNeeded]) performs [SharedPreferences] +
-     * DataStore disk I/O end-to-end. The migrator itself re-dispatches to
-     * `@IoDispatcher`, so either `IO` or `Default` would work — `IO` is chosen to match
-     * the plan verbatim and to keep the top-level launch context aligned with the
-     * dominant workload.
+     * Dispatched on [Dispatchers.IO] because startup migrations and authenticated runtime
+     * bootstrap perform DataStore, Room, and WorkManager I/O. Keeping this scope off main
+     * is required for WorkManager-launched processes where Application.onCreate must return
+     * before SystemJobService.onStartJob times out.
      */
     private val applicationScope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -161,31 +126,11 @@ public class BecalmApplication : Application(), Configuration.Provider {
                 .onFailure { Timber.e(it, "BecalmApplication: IMAP cursor v2 migration failed") }
         }
 
-        // Resolve the persisted auth mirror before touching any WorkManager-backed
-        // startup path. Pre-login boots must not initialize auth-bound workers or
-        // user-scoped DAO graphs (AUTH-009).
-        val persistedUserId = runCatching {
-            runBlocking { userPrefsStore.observeCurrentUserId().first() }
-        }.getOrElse { error ->
-            Timber.e(error, "BecalmApplication: failed to read persisted current user")
-            null
-        }
-
-        if (!persistedUserId.isNullOrBlank()) {
-            // Bind the per-user Room file before WorkManager can instantiate any
-            // DAO-bearing worker. Signed-in cold starts must resolve the correct
-            // file synchronously; post-login flows repeat this in AuthRepository.
-            runCatching {
-                databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(persistedUserId))
-            }.onFailure { Timber.e(it, "BecalmApplication: database warm-open failed") }
-
-            // Fire-and-forget upgrade compat: cancel WorkManager unique-work under the
-            // pre-#13 names only after we know an authenticated session exists. This
-            // avoids initializing auth-bound worker graphs on pre-login boots.
-            workScheduler.cleanupLegacyWorkNames()
-            appRuntimeSyncCoordinator.start()
-        } else {
-            Timber.d("BecalmApplication: pre-auth startup — runtime sync deferred")
+        // WorkManager can start the process directly for SystemJobService. Do not block
+        // Application.onCreate on DataStore, Room, or WorkManager calls; JobService must
+        // get back to onStartJob promptly even under cold-start I/O pressure (AUTH-009).
+        applicationScope.launch {
+            authenticatedRuntimeBootstrap.startIfSignedIn()
         }
     }
 
