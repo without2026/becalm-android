@@ -21,6 +21,8 @@ routes:
     data: []
     components: [TermsBody, AgreeButton, DisagreeButton]
     auth: public
+    # Public auth shell. Terms acceptance persistence belongs to the auth/public layer
+    # and must navigate to /login without requiring onboarding runtime owners.
 
   - path: /login
     screen: LoginScreen

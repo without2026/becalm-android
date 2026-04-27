@@ -162,11 +162,6 @@ public sealed class CalendarConnectEvent {
     ) : CalendarConnectEvent()
 }
 
-/** One-shot navigation events for onboarding/auth bridge steps. */
-public sealed interface OnboardingNavigationEvent {
-    public data object NavigateToLogin : OnboardingNavigationEvent
-}
-
 /** One-shot effects for the contacts permission step (ENR-001 / ENR-002). */
 public sealed interface ContactsPermissionEffect {
     public data object RequestSystemPermission : ContactsPermissionEffect
@@ -261,16 +256,6 @@ public class OnboardingViewModel @Inject constructor(
     /** Collect in calendar onboarding screens to drive connect / failure UX. */
     public val calendarConnectEvents: SharedFlow<CalendarConnectEvent> =
         _calendarConnectEvents.asSharedFlow()
-
-    private val _navigationEvents: MutableSharedFlow<OnboardingNavigationEvent> = MutableSharedFlow(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-    /** Collected by bridge screens like TermsScreen to react after persistence completes. */
-    public val navigationEvents: SharedFlow<OnboardingNavigationEvent> =
-        _navigationEvents.asSharedFlow()
 
     private val _contactsPermissionEffects: MutableSharedFlow<ContactsPermissionEffect> = MutableSharedFlow(
         replay = 0,
@@ -656,39 +641,6 @@ public class OnboardingViewModel @Inject constructor(
      */
     public fun onPipaConsentDeclined() {
         setPipa(granted = false)
-    }
-
-    // spec: ONB-001 — persist terms acceptance so restarting the app doesn't re-show terms.
-    /**
-     * Persists terms-of-service acceptance to DataStore.
-     *
-     * Called by [com.becalm.android.ui.auth.TermsScreen] before navigating to Login.
-     */
-    public fun onAcceptTerms() {
-        onAcceptTermsAndContinue()
-    }
-
-    /**
-     * ONB-001 single-intent contract: persist terms acceptance, mark the Terms step granted,
-     * then emit a one-shot navigation to Login only after the write succeeds.
-     */
-    public fun onAcceptTermsAndContinue() {
-        viewModelScope.launch {
-            try {
-                userPrefsStore.setTermsAccepted(true)
-                logger.i(TAG, "terms acceptance persisted")
-                _uiState.update { state ->
-                    state.copy(
-                        stepStates = state.stepStates + (OnboardingStep.TERMS to StepStatus.GRANTED),
-                        error = null,
-                    )
-                }
-                _navigationEvents.tryEmit(OnboardingNavigationEvent.NavigateToLogin)
-            } catch (e: Exception) {
-                logger.e(TAG, "failed to persist terms acceptance", e)
-                _uiState.update { it.copy(error = e.message ?: "terms acceptance failed") }
-            }
-        }
     }
 
     // spec: ONB-005, ONB-006, ONB-007, ONB-008

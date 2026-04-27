@@ -403,9 +403,6 @@ class AuthScreenTest {
 
     @Test
     fun terms_screen_consumes_navigation_and_finish_effects() {
-        val onboardingEvents = MutableSharedFlow<com.becalm.android.ui.onboarding.OnboardingNavigationEvent>(
-            extraBufferCapacity = 1,
-        )
         val authEffects = MutableSharedFlow<AuthEffect>(extraBufferCapacity = 1)
         var navigateCount = 0
         var finishCount = 0
@@ -414,7 +411,6 @@ class AuthScreenTest {
             BecalmTheme {
                 TermsScreen(
                     navController = rememberNavController(),
-                    onboardingNavigationEvents = onboardingEvents,
                     authEffects = authEffects,
                     onContinue = {},
                     onDecline = {},
@@ -425,7 +421,7 @@ class AuthScreenTest {
         }
 
         composeTestRule.runOnIdle {
-            onboardingEvents.tryEmit(com.becalm.android.ui.onboarding.OnboardingNavigationEvent.NavigateToLogin)
+            authEffects.tryEmit(AuthEffect.NavigateToLogin)
             authEffects.tryEmit(AuthEffect.FinishApp)
         }
 

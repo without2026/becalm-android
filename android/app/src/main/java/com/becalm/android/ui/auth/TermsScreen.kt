@@ -24,18 +24,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
-import com.becalm.android.ui.onboarding.OnboardingNavigationEvent
-import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
-import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.coroutines.flow.Flow
 
 /**
  * Terms and Privacy Policy acceptance screen.
@@ -53,10 +49,8 @@ import kotlinx.coroutines.flow.Flow
 @Composable
 public fun TermsScreen(
     navController: NavHostController,
-    onboardingViewModel: OnboardingViewModel? = null,
     authViewModel: AuthViewModel? = null,
-    onboardingNavigationEvents: Flow<OnboardingNavigationEvent>? = null,
-    authEffects: Flow<AuthEffect>? = null,
+    authEffects: kotlinx.coroutines.flow.Flow<AuthEffect>? = null,
     onContinue: (() -> Unit)? = null,
     onDecline: (() -> Unit)? = null,
     onNavigateToLogin: (() -> Unit)? = null,
@@ -64,19 +58,12 @@ public fun TermsScreen(
 ) {
     var accepted by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
-    val resolvedOnboardingViewModel = if (
-        onboardingNavigationEvents == null || onContinue == null
-    ) {
-        onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
-    } else {
-        onboardingViewModel
-    }
-    val resolvedAuthViewModel = if (authEffects == null || onDecline == null) {
+    val resolvedAuthViewModel = if (authEffects == null || onContinue == null || onDecline == null) {
         authViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
     } else {
         authViewModel
     }
-    val resolvedOnContinue = onContinue ?: requireNotNull(resolvedOnboardingViewModel)::onAcceptTermsAndContinue
+    val resolvedOnContinue = onContinue ?: requireNotNull(resolvedAuthViewModel)::onAcceptTermsAndContinue
     val resolvedOnDecline = onDecline ?: requireNotNull(resolvedAuthViewModel)::onDeclineTerms
     val resolvedNavigateToLogin = onNavigateToLogin ?: {
         navController.navigate(BecalmRoute.Login.path)
@@ -85,14 +72,9 @@ public fun TermsScreen(
         (context as? android.app.Activity)?.finish()
     }
 
-    CollectFlowEffect(onboardingNavigationEvents ?: requireNotNull(resolvedOnboardingViewModel).navigationEvents) { event ->
-        when (event) {
-            OnboardingNavigationEvent.NavigateToLogin -> resolvedNavigateToLogin()
-        }
-    }
-
     CollectFlowEffect(authEffects ?: requireNotNull(resolvedAuthViewModel).effects) { effect ->
         when (effect) {
+            AuthEffect.NavigateToLogin -> resolvedNavigateToLogin()
             AuthEffect.FinishApp -> resolvedFinishApp()
         }
     }
