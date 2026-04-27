@@ -29,9 +29,9 @@ behaviors:
     description: "Railway 5xx 응답 시 Room 레코드의 retry_count가 증가하고 sync_status='failed'로 업데이트된다. WorkManager exponential backoff 재시도 등록됨"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "Railway 서버 500 응답 모킹, Room 레코드 retry_count=0"
-    expected: "Room 레코드 sync_status='failed', retry_count=1로 UPDATE됨. 레코드 DELETE 없음. WorkManager 재시도 등록됨"
+    expected: "Room 레코드 sync_status='failed', retry_count=1로 UPDATE됨. 레코드 DELETE 없음. WorkManager 재시도 등록됨. OkHttp RetryInterceptor가 같은 Call 안에서 HTTP 5xx/408/429 retry를 수행할 때는 다음 chain.proceed() 전에 이전 retryable response를 close해야 하며, 마지막 attempt의 response만 caller에게 열린 상태로 반환할 수 있다"
     source: phase2-acceptance
-    tests: []
+    tests: [RetryInterceptorSpecTest]
 
   - id: SYNC-004
     type: lifecycle
