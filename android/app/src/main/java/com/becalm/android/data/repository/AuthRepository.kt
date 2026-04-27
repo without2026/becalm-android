@@ -17,7 +17,6 @@ import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
-import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.CoroutineDispatcher
@@ -152,7 +151,6 @@ public class AuthRepositoryImpl @Inject constructor(
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
     private val processRestarter: ProcessRestarter,
-    private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : AuthRepository {
@@ -226,7 +224,6 @@ public class AuthRepositoryImpl @Inject constructor(
             logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
             processRestarter.restart()
         }
-        appRuntimeSyncCoordinator.start()
     }
 
     override suspend fun signOut(): BecalmResult<Unit> {

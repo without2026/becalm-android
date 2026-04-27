@@ -1,16 +1,21 @@
 package com.becalm.android.worker
 
+import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
 @Singleton
 public class AppRuntimeSyncCoordinator @Inject constructor(
+    private val scope: CoroutineScope,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val workScheduler: WorkScheduler,
@@ -18,19 +23,29 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private val contactsPermissionChecker: ContactsPermissionChecker,
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
 ) {
     private var lifecycleRegistered: Boolean = false
 
     public fun start() {
-        if (!lifecycleRegistered) {
-            foregroundCatchUpScheduler.start()
-            lifecycleRegistered = true
+        scope.launch(mainDispatcher) {
+            if (!lifecycleRegistered) {
+                foregroundCatchUpScheduler.start()
+                lifecycleRegistered = true
+            }
         }
         refresh()
     }
 
     /** Recomputes runtime registrations after same-process auth or permission changes. */
     public fun refresh() {
+        scope.launch(ioDispatcher) {
+            refreshNow()
+        }
+    }
+
+    private suspend fun refreshNow() {
         if (hasSignedInUser()) {
             scheduleAuthenticatedRecurringWork()
         }
@@ -44,15 +59,15 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         workScheduler.scheduleOverdueSweep()
     }
 
-    private fun refreshPermissionManagedRegistrations() {
+    private suspend fun refreshPermissionManagedRegistrations() {
         if (!hasSignedInUser()) {
             contentObserverBootstrap.stop()
             logger.d(TAG, "runtime sync disabled — no signed-in user")
             return
         }
 
-        val voiceEnabled = runBlocking { userPrefsStore.observeSourceEnabled(SourceType.VOICE).first() }
-        val recordingsTreeUri = runBlocking { userPrefsStore.observeRecordingFolderTreeUri().first() }
+        val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
+        val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
         val audioGranted = mediaAudioPermissionChecker.isGranted()
         if (voiceEnabled && audioGranted && !recordingsTreeUri.isNullOrBlank()) {
             contentObserverBootstrap.start()
@@ -74,8 +89,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
     }
 
-    private fun hasSignedInUser(): Boolean =
-        !runBlocking { userPrefsStore.observeCurrentUserId().first() }.isNullOrBlank()
+    private suspend fun hasSignedInUser(): Boolean =
+        !userPrefsStore.observeCurrentUserId().first().isNullOrBlank()
 
     private companion object {
         private const val TAG = "AppRuntimeSync"

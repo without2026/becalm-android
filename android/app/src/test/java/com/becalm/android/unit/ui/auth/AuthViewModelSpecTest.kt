@@ -13,6 +13,7 @@ import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.AuthViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -28,6 +29,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
+import javax.inject.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -40,6 +42,9 @@ class AuthViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val runtimeBootstrap: AuthenticatedRuntimeBootstrap = mockk(relaxed = true)
+    private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap> =
+        Provider { runtimeBootstrap }
     private val logger: Logger = mockk(relaxed = true)
 
     private val session = SupabaseSession(
@@ -77,6 +82,7 @@ class AuthViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(AuthUiState.SignedOut(termsAccepted = false), viewModel.uiState.value)
+        coVerify(exactly = 0) { runtimeBootstrap.startForUser(any()) }
     }
 
     @Test
@@ -92,6 +98,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
             viewModel.uiState.value,
         )
+        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
     }
 
     @Test
@@ -200,6 +207,23 @@ class AuthViewModelSpecTest {
             viewModel.uiState.value,
         )
         coVerify(exactly = 1) { authRepository.currentSession() }
+        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
+    }
+
+    @Test
+    fun `AUTH-009 signed-in bootstrap starts runtime once for duplicate same-user emissions`() = runTest {
+        coEvery { authRepository.currentSession() } returns session
+        every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
+        every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
+            viewModel.uiState.value,
+        )
+        coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
     }
 
     @Test
@@ -333,6 +357,8 @@ class AuthViewModelSpecTest {
     private fun buildViewModel(): AuthViewModel = AuthViewModel(
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
+        runtimeBootstrapProvider = runtimeBootstrapProvider,
+        runtimeBootstrapDispatcher = testDispatcher,
         logger = logger,
     )
 }

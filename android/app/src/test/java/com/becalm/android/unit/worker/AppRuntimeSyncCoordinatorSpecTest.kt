@@ -12,6 +12,8 @@ import com.becalm.android.worker.WorkScheduler
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -123,13 +125,17 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 0) { workScheduler.scheduleEnrichmentSweep() }
     }
 
-    private fun buildCoordinator(): AppRuntimeSyncCoordinator = AppRuntimeSyncCoordinator(
-        foregroundCatchUpScheduler = foregroundCatchUpScheduler,
-        contentObserverBootstrap = contentObserverBootstrap,
-        workScheduler = workScheduler,
-        userPrefsStore = userPrefsStore,
-        contactsPermissionChecker = contactsPermissionChecker,
-        mediaAudioPermissionChecker = mediaAudioPermissionChecker,
-        logger = logger,
-    )
+    private fun buildCoordinator(): AppRuntimeSyncCoordinator =
+        AppRuntimeSyncCoordinator(
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            foregroundCatchUpScheduler = foregroundCatchUpScheduler,
+            contentObserverBootstrap = contentObserverBootstrap,
+            workScheduler = workScheduler,
+            userPrefsStore = userPrefsStore,
+            contactsPermissionChecker = contactsPermissionChecker,
+            mediaAudioPermissionChecker = mediaAudioPermissionChecker,
+            logger = logger,
+            ioDispatcher = Dispatchers.Unconfined,
+            mainDispatcher = Dispatchers.Unconfined,
+        )
 }

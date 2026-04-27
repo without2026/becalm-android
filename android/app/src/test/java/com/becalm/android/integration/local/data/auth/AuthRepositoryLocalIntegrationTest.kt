@@ -23,14 +23,12 @@ import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
-import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -99,8 +97,6 @@ class AuthRepositoryLocalIntegrationTest {
     private val imapCredentialStore = mockk<com.becalm.android.data.local.secure.ImapCredentialStore>(relaxed = true)
     private val oauthCredentialStore = mockk<OAuthCredentialStore>(relaxed = true)
     private val processRestarter = mockk<ProcessRestarter>()
-    private val appRuntimeSyncCoordinator = mockk<AppRuntimeSyncCoordinator>(relaxed = true)
-
     private val repository: AuthRepository = AuthRepositoryImpl(
         authClient = authClient,
         sessionStore = sessionStore,
@@ -115,7 +111,6 @@ class AuthRepositoryLocalIntegrationTest {
         imapCredentialStore = imapCredentialStore,
         oauthCredentialStore = oauthCredentialStore,
         processRestarter = processRestarter,
-        appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
         ioDispatcher = Dispatchers.IO,
         logger = logger,
     )
@@ -140,7 +135,6 @@ class AuthRepositoryLocalIntegrationTest {
             assertTrue(result is BecalmResult.Success)
             assertEquals(USER_ID, userPrefsStore.observeCurrentUserId().first())
             assertEquals(BeCalmDatabase.deriveUserIdHash(USER_ID), databaseProvider.currentUserIdHash())
-            verify(exactly = 1) { appRuntimeSyncCoordinator.start() }
             val authenticated = awaitItem()
             assertTrue(authenticated is AuthState.Authenticated)
             cancelAndIgnoreRemainingEvents()
@@ -159,7 +153,6 @@ class AuthRepositoryLocalIntegrationTest {
             assertTrue(result is BecalmResult.Success)
             assertEquals(USER_ID, userPrefsStore.observeCurrentUserId().first())
             assertEquals(BeCalmDatabase.deriveUserIdHash(USER_ID), databaseProvider.currentUserIdHash())
-            verify(exactly = 1) { appRuntimeSyncCoordinator.start() }
             val authenticated = awaitItem()
             assertTrue(authenticated is AuthState.Authenticated)
             cancelAndIgnoreRemainingEvents()
