@@ -20,9 +20,9 @@ behaviors:
     description: "batch upload는 client_event_id 기준으로 멱등(idempotent)하다 — 동일 client_event_id 재업로드 시 중복 INSERT되지 않는다"
     endpoint: "POST /v1/raw_ingestion_events:batch"
     precondition: "동일 client_event_id를 가진 이벤트 1건을 두 번 연속 POST"
-    expected: "HTTP 200, {results:[{client_event_id, disposition:'duplicate'|'inserted'}], failed: []} — Supabase에 레코드 1건만 존재 (중복 없음)"
+    expected: "HTTP 200, {results:[{client_event_id, disposition:'duplicate'|'inserted'}], failed: []} — Supabase에 레코드 1건만 존재 (중복 없음). 한 logical OkHttp Call 안에서 5xx/408/429 retry 또는 401 refresh retry가 발생해도 wire 요청의 Idempotency-Key는 동일해야 한다"
     source: phase2-acceptance
-    tests: []
+    tests: [ApiFactoryInterceptorSpecTest]
 
   - id: SYNC-003
     type: api
