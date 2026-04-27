@@ -65,6 +65,8 @@ import java.util.UUID
  * - Raw event not found (user signed out between enqueue and run) → `Result.failure()`.
  * - [BecalmError.ExtractorUnavailable] with reason `LLM_JSON_PARSE_FAILED` or
  *   `AICORE_ERROR` → `Result.retry()` so WorkManager applies exponential backoff.
+ *   `AICORE_ERROR` is retry-capped because a device/runtime-level AICore failure can otherwise
+ *   restore many persisted WorkSpecs into a foreground retry storm.
  * - Any other error bubble → `Result.retry()`.
  *
  * ## Manual commitments (MAN-003 invariant 4)
@@ -236,6 +238,21 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                 )
                 Result.success()
             }
+            REASON_AICORE_ERROR -> {
+                if (shouldRetryExtractorFailure(reason, runAttemptCount)) {
+                    logger.w(
+                        TAG,
+                        "extraction failure id=${redact(rawEventId)} reason=$reason attempt=$runAttemptCount — retrying",
+                    )
+                    Result.retry()
+                } else {
+                    logger.w(
+                        TAG,
+                        "extraction failure id=${redact(rawEventId)} reason=$reason attempt=$runAttemptCount — retry budget exhausted, no retry",
+                    )
+                    Result.success()
+                }
+            }
             else -> {
                 logger.w(
                     TAG,
@@ -256,6 +273,9 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
         public fun supportsRawEventSource(sourceType: String): Boolean =
             SourceType.isRawIngestionSource(sourceType)
 
+        public fun shouldRetryExtractorFailure(reason: String?, runAttemptCount: Int): Boolean =
+            reason != REASON_AICORE_ERROR || runAttemptCount < MAX_AICORE_ERROR_RETRY_ATTEMPTS
+
         /** WorkManager input [androidx.work.Data] key — UUID of the raw ingestion event. */
         public const val KEY_RAW_EVENT_ID: String = "rawEventId"
 
@@ -268,6 +288,8 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
          * to avoid exposing the extractor's private constants to the worker module.
          */
         private const val REASON_AICORE_NOT_AVAILABLE: String = "AICORE_NOT_AVAILABLE"
+        private const val REASON_AICORE_ERROR: String = "AICORE_ERROR"
+        private const val MAX_AICORE_ERROR_RETRY_ATTEMPTS: Int = 1
     }
 }
 

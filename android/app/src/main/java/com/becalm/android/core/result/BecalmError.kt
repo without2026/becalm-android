@@ -72,8 +72,9 @@ public sealed class BecalmError {
      *   expected JSON array. Deterministic per prompt+model, so caller quarantines instead
      *   of retrying.
      * - `AICORE_ERROR` — any other SDK exception. Typically transient (service crashed,
-     *   model still downloading, etc.) so caller returns
-     *   [androidx.work.ListenableWorker.Result.retry].
+     *   model still downloading, etc.) so caller may return
+     *   [androidx.work.ListenableWorker.Result.retry], but must cap retries to avoid
+     *   foreground/startup retry storms when the SDK remains unavailable.
      *
      * Spec refs: EMAIL-001, EMAIL-008, KTR-GEMINI-NANO.
      */

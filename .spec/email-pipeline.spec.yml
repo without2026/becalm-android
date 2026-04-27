@@ -15,7 +15,7 @@ behaviors:
     description: "이메일을 voice/commitment 추출 파이프라인에 넘길 때 direction 사전 힌트를 source_type에 붙이지 않고 raw event 레벨 메타(folder)로 전달한다. LLM 프롬프트에 'inbox' | 'sent' 힌트를 주고 최종 direction은 LLM 추론에 맡김 — 단, 기본값은 inbox→take, sent→give 가정"
     trigger: "ING-006..008 어댑터가 EmailBody + raw event INSERT 직후 CommitmentExtractionWorker 호출"
     precondition: "EmailBody.folder IN ('INBOX','SENT'), raw_ingestion_events.sync_status='pending'"
-    expected: "CommitmentExtractionWorker가 Gemini 프롬프트에 'source: email, folder: INBOX|SENT, user.phone_e164_self=..., user.display_name_override=...'를 system context로 전달. LLM 출력 CommitmentDraft[]의 direction은 inbox→take, sent→give 기본 가정이지만 본문 증거가 반대일 경우 override 가능 (예: INBOX에 '제가 월요일에 보내드리겠습니다' = give). 최종 direction 결정 근거는 quote 필드에 보존. WorkRequest는 AICore 전력 사용을 고려해 requiresBatteryNotLow 제약을 유지하며, WorkManager 제약 호환성을 위해 expedited로 만들지 않는다"
+    expected: "CommitmentExtractionWorker가 Gemini 프롬프트에 'source: email, folder: INBOX|SENT, user.phone_e164_self=..., user.display_name_override=...'를 system context로 전달. LLM 출력 CommitmentDraft[]의 direction은 inbox→take, sent→give 기본 가정이지만 본문 증거가 반대일 경우 override 가능 (예: INBOX에 '제가 월요일에 보내드리겠습니다' = give). 최종 direction 결정 근거는 quote 필드에 보존. WorkRequest는 AICore 전력 사용을 고려해 requiresBatteryNotLow 제약을 유지하며, WorkManager 제약 호환성을 위해 expedited로 만들지 않는다. AICORE_NOT_AVAILABLE은 영구 비가용으로 success no-op 처리한다. AICORE_ERROR는 transient로 1회 retry를 허용하되, 다음 attempt에서도 동일하면 success no-op으로 종료해 startup/foreground retry storm을 만들지 않는다"
     source: phase2-acceptance
     tests: []
 

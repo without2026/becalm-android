@@ -7,8 +7,8 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.data.repository.AuthRepository
-import com.becalm.android.data.repository.AuthState
 import com.becalm.android.ui.auth.AuthEffect
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.AuthViewModel
@@ -20,8 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -41,6 +40,8 @@ class AuthViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val authRepository: AuthRepository = mockk(relaxed = true)
+    private val authRepositoryProvider: Provider<AuthRepository> = Provider { authRepository }
+    private val sessionStore: SupabaseSessionStore = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val runtimeBootstrap: AuthenticatedRuntimeBootstrap = mockk(relaxed = true)
     private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap> =
@@ -58,8 +59,8 @@ class AuthViewModelSpecTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        coEvery { authRepository.currentSession() } returns null
-        every { authRepository.observeAuthState() } returns flowOf(AuthState.Unauthenticated)
+        coEvery { sessionStore.load() } returns null
+        every { sessionStore.observe() } returns sessionEvents()
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-123")
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
@@ -87,8 +88,8 @@ class AuthViewModelSpecTest {
 
     @Test
     fun `ONB-006 authenticated session with completed onboarding resolves to SignedIn shell state`() = runTest {
-        coEvery { authRepository.currentSession() } returns session
-        every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session))
+        coEvery { sessionStore.load() } returns session
+        every { sessionStore.observe() } returns sessionEvents(session)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
 
         val viewModel = buildViewModel()
@@ -116,12 +117,9 @@ class AuthViewModelSpecTest {
     }
 
     @Test
-    fun `AUTH-001 email sign-in success is reflected through observer transition`() = runTest {
-        val states = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
-        every { authRepository.observeAuthState() } returns states
+    fun `AUTH-001 email sign-in success maps returned session without waiting for observer`() = runTest {
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
         coEvery { authRepository.signInWithEmail("user@example.com", "ValidPass1!") } coAnswers {
-            states.value = AuthState.Authenticated(session)
             BecalmResult.Success(session)
         }
 
@@ -139,12 +137,9 @@ class AuthViewModelSpecTest {
     }
 
     @Test
-    fun `AUTH-001A email sign-up success is reflected through observer transition`() = runTest {
-        val states = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
-        every { authRepository.observeAuthState() } returns states
+    fun `AUTH-001A email sign-up success maps returned session without waiting for observer`() = runTest {
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
         coEvery { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") } coAnswers {
-            states.value = AuthState.Authenticated(session.copy(email = "new@example.com"))
             BecalmResult.Success(session.copy(email = "new@example.com"))
         }
 
@@ -182,22 +177,35 @@ class AuthViewModelSpecTest {
     }
 
     @Test
+    fun `AUTH-010 splash bootstrap does not instantiate network auth repository graph`() = runTest {
+        val forbiddenProvider = Provider<AuthRepository> {
+            error("AuthRepository should stay lazy during splash bootstrap")
+        }
+
+        val viewModel = buildViewModel(authRepositoryProvider = forbiddenProvider)
+        advanceUntilIdle()
+
+        assertEquals(AuthUiState.SignedOut(termsAccepted = true), viewModel.uiState.value)
+        coVerify(exactly = 1) { sessionStore.load() }
+    }
+
+    @Test
     fun `AUTH-010 bootstrap resolves signed out route from persisted terms before observer emits`() = runTest {
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(false)
-        every { authRepository.observeAuthState() } returns emptyFlow()
+        every { sessionStore.observe() } returns sessionEvents()
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
         assertEquals(AuthUiState.SignedOut(termsAccepted = false), viewModel.uiState.value)
-        coVerify(exactly = 1) { authRepository.currentSession() }
+        coVerify(exactly = 1) { sessionStore.load() }
     }
 
     @Test
     fun `AUTH-010 bootstrap resolves signed in route from persisted session before observer emits`() = runTest {
-        coEvery { authRepository.currentSession() } returns session
+        coEvery { sessionStore.load() } returns session
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
-        every { authRepository.observeAuthState() } returns emptyFlow()
+        every { sessionStore.observe() } returns sessionEvents()
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -206,15 +214,15 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
             viewModel.uiState.value,
         )
-        coVerify(exactly = 1) { authRepository.currentSession() }
+        coVerify(exactly = 1) { sessionStore.load() }
         coVerify(exactly = 1) { runtimeBootstrap.startForUser("user-123") }
     }
 
     @Test
     fun `AUTH-009 signed-in bootstrap starts runtime once for duplicate same-user emissions`() = runTest {
-        coEvery { authRepository.currentSession() } returns session
+        coEvery { sessionStore.load() } returns session
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
-        every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session))
+        every { sessionStore.observe() } returns sessionEvents(session)
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -228,8 +236,8 @@ class AuthViewModelSpecTest {
 
     @Test
     fun `AUTH-010 bootstrap resumes first incomplete onboarding provider after email PIPA consent`() = runTest {
-        coEvery { authRepository.currentSession() } returns session
-        every { authRepository.observeAuthState() } returns emptyFlow()
+        coEvery { sessionStore.load() } returns session
+        every { sessionStore.observe() } returns sessionEvents()
         every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(
             mapOf(
                 "TERMS" to "GRANTED",
@@ -256,11 +264,8 @@ class AuthViewModelSpecTest {
 
     @Test
     fun `AUTH-003 google sign-in success delegates once and maps onboarding completion`() = runTest {
-        val states = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
-        every { authRepository.observeAuthState() } returns states
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
         coEvery { authRepository.signInWithGoogle("id-token") } coAnswers {
-            states.value = AuthState.Authenticated(session)
             BecalmResult.Success(session)
         }
 
@@ -279,12 +284,13 @@ class AuthViewModelSpecTest {
 
     @Test
     fun `AUTH-005 signout success is driven by observer transition not direct state write`() = runTest {
-        val states = MutableStateFlow<AuthState>(AuthState.Authenticated(session))
-        every { authRepository.observeAuthState() } returns states
+        val sessionEvents = MutableSharedFlow<SupabaseSession?>()
+        coEvery { sessionStore.load() } returns session
+        every { sessionStore.observe() } returns sessionEvents
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
         coEvery { authRepository.invalidateSession() } coAnswers {
-            states.value = AuthState.Unauthenticated
+            sessionEvents.emit(null)
             BecalmResult.Success(Unit)
         }
 
@@ -354,11 +360,21 @@ class AuthViewModelSpecTest {
         coVerify(exactly = 1) { userPrefsStore.setTermsAccepted(true) }
     }
 
-    private fun buildViewModel(): AuthViewModel = AuthViewModel(
-        authRepository = authRepository,
+    private fun buildViewModel(
+        authRepositoryProvider: Provider<AuthRepository> = this.authRepositoryProvider,
+    ): AuthViewModel = AuthViewModel(
+        authRepositoryProvider = authRepositoryProvider,
+        sessionStore = sessionStore,
         userPrefsStore = userPrefsStore,
         runtimeBootstrapProvider = runtimeBootstrapProvider,
         runtimeBootstrapDispatcher = testDispatcher,
         logger = logger,
     )
+
+    private fun sessionEvents(
+        vararg sessions: SupabaseSession?,
+    ): MutableSharedFlow<SupabaseSession?> =
+        MutableSharedFlow<SupabaseSession?>(replay = sessions.size).also { events ->
+            sessions.forEach { session -> events.tryEmit(session) }
+        }
 }
