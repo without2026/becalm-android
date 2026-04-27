@@ -5,9 +5,18 @@
 
 - `Room = source-of-truth`
 - `Supabase = Room mirror`
-- `server → Room` 역방향 sync 없음
+- provider fetch owner와 UI source of truth는 별도다
 - voice는 `draft extraction only`
 - full transcript 저장 없음
+
+Provider fetch owner:
+
+| Source | Fetch owner | UI/read model |
+| --- | --- | --- |
+| voice | Android local worker | Room |
+| naver_imap / daum_imap | Android local IMAP workers | Room |
+| gmail / outlook_mail | Railway mail sync | Room projection / source status cache |
+| google_calendar / outlook_calendar | Railway calendar sync, triggered by thin Android workers or manual sync | Room `calendar_events` |
 
 테스트 목적은 개별 함수 correctness보다 다음 체인을 검증하는 것이다:
 
@@ -59,11 +68,11 @@ Integration test assertions:
 
 | Step | Wiring |
 |---|---|
-| Trigger | Gmail / Outlook / IMAP periodic sync or foreground catch-up |
-| Local write | `EmailBody INSERT`, `raw_ingestion_events INSERT(event_snippet, folder, person_ref)` |
-| Background | extraction worker if snippet/body available |
-| Remote | raw mirror batch, commitment PATCH/POST batch |
-| Success state | Room raw/email 유지, extracted commitments는 Room에 먼저 저장 |
+| Trigger | backend-managed Gmail/Outlook sync, or Android-owned IMAP foreground/manual worker |
+| Local write | IMAP only: `EmailBody INSERT`, `raw_ingestion_events INSERT(event_snippet, folder, person_ref)` |
+| Background | IMAP extraction worker if snippet/body available |
+| Remote | IMAP raw mirror batch, commitment PATCH/POST batch; Gmail/Outlook provider fetch happens on Railway |
+| Success state | IMAP Room raw/email 유지. Gmail/Outlook source status and server raw mirror are backend-managed |
 | UI surface | Source viewer에서 email body 로컬 렌더 |
 
 Integration test assertions:
@@ -79,9 +88,9 @@ Integration test assertions:
 | Step | Wiring |
 |---|---|
 | Trigger | calendar periodic sync or foreground catch-up |
-| Local write | `calendar_events INSERT/UPSERT`, 필요 시 raw event metadata update |
-| Background | upload flush |
-| Remote | raw/calendar mirror |
+| Local write | `CalendarEventRepository.refreshSince`가 Railway `GET /v1/calendar_events` 결과를 Room `calendar_events`에 UPSERT |
+| Background | thin Android worker triggers Railway sync, then refreshes Room projection |
+| Remote | Railway provider fetch + raw/calendar mirror |
 | Success state | cancelled event는 `DELETE`가 아니라 `status='cancelled'` |
 | UI surface | Today timeline strike-through event |
 

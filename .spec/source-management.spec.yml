@@ -2,6 +2,10 @@
 # Source management = per-source administration and error recovery path.
 # The PRIMARY sync trigger is ING-011 (foreground catch-up) and DASH-009 (pull-to-refresh).
 # Per-source manual trigger (SMG-005) is intentionally only accessible inside source detail — not on dashboard.
+# Source of truth is local Room/UI state; provider fetch owner is source-specific.
+# Fetch owner table:
+#   backend-managed: gmail, outlook_mail, google_calendar, outlook_calendar
+#   local-worker: voice, naver_imap, daum_imap
 module: source-management
 platform: android
 version: 1
@@ -34,23 +38,23 @@ behaviors:
     screen: "SourceDetailScreen"
     interaction: "disconnected 또는 error 소스 카드 탭"
     precondition: "SourcesListScreen에서 Outlook Mail(error) 카드 탭"
-    expected: "SourceDetailScreen 표시됨. [다시 연결] 버튼 표시됨. [다시 연결] 탭 시 Microsoft OAuth 재인증 플로우 실행됨. calendar source의 경우 backend-managed OAuth start URL을 브라우저/Custom Tab으로 열고 callback 후 연결 상태 polling으로 완료를 확인한다. 재인증 성공 시 SourceDetailScreen 상태가 connected로 갱신됨"
+    expected: "SourceDetailScreen 표시됨. [다시 연결] 버튼 표시됨. [다시 연결] 탭 시 Microsoft OAuth 재인증 플로우 실행됨. Gmail/Outlook Mail/calendar source의 경우 backend-managed OAuth start URL을 브라우저/Custom Tab으로 열고 callback 후 연결 상태 polling으로 완료를 확인한다. Naver/Daum IMAP은 backend OAuth가 없으며 앱 비밀번호 재입력 화면으로 이동한다. 재인증 성공 시 SourceDetailScreen 상태가 connected로 갱신됨"
     source: phase2-acceptance
     tests: []
 
   - id: SMG-004
     type: ui_interaction
-    description: "소스 연결 해제 시 해당 소스의 DataStore cursor 초기화, Keystore credentials 삭제, 기존 Room 데이터는 유지, 칩 상태가 idle로 변경된다"
+    description: "소스 연결 해제 시 해당 소스의 DataStore cursor/connection flag 초기화, local-worker credentials 삭제, 기존 Room 데이터는 유지, 칩 상태가 idle로 변경된다"
     screen: "SourceDetailScreen"
     interaction: "[연결 해제] 버튼 탭"
     precondition: "SourceDetailScreen에서 Gmail connected 상태, [연결 해제] 탭 + 확인 다이얼로그 [확인] 탭"
-    expected: "DataStore gmail last_cursor 초기화됨(null). Keystore Gmail OAuth 토큰 삭제됨. Room의 기존 gmail raw_ingestion_events + EmailBody 유지됨(삭제 없음). SourceStatusStrip Gmail 칩이 idle(회색)으로 변경됨"
+    expected: "DataStore gmail local compatibility cursor와 backend-managed flag가 초기화됨. Naver/Daum IMAP은 Keystore app-password credential과 per-folder UID cursor가 삭제됨. Room의 기존 raw_ingestion_events + EmailBody + commitments/quotes는 유지됨(삭제 없음). SourceStatusStrip 해당 소스 칩이 idle(회색)로 변경됨"
     source: phase2-acceptance
     tests: []
 
   - id: SMG-005
     type: ui_interaction
-    description: "소스 상세 화면의 [지금 동기화] 버튼이 source owner에 맞는 수동 동기화를 실행한다. backend-managed source는 Railway sync endpoint를, local source는 WorkManager worker를 사용한다. 이것이 앱에서 유일한 소스별 수동 트리거다"
+    description: "소스 상세 화면의 [지금 동기화] 버튼이 provider fetch owner에 맞는 수동 동기화를 실행한다. backend-managed source는 Railway sync endpoint를, local source는 WorkManager worker를 사용한다. 이것이 앱에서 유일한 소스별 수동 트리거다"
     screen: "SourceDetailScreen"
     interaction: "[지금 동기화] 버튼 탭"
     precondition: "인증 완료 상태에서 SourceDetailScreen 표시됨, Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
@@ -60,6 +64,8 @@ behaviors:
 
 invariants:
   - "수동 source sync는 authenticated session이 있을 때만 허용된다 — pre-login 상태에서는 backend endpoint 호출과 WorkManager enqueue 모두 금지"
+  - "Room/local UI source of truth와 provider fetch owner를 혼동하지 않는다: Room은 계속 UI read model이고, Gmail/Outlook Mail/calendar fetch는 Railway owner, IMAP/voice fetch는 Android local worker owner다"
+  - "Naver/Daum IMAP credential은 Android Keystore에만 저장되며 Railway로 전송하지 않는다"
   - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, commitments/quotes)는 삭제하지 않는다"
   - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"
   - "[지금 동기화]는 소스 상세 화면에서만 접근 가능하다 — 대시보드에서 소스별 개별 동기화 불가"

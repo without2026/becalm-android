@@ -139,15 +139,15 @@ public data class RawIngestionEventEntity(
      * (`gmail` / `outlook_mail` / `naver_imap` / `daum_imap`). Null for all other
      * sources (`voice`, `google_calendar`, `outlook_calendar`, etc.).
      *
-     * The folder label reaches Room via the ingestion workers and is mirrored here
+     * The folder label reaches Room via the current ingestion owner and is mirrored here
      * so that downstream consumers (SyncWorker, UI timelines) can read the hint
      * without joining against [EmailBodyEntity]. EMAIL-002 uses the hint to pick the
      * correct participant column when deriving [personRef]: `INBOX` → `From`,
      * `SENT` → first `To[0]`. Spec: `.spec/email-pipeline.spec.yml:15-18`.
      *
      * Nullable at the schema level because `ALTER TABLE ADD COLUMN` on SQLite forbids
-     * `NOT NULL` without a DEFAULT. Application-layer invariant: email workers MUST
-     * always populate this column; other workers MUST leave it null.
+     * `NOT NULL` without a DEFAULT. Application-layer invariant: email ingestion owners
+     * MUST always populate this column; non-email sources MUST leave it null.
      */
     @ColumnInfo(name = "folder")
     val folder: String? = null,

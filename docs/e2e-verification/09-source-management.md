@@ -9,7 +9,7 @@ Spec: `becalm-android/.spec/source-management.spec.yml`
 ## 0. 전체 흐름
 
 ```
-SettingsScreen → SourcesListScreen (7 rows: 6 data sources + 연락처)
+SettingsScreen → SourcesListScreen (8 rows: 7 data sources + 연락처)
    ui/sources/SourcesListScreen.kt   ui/sources/SourcesListViewModel.kt:62
         │  (select source)
         ▼
@@ -24,18 +24,23 @@ SourceDetailScreen
 Source owners:
 - Gmail / Outlook Mail: backend-managed OAuth + sync (`EmailOAuthConnector` → Railway)
 - Google Calendar / Outlook Calendar: backend-managed OAuth + sync
-- IMAP: local worker (`ImapNaverWorker.kt`, `ImapDaumWorker.kt`)
+- Naver / Daum IMAP: local worker (`ImapNaverWorker.kt`, `ImapDaumWorker.kt`)
 - Voice (MediaStore): local worker (`MediaStoreWorker.kt`)
+
+Owner rule:
+- Room/local UI state remains the source of truth for rendering.
+- Provider fetch owner is separate: backend-managed sources call Railway, local sources enqueue Android workers.
+- IMAP app passwords are local credentials and must not be sent to Railway.
 
 ---
 
-## SMG-001 — 7 소스 상태 표시
+## SMG-001 — 7 소스 + 연락처 상태 표시
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
 | Screen | `ui/sources/SourcesListScreen.kt` | LazyColumn |
 | VM | `ui/sources/SourcesListViewModel.kt:62` | `SourcesListUiState` (L42) + `SourceStatusRow` (L29) |
-| Repo | `data/repository/SourceStatusRepository.kt` | 6 소스 상태 + contacts 의사 상태 합성 |
+| Repo | `data/repository/SourceStatusRepository.kt` | 7 소스 상태 + contacts 의사 상태 합성 |
 
 ---
 
@@ -56,7 +61,7 @@ API gap 주의 — `SourceDetailViewModel.kt:110/141` 의 "API gap: filter by so
 | 소스 종류 | 진입 파일 |
 | --- | --- |
 | OAuth (Gmail/Outlook/Google Calendar/Outlook Calendar) | `ui/onboarding/GmailOAuthScreen.kt` / `OutlookMailOAuthScreen.kt` / `GoogleCalendarOAuthScreen.kt` / `OutlookCalendarOAuthScreen.kt` |
-| IMAP | `ui/onboarding/ImapSetupScreen.kt` (앱 비밀번호 재입력) |
+| IMAP | `ui/onboarding/ImapSetupScreen.kt` (앱 비밀번호 재입력; backend OAuth 없음) |
 | Voice | `ui/onboarding/RecordingFolderScreen.kt` (SAF 폴더 재선택) |
 
 **Verify**: `SourceDetailScreen` 의 `[다시 연결]` 콜백이 Nav 로 각 화면에 재진입하는지. Mail/Calendar OAuth 는 브라우저를 열고 Railway `:status` polling 후 connected 상태로 돌아와야 한다.
@@ -69,9 +74,9 @@ API gap 주의 — `SourceDetailViewModel.kt:110/141` 의 "API gap: filter by so
 | --- | --- | --- |
 | VM | `SourcesListViewModel.kt:118` | `disconnectSource(sourceType)` |
 | Cursor clear | `data/local/datastore/SyncCursorStore.kt:88/96` | `clearCursor(source)` / `clearAll()` |
-| Gmail history clear | `SyncCursorStore.kt:116` | `setGmailHistoryId(null)` |
-| IMAP clear | `SyncCursorStore.kt:140` | `setImapState(mailbox, null)` |
-| Credential clear | `data/local/secure/OAuthCredentialStore.kt` / `ImapCredentialStore.kt` | clear 메서드 |
+| Backend-managed mail flag clear | `UserPrefsStore.kt` | `setEmailSourceManagedByBackend(provider, false)` |
+| IMAP clear | `SyncCursorStore.kt:140` | provider별 INBOX/SENT `setImapState(mailbox, null)` |
+| Credential clear | `data/local/secure/ImapCredentialStore.kt` | IMAP app password clear |
 | Room 유지 | `RawIngestionEventDao.kt` | DELETE 호출 **없어야** 함 |
 
 **Verify invariant**:
@@ -90,6 +95,10 @@ grep -n "disconnectSource" becalm-android/android/app/src/main/java/com/becalm/a
 | Button | `ui/sources/SourceDetailScreen.kt` | [지금 동기화] 버튼 |
 | Local sources | `worker/WorkSchedulerImpl.kt` | IMAP/voice one-shot |
 | Backend-managed sources | `ui/sources/SourceSyncPort.kt` | Gmail/Outlook Mail → `syncMailSource`, Calendar → `triggerServerSync` |
+
+**Verify owner split**:
+- `gmail`, `outlook_mail`, `google_calendar`, `outlook_calendar` do not route through on-device provider workers.
+- `naver_imap`, `daum_imap`, `voice` do not call Railway provider-fetch endpoints.
 
 **Verify invariant — dashboard 에서 소스별 수동 트리거 금지**:
 ```

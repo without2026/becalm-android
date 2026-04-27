@@ -5,6 +5,13 @@
 - 저장된 app password 로 worker 가 실제 IMAPS fetch 를 수행하는지 확인
 - fetch 후 `raw_ingestion_events`, `source_status`, person-facing projection 이 기대대로 갱신되는지 확인
 
+Owner decision:
+- Naver / Daum IMAP은 이번 정리에서 backend-managed로 옮기지 않는다.
+- Provider fetch owner는 Android local worker다: `ImapNaverWorker.kt`, `ImapDaumWorker.kt`.
+- UI source of truth는 계속 local Room이다. 이 말은 provider fetch를 반드시 Android가 해야 한다는 뜻이 아니라, 렌더링/로컬 보존 기준이 Room이라는 뜻이다.
+- 현재 backend는 `gmail` / `outlook_mail` OAuth+sync만 지원하고 `naver_imap` / `daum_imap` OAuth 또는 credential table이 없다.
+- IMAP app password는 Android Keystore에만 저장하고 Railway로 전송하지 않는다.
+
 전제:
 - 실기기 또는 에뮬레이터가 필요하다.
 - BeCalm 테스트 계정으로 앱 로그인 가능해야 한다.
@@ -131,6 +138,8 @@ Pass 조건:
 - Naver 는 `ImapNaverWorker`
 - Daum 은 `ImapDaumWorker`
 - 둘 다 성공 시 `SourceStatusRepository.recordSyncSuccess(...)`
+- Gmail/Outlook Mail처럼 `POST /v1/mail_sources:sync`를 호출하지 않는다
+- IMAP credential 또는 app password가 backend request body/header/log에 나타나지 않는다
 
 추가 확인 포인트:
 - INBOX + SENT 두 패스가 모두 허용되는지
@@ -145,6 +154,17 @@ Naver / Daum 각각에 대해 아래 4개가 맞으면 external smoke pass:
 2. app credential save 성공
 3. worker fetch 후 `synced`
 4. `raw_ingestion_events` 와 person-facing projection 반영
+
+아직 남은 live smoke:
+- `naver_imap`
+- `daum_imap`
+
+이미 닫힌 live smoke와 혼동하지 않는다:
+- `voice`
+- `google_calendar`
+- `outlook_calendar`
+- `gmail`
+- `outlook_mail`
 
 ## 6. 디버깅 순서
 

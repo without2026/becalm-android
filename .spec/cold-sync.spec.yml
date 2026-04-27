@@ -3,8 +3,8 @@
 # 이 스펙은 최초 온보딩 직후 Room이 빈 상태에서 수행되는 cold sync를 **2단계**로 분리하여 codify한다.
 # 기존 TDY-010의 단일 전체화면 대기 UX는 '현실적 30초 내 앱 진입'이 불가능한 병목(이메일 30일 백필·녹음 폴더 전체 스캔)을
 # 가지고 있어 사용자가 앱을 포기하는 이탈을 유발했다. 이를 해소하기 위해:
-#   Stage 1 = 'Today-usable' 최소 데이터 세트 (calendar 오늘/+7d + 이메일 7d + user_profile bootstrap) — 목표 <30초, 전체화면 블로킹
-#   Stage 2 = 'Full history' 백필 (이메일 30일 + 녹음 폴더 full scan + cursor 안정화) — 백그라운드, 비블로킹
+#   Stage 1 = 'Today-usable' 최소 데이터 세트 (calendar 오늘/+7d + IMAP 7d + user_profile bootstrap) — 목표 <30초, 전체화면 블로킹
+#   Stage 2 = 'Full history' 백필 (IMAP 30일 + 녹음 폴더 full scan + cursor 안정화) — 백그라운드, 비블로킹
 # TodayTimelineScreen 진입 가능 시점은 Stage 1 완료이며 onboarding_completed 플래그도 이 시점에 set된다.
 # Stage 2는 이후 SettingsScreen 상단 '초기 데이터 가져오는 중' 배너로 진행률만 surfacing.
 
@@ -15,20 +15,20 @@ version: 1
 behaviors:
   - id: COLD-001
     type: lifecycle
-    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — 7개 사용자-facing source 중 high-priority 6개(google_calendar ±7일, outlook_calendar ±7일, gmail 7일, outlook_mail 7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)을 병렬 코루틴으로 실행. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
+    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — provider fetch owner 기준으로 Android가 즉시 fan-out할 수 있는 high-priority source(google_calendar ±7일, outlook_calendar ±7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)를 실행한다. Gmail/Outlook Mail은 backend-managed owner이므로 cold sync local worker fan-out에 포함하지 않는다. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
     trigger: "ColdSyncScreen 진입 (TDY-010 조건: Room에 raw_ingestion_events + commitments + calendar_events 0건)"
     precondition: "인증 완료, DataStore onboarding_completed=false, 최소 1개 소스 연결됨"
-    expected: "Stage 1 코루틴 Scope 시작. 각 어댑터는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT. user_profile bootstrap은 auth session + 기본 timezone/locale로 Room user_profile row를 로컬 생성/UPSERT하고, 이후 별도 user_profile mirror 경로로 서버에 반영한다(서버 GET으로 Room을 역갱신하지 않음). 동시에 SYNC-006 즉시 업로드도 큐잉되어 calendar_events·raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
+    expected: "Stage 1 코루틴 Scope 시작. IMAP worker는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT한다. calendar thin worker는 Railway provider fetch를 trigger한 뒤 Room calendar_events projection을 refresh한다. user_profile bootstrap은 auth session + 기본 timezone/locale로 Room user_profile row를 로컬 생성/UPSERT하고, 이후 별도 user_profile mirror 경로로 서버에 반영한다. 동시에 SYNC-006 즉시 업로드도 큐잉되어 local raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
     source: phase2-acceptance
     tests: []
 
   - id: COLD-002
     type: ui_interaction
-    description: "ColdSyncScreen 상단 progress indicator가 Stage 1 진행률을 '7개 소스 중 N개 완료'로 표시하며 하단에 각 소스별 진행 항목(완료 체크 / 진행 중 스피너 / 실패 느낌표)을 나열한다. [나중에 하기] 버튼은 Stage 1 시작 후 5초가 지나면 활성화(사용자가 즉시 포기할 수 있도록)"
+    description: "ColdSyncScreen 상단 progress indicator가 Stage 1 owner fan-out 진행률을 표시하며 하단에 각 소스별 진행 항목(완료 체크 / 진행 중 스피너 / 실패 느낌표)을 나열한다. [나중에 하기] 버튼은 Stage 1 시작 후 5초가 지나면 활성화(사용자가 즉시 포기할 수 있도록)"
     screen: "ColdSyncScreen"
     interaction: "화면 진입 후 자동 진행"
     precondition: "COLD-001 실행 중"
-    expected: "Progress 표시 '초기 데이터를 가져오는 중 (N/7)'. 소스별 항목: [Google Calendar ✓ 완료] [Outlook Calendar ⏳ 진행 중] [Gmail ⏳ 진행 중] [Outlook Mail ⚠️ 실패 — 재시도] [Naver IMAP ⏳ 진행 중] [Daum IMAP ⏳ 진행 중] [내 프로필 ✓ 완료]. [나중에 하기] 버튼은 첫 5초 동안 비활성(dimmed), 이후 활성. 실패 항목 탭 시 해당 소스의 cursor 재시도(ING-013 트리거)"
+    expected: "Progress 표시 '초기 데이터를 가져오는 중'. 소스별 항목: [Google Calendar ✓ 완료] [Outlook Calendar ⏳ 진행 중] [Naver IMAP ⏳ 진행 중] [Daum IMAP ⏳ 진행 중] [내 프로필 ✓ 완료]. Gmail/Outlook Mail은 backend-managed source status로 별도 표시되며 local worker 진행 항목으로 세지지 않는다. [나중에 하기] 버튼은 첫 5초 동안 비활성(dimmed), 이후 활성. 실패 항목 탭 시 해당 소스의 cursor 재시도(ING-013 트리거)"
     source: phase2-acceptance
     tests: []
 

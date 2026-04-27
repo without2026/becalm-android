@@ -1,11 +1,14 @@
 # Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 #
 # SYNC ARCHITECTURE NOTE:
-# PRIMARY 100%-arrival path: ING-011 foreground catch-up (ON_START / pull-to-refresh)
-#   + Room-as-source-of-truth + immediate UploadWorker (SYNC-006).
+# PRIMARY local-arrival path: ING-011 foreground catch-up (ON_START / pull-to-refresh)
+#   for Android-owned sources + Room-as-source-of-truth + immediate UploadWorker (SYNC-006).
 # SECONDARY redundancy path: periodic WorkManager jobs (ING-006..010).
 # ContentObserver (ING-001) covers realtime detection ONLY while process is alive.
 # Events missed while process is dead are recovered via ING-011 MediaStore cursor.
+# Provider fetch owner is separate from local UI source of truth:
+#   backend-managed: gmail, outlook_mail, google_calendar, outlook_calendar
+#   local-worker: voice, naver_imap, daum_imap
 
 module: data-ingestion
 platform: android
@@ -60,28 +63,28 @@ behaviors:
 
   - id: ING-006
     type: lifecycle
-    description: "[주기적 보조 경로] Railway backend-managed Gmail sync가 신규 이메일을 canonical raw_ingestion_events + EmailBody로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 인덱싱 범위는 'INBOX' + 'SENT' 두 라벨만 대상이며 Draft/Trash/Spam/Promotions/Social/Updates/Forums는 제외된다"
-    trigger: "Railway Gmail sync endpoint 호출 후 Android mirror refresh"
+    description: "[backend-managed 경로] Railway backend-managed Gmail sync가 신규 이메일을 server-side canonical raw_ingestion_events + source_status로 저장한다. Android는 provider fetch를 수행하지 않고 OAuth/status/manual-sync 호출만 담당한다. 인덱싱 범위는 'INBOX' + 'SENT' 두 라벨만 대상이며 Draft/Trash/Spam/Promotions/Social/Updates/Forums는 제외된다"
+    trigger: "Railway Gmail sync endpoint 호출"
     precondition: "Railway에 Gmail 연결 완료, 마지막 sync 이후 INBOX 또는 SENT 라벨에 신규 메시지 1건 존재"
-    expected: "Railway source_status='gmail: synced' 반영 후 Android Room raw_ingestion_events / EmailBody mirror에 Gmail row가 내려온다. person_ref 방향은 INBOX=발신자, SENT=수신자 기준으로 정규화된다"
+    expected: "Railway source_status='gmail: synced'와 server-side raw_ingestion_events(source_type='gmail')가 반영된다. Android source-management 화면은 backend status를 refresh/cache하고, Gmail provider fetch를 local worker로 실행하지 않는다. person_ref 방향은 INBOX=발신자, SENT=수신자 기준으로 정규화된다"
     source: phase2-acceptance
     tests: []
 
   - id: ING-007
     type: lifecycle
-    description: "[주기적 보조 경로] Railway backend-managed Outlook Mail sync가 신규 이메일을 canonical raw_ingestion_events + EmailBody로 저장하고, Android는 그 결과를 로컬 Room mirror로 가져온다. 인덱싱 범위는 'Inbox' + 'Sent Items' 두 폴더만 대상이며 Drafts/Deleted Items/Junk Email/Archive는 제외된다"
-    trigger: "Railway Outlook Mail sync endpoint 호출 후 Android mirror refresh"
+    description: "[backend-managed 경로] Railway backend-managed Outlook Mail sync가 신규 이메일을 server-side canonical raw_ingestion_events + source_status로 저장한다. Android는 provider fetch를 수행하지 않고 OAuth/status/manual-sync 호출만 담당한다. 인덱싱 범위는 'Inbox' + 'Sent Items' 두 폴더만 대상이며 Drafts/Deleted Items/Junk Email/Archive는 제외된다"
+    trigger: "Railway Outlook Mail sync endpoint 호출"
     precondition: "Railway에 Outlook Mail 연결 완료, Inbox 또는 Sent Items에 신규 메시지 1건 존재"
-    expected: "Railway source_status='outlook_mail: synced' 반영 후 Android Room raw_ingestion_events / EmailBody mirror에 Outlook Mail row가 내려온다. person_ref 방향은 Inbox=발신자, Sent Items=수신자 기준으로 정규화된다"
+    expected: "Railway source_status='outlook_mail: synced'와 server-side raw_ingestion_events(source_type='outlook_mail')가 반영된다. Android source-management 화면은 backend status를 refresh/cache하고, Outlook Mail provider fetch를 local worker로 실행하지 않는다. person_ref 방향은 Inbox=발신자, Sent Items=수신자 기준으로 정규화된다"
     source: phase2-acceptance
     tests: []
 
   - id: ING-008
     type: lifecycle
-    description: "[주기적 보조 경로] 네이버 IMAP sync가 신규 이메일을 로컬 파싱하여 Room에 저장한다. 인덱싱 범위는 IMAP folder 'INBOX'(받은 메일) + '보낸메일함'(또는 서버 반환 SENT special-use flag가 있는 폴더) 두 개만 대상. '임시보관함', '스팸메일함', '휴지통', '전체메일'은 제외. IMAP 앱 비밀번호는 Android Keystore에 보관되며 Railway로 전송되지 않는다"
-    trigger: "WorkManager NaverImapSyncWorker 실행"
-    precondition: "Keystore에 네이버 IMAP credential 저장됨, IMAP 연결 성공, INBOX 또는 보낸메일함에 신규 UID 1건 존재"
-    expected: "Room raw_ingestion_events 1건(source_type='naver_imap', person_ref=INBOX는 발신자/보낸메일함은 수신자 이메일, event_title=이메일제목, event_snippet=본문앞200자, source_ref=UIDVALIDITY+UID) + EmailBody 1건 INSERT됨. 임시보관함/스팸메일함/휴지통/전체메일 UID는 INSERT되지 않음. 다음 sync 시 UIDVALIDITY 변경 감지되면 ING-013 재동기화"
+    description: "[local-worker 경로] 네이버/다음 IMAP sync가 신규 이메일을 Android에서 직접 IMAPS fetch + 로컬 파싱하여 Room에 저장한다. 인덱싱 범위는 provider별 INBOX + SENT special-use/fallback folder 두 개만 대상이다. Naver의 '임시보관함', '스팸메일함', '휴지통', '전체메일'과 Daum denylist folder는 제외한다. IMAP 앱 비밀번호는 Android Keystore에 보관되며 Railway로 전송되지 않는다"
+    trigger: "WorkManager ImapNaverWorker 또는 ImapDaumWorker 실행"
+    precondition: "Keystore에 해당 provider IMAP credential 저장됨, IMAP 연결 성공, INBOX 또는 SENT fallback folder에 신규 UID 1건 존재"
+    expected: "Room raw_ingestion_events 1건(source_type='naver_imap' 또는 'daum_imap', person_ref=INBOX는 발신자/SENT는 수신자 이메일, event_title=이메일제목, event_snippet=snippet builder 결과, source_ref=UIDVALIDITY+UID envelope) + EmailBody 1건 INSERT됨. provider denylist folder UID는 INSERT되지 않음. 다음 sync 시 UIDVALIDITY 변경 감지되면 ING-013 재동기화"
     source: phase2-acceptance
     tests: []
 
@@ -105,16 +108,16 @@ behaviors:
 
   - id: ING-011
     type: lifecycle
-    description: "[PRIMARY 100%-arrival 경로] 앱 foreground 진입(ON_START) 또는 pull-to-refresh 시 7개 사용자-facing source에 대응하는 어댑터를 병렬 코루틴으로 실행하여 catch-up sync를 수행한다. 각 어댑터는 DataStore의 last_cursor를 읽어 해당 소스의 'since cursor' API를 호출하고 신규 이벤트를 Room에 INSERT(sync_status='pending')한다. 이후 SYNC-006 즉시 업로드 워커를 enqueueUniqueWork('sync-all-upload', REPLACE)로 트리거한다"
+    description: "[PRIMARY local-arrival 경로] 앱 foreground 진입(ON_START) 또는 pull-to-refresh 시 Android-owned source에 대응하는 worker를 enqueue하여 catch-up sync를 수행한다. voice와 IMAP은 local worker가 Room에 직접 INSERT한다. calendar는 thin Android worker가 Railway provider fetch를 trigger하고 `CalendarEventRepository.refreshSince`로 Room projection을 갱신한다. Gmail/Outlook Mail은 backend-managed owner이므로 local foreground fan-out에서 provider worker를 실행하지 않는다"
     trigger: "앱이 ON_START 생명주기 진입 (BACKGROUND→FOREGROUND 포함) 또는 사용자 pull-to-refresh"
     precondition: "인증 완료, 최소 1개 소스 연결됨, 네트워크 연결됨"
-    expected: "7개 사용자-facing source에 대응하는 어댑터가 병렬 실행됨(각 어댑터 독립 성공/실패 격리). 각 어댑터가 last_cursor 이후 신규 이벤트를 Room에 INSERT함. UploadWorker enqueueUniqueWork('sync-all-upload', REPLACE) 호출됨. DashboardScreen의 OverallSyncIndicator가 'syncing N/7' 상태로 업데이트됨"
+    expected: "DataStore enabled source 중 `voice`, `naver_imap`, `daum_imap`, `google_calendar`, `outlook_calendar`만 ForegroundCatchUpScheduler dispatch table에 의해 enqueue됨. Gmail/Outlook Mail은 backend-managed flag가 true이면 enabled local source set에서 제외된다. 각 local enqueue는 독립 성공/실패 격리된다. local raw row가 생긴 source는 UploadWorker 경로로 mirror된다"
     source: phase2-acceptance
     tests: []
 
   - id: ING-012
     type: lifecycle
-    description: "각 소스 어댑터는 DataStore에 source별 last_cursor를 영속 저장한다. 커서 타입: voice=MediaStore DATE_MODIFIED epoch millis, gmail=history.list startHistoryId, outlook_mail=messages/delta @odata.deltaLink, naver_imap/daum_imap=UIDVALIDITY+last_UID, google_calendar=events.list syncToken, outlook_calendar=events/delta deltaLink"
+    description: "Android-owned source adapter는 DataStore에 source별 last_cursor를 영속 저장한다. 커서 타입: voice=MediaStore DATE_MODIFIED epoch millis, naver_imap/daum_imap=per-folder UIDVALIDITY+last_UID, calendar Room projection=`calendar_events` pagination cursor. Gmail/Outlook Mail local cursor key는 backend-managed 전환 이후 legacy compatibility only이며 새 sync에서 advance하지 않는다"
     trigger: "소스 어댑터가 성공적으로 sync 완료"
     precondition: "어댑터가 최소 1건의 이벤트를 처리하거나 source API가 새 cursor를 반환"
     expected: "DataStore에 해당 소스의 last_cursor가 UPDATE됨. 다음 ING-011 실행 시 업데이트된 cursor로 API 호출함"
@@ -123,8 +126,8 @@ behaviors:
 
   - id: ING-013
     type: lifecycle
-    description: "커서 무효화(Gmail 410 historyId 만료 / IMAP UIDVALIDITY 변경 / backend mirror pagination invalidation) 시 해당 소스 어댑터가 DataStore cursor를 초기화하고 제한된 전체 재동기화를 수행한다"
-    trigger: "소스 API가 커서 무효화 오류 반환 (Gmail HTTP 410, IMAP UIDVALIDITY mismatch, backend pagination reset)"
+    description: "Android-owned cursor 무효화(IMAP UIDVALIDITY 변경 / backend mirror pagination invalidation) 시 해당 소스 어댑터가 DataStore cursor를 초기화하고 제한된 전체 재동기화를 수행한다. Gmail/Outlook Mail provider cursor invalidation은 Railway mail sync owner가 처리하며 Android local cursor invalidation 경로가 아니다"
+    trigger: "소스 API가 커서 무효화 오류 반환 (IMAP UIDVALIDITY mismatch, backend pagination reset)"
     precondition: "어댑터 cursor가 DataStore에 저장됨, source API가 410 또는 UIDVALIDITY mismatch 응답"
     expected: "DataStore 해당 소스 cursor 초기화됨(null). 최근 30일 범위로 전체 재동기화 실행됨. 신규 cursor 저장됨. OverallSyncIndicator의 해당 소스 칩이 syncing 상태로 표시됨"
     source: phase2-acceptance
@@ -152,9 +155,9 @@ invariants:
   - "인증 완료 전(current_user_id == null)에는 foreground catch-up, periodic redundancy, manual source sync가 어떤 source worker도 enqueue하면 안 된다. pre-login startup은 worker no-op 이어야 한다"
   - "raw_ingestion_events는 Railway durable result(sync_status='synced') 확인 전까지 Room에서 DELETE되지 않는다"
   - "Transcript 및 EmailBody는 Railway 또는 Supabase로 업로드되지 않는다 (로컬 only). voice에서 서버로 나가는 텍스트는 consent 이후의 quote/event_snippet 최소치뿐이다"
-  - "Gmail/Outlook OAuth 토큰 및 IMAP 앱 비밀번호는 Android Keystore에만 저장되며 Railway 서버로 전송되지 않는다"
-  - "이메일/캘린더 데이터는 Android 기기에서 직접 로컬 파싱 후 구조화된 이벤트만 Railway로 업로드된다"
-  - "7개 사용자-facing source에 대응하는 어댑터는 병렬 실행되며 한 어댑터의 실패가 다른 어댑터의 실행을 중단시키지 않는다"
+  - "Gmail/Outlook OAuth 토큰은 backend-managed 연결로 Railway가 보관/refresh한다. Naver/Daum IMAP 앱 비밀번호는 Android Keystore에만 저장되며 Railway 서버로 전송되지 않는다"
+  - "IMAP/voice 데이터는 Android 기기에서 직접 로컬 파싱/감지 후 구조화된 이벤트만 Railway로 업로드된다. Gmail/Outlook Mail/calendar provider fetch는 Railway owner다"
+  - "Foreground catch-up dispatch table에 포함된 source worker는 병렬/독립 실행되며 한 worker의 실패가 다른 worker의 실행을 중단시키지 않는다"
   - "커서는 로그아웃 또는 앱 삭제 시 DataStore에서 삭제된다"
   - "Railway 응답 4xx(401 제외)는 영구 실패로 간주 — sync_status='quarantined'로 격리, 재시도하지 않음"
   - "동일 client_event_id의 재전송은 서버에서 멱등 처리되며 항상 200 + row-level result(disposition='duplicate') 반환 (ING-015)"
