@@ -6,6 +6,8 @@ version: 1
 # Total routes: 22
 # Glass surfaces must preserve foreground legibility. Compose implementations
 # must not apply foreground blur to panel contents, text fields, or buttons.
+# Android 13+ predictive-back platform warnings must be avoided by enabling
+# android:enableOnBackInvokedCallback at the application manifest level.
 
 routes:
   # -------- AUTH / ONBOARDING (public + first-run) --------

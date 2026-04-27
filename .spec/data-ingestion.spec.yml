@@ -111,7 +111,7 @@ behaviors:
     description: "[PRIMARY local-arrival 경로] 앱 foreground 진입(ON_START) 또는 pull-to-refresh 시 Android-owned source에 대응하는 worker를 enqueue하여 catch-up sync를 수행한다. voice와 IMAP은 local worker가 Room에 직접 INSERT한다. calendar는 thin Android worker가 Railway provider fetch를 trigger하고 `CalendarEventRepository.refreshSince`로 Room projection을 갱신한다. Gmail/Outlook Mail은 backend-managed owner이므로 local foreground fan-out에서 provider worker를 실행하지 않는다"
     trigger: "앱이 ON_START 생명주기 진입 (BACKGROUND→FOREGROUND 포함) 또는 사용자 pull-to-refresh"
     precondition: "인증 완료, 최소 1개 소스 연결됨, 네트워크 연결됨"
-    expected: "DataStore enabled source 중 `voice`, `naver_imap`, `daum_imap`, `google_calendar`, `outlook_calendar`만 ForegroundCatchUpScheduler dispatch table에 의해 enqueue됨. Gmail/Outlook Mail은 backend-managed flag가 true이면 enabled local source set에서 제외된다. 각 local enqueue는 독립 성공/실패 격리된다. local raw row가 생긴 source는 UploadWorker 경로로 mirror된다"
+    expected: "DataStore enabled source 중 `voice`, `naver_imap`, `daum_imap`, `google_calendar`, `outlook_calendar`만 ForegroundCatchUpScheduler dispatch table에 의해 enqueue됨. Gmail/Outlook Mail은 backend-managed flag가 true이면 enabled local source set에서 제외된다. 각 local enqueue는 독립 성공/실패 격리된다. local raw row가 생긴 source는 UploadWorker 경로로 mirror된다. 자동 ON_START catch-up은 첫 프레임/초기 navigation과 경쟁하지 않도록 짧은 지연 후 enqueue할 수 있으며, 사용자 pull-to-refresh는 지연 없이 즉시 enqueue한다"
     source: phase2-acceptance
     tests: []
 

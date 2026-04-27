@@ -7,25 +7,26 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
-import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
-import com.becalm.android.data.repository.AuthState
+import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.ui.onboarding.OnboardingProgressResolver
 import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import javax.inject.Provider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,7 +64,7 @@ public sealed class AuthUiState {
      *
      * @param message Human-readable description of the error.
      */
-public data class Error(val message: String) : AuthUiState()
+    public data class Error(val message: String) : AuthUiState()
 }
 
 /** One-shot effects emitted by [AuthViewModel]. */
@@ -90,7 +91,8 @@ private const val SIGNUP_FAILED_MESSAGE = "Could not create account"
  */
 @HiltViewModel
 public class AuthViewModel @Inject constructor(
-    private val authRepository: AuthRepository,
+    private val authRepositoryProvider: Provider<AuthRepository>,
+    private val sessionStore: SupabaseSessionStore,
     private val userPrefsStore: UserPrefsStore,
     private val runtimeBootstrapProvider: Provider<AuthenticatedRuntimeBootstrap>,
     @IoDispatcher private val runtimeBootstrapDispatcher: CoroutineDispatcher,
@@ -119,17 +121,18 @@ public class AuthViewModel @Inject constructor(
     /**
      * Initiates an email/password sign-in.
      *
-     * On success the session observer ([onObserveSession]) will update [uiState]
-     * to [AuthUiState.SignedIn] automatically; this method only drives the
-     * loading/error transitions around the network call itself.
+     * Splash/bootstrap keeps the network auth graph lazy, so this method is the
+     * first place that resolves [AuthRepository]. On success it maps the returned
+     * session immediately; [onObserveSession] remains the source for later session
+     * clear/save events.
      */
     public fun onEmailSignIn(email: String, password: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            when (val result = authRepository.signInWithEmail(email, password)) {
+            when (val result = authRepository().signInWithEmail(email, password)) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "email sign-in succeeded")
-                    // uiState will update via onObserveSession; no explicit transition needed.
+                    setUiState(result.value.toUiState())
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-in failed")
@@ -147,16 +150,17 @@ public class AuthViewModel @Inject constructor(
     /**
      * Creates an email/password account from the public Login shell.
      *
-     * If Supabase returns a session immediately, the session observer drives the
+     * If Supabase returns a session immediately, the returned session drives the
      * transition to [AuthUiState.SignedIn]. If email confirmation is required, the
      * screen stays on Login and shows a stable confirmation-required message.
      */
     public fun onEmailSignUp(email: String, password: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            when (val result = authRepository.signUpWithEmail(email, password)) {
+            when (val result = authRepository().signUpWithEmail(email, password)) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "email sign-up succeeded")
+                    setUiState(result.value.toUiState())
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-up failed")
@@ -184,9 +188,10 @@ public class AuthViewModel @Inject constructor(
     public fun onGoogleSignIn(idToken: String) {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            when (val result = authRepository.signInWithGoogle(idToken)) {
+            when (val result = authRepository().signInWithGoogle(idToken)) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "google sign-in succeeded")
+                    setUiState(result.value.toUiState())
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "google sign-in failed")
@@ -213,19 +218,19 @@ public class AuthViewModel @Inject constructor(
      * reached from Settings → Privacy and is intentionally not this method's concern.
      *
      * On success the sign-out state is driven solely by [onObserveSession] collecting
-     * [AuthRepository.observeAuthState], which will emit [AuthState.Unauthenticated] once
-     * the repository completes the session-only cleanup. That collector is the single
+     * [SupabaseSessionStore.observe], which will emit `null` once the repository completes
+     * the session-only cleanup. That collector is the single
      * source of truth for the signed-out transition; assigning [AuthUiState.SignedOut]
      * here would race with it.
      */
     public fun onSignOut() {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            when (val result = authRepository.invalidateSession()) {
+            when (val result = authRepository().invalidateSession()) {
                 is BecalmResult.Success -> {
                     logger.d(TAG, "routine sign-out completed (Room data preserved)")
                     // State transitions to SignedOut via onObserveSession once the repository
-                    // publishes AuthState.Unauthenticated.
+                    // clears the encrypted session store.
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "routine sign-out failed")
@@ -265,7 +270,7 @@ public class AuthViewModel @Inject constructor(
 
     // spec: AUTH-003, AUTH-004, AUTH-006, AUTH-007
     /**
-     * Begins collecting [AuthRepository.observeAuthState] and maps each emission to
+     * Begins collecting [SupabaseSessionStore.observe] and maps each emission to
      * an [AuthUiState].
      *
      * Called automatically from `init`; may also be called explicitly to re-subscribe
@@ -282,13 +287,14 @@ public class AuthViewModel @Inject constructor(
                 _uiState.value = AuthUiState.Error(e.message ?: "session bootstrap failed")
             }
 
-            authRepository.observeAuthState()
-                .catch { e ->
-                    _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
+            try {
+                sessionStore.observe().collect { session ->
+                    setUiState(session.toUiState())
                 }
-                .collect { authState ->
-                    setUiState(authState.toUiState())
-                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
+            }
         }
     }
 
@@ -328,28 +334,18 @@ public class AuthViewModel @Inject constructor(
     }
 
     private suspend fun bootstrapUiState(): AuthUiState {
-        val session = authRepository.currentSession()
-        return if (session != null) {
+        return sessionStore.load().toUiState()
+    }
+
+    private suspend fun SupabaseSession?.toUiState(): AuthUiState =
+        if (this != null) {
             AuthUiState.SignedIn(
-                userId = session.userId,
+                userId = userId,
                 onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
                 onboardingResumeRoute = onboardingResumeRoute(),
             )
         } else {
             AuthUiState.SignedOut(
-                termsAccepted = userPrefsStore.observeTermsAccepted().first(),
-            )
-        }
-    }
-
-    private suspend fun AuthState.toUiState(): AuthUiState =
-        when (this) {
-            is AuthState.Authenticated -> AuthUiState.SignedIn(
-                userId = session.userId,
-                onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
-                onboardingResumeRoute = onboardingResumeRoute(),
-            )
-            is AuthState.Unauthenticated -> AuthUiState.SignedOut(
                 termsAccepted = userPrefsStore.observeTermsAccepted().first(),
             )
         }
@@ -365,4 +361,6 @@ public class AuthViewModel @Inject constructor(
         }
         return OnboardingProgressResolver.resumeRoute(stepStates, emailConsents)
     }
+
+    private fun authRepository(): AuthRepository = authRepositoryProvider.get()
 }

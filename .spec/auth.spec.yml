@@ -92,7 +92,7 @@ behaviors:
     description: "인증 전(pre-login) 또는 로그아웃 직후에는 user-scoped Room에 의존하는 startup/background 경로가 실행되면 안 된다. WorkManager/Hilt worker 생성과 persisted stale work 복원까지 포함해, foreground catch-up, periodic redundancy, source manual sync는 모두 AuthState.Authenticated 이후에만 열릴 수 있다"
     trigger: "앱 cold start, 프로세스 foreground 진입, 로그아웃 직후"
     precondition: "current_user_id == null 또는 AuthRepository.observeAuthState() != Authenticated"
-    expected: "BeCalmDatabaseProvider.current() 가 호출되지 않음. AppRuntimeSyncCoordinator는 auth-gated no-op 상태를 유지한다. ForegroundCatchUpScheduler / periodic source workers / manual source sync CTA는 enqueue를 수행하지 않는다. Application.onCreate는 DataStore read, Room open, WorkManager enqueue/cancel, authenticated runtime Hilt graph construction을 수행하지 않고 즉시 반환해야 한다. IMAP/cursor migration, user-scoped DB warm-open, legacy work cleanup, runtime sync start는 AuthRepository.observeAuthState 또는 persisted session bootstrap이 SignedIn을 resolve한 뒤 AuthViewModel이 사용자 단위로 1회만 시작한다. Lifecycle observer 등록은 main thread에서만 수행한다. UI는 Terms/Login 또는 cached read-only shell로만 진입하며 background worker crash/ANR이 발생하지 않는다"
+    expected: "BeCalmDatabaseProvider.current() 가 호출되지 않음. AppRuntimeSyncCoordinator는 auth-gated no-op 상태를 유지한다. ForegroundCatchUpScheduler / periodic source workers / manual source sync CTA는 enqueue를 수행하지 않는다. Application.onCreate는 DataStore read, Room open, WorkManager enqueue/cancel, authenticated runtime Hilt graph construction을 수행하지 않고 즉시 반환해야 한다. IMAP/cursor migration, user-scoped DB warm-open, legacy work cleanup, runtime sync start는 persisted encrypted session bootstrap이 SignedIn을 resolve한 뒤 AuthViewModel이 사용자 단위로 1회만 시작한다. Splash/public auth bootstrap은 Supabase network client graph를 생성하지 않고 encrypted session store만 읽는다. Lifecycle observer 등록은 main thread에서만 수행한다. UI는 Terms/Login 또는 cached read-only shell로만 진입하며 background worker crash/ANR이 발생하지 않는다"
     source: phase2-acceptance
     tests: [AuthViewModelSpecTest, AuthenticatedRuntimeBootstrapSpecTest]
 
@@ -101,7 +101,7 @@ behaviors:
     description: "SplashScreen은 transition-only gate다. cold start에서 AuthViewModel은 persisted session + terms/onboarding DataStore를 먼저 resolve한 뒤, Terms / Login / OnboardingPipaConsent / Today 중 하나로 즉시 라우팅해야 하며 indefinite blank loading shell에 머무르면 안 된다"
     trigger: "앱 cold start 직후 SplashScreen 첫 composition"
     precondition: "MainActivity 시작, Compose root mounted"
-    expected: "유효 세션이 없으면 termsAccepted 값에 따라 Terms 또는 Login으로 이동. 유효 세션이 있으면 onboardingCompleted 값에 따라 OnboardingPipaConsent 또는 Today로 이동. 세션 bootstrap 실패 시 Error 상태를 통해 Terms fallback이 허용된다"
+    expected: "유효 세션이 없으면 termsAccepted 값에 따라 Terms 또는 Login으로 이동. 유효 세션이 있으면 onboardingCompleted 값에 따라 OnboardingPipaConsent 또는 Today로 이동. 세션 bootstrap 실패 시 Error 상태를 통해 Terms fallback이 허용된다. Splash bootstrap은 로컬 encrypted session read만 수행하며 SupabaseClient/AuthRepository network graph 생성은 로그인/회원가입/토큰 refresh 같은 실제 auth action까지 지연된다"
     source: phase2-acceptance
     tests: []
 

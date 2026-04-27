@@ -142,11 +142,13 @@ Implications:
 - disconnected sources should render as read-only where applicable
 - Splash is a transition-only gate; once startup auth bootstrap resolves, the app must advance to Terms, Login, Onboarding, or Today rather than remain on a blank loading shell
 - Splash / Terms / Login are public auth shell routes and must render from auth/public state only; they must not require onboarding/runtime-owner dependency graphs to paint the first frame
+- Splash bootstrap must read the encrypted local session directly and must not instantiate the network auth client/Supabase graph until the user performs an auth action that needs it
 - Startup diagnostics for this public auth shell must distinguish route resolution, NavController destination change, composition commit, and first layout/render evidence
 - Glass surface styling must not blur foreground content; auth disclosures, fields, and CTA labels must remain readable on first render
 - before a cloud account session exists, no background worker, DAO, or source sync path may touch the user-scoped Room database
 - this also applies to stale persisted WorkManager rows restored after process death; worker construction itself must remain Room-safe until authenticated state is confirmed
-- foreground catch-up, periodic redundancy, and source-specific manual sync are all gated behind authenticated session state
+- foreground catch-up, periodic redundancy, and source-specific manual sync are all gated behind authenticated session state; automatic foreground catch-up may wait briefly after process foreground so it does not compete with the first rendered frame
+- device/runtime warnings from Android Studio startup agents, ART verification, and emulator graphics drivers are not product defects; app-side fixes should target only warnings caused by app scheduling, manifest, or worker behavior
 
 ## 9. Voice Pipeline Authority
 

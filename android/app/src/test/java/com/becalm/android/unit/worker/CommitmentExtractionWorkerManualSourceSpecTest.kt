@@ -20,4 +20,30 @@ class CommitmentExtractionWorkerManualSourceSpecTest {
         assertTrue(CommitmentExtractionWorker.Companion.supportsRawEventSource(SourceType.GMAIL))
         assertTrue(CommitmentExtractionWorker.Companion.supportsRawEventSource(SourceType.GOOGLE_CALENDAR))
     }
+
+    @Test
+    fun `EMAIL-001 AICORE_ERROR retries once then stops retry storm`() {
+        assertTrue(
+            CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
+                reason = "AICORE_ERROR",
+                runAttemptCount = 0,
+            ),
+        )
+        assertFalse(
+            CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
+                reason = "AICORE_ERROR",
+                runAttemptCount = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `EMAIL-001 non AICORE_ERROR extractor failures keep WorkManager retry semantics`() {
+        assertTrue(
+            CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
+                reason = "LLM_JSON_PARSE_FAILED",
+                runAttemptCount = 3,
+            ),
+        )
+    }
 }

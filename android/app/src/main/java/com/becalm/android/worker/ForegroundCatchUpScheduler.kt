@@ -8,6 +8,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.ingestion.WorkSchedulerCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,15 +42,15 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  * ## ING-011 — 100% arrival guarantee (foreground path)
  * When the app was backgrounded or killed, periodic workers may not have fired in time.
  * This scheduler fires on `onStart` (i.e. each foreground entry) so that any rows that
- * arrived while the app was absent are captured before TodayScreen is visible.
+ * arrived while the app was absent are captured. Automatic lifecycle catch-up waits briefly
+ * so it does not compete with the first rendered frame; user-triggered pull-to-refresh remains
+ * immediate.
  *
  * ## Lifecycle registration
  * Call [start] only after an authenticated session is mirrored into
  * [UserPrefsStore.observeCurrentUserId]. Signed-in cold starts do this from
- * [com.becalm.android.BecalmApplication.onCreate]; same-process sign-in does it from
- * [com.becalm.android.data.repository.AuthRepository]. Internally this adds [this] as a
- * [DefaultLifecycleObserver] on [ProcessLifecycleOwner], which survives configuration
- * changes.
+ * the authenticated runtime bootstrap. Internally this adds [this] as a
+ * [DefaultLifecycleObserver] on [ProcessLifecycleOwner], which survives configuration changes.
  *
  * ## Source fan-out
  * The set of enabled sources is read from [UserPrefsStore.observeEnabledSources] and
@@ -153,6 +154,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     override fun onStart(owner: LifecycleOwner) {
         scope.launch {
             try {
+                delay(ON_START_CATCH_UP_DELAY_MS)
                 if (!hasSignedInUser()) {
                     logger.d(TAG, "onStart: no authenticated user — skipping catch-up enqueue")
                     return@launch
@@ -235,5 +237,6 @@ public class ForegroundCatchUpScheduler @Inject constructor(
 
     private companion object {
         private const val TAG = "ForegroundCatchUpScheduler"
+        private const val ON_START_CATCH_UP_DELAY_MS: Long = 1_500L
     }
 }
