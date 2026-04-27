@@ -28,6 +28,7 @@ internal object WorkSchedulerRequests {
     const val PERIODIC_INTERVAL_MINUTES: Long = 15L
     const val BACKOFF_DELAY_SECONDS: Long = 30L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
+    const val TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
 
     val uploadConstraints: Constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -130,6 +131,7 @@ internal object WorkSchedulerRequests {
                     CommitmentExtractionWorker.KEY_RAW_EVENT_ID to rawEventId,
                 ),
             )
+            .addTag(TAG_COMMITMENT_EXTRACTION)
             .build()
 
     fun allStaticKeys(): List<String> = listOf(

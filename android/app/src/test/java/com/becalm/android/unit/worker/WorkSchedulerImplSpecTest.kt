@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import com.becalm.android.core.util.Logger
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.WorkSchedulerImpl
+import com.becalm.android.worker.WorkSchedulerRequests
 import com.becalm.android.worker.extraction.CommitmentExtractionWorker
 import io.mockk.every
 import io.mockk.mockk
@@ -85,5 +86,21 @@ class WorkSchedulerImplSpecTest {
         assertTrue(workSpec.constraints.requiresBatteryNotLow())
         assertFalse(workSpec.expedited)
         assertEquals("raw-1", workSpec.input.getString(CommitmentExtractionWorker.KEY_RAW_EVENT_ID))
+        assertTrue(request.captured.tags.contains(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION))
+    }
+
+    @Test
+    fun `AUTH-009 cancelAll cancels dynamic extraction and voice work by tag`() {
+        every { workManager.cancelUniqueWork(any()) } returns operation
+        every { workManager.cancelAllWorkByTag(any()) } returns operation
+
+        WorkSchedulerImpl(appContext, logger).cancelAll()
+
+        verify(exactly = 1) {
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
+        }
+        verify(exactly = 1) {
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+        }
     }
 }
