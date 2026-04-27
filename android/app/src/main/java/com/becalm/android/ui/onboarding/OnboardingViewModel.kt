@@ -214,10 +214,6 @@ public class OnboardingViewModel @Inject constructor(
         logger = logger,
     )
 
-    init {
-        hydrateDurableProgress()
-    }
-
     /** Canonical ordered list of onboarding steps (12 entries, see [OnboardingStep]). */
     public val steps: List<OnboardingStep> = OnboardingStep.entries
 
@@ -270,6 +266,10 @@ public class OnboardingViewModel @Inject constructor(
     /** Collect in [ContactsPermissionScreen] to request the system dialog or navigate next. */
     public val contactsPermissionEffects: SharedFlow<ContactsPermissionEffect> =
         _contactsPermissionEffects.asSharedFlow()
+
+    init {
+        hydrateDurableProgress()
+    }
 
     // ─── Navigation actions ───────────────────────────────────────────────────
 
