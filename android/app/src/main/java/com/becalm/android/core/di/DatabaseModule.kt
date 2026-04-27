@@ -12,6 +12,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
 import javax.inject.Singleton
 
 /**
@@ -28,10 +30,10 @@ import javax.inject.Singleton
  * recommended UX is a process restart on user swap and a follow-up refactor will
  * migrate repos to `Provider<Dao>` injection.
  *
- * DAOs are **not** scoped to `@Singleton`. Room generates DAO implementations as
- * lightweight wrappers that delegate directly to the database instance; they carry
- * no mutable state of their own. Re-creating them on each injection site is safe and
- * avoids holding unnecessary references beyond a ViewModel's lifetime.
+ * DAOs are **not** scoped to `@Singleton`. To keep pre-auth startup safe, Hilt receives
+ * lazy proxy instances that defer `BeCalmDatabaseProvider.current()` until the first DAO
+ * method call. This prevents worker/repository construction from opening Room before an
+ * authenticated user exists, while preserving the same DAO API at call sites.
  *
  * ## Separation from [NetworkModule] and [AppModule]
  * Each infrastructure concern has its own Hilt module to keep the Hilt graph
@@ -58,25 +60,33 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): BeCalmDatabase = provider.current()
 
-    /** Provides [RawIngestionEventDao] from the singleton [BeCalmDatabase]. */
+    /** Provides a lazy [RawIngestionEventDao] proxy backed by the current user-scoped DB. */
     @Provides
-    public fun provideRawIngestionEventDao(db: BeCalmDatabase): RawIngestionEventDao =
-        db.rawIngestionEventDao()
+    public fun provideRawIngestionEventDao(
+        provider: BeCalmDatabaseProvider,
+    ): RawIngestionEventDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::rawIngestionEventDao)
 
-    /** Provides [CommitmentDao] from the singleton [BeCalmDatabase]. */
+    /** Provides a lazy [CommitmentDao] proxy backed by the current user-scoped DB. */
     @Provides
-    public fun provideCommitmentDao(db: BeCalmDatabase): CommitmentDao =
-        db.commitmentDao()
+    public fun provideCommitmentDao(
+        provider: BeCalmDatabaseProvider,
+    ): CommitmentDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::commitmentDao)
 
-    /** Provides [CalendarEventDao] from the singleton [BeCalmDatabase]. */
+    /** Provides a lazy [CalendarEventDao] proxy backed by the current user-scoped DB. */
     @Provides
-    public fun provideCalendarEventDao(db: BeCalmDatabase): CalendarEventDao =
-        db.calendarEventDao()
+    public fun provideCalendarEventDao(
+        provider: BeCalmDatabaseProvider,
+    ): CalendarEventDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::calendarEventDao)
 
-    /** Provides [PersonEnrichmentDao] from the singleton [BeCalmDatabase]. */
+    /** Provides a lazy [PersonEnrichmentDao] proxy backed by the current user-scoped DB. */
     @Provides
-    public fun providePersonEnrichmentDao(db: BeCalmDatabase): PersonEnrichmentDao =
-        db.personEnrichmentDao()
+    public fun providePersonEnrichmentDao(
+        provider: BeCalmDatabaseProvider,
+    ): PersonEnrichmentDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::personEnrichmentDao)
 
     /**
      * Provides the room-only [EmailBodyDao] from the singleton [BeCalmDatabase].
@@ -86,10 +96,44 @@ public object DatabaseModule {
      * email body fields reach a wire DTO.
      */
     @Provides
-    public fun provideEmailBodyDao(db: BeCalmDatabase): EmailBodyDao =
-        db.emailBodyDao()
+    public fun provideEmailBodyDao(
+        provider: BeCalmDatabaseProvider,
+    ): EmailBodyDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::emailBodyDao)
 
     @Provides
-    public fun provideUserProfileDao(db: BeCalmDatabase): UserProfileDao =
-        db.userProfileDao()
+    public fun provideUserProfileDao(
+        provider: BeCalmDatabaseProvider,
+    ): UserProfileDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::userProfileDao)
+
+    private inline fun <reified T : Any> lazyDaoProxy(
+        dbProvider: BeCalmDatabaseProvider?,
+        eager: BeCalmDatabase?,
+        noinline accessor: (BeCalmDatabase) -> T,
+    ): T {
+        val daoType = T::class.java
+        val invocationHandler = java.lang.reflect.InvocationHandler { proxy, method, args ->
+            when (method.name) {
+                "toString" -> "LazyDaoProxy(${daoType.simpleName})"
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.firstOrNull()
+                else -> {
+                    val database = eager ?: requireNotNull(dbProvider).current()
+                    val target = accessor(database)
+                    try {
+                        method.invoke(target, *(args ?: emptyArray()))
+                    } catch (error: InvocationTargetException) {
+                        throw (error.targetException ?: error)
+                    }
+                }
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return Proxy.newProxyInstance(
+            daoType.classLoader,
+            arrayOf(daoType),
+            invocationHandler,
+        ) as T
+    }
 }
