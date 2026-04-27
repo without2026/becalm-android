@@ -1,205 +1,95 @@
-# Spec Unit Test Checklist
+# Spec Test Coverage Status
 
-Updated: 2026-04-22
+Updated: 2026-04-27
 
-Scope:
-- This checklist tracks this round's unit-test ownership only.
-- Source of truth is limited to `docs/becalm-mvp-boundary.md`, `.spec/**`, and current `*SpecTest.kt`.
-- `covered` means an exact spec id appears in a unit `*SpecTest.kt` name.
-- Behavior-adjacent tests without an exact spec id do not count as `covered`.
-- `red` means uncovered and assigned in this round.
-- `missing` means uncovered and not assigned in this round.
-- `blocked(contract)` means spec/contracts conflict. None found in the current scope.
+Purpose:
+- Replace the old worker-ownership checklist with a current traceability audit.
+- Separate exact spec-id linkage from runtime execution status.
+- Keep only verifiable facts from the present codebase.
 
-## Worker Ownership
+Rules:
+- `covered` means the exact spec id appears in current test source (`src/test` or `src/androidTest`).
+- `missing exact-id` means grep-traceability is not locked to a current test name.
+- `PASS` is used only for commands that this session actually executed.
+- `PENDING` is used for commands not executed in this session.
 
-- `W1 cold-sync`: `TDY-010`, `COLD-001..008`
-- `W2 source-management-detail`: `SMG-002..005`, `ENR-008`
-- `W3 source-viewer-list`: `SRC-001`, `SRC-003`, `SRC-005`, `SRC-006`, `SRC-007`, `ENR-006`
-- `W4 source-viewer-detail-enrichment`: `SRC-002`, `SRC-004`, `SRC-008`, `ENR-003`, `ENR-004`, `ENR-005`
-- `W5 commitments-management`: `CMT-002`, `CMT-003`, `CMT-008`, `CMT-009`, `CMT-011`
-- `W6 commitments-edit-manual`: `MAN-001..004`, `MAN-006`, `EDIT-001`, `EDIT-002`, `EDIT-006`, `EDIT-007`, `EDIT-008`
-- `W7 auth-onboarding`: `AUTH-004`, `AUTH-006`, `AUTH-007`, `ONB-001`, `ONB-002`, `ONB-003`, `ONB-005`, `ONB-006`, `ENR-001`, `ENR-002`
-- `W8 settings-sync`: `PIPA-001..007`, `SYNC-001`, `SYNC-002`, `SYNC-004`, `SYNC-006`
+## Execution Snapshot
 
-## 1. Cold Sync / TDY-010
+Executed on clean branch `qa/verification-runtime-status`.
 
-### today-timeline
+- `PASS` `cd android && ./gradlew :app:testDebugUnitTest`
+- `PASS` `cd android && ./gradlew :app:compileDebugAndroidTestKotlin`
+- `PENDING` `cd android && ./gradlew :app:connectedDebugAndroidTest`
+  - Not executed in this session because the environment had no `adb`.
 
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `TDY-001` | `covered` | `TodayViewModelSpecTest.kt` |
-| `TDY-002` | `covered` | `TodayViewModelSpecTest.kt` |
-| `TDY-003` | `missing` | unassigned |
-| `TDY-004` | `missing` | unassigned |
-| `TDY-005` | `missing` | unassigned |
-| `TDY-006` | `covered` | `TodayViewModelSpecTest.kt` |
-| `TDY-007` | `missing` | unassigned |
-| `TDY-008` | `covered` | `TodayViewModelSpecTest.kt` |
-| `TDY-009` | `covered` | `TodayViewModelSpecTest.kt` |
-| `TDY-010` | `red` | `W1 cold-sync` |
+## Exact-ID Coverage Summary
 
-### cold-sync
+Exact spec ids found in current test source:
+- `103 / 137` covered
+- `34 / 137` missing exact-id traceability
 
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `COLD-001` | `red` | `W1 cold-sync` |
-| `COLD-002` | `red` | `W1 cold-sync` |
-| `COLD-003` | `red` | `W1 cold-sync` |
-| `COLD-004` | `red` | `W1 cold-sync` |
-| `COLD-005` | `red` | `W1 cold-sync` |
-| `COLD-006` | `red` | `W1 cold-sync` |
-| `COLD-007` | `red` | `W1 cold-sync` |
-| `COLD-008` | `red` | `W1 cold-sync` |
+| module | covered | total | missing exact-id |
+| --- | ---: | ---: | --- |
+| `auth` | 9 | 10 | `AUTH-009` |
+| `backend-sync` | 5 | 6 | `SYNC-002` |
+| `cold-sync` | 8 | 8 | none |
+| `commitment-edit` | 8 | 8 | none |
+| `commitment-management` | 13 | 13 | none |
+| `data-ingestion` | 1 | 15 | `ING-002..015` |
+| `email-pipeline` | 5 | 7 | `EMAIL-004`, `EMAIL-007` |
+| `error-states` | 0 | 9 | `ERR-001..009` |
+| `manual-commitment` | 5 | 6 | `MAN-002` |
+| `onboarding` | 10 | 10 | none |
+| `person-enrichment` | 7 | 8 | `ENR-007` |
+| `pipa-rights` | 5 | 7 | `PIPA-001`, `PIPA-007` |
+| `source-management` | 5 | 5 | none |
+| `source-viewer` | 8 | 8 | none |
+| `today-timeline` | 10 | 10 | none |
+| `voice-pipeline` | 4 | 7 | `VOI-001`, `VOI-005`, `VOI-007` |
 
-## 2. Source Management Detail
+## Missing Exact-ID Set
 
-### source-management
+- `AUTH-009`
+- `EMAIL-004`
+- `EMAIL-007`
+- `ENR-007`
+- `ERR-001`
+- `ERR-002`
+- `ERR-003`
+- `ERR-004`
+- `ERR-005`
+- `ERR-006`
+- `ERR-007`
+- `ERR-008`
+- `ERR-009`
+- `ING-002`
+- `ING-003`
+- `ING-004`
+- `ING-005`
+- `ING-006`
+- `ING-007`
+- `ING-008`
+- `ING-009`
+- `ING-010`
+- `ING-011`
+- `ING-012`
+- `ING-013`
+- `ING-014`
+- `ING-015`
+- `MAN-002`
+- `PIPA-001`
+- `PIPA-007`
+- `SYNC-002`
+- `VOI-001`
+- `VOI-005`
+- `VOI-007`
 
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `SMG-001` | `covered` | `SourcesListViewModelSpecTest.kt` |
-| `SMG-002` | `red` | `W2 source-management-detail` |
-| `SMG-003` | `red` | `W2 source-management-detail` |
-| `SMG-004` | `red` | `W2 source-management-detail` |
-| `SMG-005` | `red` | `W2 source-management-detail` |
+## Interpretation
 
-## 3. Source Viewer / Enrichment
-
-### source-viewer
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `SRC-001` | `red` | `W3 source-viewer-list` |
-| `SRC-002` | `red` | `W4 source-viewer-detail-enrichment` |
-| `SRC-003` | `red` | `W3 source-viewer-list` |
-| `SRC-004` | `red` | `W4 source-viewer-detail-enrichment` |
-| `SRC-005` | `red` | `W3 source-viewer-list` |
-| `SRC-006` | `red` | `W3 source-viewer-list` |
-| `SRC-007` | `red` | `W3 source-viewer-list` |
-| `SRC-008` | `red` | `W4 source-viewer-detail-enrichment` |
-
-### person-enrichment
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `ENR-001` | `red` | `W7 auth-onboarding` |
-| `ENR-002` | `red` | `W7 auth-onboarding` |
-| `ENR-003` | `red` | `W4 source-viewer-detail-enrichment` |
-| `ENR-004` | `red` | `W4 source-viewer-detail-enrichment` |
-| `ENR-005` | `red` | `W4 source-viewer-detail-enrichment` |
-| `ENR-006` | `red` | `W3 source-viewer-list` |
-| `ENR-007` | `missing` | unassigned |
-| `ENR-008` | `red` | `W2 source-management-detail` |
-
-## 4. Commitments Residual
-
-### commitment-management
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `CMT-001` | `covered` | `CommitmentManagementViewModelSpecTest.kt`, `CommitmentCardFormatterSpecTest.kt` |
-| `CMT-002` | `red` | `W5 commitments-management` |
-| `CMT-003` | `red` | `W5 commitments-management` |
-| `CMT-004` | `covered` | `CommitmentCardFormatterSpecTest.kt` |
-| `CMT-005` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-| `CMT-006` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-| `CMT-007` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-| `CMT-008` | `red` | `W5 commitments-management` |
-| `CMT-009` | `red` | `W5 commitments-management` |
-| `CMT-010` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-| `CMT-011` | `red` | `W5 commitments-management` |
-| `CMT-012` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-| `CMT-013` | `covered` | `CommitmentManagementViewModelSpecTest.kt` |
-
-### manual-commitment
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `MAN-001` | `red` | `W6 commitments-edit-manual` |
-| `MAN-002` | `red` | `W6 commitments-edit-manual` |
-| `MAN-003` | `red` | `W6 commitments-edit-manual` |
-| `MAN-004` | `red` | `W6 commitments-edit-manual` |
-| `MAN-005` | `covered` | `CommitmentManualValidatorSpecTest.kt` |
-| `MAN-006` | `red` | `W6 commitments-edit-manual` |
-
-### commitment-edit
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `EDIT-001` | `red` | `W6 commitments-edit-manual` |
-| `EDIT-002` | `red` | `W6 commitments-edit-manual` |
-| `EDIT-003` | `covered` | `CommitmentEditViewModelSpecTest.kt` |
-| `EDIT-004` | `covered` | `CommitmentEditValidatorSpecTest.kt` |
-| `EDIT-005` | `covered` | `CommitmentEditViewModelSpecTest.kt` |
-| `EDIT-006` | `red` | `W6 commitments-edit-manual` |
-| `EDIT-007` | `red` | `W6 commitments-edit-manual` |
-| `EDIT-008` | `red` | `W6 commitments-edit-manual` |
-
-## 5. Auth / Onboarding / Settings / Sync Residual
-
-### auth
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `AUTH-001` | `covered` | `AuthViewModelSpecTest.kt` |
-| `AUTH-002` | `covered` | `AuthViewModelSpecTest.kt` |
-| `AUTH-003` | `covered` | `AuthViewModelSpecTest.kt` |
-| `AUTH-004` | `red` | `W7 auth-onboarding` |
-| `AUTH-005` | `covered` | `AuthViewModelSpecTest.kt` |
-| `AUTH-006` | `red` | `W7 auth-onboarding` |
-| `AUTH-007` | `red` | `W7 auth-onboarding` |
-| `AUTH-008` | `covered` | `BeCalmDatabaseNamingSpecTest.kt` |
-
-### onboarding
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `ONB-001` | `red` | `W7 auth-onboarding` |
-| `ONB-PIPA` | `covered` | `OnboardingViewModelSpecTest.kt` |
-| `ONB-002` | `red` | `W7 auth-onboarding` |
-| `ONB-003` | `red` | `W7 auth-onboarding` |
-| `ONB-CONTACTS` | `covered` | `OnboardingViewModelSpecTest.kt` |
-| `ONB-004` | `covered` | `OnboardingViewModelSpecTest.kt` |
-| `ONB-005` | `red` | `W7 auth-onboarding` |
-| `ONB-006` | `red` | `W7 auth-onboarding` |
-| `ONB-007` | `covered` | `OnboardingViewModelSpecTest.kt` |
-| `ONB-008` | `covered` | `OnboardingViewModelSpecTest.kt` |
-
-### pipa-rights
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `PIPA-001` | `red` | `W8 settings-sync` |
-| `PIPA-002` | `red` | `W8 settings-sync` |
-| `PIPA-003` | `red` | `W8 settings-sync` |
-| `PIPA-004` | `red` | `W8 settings-sync` |
-| `PIPA-005` | `red` | `W8 settings-sync` |
-| `PIPA-006` | `red` | `W8 settings-sync` |
-| `PIPA-007` | `red` | `W8 settings-sync` |
-
-### backend-sync
-
-| spec id | status | evidence / owner |
-| --- | --- | --- |
-| `SYNC-001` | `red` | `W8 settings-sync` |
-| `SYNC-002` | `red` | `W8 settings-sync` |
-| `SYNC-003` | `covered` | `UploadBackoffSpecTest.kt` |
-| `SYNC-004` | `red` | `W8 settings-sync` |
-| `SYNC-005` | `covered` | `UploadBackoffSpecTest.kt` |
-| `SYNC-006` | `red` | `W8 settings-sync` |
-
-## Adjacent But Not Counted Yet
-
-- `AuthInterceptorSpecTest.kt` exercises refresh/retry paths adjacent to `AUTH-007`, but no exact spec id is locked in the test names.
-- `SettingsViewModelSpecTest.kt` exercises PIPA toggle behavior adjacent to `PIPA-003`, `PIPA-006`, and voice-consent state transitions, but no exact `PIPA-*` id is locked.
-- `SourceDetailViewModelSpecTest.kt` exercises source-detail behavior adjacent to `SMG-002..005`, but no exact `SMG-*` id is locked.
-- `PersonsViewModelSpecTest.kt`, `PersonDetailViewModelSpecTest.kt`, and `RawEventDetailViewModelSpecTest.kt` exercise `SRC-*` / `ENR-*`-adjacent behavior, but no exact ids are locked.
-- `CommitmentCreateViewModelSpecTest.kt` exercises manual/supersede-adjacent behavior, but no exact `MAN-*` or `EDIT-007` id is locked.
-- `CommitmentEditViewModelSpecTest.kt` has unlabeled edit-load/delete paths adjacent to `EDIT-001`, `EDIT-006`, and `EDIT-008`; only exact-id tests count as `covered`.
-
-## Contract Check
-
-- No `blocked(contract)` items found in the current scope.
-- `TDY-010` and `COLD-001..008` are consistent with `contracts/ui-map.yml` cold-sync routing/types.
-- `MAN-*` and `EDIT-*` are consistent with `contracts/data-model.yml` and `contracts/api-contract.yml`; no schema conflict remains in current source-of-truth.
+- This file is a grep-traceability audit, not a product-open-items list.
+- UI verification closure is tracked primarily in [docs/ui-verification-map.html](./ui-verification-map.html) and [docs/ui-test-checklist.md](./ui-test-checklist.md).
+- For the current UI/QA pass, the remaining runtime blockers are:
+  - `connectedDebugAndroidTest` full green on an emulator
+  - manual emulator smoke after the black screen fix lands
+  - `naver_imap` live smoke
+  - `daum_imap` live smoke
