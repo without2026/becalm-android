@@ -87,9 +87,19 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-010
+    type: lifecycle
+    description: "SplashScreen은 transition-only gate다. cold start에서 AuthViewModel은 persisted session + terms/onboarding DataStore를 먼저 resolve한 뒤, Terms / Login / OnboardingPipaConsent / Today 중 하나로 즉시 라우팅해야 하며 indefinite blank loading shell에 머무르면 안 된다"
+    trigger: "앱 cold start 직후 SplashScreen 첫 composition"
+    precondition: "MainActivity 시작, Compose root mounted"
+    expected: "유효 세션이 없으면 termsAccepted 값에 따라 Terms 또는 Login으로 이동. 유효 세션이 있으면 onboardingCompleted 값에 따라 OnboardingPipaConsent 또는 Today로 이동. 세션 bootstrap 실패 시 Error 상태를 통해 Terms fallback이 허용된다"
+    source: phase2-acceptance
+    tests: []
+
 invariants:
   - "인증 토큰은 EncryptedSharedPreferences 또는 Android Keystore에만 저장된다 — plaintext 저장 금지"
   - "로그아웃 시 Room DB 데이터는 삭제하지 않는다 (로컬 데이터 보존)"
   - "모든 Railway API 호출에는 Authorization: Bearer <supabase_jwt> 헤더가 첨부된다"
   - "Room DB 파일은 user_id 기반으로 분리된다 — 한 디바이스에서 여러 계정 사용 시에도 데이터 격리가 보장된다 (AUTH-008)"
   - "AuthState.Authenticated 이전에는 어떤 worker/DAO 경로도 user-scoped Room을 lazy-open 하거나 source sync enqueue를 시작하면 안 된다; persisted stale WorkManager row 복원도 예외가 아니다 (AUTH-009)"
+  - "SplashScreen은 bootstrap gate일 뿐 장기 체류 화면이 아니다; startup auth bootstrap이 끝나면 Terms / Login / Onboarding / Today 중 하나로 반드시 이행해야 한다 (AUTH-010)"

@@ -18,6 +18,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -50,6 +51,7 @@ class AuthViewModelSpecTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        coEvery { authRepository.currentSession() } returns null
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Unauthenticated)
         every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
@@ -72,6 +74,7 @@ class AuthViewModelSpecTest {
 
     @Test
     fun `ONB-006 authenticated session with completed onboarding resolves to SignedIn shell state`() = runTest {
+        coEvery { authRepository.currentSession() } returns session
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session))
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
 
@@ -119,6 +122,34 @@ class AuthViewModelSpecTest {
             viewModel.uiState.value,
         )
         coVerify(exactly = 1) { authRepository.signInWithEmail("user@example.com", "ValidPass1!") }
+    }
+
+    @Test
+    fun `AUTH-010 bootstrap resolves signed out route from persisted terms before observer emits`() = runTest {
+        every { userPrefsStore.observeTermsAccepted() } returns flowOf(false)
+        every { authRepository.observeAuthState() } returns emptyFlow()
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(AuthUiState.SignedOut(termsAccepted = false), viewModel.uiState.value)
+        coVerify(exactly = 1) { authRepository.currentSession() }
+    }
+
+    @Test
+    fun `AUTH-010 bootstrap resolves signed in route from persisted session before observer emits`() = runTest {
+        coEvery { authRepository.currentSession() } returns session
+        every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(true)
+        every { authRepository.observeAuthState() } returns emptyFlow()
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.SignedIn(userId = "user-123", onboardingCompleted = true),
+            viewModel.uiState.value,
+        )
+        coVerify(exactly = 1) { authRepository.currentSession() }
     }
 
     @Test
