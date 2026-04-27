@@ -143,7 +143,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         imapCredentialStoreMigrator.migrateIfNeeded()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
-        val credentials = loadCredentials() ?: return Result.failure()
+        val credentials = loadCredentials() ?: return Result.success()
         val imapEmail = credentials.username
         val imapPassword = credentials.appPassword
 

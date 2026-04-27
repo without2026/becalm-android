@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import java.io.IOException
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 // ─── Auth state ──────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ private const val TAG = "AuthRepository"
  */
 @Singleton
 public class AuthRepositoryImpl @Inject constructor(
-    private val authClient: SupabaseAuthClient,
+    private val authClientProvider: Provider<SupabaseAuthClient>,
     private val sessionStore: SupabaseSessionStore,
     private val tokenProvider: AuthTokenProvider,
     private val deviceKeyStore: DeviceKeyStore,
@@ -156,7 +157,7 @@ public class AuthRepositoryImpl @Inject constructor(
 ) : AuthRepository {
 
     private val cleanupPlanner: AuthSessionCleanupPlanner = AuthSessionCleanupPlanner(
-        authClient = authClient,
+        authClientProvider = authClientProvider,
         sessionStore = sessionStore,
         tokenProvider = tokenProvider,
         deviceKeyStore = deviceKeyStore,
@@ -175,6 +176,9 @@ public class AuthRepositoryImpl @Inject constructor(
     // [observeAuthState] re-emit after sign-in and sign-out. `null` means no session is
     // currently persisted. Seeded lazily from [sessionStore] on first collection.
     private val sessionFlow = MutableStateFlow<SupabaseSession?>(null)
+
+    private val authClient: SupabaseAuthClient
+        get() = authClientProvider.get()
 
     override suspend fun signInWithEmail(
         email: String,
@@ -305,7 +309,8 @@ public class AuthRepositoryImpl @Inject constructor(
             }
     }
 
-    override suspend fun currentSession(): SupabaseSession? = sessionStore.load()
+    override suspend fun currentSession(): SupabaseSession? =
+        sessionFlow.value ?: sessionStore.load()?.also { sessionFlow.value = it }
 
     override fun observeAuthState(): Flow<AuthState> = merge(
         sessionFlow,
