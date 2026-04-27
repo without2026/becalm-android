@@ -13,7 +13,8 @@ routes:
     data: []
     components: [SplashLogo]
     auth: public
-    # Decides: onboarding vs /today based on DataStore state
+    # Transition-only gate. Must resolve immediately to /terms, /login,
+    # /onboarding/pipa-consent, or /today after persisted session + DataStore bootstrap.
 
   - path: /terms
     screen: TermsScreen
