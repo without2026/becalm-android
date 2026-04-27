@@ -19,6 +19,7 @@ import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.hasExceededMaxRetries
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -92,24 +93,38 @@ import kotlinx.datetime.Clock
 public class MediaStoreWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    syncCursorStore: SyncCursorStore,
-    sourceStatusRepository: SourceStatusRepository,
-    rawIngestionEventDao: RawIngestionEventDao,
-    workScheduler: WorkScheduler,
+    private val syncCursorStoreProvider: Provider<SyncCursorStore>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
+    private val workSchedulerProvider: Provider<WorkScheduler>,
     private val userPrefsStore: UserPrefsStore,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    private val voiceMediaStoreProbe: VoiceMediaStoreProbe = VoiceMediaStoreProbe(
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        syncCursorStore: SyncCursorStore,
+        sourceStatusRepository: SourceStatusRepository,
+        rawIngestionEventDao: RawIngestionEventDao,
+        workScheduler: WorkScheduler,
+        userPrefsStore: UserPrefsStore,
+        processingPauseGate: ProcessingPauseGate,
+        logger: Logger,
+        ioDispatcher: CoroutineDispatcher,
+    ) : this(
         appContext = appContext,
-        syncCursorStore = syncCursorStore,
-        sourceStatusRepository = sourceStatusRepository,
-        rawIngestionEventDao = rawIngestionEventDao,
-        workScheduler = workScheduler,
+        workerParams = workerParams,
+        syncCursorStoreProvider = Provider { syncCursorStore },
+        sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
+        workSchedulerProvider = Provider { workScheduler },
         userPrefsStore = userPrefsStore,
+        processingPauseGate = processingPauseGate,
         logger = logger,
+        ioDispatcher = ioDispatcher,
     )
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
@@ -140,6 +155,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         }
 
         val now = Clock.System.now()
+        val voiceMediaStoreProbe = createProbe()
         val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
         val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
 
@@ -164,6 +180,17 @@ public class MediaStoreWorker @AssistedInject constructor(
     private fun isMissing(perm: String): Boolean =
         ContextCompat.checkSelfPermission(appContext, perm) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun createProbe(): VoiceMediaStoreProbe =
+        VoiceMediaStoreProbe(
+            appContext = appContext,
+            syncCursorStore = syncCursorStoreProvider.get(),
+            sourceStatusRepository = sourceStatusRepositoryProvider.get(),
+            rawIngestionEventDao = rawIngestionEventDaoProvider.get(),
+            workScheduler = workSchedulerProvider.get(),
+            userPrefsStore = userPrefsStore,
+            logger = logger,
+        )
 
     public companion object {
         private const val TAG = "MediaStoreWorker"

@@ -50,7 +50,7 @@ behaviors:
     screen: "CommitmentDetailSheet"
     interaction: "[리마인드] 버튼 탭"
     precondition: "CommitmentDetailSheet에서 action_state='pending' Commitment 표시됨"
-    expected: "Room의 commitment action_state='reminded'로 UPDATE됨. PATCH /v1/commitments/{id} {action_state: 'reminded'} 호출됨. 버튼 상태 갱신됨. due_at != null && due_at - 1h > now() 인 경우 AlarmManager에 setExactAndAllowWhileIdle(alarm_time = due_at - 1h, PendingIntent.FLAG_IMMUTABLE) 등록됨. due_at이 이미 과거거나 null이면 alarm 등록 생략"
+    expected: "Room의 commitment action_state='reminded'로 UPDATE됨. PATCH /v1/commitments/{id} {action_state: 'reminded'} 호출됨. 버튼 상태 갱신됨. due_at != null && due_at - 1h > now() 인 경우 AlarmManager에 setExactAndAllowWhileIdle(alarm_time = due_at - 1h, PendingIntent.FLAG_IMMUTABLE) 등록됨. userId/DataStore read와 AlarmManager 예약은 suspend/off-main 경로에서 수행하며 UI thread에서 runBlocking을 사용하지 않는다. due_at이 이미 과거거나 null이면 alarm 등록 생략"
     source: phase2-acceptance
     tests: []
 

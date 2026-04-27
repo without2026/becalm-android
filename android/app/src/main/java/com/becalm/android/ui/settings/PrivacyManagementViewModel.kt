@@ -2,6 +2,7 @@ package com.becalm.android.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -18,6 +19,8 @@ import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -80,6 +83,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
     private val _staticState = MutableStateFlow(PrivacyManagementUiState())
@@ -123,7 +127,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     private fun load() {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             val session = authRepository.currentSession()
             val userId = session?.userId
             val commitmentCount = userId?.let { commitmentDao.countForUser(it) } ?: 0
@@ -144,7 +148,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     public fun onExportRequested() {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             val userId = currentUserId()
             if (userId.isNullOrBlank()) {
                 _staticState.value = _staticState.value.copy(error = "no signed-in user")
@@ -171,7 +175,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     public fun onExportSaved() {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             userPrefsStore.appendPipaActionLog(
                 PipaActionLogEntry(
                     action = "data_export",
@@ -187,7 +191,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     public fun onWithdrawConsent(target: WithdrawConsentTarget) {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             when (target) {
                 WithdrawConsentTarget.VOICE -> withdrawVoiceConsent()
                 WithdrawConsentTarget.GMAIL -> withdrawEmailProvider(EmailPipaProvider.GMAIL)
@@ -201,7 +205,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     public fun onSetProcessingPaused(paused: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             if (paused) {
                 userPrefsStore.setProcessingPaused(true)
                 userPrefsStore.setPauseStartedAt(Clock.System.now().toEpochMilliseconds())
@@ -230,7 +234,7 @@ public class PrivacyManagementViewModel @Inject constructor(
         emailInput: String,
         confirmationText: String,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
             val expectedEmail = _staticState.value.userEmail
             if (expectedEmail.isNullOrBlank() || emailInput != expectedEmail) {
                 _staticState.value = _staticState.value.copy(error = "email mismatch")

@@ -4,8 +4,10 @@ import android.content.Context
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,11 +29,10 @@ private const val TAG = "BeCalmDatabaseProvider"
  * userId, so two users on the same device physically cannot share a file.
  *
  * ## Bootstrap contract
- * [current] lazily opens the database on first access by reading
- * [UserPrefsStore.observeCurrentUserId]. If no user is signed in the call throws —
- * the DAO layer must never be touched before sign-in. On cold start
- * [com.becalm.android.BecalmApplication] nudges the provider via [ensureOpenFor]
- * so Hilt's first DAO injection resolves the correct user immediately.
+ * [current] lazily opens the database from a cached [UserPrefsStore.observeCurrentUserId]
+ * snapshot. If no user is signed in the call throws — the DAO layer must never be touched
+ * before sign-in. On cold start [com.becalm.android.BecalmApplication] nudges the provider
+ * via [ensureOpenFor] so Hilt's first DAO injection resolves the correct user immediately.
  *
  * ## In-process user swap caveat (alpha MVP)
  * [ensureOpenFor] idempotently no-ops when the requested [userIdHash] matches the
@@ -63,6 +64,16 @@ public class BeCalmDatabaseProvider @Inject constructor(
     private var currentDb: BeCalmDatabase? = null
     private var currentHash: String? = null
     private var legacyCleanupDone: Boolean = false
+    @Volatile
+    private var currentUserIdSnapshot: String? = null
+
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            userPrefsStore.observeCurrentUserId().collect { userId ->
+                currentUserIdSnapshot = userId
+            }
+        }
+    }
 
     /**
      * Ensures the provider is open against [userIdHash]. Idempotent when the same hash
@@ -107,7 +118,7 @@ public class BeCalmDatabaseProvider @Inject constructor(
     public fun current(): BeCalmDatabase {
         lock.withLock {
             currentDb?.let { return it }
-            val userId = runBlocking { userPrefsStore.observeCurrentUserId().first() }
+            val userId = currentUserIdSnapshot
                 ?: error(
                     "BeCalmDatabase accessed before sign-in. Room requires an authenticated " +
                         "user; defer DAO usage until AuthRepository.observeAuthState() emits " +

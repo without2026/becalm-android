@@ -12,6 +12,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 import kotlinx.datetime.Instant
 import kotlin.time.Duration.Companion.hours
 
@@ -31,12 +32,30 @@ import kotlin.time.Duration.Companion.hours
 public class OverdueSweepWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val authRepository: AuthRepository,
-    private val commitmentRepository: CommitmentRepository,
+    private val authRepositoryProvider: Provider<AuthRepository>,
+    private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val clock: Clock,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
+
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        authRepository: AuthRepository,
+        commitmentRepository: CommitmentRepository,
+        clock: Clock,
+        processingPauseGate: ProcessingPauseGate,
+        logger: Logger,
+    ) : this(
+        appContext = appContext,
+        workerParams = workerParams,
+        authRepositoryProvider = Provider { authRepository },
+        commitmentRepositoryProvider = Provider { commitmentRepository },
+        clock = clock,
+        processingPauseGate = processingPauseGate,
+        logger = logger,
+    )
 
     override suspend fun doWork(): Result {
         if (processingPauseGate.shouldSkip(TAG)) {
@@ -47,7 +66,7 @@ public class OverdueSweepWorker @AssistedInject constructor(
                 ),
             )
         }
-        val userId = authRepository.currentSession()?.userId
+        val userId = authRepositoryProvider.get().currentSession()?.userId
             ?: return Result.success(
                 workDataOf(
                     KEY_CANDIDATE_COUNT to 0,
@@ -59,6 +78,7 @@ public class OverdueSweepWorker @AssistedInject constructor(
         val cutoff = graceCutoff(now)
         var totalCandidates = 0
         var totalMarked = 0
+        val commitmentRepository = commitmentRepositoryProvider.get()
 
         while (true) {
             val candidates = commitmentRepository.findOverdueCandidates(

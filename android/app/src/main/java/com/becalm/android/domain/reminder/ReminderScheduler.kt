@@ -15,7 +15,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Instant
 
 /**
@@ -61,7 +60,7 @@ public class ReminderScheduler @Inject constructor(
      * @param commitmentId Opaque commitment identifier (redacted in logs).
      * @param dueAt        Commitment deadline. The actual alarm fires 1 hour before this.
      */
-    public fun schedule(commitmentId: String, dueAt: Instant?) {
+    public suspend fun schedule(commitmentId: String, dueAt: Instant?) {
         if (dueAt == null) {
             logger.d(TAG, "schedule skipped: dueAt null for %08x".format(commitmentId.hashCode()))
             return
@@ -77,15 +76,10 @@ public class ReminderScheduler @Inject constructor(
             return
         }
 
-        // Capture the currently signed-in user id at schedule time so the
-        // receiver can enforce a user-scoped Room lookup on fire. An alarm
-        // scheduled for one account must never surface data for another
-        // account even if the user signs out and signs in as someone else
-        // before the alarm fires (data-model.yml:476 cross-account leak
-        // guard). runBlocking is acceptable here because this runs on a
-        // background coroutine (the VM's viewModelScope) and we only read
-        // a DataStore value that is already cached in memory.
-        val userId = runBlocking { userPrefsStore.observeCurrentUserId().firstOrNull() }
+        // Capture the currently signed-in user id at schedule time so the receiver can
+        // enforce a user-scoped Room lookup on fire. This remains suspend-only so UI
+        // callers never block the main thread on DataStore.
+        val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
         if (userId.isNullOrBlank()) {
             logger.w(
                 TAG,

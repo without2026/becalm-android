@@ -2,6 +2,7 @@ package com.becalm.android.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -12,6 +13,8 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -158,6 +161,7 @@ public class TodayViewModel @Inject constructor(
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     clock: Clock,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
     private val _effects: MutableSharedFlow<TodayEffect> = MutableSharedFlow(extraBufferCapacity = 1)
@@ -225,8 +229,8 @@ public class TodayViewModel @Inject constructor(
     public fun onPullRefresh() {
         // TDY-009: tap-driven catch-up on the strip is explicitly prohibited ("칩 탭
         // 인터랙션 없음") — this pull gesture is the single user-facing trigger.
-        foregroundCatchUpScheduler.triggerCatchUp()
-        viewModelScope.launch {
+        viewModelScope.launch(ioDispatcher) {
+            foregroundCatchUpScheduler.triggerCatchUp()
             val userId = authRepository.currentSession()?.userId
             refreshingFlow.value = true
             try {

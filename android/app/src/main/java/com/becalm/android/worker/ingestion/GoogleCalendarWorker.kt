@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 
 /**
  * Thin WorkManager bridge for the backend-owned Google Calendar sync path.
@@ -21,27 +22,31 @@ import dagger.assisted.AssistedInject
 public class GoogleCalendarWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val authRepository: AuthRepository,
-    private val calendarEventRepository: CalendarEventRepository,
-    private val sourceStatusRepository: SourceStatusRepository,
+    private val authRepositoryProvider: Provider<AuthRepository>,
+    private val calendarEventRepositoryProvider: Provider<CalendarEventRepository>,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingPauseGate: ProcessingPauseGate,
     private val clock: Clock,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
 
-    public override suspend fun doWork(): Result =
-        runServerBackedCalendarSync(
+    public override suspend fun doWork(): Result {
+        if (processingPauseGate.shouldSkip(TAG)) {
+            return Result.success()
+        }
+        return runServerBackedCalendarSync(
             sourceType = SourceType.GOOGLE_CALENDAR,
             tag = TAG,
             runAttemptCount = runAttemptCount,
             inputData = inputData,
-            authRepository = authRepository,
-            calendarEventRepository = calendarEventRepository,
-            sourceStatusRepository = sourceStatusRepository,
+            authRepository = authRepositoryProvider.get(),
+            calendarEventRepository = calendarEventRepositoryProvider.get(),
+            sourceStatusRepository = sourceStatusRepositoryProvider.get(),
             processingPauseGate = processingPauseGate,
             clock = clock,
             logger = logger,
         )
+    }
 
     public companion object {
         private const val TAG = "GoogleCalendarWorker"

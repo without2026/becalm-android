@@ -29,7 +29,7 @@ behaviors:
     screen: "PrivacyManagementScreen"
     interaction: "[내 데이터 다운로드] 탭"
     precondition: "로그인 상태, Room DB 접근 가능"
-    expected: "AlertDialog '데이터를 ZIP 파일로 저장하시겠습니까?' 확인 시 백그라운드 coroutine이 Room 각 테이블을 SELECT → JSON 직렬화 → ZIP 엔트리. 완료 후 ACTION_CREATE_DOCUMENT intent로 'becalm_export_{user_id_hash}_{yyyyMMdd_HHmm}.zip' 저장. ZIP 구조: /raw_ingestion_events.json, /commitments.json, /calendar_events.json, /email_body.json, /persons_enrichment.json, /user_profile.json, /datastore.json, /README.txt(PIPA 열람권 안내 + 각 파일 스키마 요약). 저장 실패 시 Snackbar 에러. 민감 비밀번호·토큰은 절대 포함 안 함. 대용량(이메일 bodies 등) 시 progress indicator 표시"
+    expected: "AlertDialog '데이터를 ZIP 파일로 저장하시겠습니까?' 확인 시 백그라운드 coroutine이 Room 각 테이블을 SELECT → JSON 직렬화 → ZIP 엔트리. Room SELECT, JSON 직렬화, ZIP I/O는 IO/Default dispatcher에서 수행하며 main thread를 차단하지 않는다. 완료 후 ACTION_CREATE_DOCUMENT intent로 'becalm_export_{user_id_hash}_{yyyyMMdd_HHmm}.zip' 저장. ZIP 구조: /raw_ingestion_events.json, /commitments.json, /calendar_events.json, /email_body.json, /persons_enrichment.json, /user_profile.json, /datastore.json, /README.txt(PIPA 열람권 안내 + 각 파일 스키마 요약). 저장 실패 시 Snackbar 에러. 민감 비밀번호·토큰은 절대 포함 안 함. 대용량(이메일 bodies 등) 시 progress indicator 표시"
     source: phase2-acceptance
     tests: []
 

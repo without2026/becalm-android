@@ -1,5 +1,6 @@
 package com.becalm.android.ui.settings
 
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CalendarEventDao
@@ -26,7 +27,10 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 public data class PrivacyExportPayload(
     val fileName: String,
@@ -43,26 +47,41 @@ public class PrivacyDataExporter @Inject constructor(
     private val userProfileDao: UserProfileDao,
     private val userPrefsStore: UserPrefsStore,
     private val moshi: Moshi,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-    private val rawEventsAdapter = moshi.adapter<List<RawIngestionEventEntity>>(
-        Types.newParameterizedType(List::class.java, RawIngestionEventEntity::class.java),
-    )
-    private val commitmentsAdapter = moshi.adapter<List<CommitmentEntity>>(
-        Types.newParameterizedType(List::class.java, CommitmentEntity::class.java),
-    )
-    private val calendarEventsAdapter = moshi.adapter<List<CalendarEventEntity>>(
-        Types.newParameterizedType(List::class.java, CalendarEventEntity::class.java),
-    )
-    private val emailBodiesAdapter = moshi.adapter<List<EmailBodyEntity>>(
-        Types.newParameterizedType(List::class.java, EmailBodyEntity::class.java),
-    )
-    private val enrichmentAdapter = moshi.adapter<List<PersonEnrichmentEntity>>(
-        Types.newParameterizedType(List::class.java, PersonEnrichmentEntity::class.java),
-    )
-    private val userProfileAdapter = moshi.adapter(UserProfileEntity::class.java).serializeNulls()
-    private val datastoreAdapter = moshi.adapter(Map::class.java).serializeNulls()
+    private val rawEventsAdapter by lazy {
+        moshi.adapter<List<RawIngestionEventEntity>>(
+            Types.newParameterizedType(List::class.java, RawIngestionEventEntity::class.java),
+        )
+    }
+    private val commitmentsAdapter by lazy {
+        moshi.adapter<List<CommitmentEntity>>(
+            Types.newParameterizedType(List::class.java, CommitmentEntity::class.java),
+        )
+    }
+    private val calendarEventsAdapter by lazy {
+        moshi.adapter<List<CalendarEventEntity>>(
+            Types.newParameterizedType(List::class.java, CalendarEventEntity::class.java),
+        )
+    }
+    private val emailBodiesAdapter by lazy {
+        moshi.adapter<List<EmailBodyEntity>>(
+            Types.newParameterizedType(List::class.java, EmailBodyEntity::class.java),
+        )
+    }
+    private val enrichmentAdapter by lazy {
+        moshi.adapter<List<PersonEnrichmentEntity>>(
+            Types.newParameterizedType(List::class.java, PersonEnrichmentEntity::class.java),
+        )
+    }
+    private val userProfileAdapter by lazy {
+        moshi.adapter(UserProfileEntity::class.java).serializeNulls()
+    }
+    private val datastoreAdapter by lazy {
+        moshi.adapter(Map::class.java).serializeNulls()
+    }
 
-    public suspend fun export(userId: String, nowEpochMs: Long): PrivacyExportPayload {
+    public suspend fun export(userId: String, nowEpochMs: Long): PrivacyExportPayload = withContext(ioDispatcher) {
         val rawEvents = rawIngestionEventDao.findAllForUser(userId)
         val commitments = commitmentDao.findAllForUser(userId)
         val calendarEvents = calendarEventDao.findAllForUser(userId)
@@ -105,7 +124,7 @@ public class PrivacyDataExporter @Inject constructor(
             putJson(zip, "datastore.json", datastoreAdapter.toJson(datastoreDump))
             putReadme(zip)
         }
-        return PrivacyExportPayload(
+        PrivacyExportPayload(
             fileName = buildFilename(userId, nowEpochMs),
             bytes = out.toByteArray(),
         )

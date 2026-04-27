@@ -23,6 +23,7 @@ import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -87,18 +88,63 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 public class VoiceUploadWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val rawIngestionEventDao: RawIngestionEventDao,
-    private val commitmentDao: CommitmentDao,
-    private val voiceApi: VoiceApi,
+    private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
+    private val commitmentDaoProvider: Provider<CommitmentDao>,
+    private val voiceApiProvider: Provider<VoiceApi>,
     private val userPrefsStore: UserPrefsStore,
-    private val sourceStatusRepository: SourceStatusRepository,
-    private val workScheduler: WorkScheduler,
+    private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val workSchedulerProvider: Provider<WorkScheduler>,
     private val processingPauseGate: ProcessingPauseGate,
     private val voiceFailureNotifier: VoiceFailureNotifier,
     private val moshi: Moshi,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
+
+    public constructor(
+        appContext: Context,
+        workerParams: WorkerParameters,
+        rawIngestionEventDao: RawIngestionEventDao,
+        commitmentDao: CommitmentDao,
+        voiceApi: VoiceApi,
+        userPrefsStore: UserPrefsStore,
+        sourceStatusRepository: SourceStatusRepository,
+        workScheduler: WorkScheduler,
+        processingPauseGate: ProcessingPauseGate,
+        voiceFailureNotifier: VoiceFailureNotifier,
+        moshi: Moshi,
+        logger: Logger,
+        ioDispatcher: CoroutineDispatcher,
+    ) : this(
+        appContext = appContext,
+        workerParams = workerParams,
+        rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
+        commitmentDaoProvider = Provider { commitmentDao },
+        voiceApiProvider = Provider { voiceApi },
+        userPrefsStore = userPrefsStore,
+        sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        workSchedulerProvider = Provider { workScheduler },
+        processingPauseGate = processingPauseGate,
+        voiceFailureNotifier = voiceFailureNotifier,
+        moshi = moshi,
+        logger = logger,
+        ioDispatcher = ioDispatcher,
+    )
+
+    private val rawIngestionEventDao: RawIngestionEventDao
+        get() = rawIngestionEventDaoProvider.get()
+
+    private val commitmentDao: CommitmentDao
+        get() = commitmentDaoProvider.get()
+
+    private val voiceApi: VoiceApi
+        get() = voiceApiProvider.get()
+
+    private val sourceStatusRepository: SourceStatusRepository
+        get() = sourceStatusRepositoryProvider.get()
+
+    private val workScheduler: WorkScheduler
+        get() = workSchedulerProvider.get()
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
         if (processingPauseGate.shouldSkip(TAG)) {
