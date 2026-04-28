@@ -43,10 +43,10 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  *
  * ## ING-011 — 100% arrival guarantee (foreground path)
  * When the app was backgrounded or killed, periodic workers may not have fired in time.
- * This scheduler fires on `onStart` (i.e. each foreground entry) so that any rows that
- * arrived while the app was absent are captured. Automatic lifecycle catch-up waits briefly
- * so it does not compete with the first rendered frame; user-triggered pull-to-refresh remains
- * immediate.
+ * This scheduler fires after runtime startup so that any rows missed before process
+ * observers are registered are captured. Automatic lifecycle catch-up waits briefly and
+ * runs at most once per source per process; realtime observers and periodic workers own
+ * ongoing arrivals. User-triggered pull-to-refresh remains immediate.
  *
  * ## Lifecycle registration
  * Call [start] only after an authenticated session is mirrored into
@@ -94,6 +94,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
 ) : DefaultLifecycleObserver {
 
     private var onStartCatchUpJob: Job? = null
+    private val automaticCatchUpEnqueuedSources: MutableSet<String> = linkedSetOf()
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -147,11 +148,13 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     // ── DefaultLifecycleObserver ──────────────────────────────────────────────
 
     /**
-     * Fires each time the app process moves from background to foreground.
+     * Fires when the app process enters foreground after this observer is registered.
      *
      * Launches a coroutine that reads the current enabled-source set and enqueues an
-     * expedited one-shot worker for each. WorkManager deduplicates concurrent enqueues
-     * per unique work name, so rapid foreground transitions are safe.
+     * expedited one-shot worker for each source that has not already had an automatic
+     * catch-up in this process. This avoids waking WorkManager's DB on every resume; missed
+     * rows after startup are handled by realtime observers, periodic workers, or explicit
+     * pull-to-refresh.
      */
     override fun onStart(owner: LifecycleOwner) {
         if (onStartCatchUpJob?.isActive == true) {
@@ -176,8 +179,15 @@ public class ForegroundCatchUpScheduler @Inject constructor(
                     return@launch
                 }
 
-                logger.d(TAG, "onStart: enqueueing catch-up for sources=$enabledSources")
-                enqueueForSources(enabledSources)
+                val pendingSources = enabledSources - automaticCatchUpEnqueuedSources
+                if (pendingSources.isEmpty()) {
+                    logger.d(TAG, "onStart: catch-up already enqueued for sources=$enabledSources — skipping")
+                    return@launch
+                }
+
+                automaticCatchUpEnqueuedSources += pendingSources
+                logger.d(TAG, "onStart: enqueueing catch-up for sources=$pendingSources")
+                enqueueForSources(pendingSources)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.e(TAG, "onStart: failed to enqueue catch-up work", e)

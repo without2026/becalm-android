@@ -78,6 +78,7 @@ internal class VoiceMediaStoreProbe(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val workScheduler: WorkScheduler,
     private val userPrefsStore: UserPrefsStore,
+    private val callRecordingPersonMatcher: CallRecordingPersonMatcher,
     private val logger: Logger,
 ) {
 
@@ -322,6 +323,7 @@ internal class VoiceMediaStoreProbe(
 
         // PIPA snapshot — same contract as voice branch (cold-sync.spec:49).
         val pipaConsented = userPrefsStore.observeThirdPartyProvisionConsent().first()
+        val callLogMatchingConsented = userPrefsStore.observeCallLogMatchingConsent().first()
 
         // Independent watermark per MediaStore folder subtree. Sharing [KIND_VOICE] between
         // the two branches would allow the voice scan — which runs first in
@@ -404,14 +406,27 @@ internal class VoiceMediaStoreProbe(
                     idxTitle = idxTitle.takeIf { it >= 0 },
                 )
 
-                // ING-001: extract counterparty number from filename and normalize to E.164;
-                // null when no valid number can be parsed (graceful degrade).
-                val personRef = PhoneNumberUtils.extractCounterpartyNumberFromDisplayName(row.displayName)
+                // Person-first contract: prefer explicit-consent CallLog matching because
+                // Samsung call-recording filenames often omit the counterparty number.
+                // Fall back to filename parsing so existing behavior is preserved when the
+                // user has not granted CallLog matching consent/permission.
+                val callLogMatch = if (callLogMatchingConsented) {
+                    callRecordingPersonMatcher.match(
+                        recordingDateAddedSec = row.dateAddedSec,
+                        recordingDurationSec = row.durationSec,
+                        displayName = row.displayName,
+                    )
+                } else {
+                    null
+                }
+                val filenamePersonRef = PhoneNumberUtils.extractCounterpartyNumberFromDisplayName(row.displayName)
+                val personRef = callLogMatch?.personRef ?: filenamePersonRef
 
                 logger.d(
                     TAG,
                     "call_recording row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} " +
-                        "dateAddedSec=${row.dateAddedSec} personRefPresent=${personRef != null}",
+                        "dateAddedSec=${row.dateAddedSec} personRefPresent=${personRef != null} " +
+                        "callLogMatched=${callLogMatch != null}",
                 )
 
                 val insertResult = insertVoiceRow(

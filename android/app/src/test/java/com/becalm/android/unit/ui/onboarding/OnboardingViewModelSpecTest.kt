@@ -278,6 +278,7 @@ class OnboardingViewModelSpecTest {
             mapOf(
                 "PIPA_CONSENT" to "GRANTED",
                 "RECORDING_FOLDER" to "GRANTED",
+                "CALL_LOG_MATCHING" to "GRANTED",
                 "CONTACTS_PERM" to "DENIED",
                 "LINK_GMAIL" to "COMPLETE",
             ),

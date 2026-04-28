@@ -62,6 +62,9 @@ public sealed class BecalmRoute(public val path: String) {
     /** Onboarding step: recording folder permission grant. */
     public data object OnboardingRecordingFolder : BecalmRoute("onboarding/recording-folder")
 
+    /** Onboarding step: optional READ_CALL_LOG consent for call-recording person matching. */
+    public data object OnboardingCallLogMatching : BecalmRoute("onboarding/call-log-matching")
+
     /**
      * Onboarding step: READ_CONTACTS permission with PIPA notice (ENR-001).
      * Graceful skip — refusal does not block app functionality.

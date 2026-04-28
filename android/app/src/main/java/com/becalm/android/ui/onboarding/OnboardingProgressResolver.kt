@@ -56,6 +56,7 @@ internal object OnboardingProgressResolver {
         OnboardingStep.LOGIN -> BecalmRoute.Login.path
         OnboardingStep.PIPA_CONSENT -> BecalmRoute.OnboardingPipaConsent.path
         OnboardingStep.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
+        OnboardingStep.CALL_LOG_MATCHING -> BecalmRoute.OnboardingCallLogMatching.path
         OnboardingStep.CONTACTS_PERM -> BecalmRoute.OnboardingContacts.path
         OnboardingStep.LINK_GMAIL ->
             if (emailConsents[EmailPipaProvider.GMAIL] == true) {

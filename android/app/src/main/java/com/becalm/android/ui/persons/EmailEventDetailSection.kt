@@ -36,24 +36,19 @@ import com.becalm.android.ui.components.IngestionTimestamp
  * fields (snippet / body / attachments / extracted commitments) are absent.
  *
  * HTML-only degrade — when `body_plain` is null but `body_html` is present
- * (EMAIL-007 graceful-degrade case), the section surfaces a localized notice
- * plus a placeholder "원문보기" button whose click shows the post-MVP
- * [onViewOriginalRequested] hook (currently a toast / snackbar rendered by the
- * host Sheet).
+ * (EMAIL-007 graceful-degrade case), the section surfaces a localized notice.
+ * It intentionally does not expose a "view original" action until a real HTML renderer
+ * exists, so the user never sees a fake affordance.
  *
  * Spec: SRC-004, EMAIL-003, EMAIL-004, EMAIL-007,
  * `.spec/contracts/ui-map.yml:113-118 § RawEventDetailSheet.components`.
  *
  * @param state Fully hydrated UI state; caller guarantees
  *   `state.sourceType in EMAIL_SOURCE_TYPES`.
- * @param onViewOriginalRequested Called when the post-MVP "원문보기" button is
- *   tapped on the body-html-only degrade path. Host Sheet typically renders a
- *   "coming soon" toast.
  */
 @Composable
 internal fun EmailEventDetailSection(
     state: RawEventDetailUiState,
-    onViewOriginalRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sourceType = state.sourceType ?: return
@@ -71,7 +66,6 @@ internal fun EmailEventDetailSection(
 
         EmailBodyBlock(
             body = state.emailBody,
-            onViewOriginalRequested = onViewOriginalRequested,
         )
 
         if (state.attachmentCount > 0 || state.commitmentsExtractedCount > 0) {
@@ -107,13 +101,12 @@ private const val BODY_COLLAPSED_CHAR_LIMIT: Int = 500
  * Renders the email body with progressive disclosure:
  * - `body_plain` present & length ≤ limit → full text, no toggle.
  * - `body_plain` present & length > limit → collapsed preview + expand toggle.
- * - `body_plain` null & `body_html` present → degrade notice + "원문보기" button.
+ * - `body_plain` null & `body_html` present → degrade notice.
  * - Both null → no row (the parent spacedBy gap collapses too).
  */
 @Composable
 private fun EmailBodyBlock(
     body: EmailBodyUi?,
-    onViewOriginalRequested: () -> Unit,
 ) {
     if (body == null) return
     val bodyPlain = body.bodyPlain
@@ -121,7 +114,7 @@ private fun EmailBodyBlock(
 
     when {
         bodyPlain != null -> ExpandableBodyText(bodyPlain = bodyPlain)
-        bodyHtml != null -> HtmlOnlyDegradeRow(onViewOriginalRequested = onViewOriginalRequested)
+        bodyHtml != null -> HtmlOnlyDegradeRow()
         else -> Unit
     }
 }
@@ -160,19 +153,10 @@ private fun ExpandableBodyText(bodyPlain: String) {
 }
 
 @Composable
-private fun HtmlOnlyDegradeRow(onViewOriginalRequested: () -> Unit) {
-    Column {
-        Text(
-            text = stringResource(R.string.raw_event_body_html_only_notice),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        TextButton(
-            onClick = onViewOriginalRequested,
-            contentPadding = PaddingValues(all = 0.dp),
-        ) {
-            Text(text = stringResource(R.string.raw_event_view_html_original))
-        }
-    }
+private fun HtmlOnlyDegradeRow() {
+    Text(
+        text = stringResource(R.string.raw_event_body_html_only_notice),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

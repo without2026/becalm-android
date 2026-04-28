@@ -25,6 +25,8 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Local CallLog matching for call recordings. Separate runtime consent + permission. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
     <!-- WorkManager long-running data-sync (upload + ingestion workers) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

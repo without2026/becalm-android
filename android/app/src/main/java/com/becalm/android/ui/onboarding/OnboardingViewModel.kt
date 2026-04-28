@@ -35,10 +35,10 @@ import kotlinx.coroutines.launch
  * only [UserPrefsStore.setOnboardingCompleted] is written at the very end. Adding or reordering
  * enum members is therefore safe for in-progress onboardings.
  *
- * **Canonical 12-step flow** (spec `onboarding.spec.yml` invariant line 110):
+ * **Canonical onboarding flow** (spec `onboarding.spec.yml` invariant line 110):
  *
  * ```
- * 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 연락처
+ * 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 통화기록매칭 → 연락처
  *      → Gmail → Outlook메일 → IMAP
  *      → Google캘린더 → Outlook캘린더
  *      → 배터리최적화 → ColdSync
@@ -57,6 +57,8 @@ public enum class OnboardingStep {
     PIPA_CONSENT,
     /** Step 4 — [RecordingFolderScreen]. Skipped if PIPA consent denied. */
     RECORDING_FOLDER,
+    /** Optional step — local CallLog matching consent for call-recording person refs. */
+    CALL_LOG_MATCHING,
     /** Step 5 — [ContactsPermissionScreen] (ONB-CONTACTS). */
     CONTACTS_PERM,
     /** Step 6 — [GmailOAuthScreen]. */
@@ -375,6 +377,25 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    /** Persists optional CallLog matching consent for call-recording person resolution. */
+    public fun onCallLogMatchingConsentResult(granted: Boolean) {
+        viewModelScope.launch {
+            userPrefsStore.setCallLogMatchingConsent(granted)
+            onMarkStepStatus(
+                OnboardingStep.CALL_LOG_MATCHING,
+                if (granted) StepStatus.GRANTED else StepStatus.DENIED,
+            )
+        }
+    }
+
+    /** Explicit graceful-skip branch for CallLog matching. */
+    public fun onSkipCallLogMatching() {
+        viewModelScope.launch {
+            userPrefsStore.setCallLogMatchingConsent(false)
+            onSkipStep(OnboardingStep.CALL_LOG_MATCHING)
+        }
+    }
+
     /** Records an explicit skip for a calendar step and moves the flow forward. */
     public fun onSkipCalendarSource(provider: CalendarOAuthProvider) {
         viewModelScope.launch {
@@ -612,6 +633,7 @@ public class OnboardingViewModel @Inject constructor(
                         mapOf(
                             OnboardingStep.PIPA_CONSENT to StepStatus.DENIED,
                             OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED,
+                            OnboardingStep.CALL_LOG_MATCHING to StepStatus.SKIPPED,
                         )
                     },
                 )

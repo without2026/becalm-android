@@ -1,6 +1,5 @@
 package com.becalm.android.ui.persons
 
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -64,8 +62,6 @@ public fun RawEventDetailSheet(
     viewModel: RawEventDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val viewOriginalToast = stringResource(R.string.raw_event_view_html_original_todo_toast)
 
     BecalmScaffold(
         title = stringResource(R.string.raw_event_detail_title),
@@ -98,13 +94,6 @@ public fun RawEventDetailSheet(
             }
             state.sourceType != null -> RawEventDetailContent(
                 state = state,
-                onViewOriginalRequested = {
-                    Toast.makeText(
-                        context,
-                        viewOriginalToast,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
                 modifier = Modifier.padding(padding),
             )
             else -> {
@@ -120,7 +109,6 @@ public fun RawEventDetailSheet(
 @Composable
 internal fun RawEventDetailContent(
     state: RawEventDetailUiState,
-    onViewOriginalRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -137,7 +125,6 @@ internal fun RawEventDetailContent(
             if (state.sourceType in EMAIL_SOURCE_TYPES) {
                 EmailEventDetailSection(
                     state = state,
-                    onViewOriginalRequested = onViewOriginalRequested,
                 )
             } else {
                 NonEmailEventDetailSection(state = state)

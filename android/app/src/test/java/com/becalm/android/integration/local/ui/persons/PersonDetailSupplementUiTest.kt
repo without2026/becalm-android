@@ -19,7 +19,6 @@ import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.persons.UnassignedEventsContent
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
-import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -94,7 +93,6 @@ class PersonDetailSupplementUiTest {
                         commitmentsExtractedCount = 3,
                         loading = false,
                     ),
-                    onViewOriginalRequested = {},
                 )
             }
         }
@@ -110,9 +108,7 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
-    fun `raw event detail content shows html only degrade action`() {
-        var originalClicks = 0
-
+    fun `raw event detail content shows html only degrade notice without fake action`() {
         composeRule.setContent {
             BecalmTheme {
                 RawEventDetailContent(
@@ -127,17 +123,11 @@ class PersonDetailSupplementUiTest {
                         ),
                         loading = false,
                     ),
-                    onViewOriginalRequested = { originalClicks += 1 },
                 )
             }
         }
 
         composeRule.onNodeWithText(string(R.string.raw_event_body_html_only_notice)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.raw_event_view_html_original)).performClick()
-
-        composeRule.runOnIdle {
-            assertEquals(1, originalClicks)
-        }
     }
 
     private fun string(resId: Int, vararg args: Any): String =
