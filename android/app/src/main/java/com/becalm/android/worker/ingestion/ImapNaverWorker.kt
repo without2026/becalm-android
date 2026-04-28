@@ -30,6 +30,7 @@ import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.remote.imap.ImapProviderDenylist
 import com.becalm.android.data.remote.imap.ImapSpecialUse
 import com.becalm.android.data.repository.EmailBodyRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
@@ -103,6 +104,7 @@ public class ImapNaverWorker @AssistedInject constructor(
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
     private val processingPauseGate: ProcessingPauseGate,
@@ -142,7 +144,10 @@ public class ImapNaverWorker @AssistedInject constructor(
         imapCredentialStoreMigrator.migrateIfNeeded()
 
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
-        val credentials = loadCredentials() ?: return Result.success()
+        val credentials = loadCredentials() ?: run {
+            processingStatusRepository.recordBlocked(SourceType.NAVER_IMAP, "IMAP credentials missing")
+            return Result.success()
+        }
         val imapEmail = credentials.username
         val imapPassword = credentials.appPassword
 
@@ -156,6 +161,8 @@ public class ImapNaverWorker @AssistedInject constructor(
         }
 
         sourceStatusRepository.recordSyncStart(SourceType.NAVER_IMAP)
+        processingStatusRepository.recordScanning(SourceType.NAVER_IMAP)
+        var fetchedCount = 0
 
         // ── 2. Discover folders ──────────────────────────────────────────────
         val listResult = imapClient.listFolders(
@@ -192,7 +199,10 @@ public class ImapNaverWorker @AssistedInject constructor(
                 userId = userId,
                 lookbackDays = lookbackDays,
             )
-            if (outcome is PassOutcome.Terminal) return outcome.result
+            when (outcome) {
+                is PassOutcome.Success -> fetchedCount += outcome.fetchedCount
+                is PassOutcome.Terminal -> return outcome.result
+            }
         }
 
         // ── 4. Pass 2: SENT ──────────────────────────────────────────────────
@@ -207,9 +217,17 @@ public class ImapNaverWorker @AssistedInject constructor(
                 userId = userId,
                 lookbackDays = lookbackDays,
             )
-            if (outcome is PassOutcome.Terminal) return outcome.result
+            when (outcome) {
+                is PassOutcome.Success -> fetchedCount += outcome.fetchedCount
+                is PassOutcome.Terminal -> return outcome.result
+            }
         }
 
+        processingStatusRepository.recordScanResult(
+            sourceType = SourceType.NAVER_IMAP,
+            itemCount = fetchedCount,
+            newItemsMessage = "Queued Gemini extraction",
+        )
         sourceStatusRepository.recordSyncSuccess(
             sourceType = SourceType.NAVER_IMAP,
             at = Clock.System.now(),
@@ -484,6 +502,7 @@ public class ImapNaverWorker @AssistedInject constructor(
      */
     private suspend fun handleFetchFailure(error: BecalmError): Result {
         logger.e(TAG, "IMAP fetch failed error=${error::class.simpleName}")
+        processingStatusRepository.recordError(SourceType.NAVER_IMAP, error::class.simpleName ?: "IMAP fetch failed")
         sourceStatusRepository.recordSyncError(
             sourceType = SourceType.NAVER_IMAP,
             error = error::class.simpleName ?: "unknown",

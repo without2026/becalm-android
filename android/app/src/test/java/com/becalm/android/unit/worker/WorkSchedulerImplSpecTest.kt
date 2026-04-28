@@ -63,14 +63,28 @@ class WorkSchedulerImplSpecTest {
 
     @Test
     fun `COLD-001 stage1 one-shot scheduler passes bounded lookback days into worker input`() {
+        val policy = slot<ExistingWorkPolicy>()
         val request = slot<OneTimeWorkRequest>()
 
         WorkSchedulerImpl(appContext, logger).enqueueImapNaverOneShotNow(7)
 
         verify(exactly = 1) {
-            workManager.enqueueUniqueWork(any(), any(), capture(request))
+            workManager.enqueueUniqueWork(any(), capture(policy), capture(request))
         }
+        assertEquals(ExistingWorkPolicy.REPLACE, policy.captured)
         assertEquals(7, request.captured.workSpec.input.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, -1))
+    }
+
+    @Test
+    fun `foreground catch-up one-shot keeps existing in-flight source work`() {
+        val policy = slot<ExistingWorkPolicy>()
+
+        WorkSchedulerImpl(appContext, logger).enqueueMediaStoreOneShotNow()
+
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork(any(), capture(policy), any<OneTimeWorkRequest>())
+        }
+        assertEquals(ExistingWorkPolicy.KEEP, policy.captured)
     }
 
     @Test
@@ -100,6 +114,21 @@ class WorkSchedulerImplSpecTest {
             workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
         }
         verify(exactly = 1) {
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+        }
+    }
+
+    @Test
+    fun `startup legacy cleanup does not cancel live commitment extraction work by tag`() {
+        every { workManager.cancelUniqueWork(any()) } returns operation
+        every { workManager.cancelAllWorkByTag(any()) } returns operation
+
+        WorkSchedulerImpl(appContext, logger).cleanupLegacyWorkNames()
+
+        verify(exactly = 2) {
+            workManager.cancelUniqueWork(any())
+        }
+        verify(exactly = 0) {
             workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
         }
     }

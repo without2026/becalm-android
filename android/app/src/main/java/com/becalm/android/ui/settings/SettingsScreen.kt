@@ -77,6 +77,7 @@ public fun SettingsScreen(
     onToggleNotifications: ((Boolean) -> Unit)? = null,
     onTogglePipaConsent: ((Boolean) -> Unit)? = null,
     onOpenSources: (() -> Unit)? = null,
+    onOpenProcessingStatus: (() -> Unit)? = null,
     onOpenPrivacy: (() -> Unit)? = null,
     onSignOut: (() -> Unit)? = null,
     onWipeLocalData: (() -> Unit)? = null,
@@ -87,6 +88,7 @@ public fun SettingsScreen(
             onToggleNotifications == null ||
             onTogglePipaConsent == null ||
             onOpenSources == null ||
+            onOpenProcessingStatus == null ||
             onOpenPrivacy == null ||
             onSignOut == null ||
             onWipeLocalData == null
@@ -199,6 +201,7 @@ public fun SettingsScreen(
             else showPipaDisableDialog = true
         },
         onSourcesClick = onOpenSources ?: { navController.navigate(BecalmRoute.SettingsSources.path) },
+        onProcessingStatusClick = onOpenProcessingStatus ?: { navController.navigate(BecalmRoute.ProcessingStatus.path) },
         onPrivacyClick = onOpenPrivacy ?: { navController.navigate(BecalmRoute.PrivacyManagement.path) },
         onRequestSignOut = { showSignOutDialog = true },
         onRequestWipe = { showWipeDialog = true },
@@ -213,6 +216,7 @@ public fun SettingsScreenContent(
     onToggleNotifications: (Boolean) -> Unit,
     onTogglePipa: (Boolean) -> Unit,
     onSourcesClick: () -> Unit,
+    onProcessingStatusClick: () -> Unit = {},
     onPrivacyClick: () -> Unit,
     onRequestSignOut: () -> Unit,
     onRequestWipe: () -> Unit,
@@ -272,6 +276,7 @@ public fun SettingsScreenContent(
 
                 SettingsSourcesSection(
                     onSourcesClick = onSourcesClick,
+                    onProcessingStatusClick = onProcessingStatusClick,
                     onPrivacyClick = onPrivacyClick,
                     onWipeClick = onRequestWipe,
                 )

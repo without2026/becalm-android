@@ -46,6 +46,8 @@ public class ColdSyncStage2Worker @AssistedInject constructor(
     )
 
     override suspend fun doWork(): Result {
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+
         val runtimeCoordinator = runtimeCoordinatorProvider.get()
         val sourceStatusRepository = sourceStatusRepositoryProvider.get()
 
@@ -72,5 +74,6 @@ public class ColdSyncStage2Worker @AssistedInject constructor(
             SourceConnectionStatus.ERROR,
         )
         private const val TAG = "ColdSyncStage2Worker"
+        private const val MAX_RETRIES = 5
     }
 }

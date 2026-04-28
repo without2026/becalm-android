@@ -83,7 +83,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     private val logger: Logger,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
     private val _staticState = MutableStateFlow(PrivacyManagementUiState())
@@ -103,6 +103,8 @@ public class PrivacyManagementViewModel @Inject constructor(
         userPrefsStore.observePauseStartedAt(),
         userPrefsStore.observePipaActionLog(),
     ) { values ->
+        @Suppress("UNCHECKED_CAST")
+        val activityLog = values[10] as List<PipaActionLogEntry>
         val base = values[0] as PrivacyManagementUiState
         base.copy(
             voiceConsentEnabled = values[1] as Boolean,
@@ -114,7 +116,7 @@ public class PrivacyManagementViewModel @Inject constructor(
             outlookCalendarEnabled = values[7] as Boolean,
             processingPaused = values[8] as Boolean,
             pauseStartedAt = values[9] as Long?,
-            activityLog = values[10] as List<PipaActionLogEntry>,
+            activityLog = activityLog,
         )
     }.stateIn(
         scope = viewModelScope,

@@ -40,6 +40,7 @@ class AuthScreenTest {
 
         composeTestRule.onNodeWithText(string(R.string.splash_title)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.splash_tagline)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.splash_loading)).assertIsDisplayed()
     }
 
     @Test
@@ -141,6 +142,7 @@ class AuthScreenTest {
         composeTestRule.runOnIdle {
             assertEquals("unexpected", destination)
         }
+        composeTestRule.onNodeWithText(string(R.string.splash_loading)).assertIsDisplayed()
     }
 
     @Test

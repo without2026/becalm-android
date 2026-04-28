@@ -15,7 +15,10 @@ import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.UploadWorker
 import io.mockk.coEvery
 import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -65,6 +68,7 @@ class UploadWorkerLocalIntegrationTest {
         processingPauseGate = ProcessingPauseGate(
             userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("upload-worker-pause")),
             logger = logger,
+            applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         )
         coEvery { authRepository.currentSession() } returns session
         coEvery { commitmentRepository.findPendingSync(any(), any()) } returns emptyList()

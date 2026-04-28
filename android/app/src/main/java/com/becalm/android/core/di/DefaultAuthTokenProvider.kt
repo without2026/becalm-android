@@ -8,7 +8,6 @@ import com.becalm.android.data.remote.supabase.SupabaseAuthClient
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,12 +21,12 @@ public class DefaultAuthTokenProvider @Inject constructor(
     private val authClientProvider: Provider<SupabaseAuthClient>,
     private val sessionStore: SupabaseSessionStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @ApplicationScope private val applicationScope: CoroutineScope,
     private val logger: Logger,
 ) : AuthTokenProvider {
 
     private val cachedAccessToken = AtomicReference<String?>(null)
     private val refreshMutex = Mutex()
-    private val observerScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     init {
         startSessionObservation()
@@ -75,7 +74,7 @@ public class DefaultAuthTokenProvider @Inject constructor(
         }
 
     private fun startSessionObservation() {
-        observerScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 primeCache()
                 sessionStore.observe().collect { session ->

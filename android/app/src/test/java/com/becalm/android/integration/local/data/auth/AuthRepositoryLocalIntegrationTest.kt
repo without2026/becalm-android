@@ -30,8 +30,10 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
@@ -62,6 +64,7 @@ class AuthRepositoryLocalIntegrationTest {
         context = LocalIntegrationSupport.appContext(),
         userPrefsStore = userPrefsStore,
         logger = logger,
+        applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     private val authClient = mockk<SupabaseAuthClient>()
     private val sessionStore = InMemorySessionStore()

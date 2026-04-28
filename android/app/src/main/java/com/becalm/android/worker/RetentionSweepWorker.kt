@@ -102,6 +102,8 @@ public class RetentionSweepWorker @AssistedInject constructor(
     )
 
     override suspend fun doWork(): Result {
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+
         if (processingPauseGate.shouldSkip(TAG)) {
             return Result.success()
         }
@@ -153,6 +155,7 @@ public class RetentionSweepWorker @AssistedInject constructor(
 
         /** 30-day rolling retention window from EMAIL-006 and data-ingestion:160. */
         private val RETENTION_WINDOW = 30.days
+        private const val MAX_RETRIES: Int = 5
 
         /**
          * Output data key for the number of `email_body` rows deleted by a given run.

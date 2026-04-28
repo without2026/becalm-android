@@ -28,6 +28,10 @@ internal suspend fun runServerBackedCalendarSync(
     if (processingPauseGate.shouldSkip(tag)) {
         return Result.success()
     }
+    if (runAttemptCount >= MAX_RETRIES) {
+        logger.e(tag, "Exceeded $MAX_RETRIES attempts, failing permanently")
+        return Result.failure()
+    }
     logger.d(tag, "doWork started runAttempt=$runAttemptCount")
 
     val userId = authRepository.currentSession()?.userId
@@ -130,6 +134,7 @@ internal suspend fun runServerBackedCalendarSync(
 }
 
 private const val NO_LOOKBACK: Int = -1
+private const val MAX_RETRIES: Int = 5
 
 private fun daysAgo(now: Instant, days: Int): Instant =
     Instant.fromEpochMilliseconds(now.toEpochMilliseconds() - days * 86_400_000L)

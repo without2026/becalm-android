@@ -20,7 +20,7 @@ internal class WorkSchedulerOneShotEnqueuer(
         planRunner.run(
             UniqueOneTimeWorkPlan(
                 uniqueKey = uniqueKey,
-                policy = ExistingWorkPolicy.REPLACE,
+                policy = oneShotPolicyFor(lookbackDays),
                 request = WorkSchedulerRequests.oneTimeExpedited(
                     workerClass = workerClass,
                     lookbackDays = lookbackDays,
@@ -29,6 +29,13 @@ internal class WorkSchedulerOneShotEnqueuer(
             ),
         )
     }
+
+    private fun oneShotPolicyFor(lookbackDays: Int?): ExistingWorkPolicy =
+        if (lookbackDays == null) {
+            ExistingWorkPolicy.KEEP
+        } else {
+            ExistingWorkPolicy.REPLACE
+        }
 
     fun enqueueVoiceUpload(
         rawEventId: String,

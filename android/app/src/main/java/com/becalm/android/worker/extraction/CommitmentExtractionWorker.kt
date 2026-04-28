@@ -24,6 +24,7 @@ import com.becalm.android.domain.email.EmailSnippetBuilder
 import com.becalm.android.domain.email.QuotedBlockSplitter
 import com.becalm.android.domain.email.SourceKind
 import com.becalm.android.domain.extractor.GeminiNanoExtractor
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -66,11 +67,12 @@ import javax.inject.Provider
  * ## Failure paths
  * - Missing `rawEventId` input → `Result.failure()`; likely a test misconfiguration.
  * - Raw event not found (user signed out between enqueue and run) → `Result.failure()`.
- * - [BecalmError.ExtractorUnavailable] with reason `LLM_JSON_PARSE_FAILED` or
- *   `AICORE_ERROR` → `Result.retry()` so WorkManager applies exponential backoff.
- *   `AICORE_ERROR` is retry-capped because a device/runtime-level AICore failure can otherwise
- *   restore many persisted WorkSpecs into a foreground retry storm.
- * - Any other error bubble → `Result.retry()`.
+ * - [BecalmError.ExtractorUnavailable] with reason `LLM_JSON_PARSE_FAILED` → `Result.success()`
+ *   so one malformed model response does not replay the same prompt indefinitely.
+ * - [BecalmError.ExtractorUnavailable] with reason `AICORE_ERROR` → capped `Result.retry()` so
+ *   transient runtime failures get one backoff attempt without restoring many persisted WorkSpecs
+ *   into a foreground retry storm.
+ * - Any other error bubble → capped `Result.retry()`.
  *
  * ## Manual commitments (MAN-003 invariant 4)
  * This worker only ever iterates `raw_ingestion_events` → writes new `commitments` rows
@@ -104,6 +106,7 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
     private val promptBuilderProvider: Provider<EmailPromptBuilder>,
     private val quotedBlockSplitterProvider: Provider<QuotedBlockSplitter>,
     private val geminiNanoExtractorProvider: Provider<GeminiNanoExtractor>,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -130,6 +133,7 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
             logger.e(TAG, "raw event not found id=${redact(rawEventId)}")
             return Result.failure()
         }
+        processingStatusRepository.recordGemini(rawEvent.sourceType)
 
         val emailBodyDao = emailBodyDaoProvider.get()
         val emailBody = emailBodyDao.getByRawEventId(rawEventId)
@@ -175,7 +179,7 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                 userId = userId,
                 drafts = extractResult.value,
             )
-            is BecalmResult.Failure -> handleFailure(rawEventId, extractResult.error)
+            is BecalmResult.Failure -> handleFailure(rawEventId, rawEvent.sourceType, extractResult.error)
         }
     }
 
@@ -232,10 +236,11 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
             TAG,
             "extraction success id=${redact(rawEvent.id)} commitments=${drafts.size}",
         )
+        processingStatusRepository.recordSynced(rawEvent.sourceType, drafts.size)
         return Result.success()
     }
 
-    private fun handleFailure(rawEventId: String, error: BecalmError): Result {
+    private suspend fun handleFailure(rawEventId: String, sourceType: String, error: BecalmError): Result {
         val reason = (error as? BecalmError.ExtractorUnavailable)?.reason
         return when (reason) {
             REASON_AICORE_NOT_AVAILABLE -> {
@@ -243,6 +248,7 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                     TAG,
                     "AICore unavailable id=${redact(rawEventId)} — device unsupported, no retry",
                 )
+                processingStatusRepository.recordBlocked(sourceType, "AICore unavailable")
                 Result.success()
             }
             REASON_AICORE_ERROR -> {
@@ -257,15 +263,33 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
                         TAG,
                         "extraction failure id=${redact(rawEventId)} reason=$reason attempt=$runAttemptCount — retry budget exhausted, no retry",
                     )
+                    processingStatusRepository.recordError(sourceType, "AICore error")
                     Result.success()
                 }
             }
-            else -> {
+            REASON_LLM_JSON_PARSE_FAILED -> {
                 logger.w(
                     TAG,
-                    "extraction failure id=${redact(rawEventId)} reason=$reason — retrying",
+                    "extraction failure id=${redact(rawEventId)} reason=$reason — malformed LLM output, no retry",
                 )
-                Result.retry()
+                processingStatusRepository.recordError(sourceType, "Gemini output parse failed")
+                Result.success()
+            }
+            else -> {
+                if (shouldRetryExtractorFailure(reason, runAttemptCount)) {
+                    logger.w(
+                        TAG,
+                        "extraction failure id=${redact(rawEventId)} reason=$reason attempt=$runAttemptCount — retrying",
+                    )
+                    Result.retry()
+                } else {
+                    logger.w(
+                        TAG,
+                        "extraction failure id=${redact(rawEventId)} reason=$reason attempt=$runAttemptCount — retry budget exhausted, no retry",
+                    )
+                    processingStatusRepository.recordError(sourceType, "Gemini extraction failed")
+                    Result.success()
+                }
             }
         }
     }
@@ -281,7 +305,11 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
             SourceType.isRawIngestionSource(sourceType)
 
         public fun shouldRetryExtractorFailure(reason: String?, runAttemptCount: Int): Boolean =
-            reason != REASON_AICORE_ERROR || runAttemptCount < MAX_AICORE_ERROR_RETRY_ATTEMPTS
+            when (reason) {
+                REASON_LLM_JSON_PARSE_FAILED -> false
+                REASON_AICORE_ERROR -> runAttemptCount < MAX_AICORE_ERROR_RETRY_ATTEMPTS
+                else -> runAttemptCount < MAX_FALLBACK_RETRY_ATTEMPTS
+            }
 
         /** WorkManager input [androidx.work.Data] key — UUID of the raw ingestion event. */
         public const val KEY_RAW_EVENT_ID: String = "rawEventId"
@@ -296,7 +324,9 @@ public class CommitmentExtractionWorker @AssistedInject constructor(
          */
         private const val REASON_AICORE_NOT_AVAILABLE: String = "AICORE_NOT_AVAILABLE"
         private const val REASON_AICORE_ERROR: String = "AICORE_ERROR"
+        private const val REASON_LLM_JSON_PARSE_FAILED: String = "LLM_JSON_PARSE_FAILED"
         private const val MAX_AICORE_ERROR_RETRY_ATTEMPTS: Int = 1
+        private const val MAX_FALLBACK_RETRY_ATTEMPTS: Int = 5
     }
 }
 

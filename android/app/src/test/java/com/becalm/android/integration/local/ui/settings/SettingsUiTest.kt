@@ -33,6 +33,7 @@ class SettingsUiTest {
     @Test
     fun `settings content shows paused banner signout note and dispatches actions`() {
         var sourcesClicks = 0
+        var processingClicks = 0
         var privacyClicks = 0
         var wipeClicks = 0
 
@@ -49,6 +50,7 @@ class SettingsUiTest {
                     onToggleNotifications = {},
                     onTogglePipa = {},
                     onSourcesClick = { sourcesClicks += 1 },
+                    onProcessingStatusClick = { processingClicks += 1 },
                     onPrivacyClick = { privacyClicks += 1 },
                     onRequestSignOut = {},
                     onRequestWipe = { wipeClicks += 1 },
@@ -59,11 +61,13 @@ class SettingsUiTest {
         composeRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).assertIsDisplayed()
         composeRule.onNodeWithTag("settings-sources-row").performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("settings-processing-status-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-privacy-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-wipe-button").performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.runOnIdle {
             assertEquals(1, sourcesClicks)
+            assertEquals(1, processingClicks)
             assertEquals(1, privacyClicks)
             assertEquals(1, wipeClicks)
         }

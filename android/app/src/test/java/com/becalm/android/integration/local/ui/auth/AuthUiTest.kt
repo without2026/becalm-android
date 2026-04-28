@@ -47,6 +47,7 @@ class AuthUiTest {
 
         composeRule.onNodeWithText(string(R.string.splash_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.splash_tagline)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.splash_loading)).assertIsDisplayed()
     }
 
     @Test
@@ -93,6 +94,7 @@ class AuthUiTest {
         composeRule.runOnIdle {
             assertEquals("sentinel", route)
         }
+        composeRule.onNodeWithText(string(R.string.splash_loading)).assertIsDisplayed()
     }
 
     @Test

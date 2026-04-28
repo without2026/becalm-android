@@ -30,6 +30,7 @@ import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.remote.imap.ImapProviderDenylist
 import com.becalm.android.data.remote.imap.ImapSpecialUse
 import com.becalm.android.data.repository.EmailBodyRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
@@ -84,6 +85,7 @@ public class ImapDaumWorker @AssistedInject constructor(
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
     private val processingPauseGate: ProcessingPauseGate,
@@ -117,7 +119,10 @@ public class ImapDaumWorker @AssistedInject constructor(
         // Idempotent legacy-tuple credential migration (see ImapNaverWorker.doWork §0).
         imapCredentialStoreMigrator.migrateIfNeeded()
 
-        val credentials = loadCredentials() ?: return Result.success()
+        val credentials = loadCredentials() ?: run {
+            processingStatusRepository.recordBlocked(SourceType.DAUM_IMAP, "IMAP credentials missing")
+            return Result.success()
+        }
         val imapEmail = credentials.username
         val imapPassword = credentials.appPassword
 
@@ -130,6 +135,8 @@ public class ImapDaumWorker @AssistedInject constructor(
         }
 
         sourceStatusRepository.recordSyncStart(SourceType.DAUM_IMAP)
+        processingStatusRepository.recordScanning(SourceType.DAUM_IMAP)
+        var fetchedCount = 0
 
         // ── Discover folders ─────────────────────────────────────────────────
         val listResult = imapClient.listFolders(
@@ -166,7 +173,10 @@ public class ImapDaumWorker @AssistedInject constructor(
                 userId = userId,
                 lookbackDays = lookbackDays,
             )
-            if (outcome is PassOutcome.Terminal) return outcome.result
+            when (outcome) {
+                is PassOutcome.Success -> fetchedCount += outcome.fetchedCount
+                is PassOutcome.Terminal -> return outcome.result
+            }
         }
 
         // ── Pass 2: SENT ─────────────────────────────────────────────────────
@@ -181,9 +191,17 @@ public class ImapDaumWorker @AssistedInject constructor(
                 userId = userId,
                 lookbackDays = lookbackDays,
             )
-            if (outcome is PassOutcome.Terminal) return outcome.result
+            when (outcome) {
+                is PassOutcome.Success -> fetchedCount += outcome.fetchedCount
+                is PassOutcome.Terminal -> return outcome.result
+            }
         }
 
+        processingStatusRepository.recordScanResult(
+            sourceType = SourceType.DAUM_IMAP,
+            itemCount = fetchedCount,
+            newItemsMessage = "Queued Gemini extraction",
+        )
         sourceStatusRepository.recordSyncSuccess(
             sourceType = SourceType.DAUM_IMAP,
             at = Clock.System.now(),
@@ -411,6 +429,7 @@ public class ImapDaumWorker @AssistedInject constructor(
 
     private suspend fun handleFetchFailure(error: BecalmError): Result {
         logger.e(TAG, "IMAP fetch failed error=${error::class.simpleName}")
+        processingStatusRepository.recordError(SourceType.DAUM_IMAP, error::class.simpleName ?: "IMAP fetch failed")
         sourceStatusRepository.recordSyncError(
             sourceType = SourceType.DAUM_IMAP,
             error = error::class.simpleName ?: "unknown",

@@ -313,10 +313,13 @@ public fun CommitmentCard(
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                if (shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = dueHint)) {
+                val visibleDueHint = dueHint.takeIf {
+                    shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = it)
+                }
+                if (visibleDueHint != null) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = dueHint!!,
+                        text = visibleDueHint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

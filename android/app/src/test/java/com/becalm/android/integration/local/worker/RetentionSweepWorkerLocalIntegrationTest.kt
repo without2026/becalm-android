@@ -13,7 +13,10 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.RetentionSweepWorker
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -40,6 +43,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
     private val processingPauseGate = ProcessingPauseGate(
         userPrefsStore = userPrefsStore,
         logger = logger,
+        applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
 
     @After

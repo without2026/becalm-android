@@ -30,6 +30,7 @@
     <!-- Splash -->
     <string name="splash_title">BeCalm</string>
     <string name="splash_tagline">Your commitment companion</string>
+    <string name="splash_loading">Starting BeCalm...</string>
 
     <!-- Terms -->
     <string name="terms_title">Terms &amp; Privacy</string>
@@ -407,6 +408,7 @@
     <string name="settings_data_section">Data</string>
     <string name="settings_notifications_label">Notifications</string>
     <string name="settings_sources_label">Data Sources</string>
+    <string name="settings_processing_status_label">Processing Status</string>
     <string name="settings_privacy_label">Privacy Management</string>
     <string name="settings_sign_out_confirm_title">Sign out?</string>
     <string name="settings_sign_out_confirm_message">You will be signed out of BeCalm. Local data remains until you wipe it.</string>
@@ -492,4 +494,5 @@
     <string name="privacy_delete_confirm">Delete account locally</string>
     <string name="privacy_activity_log_empty">No PIPA activity has been recorded yet.</string>
     <string name="processing_paused_banner">처리 일시중단 중</string>
+    <string name="processing_status_title">Processing Status</string>
 </resources>

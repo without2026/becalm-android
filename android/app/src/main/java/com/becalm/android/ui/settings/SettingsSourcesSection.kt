@@ -26,6 +26,7 @@ import com.becalm.android.ui.theme.glassPanel
 @Composable
 internal fun SettingsSourcesSection(
     onSourcesClick: () -> Unit,
+    onProcessingStatusClick: () -> Unit,
     onPrivacyClick: () -> Unit,
     onWipeClick: () -> Unit,
 ) {
@@ -41,6 +42,12 @@ internal fun SettingsSourcesSection(
             label = stringResource(R.string.settings_sources_label),
             onClick = onSourcesClick,
             rowTestTag = "settings-sources-row",
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingsNavigationRow(
+            label = stringResource(R.string.settings_processing_status_label),
+            onClick = onProcessingStatusClick,
+            rowTestTag = "settings-processing-status-row",
         )
         Spacer(modifier = Modifier.height(12.dp))
         SettingsNavigationRow(

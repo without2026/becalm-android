@@ -153,6 +153,21 @@
                 tools:node="remove" />
         </provider>
 
+        <!--
+            Cold-start ANR guard.
+
+            WorkManager's RescheduleReceiver is fired from BOOT_COMPLETED and can start
+            SystemJobService while the app is still class-verifying Hilt/Compose/DataStore
+            on the main thread. BeCalm already re-registers recurring work and runs
+            source catch-up after authenticated foreground startup, so boot-time restore
+            is intentionally disabled to keep first launch responsive.
+        -->
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:node="merge" />
+
     </application>
 
 </manifest>

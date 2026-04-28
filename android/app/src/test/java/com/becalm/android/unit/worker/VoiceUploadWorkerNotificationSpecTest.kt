@@ -19,6 +19,7 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.VoiceFailureNotifier
@@ -56,6 +57,7 @@ class VoiceUploadWorkerNotificationSpecTest {
     private val voiceApi: VoiceApi = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val processingPauseGate: ProcessingPauseGate = mockk(relaxed = true)
     private val voiceFailureNotifier: VoiceFailureNotifier = mockk(relaxed = true)
@@ -146,6 +148,7 @@ class VoiceUploadWorkerNotificationSpecTest {
         voiceApi = voiceApi,
         userPrefsStore = userPrefsStore,
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         workScheduler = workScheduler,
         processingPauseGate = processingPauseGate,
         voiceFailureNotifier = voiceFailureNotifier,

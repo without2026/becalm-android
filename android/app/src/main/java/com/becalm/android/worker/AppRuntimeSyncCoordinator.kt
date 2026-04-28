@@ -1,5 +1,6 @@
 package com.becalm.android.worker
 
+import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 
 @Singleton
 public class AppRuntimeSyncCoordinator @Inject constructor(
+    @ApplicationScope
     private val scope: CoroutineScope,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
     private val contentObserverBootstrap: ContentObserverBootstrap,
