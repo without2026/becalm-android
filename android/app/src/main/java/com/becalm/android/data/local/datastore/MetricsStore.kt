@@ -34,7 +34,7 @@ public interface MetricsStore {
     /**
      * Atomically increments `email_subject_only_skipped` by 1.
      *
-     * Called by `CommitmentExtractionWorker` (or any caller that observes
+     * Called by email ingestion workers when they observe
      * [com.becalm.android.domain.email.SourceKind.SUBJECT_FALLBACK] from
      * [com.becalm.android.domain.email.EmailSnippetBuilder.buildSnippet]) so the
      * skip rate of subject-only emails can be monitored.

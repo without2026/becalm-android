@@ -200,7 +200,7 @@ public class ImapDaumWorker @AssistedInject constructor(
         processingStatusRepository.recordScanResult(
             sourceType = SourceType.DAUM_IMAP,
             itemCount = fetchedCount,
-            newItemsMessage = "Queued Gemini extraction",
+            newItemsMessage = "Queued backend Gemini extraction",
         )
         sourceStatusRepository.recordSyncSuccess(
             sourceType = SourceType.DAUM_IMAP,
@@ -414,7 +414,7 @@ public class ImapDaumWorker @AssistedInject constructor(
             metricsStore.incrementSubjectOnlySkipped()
             return
         }
-        workScheduler.enqueueCommitmentExtraction(rawEventId)
+        workScheduler.enqueueUpload()
     }
 
     // ─── Error mapping ────────────────────────────────────────────────────────

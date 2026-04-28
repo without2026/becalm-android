@@ -13,21 +13,12 @@ import javax.inject.Singleton
 /**
  * Repository facade over [EmailBodyDao] for the on-device-only `email_body` store.
  *
- * ## PIPA invariant — Room-only (EMAIL-006)
- * Per `.spec/email-pipeline.spec.yml:58-64` (and re-stated at line 79 of the same
- * file plus `.spec/data-ingestion.spec.yml:152`), `EmailBody` is the canonical
- * on-device store for email bodies and **MUST NEVER cross the device boundary**.
- * Railway/Supabase only receive `raw_ingestion_events.event_snippet` (≤200 chars)
- * via [RawIngestionRepository.uploadBatch]; `body_plain`, `body_html`,
- * `attachments_meta`, `raw_headers`, `from_address`, and `to_addresses` are
- * physically prevented from reaching any network DTO by this Repository's design.
- *
- * **No DTO mapper.** This repository must not expose `body_plain`, `body_html`,
- * `attachments_meta`, or `raw_headers` to any wire layer. The interface
- * intentionally returns only [EmailBodyEntity] (a Room `@Entity` type) and never
- * imports from `com.becalm.android.data.remote.dto.*` — enforced at compile time
- * by [com.becalm.android.data.remote.dto.DtoInvariantTest] and asserted on the
- * source text of this file.
+ * ## PIPA invariant — not backend-mirrored (EMAIL-006)
+ * `EmailBody` remains the canonical on-device store for email bodies. The backend
+ * does not persist a mirrored `email_body` table. `RawIngestionRepository.uploadBatch`
+ * may read bounded `body_plain` as transient Vertex Gemini extraction context for
+ * the current request, while `body_html`, `attachments_meta`, `raw_headers`,
+ * `from_address`, and `to_addresses` stay local-only.
  *
  * ## Lifecycle ownership
  * Insert and parse-failure transitions go through this Repository so that future
@@ -89,9 +80,9 @@ public interface EmailBodyRepository {
  * Production implementation of [EmailBodyRepository].
  *
  * All DAO calls are dispatched on [IoDispatcher] so that callers running on the
- * Main dispatcher (test / future UI consumers) never block on Room. The room-only
- * invariant is preserved because no DTO type or `data.remote.*` import is reachable
- * from this class — a scan asserted by `DtoInvariantTest`.
+     * Main dispatcher (test / future UI consumers) never block on Room. The backend-mirror
+     * invariant is preserved because this class exposes only DAO operations; upload DTO
+     * shaping stays in [RawIngestionRepository].
  */
 @Singleton
 public class EmailBodyRepositoryImpl @Inject constructor(

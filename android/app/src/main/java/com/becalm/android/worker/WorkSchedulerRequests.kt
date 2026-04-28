@@ -11,7 +11,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequest
 import androidx.work.workDataOf
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.worker.extraction.CommitmentExtractionWorker
+import com.becalm.android.worker.ingestion.BackendMailSyncWorker
 import com.becalm.android.worker.ingestion.GoogleCalendarWorker
 import com.becalm.android.worker.ingestion.ImapDaumWorker
 import com.becalm.android.worker.ingestion.ImapNaverWorker
@@ -28,7 +28,7 @@ internal object WorkSchedulerRequests {
     const val PERIODIC_INTERVAL_MINUTES: Long = 15L
     const val BACKOFF_DELAY_SECONDS: Long = 30L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
-    const val TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
+    const val LEGACY_TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
 
     val uploadConstraints: Constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -118,28 +118,13 @@ internal object WorkSchedulerRequests {
         return builder.build()
     }
 
-    fun commitmentExtractionRequest(rawEventId: String): OneTimeWorkRequest =
-        OneTimeWorkRequest.Builder(CommitmentExtractionWorker::class.java)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiresBatteryNotLow(true)
-                    .build(),
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
-            .setInputData(
-                workDataOf(
-                    CommitmentExtractionWorker.KEY_RAW_EVENT_ID to rawEventId,
-                ),
-            )
-            .addTag(TAG_COMMITMENT_EXTRACTION)
-            .build()
-
     fun allStaticKeys(): List<String> = listOf(
         UniqueWorkKeys.MEDIA_STORE,
         UniqueWorkKeys.NAVER_IMAP,
         UniqueWorkKeys.DAUM_IMAP,
         UniqueWorkKeys.GCAL,
         UniqueWorkKeys.OUTLOOK_CAL,
+        UniqueWorkKeys.BACKEND_MAIL,
         UniqueWorkKeys.ENRICHMENT,
         UniqueWorkKeys.UPLOAD,
         UniqueWorkKeys.UPLOAD_PERIODIC,
@@ -171,6 +156,20 @@ internal object WorkSchedulerRequests {
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
                 .build(),
             logMessage = "scheduleUploadRedundancy key=${UniqueWorkKeys.UPLOAD_PERIODIC}",
+        )
+
+    fun backendMailPeriodicPlan(): UniquePeriodicWorkPlan =
+        UniquePeriodicWorkPlan(
+            uniqueKey = UniqueWorkKeys.BACKEND_MAIL,
+            policy = ExistingPeriodicWorkPolicy.UPDATE,
+            request = periodicRequest(
+                BackendMailSyncWorker::class.java,
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .setRequiresBatteryNotLow(true)
+                    .build(),
+            ),
+            logMessage = "scheduleBackendMailSync key=${UniqueWorkKeys.BACKEND_MAIL}",
         )
 
     fun enrichmentPeriodicPlan(): UniquePeriodicWorkPlan =

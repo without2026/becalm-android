@@ -257,11 +257,10 @@ private val MIGRATION_4_5 = object : Migration(4, 5) {
 // Unlocks EMAIL-001..007 (`.spec/email-pipeline.spec.yml`) and ING-006..008. Mirrors
 // `.spec/contracts/data-model.yml:327-390 § email_body` 1:1.
 //
-// `email_body` is **room_only: true** per EMAIL-006 — no Supabase migration accompanies
-// this PR because the table does not exist upstream. body_plain / body_html /
-// attachments_meta / raw_headers are user email content that MUST NEVER cross the
-// device boundary; any upload worker that includes these columns in a DTO is a
-// production-blocking privacy regression.
+    // `email_body` is **room_only: true** per EMAIL-006 — no Supabase migration accompanies
+    // this PR because the table does not exist upstream. body_plain may be sent later as
+    // transient Vertex Gemini extraction context, but the full `email_body` row is not
+    // mirrored into Railway/Supabase.
 //
 // Column list (14 — order matches EmailBodyEntity field order so reviewers can
 // diff side-by-side. Any drift here causes MigrationTestHelper.runMigrationsAndValidate

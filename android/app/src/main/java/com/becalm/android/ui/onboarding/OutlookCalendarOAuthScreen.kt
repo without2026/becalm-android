@@ -15,6 +15,7 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
@@ -47,7 +48,7 @@ public fun OutlookCalendarOAuthScreen(
     } else {
         viewModel
     }
-    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigateAfterSourceReconnectOr(downstream) }
 
     val errorCopyByCode = mapOf(
         "not_implemented" to stringResource(R.string.onb_outlook_cal_error_unavailable),

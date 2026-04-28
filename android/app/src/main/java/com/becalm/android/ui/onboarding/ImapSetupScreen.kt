@@ -42,6 +42,7 @@ import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.Flow
@@ -83,7 +84,7 @@ public fun ImapSetupScreen(
         viewModel
     }
     val navigateToGoogleCalendar = onNavigateToGoogleCalendar ?: {
-        navController.navigate(BecalmRoute.OnboardingGoogleCalendar.path)
+        navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingGoogleCalendar.path)
     }
     val saveCredentials = onSaveCredentials ?: { provider: ImapProvider, username: String, appPassword: String ->
         requireNotNull(resolvedViewModel).saveImapCredentials(

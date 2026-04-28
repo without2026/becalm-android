@@ -48,6 +48,9 @@ public interface WorkScheduler {
     /** Enrolls the periodic redundancy upload chain used by ING-002. */
     public fun scheduleUploadRedundancy()
 
+    /** Enrolls the 15-minute backend-managed Gmail / Outlook Mail sync chain. */
+    public fun scheduleBackendMailSync()
+
     /**
      * Enqueues a one-shot [EnrichmentWorker] to refresh on-device contact enrichment.
      */
@@ -105,35 +108,6 @@ public interface WorkScheduler {
         initialDelaySec: Long,
         rateLimitedAttempt: Int = 0,
     )
-
-    /**
-     * Enqueues a one-shot
-     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker] to run on-device
-     * Gemini Nano commitment extraction against the email raw event identified by
-     * [rawEventId].
-     *
-     * The unique work name is [UniqueWorkKeys.commitmentExtractionKey] and the scheduler
-     * uses [androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE]: a second enqueue for the
-     * same [rawEventId] queues behind (or supersedes) the in-flight job rather than running
-     * two AICore sessions concurrently for the same email.
-     *
-     * Constraints applied by the implementation:
-     * - [androidx.work.Constraints.Builder.setRequiresBatteryNotLow] — AICore inference is
-     *   power-intensive, so work defers when the device is running low on battery.
-     *
-     * This request is intentionally not expedited: WorkManager expedited requests only
-     * support network and storage constraints, and battery-not-low is required for this
-     * power-intensive on-device extraction path.
-     *
-     * Spec refs: EMAIL-001, EMAIL-008, ADAPT-EMAIL-010.
-     *
-     * @param rawEventId UUID of the
-     *   [com.becalm.android.data.local.db.entity.RawIngestionEventEntity] whose body should be
-     *   extracted. Current callers are the IMAP ingestion workers
-     *   (`ImapNaverWorker`, `ImapDaumWorker`). Gmail / Outlook Mail moved to backend-managed
-     *   sync and no longer enqueue on-device mail workers.
-     */
-    public fun enqueueCommitmentExtraction(rawEventId: String)
 
     /**
      * Enqueues a daily [RetentionSweepWorker] periodic request under

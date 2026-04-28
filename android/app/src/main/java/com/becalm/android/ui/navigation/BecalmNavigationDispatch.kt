@@ -12,6 +12,8 @@ import com.becalm.android.ui.sources.SourceReconnectDestination
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.today.TodayEffect
 
+private const val SOURCE_RECONNECT_RETURN_KEY = "source_reconnect_return"
+
 internal fun NavHostController.dispatchTodayEffect(effect: TodayEffect) {
     when (effect) {
         TodayEffect.NavigateToSettings -> navigate(BecalmRoute.Settings.path)
@@ -28,17 +30,29 @@ internal fun NavHostController.dispatchSourcesListNavigation(target: SourcesList
 
 internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEffect) {
     when (effect) {
-        is SourceDetailEffect.OpenReconnect -> navigate(
-            when (effect.destination) {
+        is SourceDetailEffect.OpenReconnect -> {
+            currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
+            navigate(
+                when (effect.destination) {
                 SourceReconnectDestination.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
                 SourceReconnectDestination.GMAIL -> BecalmRoute.OnboardingGmail.path
                 SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.OnboardingOutlookMail.path
                 SourceReconnectDestination.IMAP -> BecalmRoute.OnboardingImap.path
                 SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.OnboardingGoogleCalendar.path
                 SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.OnboardingOutlookCalendar.path
-            },
-        )
+                },
+            )
+        }
     }
+}
+
+internal fun NavHostController.navigateAfterSourceReconnectOr(route: String) {
+    val previousHandle = previousBackStackEntry?.savedStateHandle
+    if (previousHandle?.get<Boolean>(SOURCE_RECONNECT_RETURN_KEY) == true) {
+        previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        if (popBackStack()) return
+    }
+    navigate(route)
 }
 
 internal fun dispatchCommitmentManagementNavigation(

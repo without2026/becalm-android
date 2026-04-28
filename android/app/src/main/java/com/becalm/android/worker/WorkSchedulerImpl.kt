@@ -75,6 +75,10 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.uploadPeriodicPlan())
     }
 
+    override fun scheduleBackendMailSync() {
+        planRunner.run(WorkSchedulerRequests.backendMailPeriodicPlan())
+    }
+
     override fun enqueueEnrichment() {
         oneShotEnqueuer.enqueueForKey(
             EnrichmentWorker::class.java,
@@ -138,18 +142,6 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
-    override fun enqueueCommitmentExtraction(rawEventId: String) {
-        planRunner.run(
-            UniqueOneTimeWorkPlan(
-                uniqueKey = UniqueWorkKeys.commitmentExtractionKey(rawEventId),
-                policy = androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE,
-                request = WorkSchedulerRequests.commitmentExtractionRequest(rawEventId),
-                logMessage = "enqueueCommitmentExtraction rawEventId_hash=${redact(rawEventId)} " +
-                    "key=${UniqueWorkKeys.commitmentExtractionKey(rawEventId)}",
-            ),
-        )
-    }
-
     override fun scheduleRetentionSweep() {
         planRunner.run(WorkSchedulerRequests.retentionSweepPlan())
     }
@@ -175,21 +167,23 @@ public class WorkSchedulerImpl @Inject constructor(
             workManager.cancelUniqueWork(key)
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
-        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,
             "cancelAll — cancelled ${ALL_KEYS.size} unique chains + " +
-                "voice uploads and commitment extractions by tag",
+                "voice uploads and stale local commitment extractions by tag",
         )
     }
 
     override fun cleanupLegacyWorkNames() {
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY)
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_UPLOAD_KEY)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,
             "cleanupLegacyWorkNames — cancelled legacy keys=" +
-                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY}",
+                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY} " +
+                "and stale local commitment extractions by tag",
         )
     }
 

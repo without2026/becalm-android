@@ -124,9 +124,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
     /**
      * Returns the DAO for the `email_body` room-only table (v6+).
      *
-     * The referenced rows MUST stay on-device (EMAIL-006). Any code path that
-     * serializes an [EmailBodyEntity] into a network DTO is a production-blocking
-     * privacy regression — see `.spec/email-pipeline.spec.yml:58-64`.
+     * The referenced rows are not mirrored as a backend table. The upload path may send
+     * bounded [EmailBodyEntity.bodyPlain] as transient Vertex Gemini extraction context,
+     * but must not persist the full body in Railway/Supabase.
      *
      * `internal` visibility because only local IMAP / extraction paths consume this
      * table today. Keeping the accessor non-public avoids accidental network-mirror

@@ -42,6 +42,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
 
         verify(exactly = 1) { foregroundCatchUpScheduler.start() }
         verify(exactly = 1) { contentObserverBootstrap.start() }
+        verify(exactly = 1) { workScheduler.scheduleBackendMailSync() }
         verify(exactly = 1) { workScheduler.scheduleUploadRedundancy() }
         verify(exactly = 1) { workScheduler.scheduleRetentionSweep() }
         verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
@@ -119,6 +120,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { foregroundCatchUpScheduler.start() }
         verify(exactly = 1) { contentObserverBootstrap.stop() }
         verify(exactly = 0) { workScheduler.scheduleUploadRedundancy() }
+        verify(exactly = 0) { workScheduler.scheduleBackendMailSync() }
         verify(exactly = 0) { workScheduler.scheduleRetentionSweep() }
         verify(exactly = 0) { workScheduler.scheduleOverdueSweep() }
         verify(exactly = 0) { workScheduler.enqueuePeriodic(any()) }

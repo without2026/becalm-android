@@ -28,7 +28,6 @@ jakarta-mail = "2.1.3"
 angus-mail = "2.0.3"
 jsoup = "1.17.2"
 google-calendar-api = "v3-rev20240419-2.0.0"
-gemini-nano-aicore = "0.0.1-exp01"
 # Credential Manager + Google Identity Services for Gmail OAuth (repo-auth-gmail-oauth-provider).
 androidx-credentials = "1.3.0"
 googleid = "1.1.1"
@@ -169,9 +168,6 @@ play-services-auth = { group = "com.google.android.gms", name = "play-services-a
 
 # ─── libphonenumber (E.164 normalization — worker-voice-call-recording) ──────
 libphonenumber = { group = "com.googlecode.libphonenumber", name = "libphonenumber", version.ref = "libphonenumber" }
-
-# ─── Gemini Nano / AICore ─────────────────────────────────────────────────────
-gemini-nano-aicore = { group = "com.google.ai.edge.aicore", name = "aicore", version.ref = "gemini-nano-aicore" }
 
 # ─── Timber ─────────────────────────────────────────────────────────────────
 timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }

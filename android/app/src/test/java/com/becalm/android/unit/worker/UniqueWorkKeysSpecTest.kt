@@ -34,11 +34,4 @@ class UniqueWorkKeysSpecTest {
         )
     }
 
-    @Test
-    fun `commitment extraction key uses stable prefix plus raw event id`() {
-        assertEquals(
-            "commitment-extraction-raw-1",
-            UniqueWorkKeys.commitmentExtractionKey("raw-1"),
-        )
-    }
 }

@@ -76,7 +76,7 @@ import java.util.UUID
  * `body_plain` / `body_html` / `attachments_meta` / `raw_headers`. The snippet for
  * the parent [RawIngestionEventEntity] is built by [EmailSnippetBuilder]; a
  * `SUBJECT_FALLBACK` outcome bumps [MetricsStore.incrementSubjectOnlySkipped] and
- * suppresses the [WorkScheduler.enqueueCommitmentExtraction] hand-off per
+ * suppresses the backend upload hand-off per
  * `.spec/email-pipeline.spec.yml:32-37 § EMAIL-003`. Attachment metadata is derived
  * entirely from BODYSTRUCTURE — no bytes are ever downloaded (EMAIL-004).
  *
@@ -226,7 +226,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         processingStatusRepository.recordScanResult(
             sourceType = SourceType.NAVER_IMAP,
             itemCount = fetchedCount,
-            newItemsMessage = "Queued Gemini extraction",
+            newItemsMessage = "Queued backend Gemini extraction",
         )
         sourceStatusRepository.recordSyncSuccess(
             sourceType = SourceType.NAVER_IMAP,
@@ -425,8 +425,7 @@ public class ImapNaverWorker @AssistedInject constructor(
 
     /**
      * Writes an [EmailBodyEntity] for [rawEventId] and — when the snippet is NOT
-     * subject-only — enqueues [WorkScheduler.enqueueCommitmentExtraction] for on-device
-     * Gemini Nano follow-up.
+     * subject-only — enqueues backend upload so Railway / Vertex Gemini owns extraction.
      *
      * `parse_failed` flips true when [EmailSnippetBuilder] signals a Jsoup failure on the
      * HTML body; per EMAIL-007 `body_plain` is cleared in the same write so a partial
@@ -472,14 +471,14 @@ public class ImapNaverWorker @AssistedInject constructor(
         )
         emailBodyRepository.insert(body)
 
-        // EMAIL-003: subject-only snippets are too thin for the on-device LLM; bump
+        // EMAIL-003: subject-only snippets are too thin for LLM extraction; bump
         // the metric and skip the enqueue, but keep the body row so the UI can still
         // surface the event.
         if (snippetResult.sourceKind == SourceKind.SUBJECT_FALLBACK) {
             metricsStore.incrementSubjectOnlySkipped()
             return
         }
-        workScheduler.enqueueCommitmentExtraction(rawEventId)
+        workScheduler.enqueueUpload()
     }
 
     // ─── Error mapping ────────────────────────────────────────────────────────

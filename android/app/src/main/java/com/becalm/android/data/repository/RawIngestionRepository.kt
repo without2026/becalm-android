@@ -11,6 +11,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventDto
+import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 import retrofit2.Response
@@ -216,6 +217,7 @@ private const val TAG = "RawIngestionRepository"
 public class RawIngestionRepositoryImpl @Inject constructor(
     private val dao: RawIngestionEventDao,
     private val apiProvider: Provider<RailwayApi>,
+    private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val logger: Logger,
 ) : RawIngestionRepository {
 
@@ -229,6 +231,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     ) : this(
         dao = dao,
         apiProvider = Provider { api },
+        emailBodyRepositoryProvider = Provider { NoopEmailBodyRepository },
         logger = logger,
     )
 
@@ -342,7 +345,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     // ── Upload ────────────────────────────────────────────────────────────────
 
     override suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse> {
-        val dtos = events.map { it.toDto() }
+        val dtos = events.map { it.toDto(emailBodyPlain = it.emailBodyPlainForExtraction()) }
         val request = BatchUploadRequest(events = dtos)
         return try {
             val response = api.batchUploadRawEvents(request = request)
@@ -407,7 +410,14 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         return dao.findByClientEventId(event.userId, event.clientEventId)?.id ?: event.id
     }
 
-    private fun RawIngestionEventEntity.toDto(): RawIngestionEventDto =
+    private suspend fun RawIngestionEventEntity.emailBodyPlainForExtraction(): String? {
+        if (sourceType !in EMAIL_SOURCE_TYPES) return null
+        val body = emailBodyRepositoryProvider.get().getByRawEventId(id) ?: return null
+        if (body.parseFailed || body.groupEmail) return null
+        return body.bodyPlain?.takeIf { it.isNotBlank() }
+    }
+
+    private fun RawIngestionEventEntity.toDto(emailBodyPlain: String?): RawIngestionEventDto =
         RawIngestionEventDto(
             id = id,
             clientEventId = clientEventId,
@@ -424,6 +434,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             // server-side person_ref derivation from the same raw-event metadata the client saw.
             folder = folder,
             commitmentsExtractedCount = commitmentsExtractedCount,
+            emailBodyPlain = emailBodyPlain,
             timestamp = timestamp,
         )
 
@@ -455,4 +466,28 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             }
         }
     }
+
+    private companion object {
+        private val EMAIL_SOURCE_TYPES = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+        )
+    }
+}
+
+private object NoopEmailBodyRepository : EmailBodyRepository {
+    override suspend fun insert(entity: com.becalm.android.data.local.db.entity.EmailBodyEntity) = Unit
+
+    override suspend fun getByRawEventId(rawEventId: String): com.becalm.android.data.local.db.entity.EmailBodyEntity? = null
+
+    override suspend fun findByProviderMessage(
+        userId: String,
+        sourceType: String,
+        folder: String,
+        providerMessageId: String,
+    ): com.becalm.android.data.local.db.entity.EmailBodyEntity? = null
+
+    override suspend fun markParseFailed(id: String) = Unit
 }

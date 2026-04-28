@@ -73,7 +73,9 @@ public data class EmailBodyEntity(
      * Foreign key to [RawIngestionEventEntity.id]. `ON DELETE CASCADE` co-deletes this
      * row when the parent disappears — the structural half of EMAIL-006's retention
      * co-delete contract. The parent raw-event UUID is the only cross-layer handle
-     * that ever reaches Railway; the body referenced here never does.
+     * that reaches Railway as a stored raw-event reference. When backend Gemini email
+     * extraction is enabled, [bodyPlain] may be sent transiently in the upload request as
+     * extraction context; the backend does not persist it in `raw_ingestion_events`.
      * Spec: `.spec/contracts/data-model.yml:327-390 § email_body.raw_event_id`.
      */
     @ColumnInfo(name = "raw_event_id")
