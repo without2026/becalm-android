@@ -113,6 +113,8 @@ public fun TodayTimelineContent(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
     )
+    val sourceChips = buildChips(state.sourceStatus)
+    val sourceAttention = buildSourceStatusAttention(state.sourceStatus)
 
     BecalmScaffold(
         modifier = modifier,
@@ -148,7 +150,12 @@ public fun TodayTimelineContent(
                 )
             }
             OverallSyncIndicator(state = state.overall)
-            SourceStatusStrip(sources = buildChips(state.sourceStatus))
+            if (sourceAttention.hasWarning) {
+                SourceStatusAttentionBanner(attention = sourceAttention)
+            }
+            if (sourceChips.isNotEmpty()) {
+                SourceStatusStrip(sources = sourceChips)
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -192,6 +199,35 @@ public fun TodayTimelineContent(
             }
         }
     }
+}
+
+@Composable
+private fun SourceStatusAttentionBanner(
+    attention: SourceStatusAttention,
+    modifier: Modifier = Modifier,
+) {
+    val text = when {
+        attention.disconnectedCount > 0 && attention.failedCount > 0 ->
+            stringResource(
+                R.string.today_source_attention_mixed_fmt,
+                attention.disconnectedCount,
+                attention.failedCount,
+            )
+        attention.failedCount > 0 ->
+            stringResource(R.string.today_source_attention_failed_fmt, attention.failedCount)
+        else ->
+            stringResource(R.string.today_source_attention_disconnected_fmt, attention.disconnectedCount)
+    }
+    Text(
+        text = text,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(12.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.error,
+    )
 }
 
 @Composable

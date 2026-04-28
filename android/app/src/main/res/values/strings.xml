@@ -184,6 +184,9 @@
     <string name="today_synced_time_fmt">Synced %1$s</string>
     <string name="today_synced_date_time_fmt">Synced %1$s %2$s</string>
     <string name="today_partial_failure">Some sources failed - check Settings</string>
+    <string name="today_source_attention_disconnected_fmt">%1$d sources are not connected - connect in Settings</string>
+    <string name="today_source_attention_failed_fmt">%1$d sources failed - check Settings</string>
+    <string name="today_source_attention_mixed_fmt">%1$d sources are not connected, %2$d failed - check Settings</string>
 
     <!-- Persons -->
     <string name="persons_title">People</string>

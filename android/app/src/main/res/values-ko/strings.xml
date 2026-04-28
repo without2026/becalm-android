@@ -170,6 +170,9 @@
     <string name="today_synced_time_fmt">동기화됨 %1$s</string>
     <string name="today_synced_date_time_fmt">동기화됨 %1$s %2$s</string>
     <string name="today_partial_failure">일부 소스 실패 — 설정에서 확인</string>
+    <string name="today_source_attention_disconnected_fmt">%1$d개 소스가 연결되지 않았습니다 — 설정에서 연결하세요</string>
+    <string name="today_source_attention_failed_fmt">%1$d개 소스 연결에 실패했습니다 — 설정에서 확인하세요</string>
+    <string name="today_source_attention_mixed_fmt">%1$d개 소스 미연결, %2$d개 소스 실패 — 설정에서 확인하세요</string>
 
     <!-- Persons -->
     <string name="persons_title">사람</string>

@@ -7,9 +7,9 @@ import com.becalm.android.ui.components.SourceStatusChip
 // ─── Chip construction (TDY-003) ─────────────────────────────────────────────
 
 /**
- * Source-type display order for the TDY-003 strip.
+ * Source-type evaluation order for the TDY-003 strip and attention banner.
  *
- * Seven user-facing entries in current spec order:
+ * Seven user-facing entries in current product order:
  * `voice/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar`.
  */
 internal val CHIP_ORDER: List<String> = listOf(
@@ -23,30 +23,51 @@ internal val CHIP_ORDER: List<String> = listOf(
 )
 
 /**
- * Projects the per-source map from [TodayUiState] into seven [SourceStatusChip] rows
- * in display order (pure function; covered by `TodayChipsTest`).
+ * Projects connected or actively syncing sources into chips in display order.
  *
- * Mapping priority per TDY-003:
- * 1. Missing entry (pre-first-emission or server-ignored) → [ChipState.Idle].
- * 2. `errorMessage != null` → [ChipState.Error(message)] (red dot).
- * 3. `syncing` → [ChipState.Syncing] (animated spinner).
- * 4. `statusLabel == "CONNECTED"` AND `lastSyncedAt != null`
+ * Mapping priority:
+ * 1. Missing entry / NEVER_CONNECTED / ERROR → hidden from the strip.
+ * 2. `syncing` → [ChipState.Syncing] (animated spinner).
+ * 3. `statusLabel == "CONNECTED"` AND `lastSyncedAt != null`
  *    → [ChipState.Synced(at)] (green check + HH:mm).
- * 5. All other cases (including CONNECTED without a timestamp, NEVER_CONNECTED)
- *    → [ChipState.Idle] (neutral gray).
+ * 4. Other CONNECTED rows → [ChipState.Idle] (connected but no completed sync timestamp yet).
  *
  * [SourceType.CALL_RECORDING] is never emitted — it remains schema-only for wave 0.
  */
 internal fun buildChips(sourceStatus: Map<String, SourceStatusUi>): List<SourceStatusChip> =
-    CHIP_ORDER.map { sourceType ->
+    CHIP_ORDER.mapNotNull { sourceType ->
         val ui = sourceStatus[sourceType]
         val chipState: ChipState = when {
-            ui == null -> ChipState.Idle
-            ui.errorMessage != null -> ChipState.Error(ui.errorMessage)
+            ui == null -> return@mapNotNull null
+            ui.errorMessage != null -> return@mapNotNull null
             ui.syncing -> ChipState.Syncing
             ui.statusLabel == "CONNECTED" && ui.lastSyncedAt != null ->
                 ChipState.Synced(ui.lastSyncedAt)
-            else -> ChipState.Idle
+            ui.statusLabel == "CONNECTED" -> ChipState.Idle
+            else -> return@mapNotNull null
         }
         SourceStatusChip(sourceType = sourceType, state = chipState)
     }
+
+internal data class SourceStatusAttention(
+    val disconnectedCount: Int,
+    val failedCount: Int,
+) {
+    val hasWarning: Boolean = disconnectedCount > 0 || failedCount > 0
+}
+
+internal fun buildSourceStatusAttention(sourceStatus: Map<String, SourceStatusUi>): SourceStatusAttention {
+    var disconnectedCount = 0
+    var failedCount = 0
+    CHIP_ORDER.forEach { sourceType ->
+        val ui = sourceStatus[sourceType] ?: return@forEach
+        when {
+            ui.errorMessage != null || ui.statusLabel == "ERROR" -> failedCount += 1
+            ui.statusLabel == "NEVER_CONNECTED" -> disconnectedCount += 1
+        }
+    }
+    return SourceStatusAttention(
+        disconnectedCount = disconnectedCount,
+        failedCount = failedCount,
+    )
+}
