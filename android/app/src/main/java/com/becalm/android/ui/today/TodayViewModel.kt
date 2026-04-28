@@ -81,20 +81,26 @@ public data class TodayPersonFocus(
     val commitmentCount: Int,
 )
 
-public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPersonFocus> =
-    timeline
-        .filterIsInstance<TimelineItem.Commitment>()
-        .groupBy { it.counterpartyDisplayName?.takeIf { name -> name.isNotBlank() } }
-        .map { (displayName, commitments) ->
+public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPersonFocus> {
+    val countsByName = linkedMapOf<String?, Int>()
+    timeline.forEach { item ->
+        if (item is TimelineItem.Commitment) {
+            val name = item.counterpartyDisplayName?.takeIf { it.isNotBlank() }
+            countsByName[name] = countsByName.getOrDefault(name, 0) + 1
+        }
+    }
+    return countsByName
+        .map { (displayName, count) ->
             TodayPersonFocus(
                 displayName = displayName,
-                commitmentCount = commitments.size,
+                commitmentCount = count,
             )
         }
         .sortedWith(
             compareByDescending<TodayPersonFocus> { it.commitmentCount }
                 .thenBy { it.displayName ?: "~" },
         )
+}
 
 /**
  * Per-source summary projected into UI-layer values.

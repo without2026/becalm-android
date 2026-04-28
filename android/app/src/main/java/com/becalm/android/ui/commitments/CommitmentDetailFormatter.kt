@@ -17,15 +17,16 @@ internal object CommitmentDetailFormatter {
 
     fun buildSourcePresentation(entity: CommitmentEntity): CommitmentSourcePresentation {
         val isManual = entity.sourceType == SourceType.MANUAL
+        val occurredAt = if (isManual) entity.createdAt else entity.sourceEventOccurredAt
         val label = if (isManual) {
-            "사용자 직접 추가 ${formatIsoKst(entity.createdAt)} KST"
+            buildManualSourceLabel(entity.createdAt)
         } else {
-            "${entity.sourceEventTitle ?: entity.sourceType}:${formatShortKst(entity.sourceEventOccurredAt)}"
+            buildEventSourceLabel(entity)
         }
         return CommitmentSourcePresentation(
             isManual = isManual,
             sourceTitle = if (isManual) null else entity.sourceEventTitle,
-            sourceOccurredAt = if (isManual) entity.createdAt else entity.sourceEventOccurredAt,
+            sourceOccurredAt = occurredAt,
             sourceLabel = label,
         )
     }
@@ -33,15 +34,30 @@ internal object CommitmentDetailFormatter {
     fun buildHistoryPresentation(entity: CommitmentEntity): CommitmentHistoryPresentation =
         CommitmentHistoryPresentation(
             lastEditedAt = entity.lastEditedAt,
-            lastEditedLabel = entity.lastEditedAt?.let {
-                "마지막 수정: ${formatShortKst(it)} (본인)"
-            },
+            lastEditedLabel = entity.lastEditedAt?.let(::buildLastEditedLabel),
             disputeRaisedAt = entity.quoteDisputedAt,
-            disputedLabel = entity.quoteDisputedAt?.let {
-                "⚠️ 이의 제기됨 — ${formatShortKst(it)}"
-            },
+            disputedLabel = entity.quoteDisputedAt?.let(::buildDisputedLabel),
             showSupersedeLink = entity.supersedesCommitmentId != null,
         )
+
+    fun buildCompactSourceLabel(entity: CommitmentEntity): String =
+        if (entity.sourceType == SourceType.MANUAL) {
+            "manual:${formatShortKst(entity.createdAt)}"
+        } else {
+            buildEventSourceLabel(entity)
+        }
+
+    private fun buildManualSourceLabel(createdAt: Instant): String =
+        "사용자 직접 추가 ${formatIsoKst(createdAt)} KST"
+
+    private fun buildEventSourceLabel(entity: CommitmentEntity): String =
+        "${entity.sourceEventTitle ?: entity.sourceType}:${formatShortKst(entity.sourceEventOccurredAt)}"
+
+    private fun buildLastEditedLabel(editedAt: Instant): String =
+        "마지막 수정: ${formatShortKst(editedAt)} (본인)"
+
+    private fun buildDisputedLabel(disputedAt: Instant): String =
+        "⚠️ 이의 제기됨 — ${formatShortKst(disputedAt)}"
 
     fun formatShortKst(instant: Instant): String {
         val ldt = instant.toLocalDateTime(KST_ZONE)

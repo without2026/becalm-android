@@ -11,8 +11,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.becalm.android.R
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.SystemClock
 import com.becalm.android.ui.theme.BecalmTheme
@@ -54,9 +56,9 @@ public fun OverallSyncIndicator(
 
     val label: String = when (state) {
         OverallSyncState.Idle -> ""
-        is OverallSyncState.Syncing -> "동기화 중 ${state.count}/${state.total}"
+        is OverallSyncState.Syncing -> stringResource(R.string.today_syncing_fmt, state.count, state.total)
         is OverallSyncState.Synced -> formatSyncedLabel(state.at, clock)
-        OverallSyncState.PartialFailure -> "일부 소스 실패 — 설정에서 확인"
+        OverallSyncState.PartialFailure -> stringResource(R.string.today_partial_failure)
     }
 
     if (label.isEmpty()) {
@@ -93,6 +95,7 @@ public fun OverallSyncIndicator(
  * Uses the injected [clock] to decide "today" via `clock.today(zone)`, so tests can control
  * the boundary without patching the system clock.
  */
+@Composable
 private fun formatSyncedLabel(at: Instant, clock: Clock): String {
     val tz = TimeZone.currentSystemDefault()
     val atLocal = at.toLocalDateTime(tz)
@@ -101,12 +104,13 @@ private fun formatSyncedLabel(at: Instant, clock: Clock): String {
     val hh = atLocal.hour.toString().padStart(2, '0')
     val mm = atLocal.minute.toString().padStart(2, '0')
 
+    val time = "$hh:$mm"
     return if (atLocal.date == today) {
-        "동기화됨 $hh:$mm"
+        stringResource(R.string.today_synced_time_fmt, time)
     } else {
         val mo = atLocal.monthNumber.toString().padStart(2, '0')
         val d = atLocal.dayOfMonth.toString().padStart(2, '0')
-        "동기화됨 $mo/$d $hh:$mm"
+        stringResource(R.string.today_synced_date_time_fmt, "$mo/$d", time)
     }
 }
 

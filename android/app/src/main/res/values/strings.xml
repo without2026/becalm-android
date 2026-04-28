@@ -178,6 +178,10 @@
     <string name="today_section_events">Events</string>
     <string name="today_person_focus_title">People to follow up</string>
     <string name="today_person_focus_commitments_fmt">Commitments %1$d</string>
+    <string name="today_syncing_fmt">Syncing %1$d/%2$d</string>
+    <string name="today_synced_time_fmt">Synced %1$s</string>
+    <string name="today_synced_date_time_fmt">Synced %1$s %2$s</string>
+    <string name="today_partial_failure">Some sources failed - check Settings</string>
 
     <!-- Persons -->
     <string name="persons_title">People</string>

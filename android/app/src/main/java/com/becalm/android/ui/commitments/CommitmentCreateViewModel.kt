@@ -213,7 +213,9 @@ public class CommitmentCreateViewModel @Inject constructor(
         val snap = _uiState.value
         val effectiveDraft = CommitmentCreateProjector.effectiveDraft(snap)
         if (effectiveDraft == null) {
-            _uiState.update { it.copy(saveError = "원문 commitment를 찾지 못했습니다") }
+            _uiState.update {
+                it.copy(saveError = CommitmentSaveErrorFormatter.SUPERSEDE_SOURCE_NOT_FOUND)
+            }
             return
         }
         when (val v = CommitmentManualValidator.validate(effectiveDraft)) {

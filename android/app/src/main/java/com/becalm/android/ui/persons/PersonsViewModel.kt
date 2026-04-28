@@ -56,16 +56,27 @@ public data class PersonSection(
     val people: List<PersonRow>,
 )
 
-public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> = listOf(
-    PersonSection(
-        kind = PersonSectionKind.PENDING_COMMITMENTS,
-        people = people.filter { it.pendingCommitmentCount > 0 },
-    ),
-    PersonSection(
-        kind = PersonSectionKind.RECENT_CONTACTS,
-        people = people.filter { it.pendingCommitmentCount <= 0 },
-    ),
-)
+public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
+    val pending = ArrayList<PersonRow>()
+    val recent = ArrayList<PersonRow>()
+    people.forEach { person ->
+        if (person.pendingCommitmentCount > 0) {
+            pending += person
+        } else {
+            recent += person
+        }
+    }
+    return listOf(
+        PersonSection(
+            kind = PersonSectionKind.PENDING_COMMITMENTS,
+            people = pending,
+        ),
+        PersonSection(
+            kind = PersonSectionKind.RECENT_CONTACTS,
+            people = recent,
+        ),
+    )
+}
 
 /**
  * Immutable snapshot of the PersonsScreen UI.

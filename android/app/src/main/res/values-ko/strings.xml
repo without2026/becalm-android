@@ -165,6 +165,10 @@
     <string name="today_section_events">이벤트</string>
     <string name="today_person_focus_title">오늘 챙길 사람</string>
     <string name="today_person_focus_commitments_fmt">약속 %1$d건</string>
+    <string name="today_syncing_fmt">동기화 중 %1$d/%2$d</string>
+    <string name="today_synced_time_fmt">동기화됨 %1$s</string>
+    <string name="today_synced_date_time_fmt">동기화됨 %1$s %2$s</string>
+    <string name="today_partial_failure">일부 소스 실패 — 설정에서 확인</string>
 
     <!-- Persons -->
     <string name="persons_title">사람</string>
