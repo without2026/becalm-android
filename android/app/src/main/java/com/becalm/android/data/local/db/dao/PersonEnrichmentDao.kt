@@ -93,10 +93,11 @@ public interface PersonEnrichmentDao {
     /**
      * Emits only the aggregate fields needed by source/settings UI.
      *
-     * This avoids loading every PIPA-local contact row just to render a count and
-     * last-sync timestamp.
+     * The count is the number of distinct ContactsContract rows actually matched. Minimal
+     * "no contact found" cache rows have a null source_contact_id and are intentionally
+     * excluded so the UI does not present app-internal personRef cache size as contact count.
      */
-    @Query("SELECT COUNT(*) AS count, MAX(last_synced_at) AS lastSyncedAt FROM persons_enrichment")
+    @Query("SELECT COUNT(DISTINCT source_contact_id) AS count, MAX(last_synced_at) AS lastSyncedAt FROM persons_enrichment")
     public fun observeSummary(): Flow<PersonEnrichmentSummary>
 
     /**

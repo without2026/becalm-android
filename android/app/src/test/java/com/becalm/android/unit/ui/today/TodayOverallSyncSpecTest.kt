@@ -59,6 +59,19 @@ class TodayOverallSyncSpecTest {
     }
 
     @Test
+    fun `deriveOverallState excludes never connected sources from syncing total`() {
+        val state = deriveOverallState(
+            listOf(
+                sourceStatus(SourceType.VOICE, SourceConnectionStatus.SYNCING, null),
+                sourceStatus(SourceType.GMAIL, SourceConnectionStatus.NEVER_CONNECTED, null),
+                sourceStatus(SourceType.OUTLOOK_MAIL, SourceConnectionStatus.CONNECTED, 4_000),
+            ),
+        )
+
+        assertEquals(OverallSyncState.Syncing(count = 1, total = 2), state)
+    }
+
+    @Test
     fun `deriveOverallState returns Synced at earliest lastSyncedAt when all product sources connected`() {
         val state = deriveOverallState(
             listOf(
@@ -106,7 +119,7 @@ class TodayOverallSyncSpecTest {
     }
 
     @Test
-    fun `buildChips emits seven current-spec chips including voice and split email providers`() {
+    fun `buildChips emits connected and syncing chips and hides failed or disconnected sources`() {
         val chips = buildChips(
             mapOf(
                 SourceType.VOICE to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 8_000),
@@ -119,11 +132,13 @@ class TodayOverallSyncSpecTest {
             ),
         )
 
-        assertEquals(7, chips.size)
+        assertEquals(4, chips.size)
         assertTrue(chips.any { it.sourceType == SourceType.VOICE })
         assertTrue(chips.any { it.sourceType == SourceType.NAVER_IMAP })
         assertTrue(chips.any { it.sourceType == SourceType.DAUM_IMAP })
-        assertEquals(ChipState.Error("401"), chips.single { it.sourceType == SourceType.GMAIL }.state)
+        assertFalse(chips.any { it.sourceType == SourceType.GMAIL })
+        assertFalse(chips.any { it.sourceType == SourceType.GOOGLE_CALENDAR })
+        assertFalse(chips.any { it.sourceType == SourceType.OUTLOOK_CALENDAR })
         assertEquals(ChipState.Syncing, chips.single { it.sourceType == SourceType.OUTLOOK_MAIL }.state)
         assertEquals(
             ChipState.Synced(Instant.fromEpochMilliseconds(8_000)),
@@ -132,19 +147,16 @@ class TodayOverallSyncSpecTest {
     }
 
     @Test
-    fun `TDY-003 buildChips materializes all seven contract chip slots and defaults missing rows to idle`() {
+    fun `TDY-003 buildChips hides missing rows instead of showing fake idle chips`() {
         val chips = buildChips(
             mapOf(
                 SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 9_000),
             ),
         )
 
-        assertEquals(CHIP_ORDER, chips.map { it.sourceType })
-        assertEquals(7, chips.size)
+        assertEquals(listOf(SourceType.GMAIL), chips.map { it.sourceType })
+        assertEquals(1, chips.size)
         assertEquals(ChipState.Synced(Instant.fromEpochMilliseconds(9_000)), chips.single { it.sourceType == SourceType.GMAIL }.state)
-        assertEquals(ChipState.Idle, chips.single { it.sourceType == SourceType.VOICE }.state)
-        assertEquals(ChipState.Idle, chips.single { it.sourceType == SourceType.NAVER_IMAP }.state)
-        assertEquals(ChipState.Idle, chips.single { it.sourceType == SourceType.DAUM_IMAP }.state)
         assertFalse(chips.any { it.sourceType == SourceType.CALL_RECORDING })
     }
 
@@ -166,6 +178,20 @@ class TodayOverallSyncSpecTest {
         assertEquals(7, chips.size)
         assertTrue(chips.none { it.sourceType == SourceType.CALL_RECORDING })
         assertTrue(chips.any { it.sourceType == SourceType.VOICE })
+    }
+
+    @Test
+    fun `buildSourceStatusAttention reports disconnected and failed sources for warning banner`() {
+        val attention = buildSourceStatusAttention(
+            mapOf(
+                SourceType.VOICE to sourceUi(syncing = false, statusLabel = "NEVER_CONNECTED", errorMessage = null, lastSyncedAt = null),
+                SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "ERROR", errorMessage = "expired", lastSyncedAt = null),
+                SourceType.OUTLOOK_MAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 1_000),
+            ),
+        )
+
+        assertEquals(SourceStatusAttention(disconnectedCount = 1, failedCount = 1), attention)
+        assertTrue(attention.hasWarning)
     }
 
     private fun sourceStatus(

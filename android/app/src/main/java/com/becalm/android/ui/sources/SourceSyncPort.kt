@@ -5,7 +5,9 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
@@ -31,8 +33,10 @@ public interface SourceSyncPort {
 
 @Singleton
 public class DefaultSourceSyncPort @Inject constructor(
+    private val authRepository: AuthRepository,
     private val apiProvider: Provider<RailwayApi>,
     private val calendarEventRepository: CalendarEventRepository,
+    private val commitmentRepository: CommitmentRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
@@ -59,20 +63,52 @@ public class DefaultSourceSyncPort @Inject constructor(
         }
 
     private suspend fun syncBackendManagedMail(sourceType: String): BecalmResult<Unit> {
+        val userId = authRepository.currentSession()?.userId ?: return onBackendSyncFailure(
+            sourceType = sourceType,
+            error = BecalmError.Unauthorized,
+        )
         sourceStatusRepository.recordSyncStart(sourceType)
         val response = api.syncMailSource(provider = sourceType)
         if (!response.isSuccessful) {
             return onBackendSyncFailure(sourceType, response.toSyncError())
+        }
+        when (val refresh = commitmentRepository.refreshSince(userId = userId, since = null)) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "commitment refresh after backend mail sync sourceType=$sourceType " +
+                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
+            )
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
         }
         logger.d(TAG, "manual sync delegated to backend mail sourceType=$sourceType")
         return finalizeBackendSyncSuccess(sourceType)
     }
 
     private suspend fun syncBackendManagedCalendar(sourceType: String): BecalmResult<Unit> {
+        val userId = authRepository.currentSession()?.userId ?: return onBackendSyncFailure(
+            sourceType = sourceType,
+            error = BecalmError.Unauthorized,
+        )
         sourceStatusRepository.recordSyncStart(sourceType)
         when (val result = calendarEventRepository.triggerServerSync()) {
             is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, result.error)
             is BecalmResult.Success -> {
+                when (val calendarRefresh = calendarEventRepository.refreshSince(userId = userId, since = null)) {
+                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, calendarRefresh.error)
+                    is BecalmResult.Success -> logger.d(
+                        TAG,
+                        "calendar refresh after backend calendar sync sourceType=$sourceType " +
+                            "fetched=${calendarRefresh.value.fetched} upserted=${calendarRefresh.value.upserted}",
+                    )
+                }
+                when (val commitmentRefresh = commitmentRepository.refreshSince(userId = userId, since = null)) {
+                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, commitmentRefresh.error)
+                    is BecalmResult.Success -> logger.d(
+                        TAG,
+                        "commitment refresh after backend calendar sync sourceType=$sourceType " +
+                            "fetched=${commitmentRefresh.value.fetched} upserted=${commitmentRefresh.value.upserted}",
+                    )
+                }
                 logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
                 return finalizeBackendSyncSuccess(sourceType)
             }

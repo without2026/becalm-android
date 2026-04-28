@@ -117,6 +117,7 @@ class SourcesLocalIntegrationTest {
             PersonEnrichmentEntity(
                 personRef = "+821012345678",
                 displayName = "김철수",
+                sourceContactId = "contact-1",
                 lastSyncedAt = Instant.parse("2026-04-23T01:00:00Z"),
             ),
         )
@@ -124,7 +125,14 @@ class SourcesLocalIntegrationTest {
             PersonEnrichmentEntity(
                 personRef = "a@corp.com",
                 displayName = "Alice",
+                sourceContactId = "contact-2",
                 lastSyncedAt = Instant.parse("2026-04-23T02:00:00Z"),
+            ),
+        )
+        enrichmentRepository.upsert(
+            PersonEnrichmentEntity(
+                personRef = "unmatched@example.com",
+                lastSyncedAt = Instant.parse("2026-04-23T03:00:00Z"),
             ),
         )
 
@@ -144,7 +152,7 @@ class SourcesLocalIntegrationTest {
             assertEquals(CONTACTS_SOURCE_TYPE, state.items.first().sourceType)
             assertEquals("CONNECTED", state.items.first().status)
             assertEquals(2, state.items.first().enrichedCount)
-            assertEquals(Instant.parse("2026-04-23T02:00:00Z"), state.items.first().lastSyncAt)
+            assertEquals(Instant.parse("2026-04-23T03:00:00Z"), state.items.first().lastSyncAt)
 
             val voice = state.items.first { it.sourceType == SourceType.VOICE }
             assertEquals("CONNECTED", voice.status)
@@ -187,6 +195,7 @@ class SourcesLocalIntegrationTest {
             PersonEnrichmentEntity(
                 personRef = "+82105557777",
                 displayName = "연락처 이름",
+                sourceContactId = "contact-3",
                 lastSyncedAt = Instant.parse("2026-04-23T04:00:00Z"),
             ),
         )

@@ -2,6 +2,8 @@ package com.becalm.android.ui.today
 
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 
@@ -11,9 +13,20 @@ internal object TodayTimelineProjector {
     fun buildTimeline(
         commitments: List<TodayCommitmentRow>,
         calendarEvents: List<CalendarEventEntity>,
-    ): List<TimelineItem> =
-        (commitments.map { it.toTimelineItem() } + calendarEvents.map { it.toTimelineItem() })
+    ): List<TimelineItem> {
+        val scheduleCommitmentKeys = commitments
+            .filter { row ->
+                row.itemType == CommitmentItemType.SCHEDULE &&
+                    row.sourceType in CALENDAR_SOURCE_TYPES &&
+                    !row.sourceRef.isNullOrBlank()
+            }
+            .mapTo(mutableSetOf()) { row -> row.sourceType to row.sourceRef }
+        val visibleCalendarEvents = calendarEvents.filterNot { event ->
+            event.sourceRef != null && (event.sourceType to event.sourceRef) in scheduleCommitmentKeys
+        }
+        return (commitments.map { it.toTimelineItem() } + visibleCalendarEvents.map { it.toTimelineItem() })
             .sortedBy { it.sortKey }
+    }
 
     private fun TodayCommitmentRow.toTimelineItem(): TimelineItem.Commitment =
         TimelineItem.Commitment(
@@ -41,6 +54,11 @@ internal object TodayTimelineProjector {
                 sortKey = startAt,
             )
         }
+
+    private val CALENDAR_SOURCE_TYPES = setOf(
+        SourceType.GOOGLE_CALENDAR,
+        SourceType.OUTLOOK_CALENDAR,
+    )
 }
 
 internal object TodaySyncProjector {

@@ -27,6 +27,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -108,6 +109,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             clock = clock,
             logger = logger,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
         val refreshing = MutableStateFlow(false)
         val userIdFlow = stateSource.userIdFlow(this.backgroundScope)

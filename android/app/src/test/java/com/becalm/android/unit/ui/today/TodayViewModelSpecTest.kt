@@ -12,6 +12,7 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
@@ -138,6 +139,44 @@ class TodayViewModelSpecTest {
             assertEquals(1, emission.personFocus.size)
             assertEquals("이대리", emission.personFocus.single().displayName)
             assertEquals(2, emission.personFocus.single().commitmentCount)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `calendar event is hidden from today timeline when mirrored as schedule commitment`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "calendar-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    personRef = "lee@corp.com",
+                    sourceType = SourceType.GOOGLE_CALENDAR,
+                    sourceRef = "event-1",
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(
+                calendarEvent(
+                    id = "event-1",
+                    startAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    attendeesRaw = "lee@corp.com",
+                ),
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(1, emission.timeline.size)
+            assertTrue(emission.timeline.single() is TimelineItem.Commitment)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -542,6 +581,8 @@ class TodayViewModelSpecTest {
         itemType: String = CommitmentItemType.ACTION,
         direction: String? = "give",
         scheduleStatus: String? = null,
+        sourceType: String = "voice",
+        sourceRef: String? = null,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
@@ -559,8 +600,8 @@ class TodayViewModelSpecTest {
         dueHint = null,
         dueIsApproximate = false,
         actionState = "pending",
-        sourceType = "voice",
-        sourceRef = null,
+        sourceType = sourceType,
+        sourceRef = sourceRef,
         confidence = 1.0,
         commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "synced",
@@ -582,6 +623,8 @@ class TodayViewModelSpecTest {
                 counterpartyDisplayName = commitment.personRef?.let { ref ->
                     enrichment[ref] ?: ref
                 } ?: commitment.counterpartyRaw?.take(30),
+                sourceType = commitment.sourceType,
+                sourceRef = commitment.sourceRef,
                 sortKey = commitment.sourceEventOccurredAt,
             )
         }

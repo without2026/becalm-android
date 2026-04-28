@@ -200,6 +200,7 @@ public class TodayViewModel @Inject constructor(
         userPrefsStore = userPrefsStore,
         clock = clock,
         logger = logger,
+        ioDispatcher = ioDispatcher,
     )
     /** Emits the authenticated userId once, or null when no session is present. */
     private val userIdFlow: StateFlow<String?> = stateSource.userIdFlow(viewModelScope)

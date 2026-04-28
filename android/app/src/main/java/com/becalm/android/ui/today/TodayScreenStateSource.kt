@@ -1,5 +1,6 @@
 package com.becalm.android.ui.today
 
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
@@ -12,13 +13,16 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.DatePeriod
@@ -42,6 +46,7 @@ internal class TodayScreenStateSource @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val clock: Clock,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     fun userIdFlow(scope: kotlinx.coroutines.CoroutineScope): StateFlow<String?> = flow {
         val userId = authRepository.currentSession()?.userId
@@ -91,15 +96,18 @@ internal class TodayScreenStateSource @Inject constructor(
 
         return combine(snapshotFlow, refreshingFlow) { snapshot, refreshing ->
             TodaySyncProjector.buildUiState(snapshot, refreshing)
-        }.catch { e ->
-            logger.w(TAG, "timeline flow failed: ${e.message}")
-            emit(
-                TodayUiState(
-                    loading = false,
-                    error = e.message ?: "timeline load failed",
-                ),
-            )
         }
+            .distinctUntilChanged()
+            .flowOn(ioDispatcher)
+            .catch { e ->
+                logger.w(TAG, "timeline flow failed: ${e.message}")
+                emit(
+                    TodayUiState(
+                        loading = false,
+                        error = e.message ?: "timeline load failed",
+                    ),
+                )
+            }
     }
 
     /**

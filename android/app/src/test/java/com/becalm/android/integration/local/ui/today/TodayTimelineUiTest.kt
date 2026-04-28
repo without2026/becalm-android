@@ -1,13 +1,12 @@
 package com.becalm.android.integration.local.ui.today
 
 import android.content.Context
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
@@ -36,7 +35,7 @@ class TodayTimelineUiTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun `today content shows processing banner settings action and seven source labels`() {
+    fun `today content shows processing banner active source chips source warning and settings action`() {
         var openSettingsCount = 0
 
         composeRule.setContent {
@@ -60,6 +59,18 @@ class TodayTimelineUiTest {
                                 errorMessage = null,
                                 lastSyncedAt = Instant.parse("2026-04-24T01:00:00Z"),
                             ),
+                            "outlook_mail" to SourceStatusUi(
+                                syncing = false,
+                                statusLabel = "ERROR",
+                                errorMessage = "token expired",
+                                lastSyncedAt = null,
+                            ),
+                            "naver_imap" to SourceStatusUi(
+                                syncing = false,
+                                statusLabel = "NEVER_CONNECTED",
+                                errorMessage = null,
+                                lastSyncedAt = null,
+                            ),
                         ),
                     ),
                     onOpenSettings = { openSettingsCount += 1 },
@@ -70,11 +81,11 @@ class TodayTimelineUiTest {
 
         composeRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
         composeRule.onNodeWithText("Voice").assertIsDisplayed()
         composeRule.onNodeWithText("Gmail").assertExists()
-        composeRule.onNodeWithTag("source-status-strip")
-            .performScrollToNode(hasText("Outlook Calendar"))
-        composeRule.onNodeWithText("Outlook Calendar").assertExists()
+        composeRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
+        composeRule.onAllNodesWithText("Naver Email").assertCountEquals(0)
         composeRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeRule.runOnIdle {
@@ -146,18 +157,13 @@ class TodayTimelineUiTest {
     }
 
     @Test
-    fun `source status strip renders seven product sources`() {
+    fun `source status strip renders provided active sources only`() {
         composeRule.setContent {
             BecalmTheme {
                 SourceStatusStrip(
                     sources = listOf(
                         SourceStatusChip("voice", ChipState.Syncing),
                         SourceStatusChip("gmail", ChipState.Idle),
-                        SourceStatusChip("outlook_mail", ChipState.Error("expired")),
-                        SourceStatusChip("naver_imap", ChipState.Idle),
-                        SourceStatusChip("daum_imap", ChipState.Idle),
-                        SourceStatusChip("google_calendar", ChipState.Idle),
-                        SourceStatusChip("outlook_calendar", ChipState.Idle),
                     ),
                 )
             }
@@ -165,9 +171,7 @@ class TodayTimelineUiTest {
 
         composeRule.onNodeWithText("Voice").assertExists()
         composeRule.onNodeWithText("Gmail").assertExists()
-        composeRule.onNodeWithTag("source-status-strip")
-            .performScrollToNode(hasText("Outlook Calendar"))
-        composeRule.onNodeWithText("Outlook Calendar").assertExists()
+        composeRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

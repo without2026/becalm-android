@@ -75,14 +75,15 @@ public data class SourceStatusChip(
 private val ChipShape = RoundedCornerShape(100.dp)
 
 /**
- * Horizontal strip of seven per-source status chips (TDY-003).
+ * Horizontal strip of connected or actively syncing source status chips (TDY-003).
  *
- * Renders exactly [sources].size chips in order. The strip is read-only per spec —
- * "칩 탭 인터랙션 없음". Catch-up recovery is driven by pull-to-refresh on the Today
- * screen (TDY-009), not by tapping chips. Error recovery is routed through the
- * settings screen.
+ * Renders exactly [sources].size chips in order. Disconnected and failed sources are
+ * surfaced by the Today attention banner instead of occupying neutral-looking chip slots.
+ * The strip is read-only per spec — "칩 탭 인터랙션 없음". Catch-up recovery is driven
+ * by pull-to-refresh on the Today screen (TDY-009), not by tapping chips. Error recovery
+ * is routed through the settings screen.
  *
- * @param sources Chip list in display order. Caller is expected to pass exactly 7 entries.
+ * @param sources Chip list in display order.
  * @param modifier Optional [Modifier] applied to the outer [LazyRow].
  */
 @Composable
