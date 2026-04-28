@@ -7,22 +7,24 @@ import kotlinx.datetime.Instant
 /**
  * Single item in [SourceStatusResponseDto.sources] returned by GET /v1/source_status.
  *
- * Wire shape (api-contract.yml lines 212-226):
+ * Wire shape (api-contract.yml § GET /v1/source_status):
  * ```
  * {
- *   source_type: "gmail" | "outlook_mail" | "naver_imap" | "daum_imap" |
- *                "google_calendar" | "outlook_calendar",
+ *   source_type: "voice" | "gmail" | "outlook_mail" | "naver_imap" |
+ *                "daum_imap" | "google_calendar" | "outlook_calendar",
  *   state:       "idle" | "syncing" | "synced" | "error",
  *   last_sync_at?: datetime,
  *   last_error?: string
  * }
  * ```
  *
- * Exactly six items are returned (voice excluded — TDY-003 chip strip is 6 ingestion sources).
+ * The server may omit sources it cannot observe directly. Android merges returned rows into
+ * the local DataStore status cache and preserves existing local-derived rows for omissions
+ * such as voice runtime state.
  */
 @JsonClass(generateAdapter = true)
 public data class SourceStatusItemDto(
-    /** One of the six [SourceType] constants (voice excluded). */
+    /** One of the product-facing source type constants. */
     @field:Json(name = "source_type") val sourceType: String,
 
     /** "idle" | "syncing" | "synced" | "error" */

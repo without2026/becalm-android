@@ -11,9 +11,11 @@ import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
@@ -86,6 +88,7 @@ public class ImapDaumWorker @AssistedInject constructor(
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
+    private val userPrefsStore: UserPrefsStore,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
     private val processingPauseGate: ProcessingPauseGate,
@@ -121,6 +124,9 @@ public class ImapDaumWorker @AssistedInject constructor(
 
         val credentials = loadCredentials() ?: run {
             processingStatusRepository.recordBlocked(SourceType.DAUM_IMAP, "IMAP credentials missing")
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.DAUM_IMAP, false)
+            userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.DAUM_IMAP, false)
+            sourceStatusRepository.clear(SourceType.DAUM_IMAP)
             return Result.success()
         }
         val imapEmail = credentials.username

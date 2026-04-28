@@ -223,6 +223,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         }
 
         val parts = entity.toRequestParts(rawEventId)
+        processingStatusRepository.recordGemini(entity.sourceType, "Analyzing audio with Gemini")
 
         val response = try {
             voiceApi.transcribeExtract(

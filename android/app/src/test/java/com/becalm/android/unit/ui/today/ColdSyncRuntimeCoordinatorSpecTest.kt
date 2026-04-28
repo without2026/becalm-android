@@ -40,6 +40,10 @@ class ColdSyncRuntimeCoordinatorSpecTest {
     init {
         every { userPrefsStore.observeCurrentUserId() } returns currentUserId
         every { userPrefsStore.observeLocaleTag() } returns flowOf("ko-KR")
+        every { userPrefsStore.observeEnabledSources() } returns flowOf(
+            (DefaultColdSyncRuntimeCoordinator.STAGE1_SOURCE_TYPES +
+                DefaultColdSyncRuntimeCoordinator.STAGE2_SOURCE_TYPES).toSet(),
+        )
         every { userProfileRepository.observe("user-1") } returns flowOf(null)
     }
 
@@ -61,6 +65,25 @@ class ColdSyncRuntimeCoordinatorSpecTest {
         verify(exactly = 1) { foregroundWorkScheduler.enqueueOutlookCalOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
         verify(exactly = 1) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
+        verify(exactly = 1) { workScheduler.enqueueUpload(0) }
+    }
+
+    @Test
+    fun `COLD-001 startStage1 skips disabled sources`() = runTest {
+        every { userPrefsStore.observeEnabledSources() } returns flowOf(setOf(SourceType.NAVER_IMAP))
+        val coordinator = buildCoordinator()
+
+        val result = coordinator.startStage1(Instant.parse("2026-04-23T00:00:00Z"))
+
+        assertTrue(result is BecalmResult.Success<*>)
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncStart(SourceType.NAVER_IMAP) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncStart(SourceType.GOOGLE_CALENDAR) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncStart(SourceType.OUTLOOK_CALENDAR) }
+        coVerify(exactly = 0) { sourceStatusRepository.recordSyncStart(SourceType.DAUM_IMAP) }
+        verify(exactly = 1) { foregroundWorkScheduler.enqueueImapNaverOneShotNow(DefaultColdSyncRuntimeCoordinator.STAGE1_LOOKBACK_DAYS) }
+        verify(exactly = 0) { foregroundWorkScheduler.enqueueGCalOneShotNow(any()) }
+        verify(exactly = 0) { foregroundWorkScheduler.enqueueOutlookCalOneShotNow(any()) }
+        verify(exactly = 0) { foregroundWorkScheduler.enqueueImapDaumOneShotNow(any()) }
         verify(exactly = 1) { workScheduler.enqueueUpload(0) }
     }
 
