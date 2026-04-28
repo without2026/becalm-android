@@ -161,7 +161,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             assertEquals("가장 최근 음성 메모", first.lastInteractionSnippet)
 
             val second = updated.people.last()
-            assertEquals("unknown@corp.com", second.displayLabel)
+            assertEquals("Unknown", second.displayLabel)
             assertEquals(0, second.pendingCommitmentCount)
             assertEquals("메일 미리보기", second.lastInteractionSnippet)
 

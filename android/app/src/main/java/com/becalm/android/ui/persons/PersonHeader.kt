@@ -28,9 +28,9 @@ import com.becalm.android.ui.theme.glassPanel
  * Top header composable for [PersonDetailScreen] — renders the person's display
  * name plus an optional role/company subtitle.
  *
- * Respects ENR-006 fallback: when [displayName] is null / blank the raw
- * [personRef] (email / phone / display string) is shown verbatim so a contact
- * still has a human handle before enrichment has run.
+ * Respects ENR-006 fallback: when [displayName] is null / blank, [personRef] is
+ * rendered through the UI-only display-label formatter so email refs still have
+ * a human handle before enrichment has run.
  *
  * The subtitle composes [jobTitle] and [companyName] into one of four shapes:
  * both → `"Engineer · Acme"`, job only → `"Engineer"`, company only → `"Acme"`,
@@ -54,7 +54,11 @@ internal fun PersonHeader(
     pendingCommitmentCount: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personRef
+    val nameLine = personDisplayLabel(
+        personRef = personRef,
+        displayName = displayName,
+        nickname = nickname,
+    )
     val subtitle = composeSubtitle(jobTitle = jobTitle, companyName = companyName)
     val metaLine = composeMetaLine(
         nickname = nickname,

@@ -19,9 +19,11 @@ internal object PersonDetailProjector {
         completedExpanded: Boolean,
     ): PersonDetailUiState {
         val sections = buildInteractions(rawEvents, commitments, calendarEvents)
-        val resolvedDisplayName = enrichment?.displayName
-            ?: enrichment?.nickname
-            ?: personRef
+        val resolvedDisplayName = personDisplayLabel(
+            personRef = personRef,
+            displayName = enrichment?.displayName,
+            nickname = enrichment?.nickname,
+        )
         return PersonDetailUiState(
             personRef = personRef,
             displayName = resolvedDisplayName,

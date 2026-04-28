@@ -37,13 +37,15 @@ public data class PersonRow(
     val lastInteractionSnippet: String? = null,
 ) {
     /**
-     * User-facing label. Falls back to the canonical raw [personRef] when no
-     * display name or nickname is available (SRC-001, ENR-006).
+     * User-facing label. Keeps [personRef] as the stable identifier while
+     * presenting email refs as readable contact labels when enrichment is absent.
      */
     val displayLabel: String
-        get() = displayName
-            ?: nickname
-            ?: personRef
+        get() = personDisplayLabel(
+            personRef = personRef,
+            displayName = displayName,
+            nickname = nickname,
+        )
 }
 
 public enum class PersonSectionKind {

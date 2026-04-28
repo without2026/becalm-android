@@ -27,13 +27,14 @@ internal object PersonsUiProjector {
         pageSize: Int,
     ): PersonsUiState {
         val rows = peoplePage.rows
-            .filter { projection ->
-                query.isBlank() ||
-                    projection.displayName?.contains(query, ignoreCase = true) == true ||
-                    projection.nickname?.contains(query, ignoreCase = true) == true ||
-                    projection.personRef.contains(query, ignoreCase = true)
-            }
             .map(PersonsUiProjector::toPersonRow)
+            .filter { row ->
+                query.isBlank() ||
+                    row.displayName?.contains(query, ignoreCase = true) == true ||
+                    row.nickname?.contains(query, ignoreCase = true) == true ||
+                    row.displayLabel.contains(query, ignoreCase = true) ||
+                    row.personRef.contains(query, ignoreCase = true)
+            }
         return PersonsUiState(
             query = query,
             people = rows,

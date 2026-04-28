@@ -78,6 +78,11 @@ class PersonsViewModelSpecTest {
                 displayName = null,
                 nickname = null,
             ),
+            person(
+                ref = "noreply@navercorp.com",
+                displayName = null,
+                nickname = null,
+            ),
         )
 
         val viewModel = buildViewModel()
@@ -100,7 +105,7 @@ class PersonsViewModelSpecTest {
             sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.map { it.personRef },
         )
         assertEquals(
-            listOf("nick@example.com", "+821012345678"),
+            listOf("nick@example.com", "+821012345678", "noreply@navercorp.com"),
             sections.getValue(PersonSectionKind.RECENT_CONTACTS).people.map { it.personRef },
         )
     }
@@ -118,6 +123,11 @@ class PersonsViewModelSpecTest {
                 displayName = null,
                 nickname = null,
             ),
+            person(
+                ref = "noreply@navercorp.com",
+                displayName = null,
+                nickname = null,
+            ),
         )
 
         val viewModel = buildViewModel()
@@ -126,6 +136,7 @@ class PersonsViewModelSpecTest {
         val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personRef)
         assertEquals("Nick Only", rowsByRef.getValue("nick@example.com").displayLabel)
         assertEquals("+821012345678", rowsByRef.getValue("+821012345678").displayLabel)
+        assertEquals("네이버", rowsByRef.getValue("noreply@navercorp.com").displayLabel)
     }
 
     @Test
@@ -154,6 +165,24 @@ class PersonsViewModelSpecTest {
         advanceUntilIdle()
         assertEquals("", viewModel.uiState.value.query)
         assertEquals(2, viewModel.uiState.value.people.size)
+    }
+
+    @Test
+    fun `SRC-003 query matches readable fallback labels for branded email senders`() = runTest {
+        projectionPort.people.value = pageOf(
+            person(ref = "noreply@navercorp.com", displayName = null),
+            person(ref = "lee@corp.com", displayName = "Minji Lee"),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onQueryChange("네이버")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        assertEquals(listOf("noreply@navercorp.com"), viewModel.uiState.value.people.map { it.personRef })
+        assertEquals("네이버", viewModel.uiState.value.people.single().displayLabel)
     }
 
     @Test

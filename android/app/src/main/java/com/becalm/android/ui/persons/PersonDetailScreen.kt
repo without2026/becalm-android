@@ -76,7 +76,7 @@ public fun PersonDetailScreen(
 
     PersonDetailScreenContent(
         state = state,
-        title = state.displayName ?: personId.take(16),
+        title = state.displayName?.takeIf { it.isNotBlank() } ?: personDisplayLabel(personId),
         snackbarHostState = snackbarHostState,
         onBack = navController::popBackStack,
         onEventTap = onEventTap,

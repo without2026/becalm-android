@@ -231,7 +231,7 @@ class PersonDetailViewModelSpecTest {
     }
 
     @Test
-    fun `SRC-002 ENR-006 detail falls back to raw person ref when enrichment display name is absent`() = runTest {
+    fun `SRC-002 ENR-006 detail falls back to readable person label when enrichment display name is absent`() = runTest {
         val personRef = "unknown@domain.com"
         every { personEnrichmentRepository.observeByPersonRef(personRef) } returns
             flowOf(
@@ -253,7 +253,7 @@ class PersonDetailViewModelSpecTest {
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
-        assertEquals(personRef, state.displayName)
+        assertEquals("Unknown", state.displayName)
         assertEquals(emptyList<InteractionRow.Commitment>(), state.pendingCommitments)
         assertEquals(emptyList<InteractionRow.Commitment>(), state.completedCommitments)
     }
