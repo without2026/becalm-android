@@ -13,11 +13,8 @@ package com.becalm.android.core.result
  * - [Permission] — Android runtime permission not granted.
  * - [NotFound] — 404 or missing local resource.
  * - [Cancelled] — coroutine or user-initiated cancellation; typically not shown to user.
- * - [ExtractorUnavailable] — on-device LLM (Gemini Nano / AICore) could not run
- *   the extraction request. [reason] is a short machine-readable tag — `AICORE_NOT_AVAILABLE`
- *   (device unsupported — caller should skip, no retry), `LLM_JSON_PARSE_FAILED`
- *   (model returned malformed output — quarantine), `AICORE_ERROR` (generic SDK error —
- *   transient retry). Spec refs: EMAIL-001 / EMAIL-008, KTR-GEMINI-NANO.
+ * - [ExtractorUnavailable] — LLM extraction could not run or returned unusable output.
+ *   [reason] is a short machine-readable tag suitable for worker retry decisions.
  * - [Unknown] — catch-all wrapping an unexpected [Throwable].
  */
 public sealed class BecalmError {
@@ -59,24 +56,9 @@ public sealed class BecalmError {
     public data object Cancelled : BecalmError()
 
     /**
-     * On-device LLM extraction could not complete.
-     *
-     * Thrown by [com.becalm.android.domain.extractor.GeminiNanoExtractor.extract] when the
-     * AICore SDK path fails for any of three reasons tracked via [reason]:
-     *
-     * - `AICORE_NOT_AVAILABLE` — SDK reports the device does not support Gemini Nano. Caller
-     *   (the [com.becalm.android.worker.extraction.CommitmentExtractionWorker]) should treat
-     *   this as permanent and return [androidx.work.ListenableWorker.Result.success] without
-     *   retry: no amount of WorkManager backoff will make an unsupported device work.
-     * - `LLM_JSON_PARSE_FAILED` — model produced output that Moshi could not parse as the
-     *   expected JSON array. Deterministic per prompt+model, so caller quarantines instead
-     *   of retrying.
-     * - `AICORE_ERROR` — any other SDK exception. Typically transient (service crashed,
-     *   model still downloading, etc.) so caller may return
-     *   [androidx.work.ListenableWorker.Result.retry], but must cap retries to avoid
-     *   foreground/startup retry storms when the SDK remains unavailable.
-     *
-     * Spec refs: EMAIL-001, EMAIL-008, KTR-GEMINI-NANO.
+     * LLM extraction could not complete. Current production extraction is server-backed
+     * through Railway / Vertex Gemini; this error remains as a transport-neutral domain
+     * shape for sync owners that need to classify extraction failures.
      */
     public data class ExtractorUnavailable(
         val reason: String,

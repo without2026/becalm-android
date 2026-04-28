@@ -11,7 +11,6 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         // supabase-kt is published on Maven Central
-        // gemini nano aicore is distributed via Google's Maven repository (included above)
         // Microsoft DuoSDK feed — required transitively by MSAL's `common` artifact
         // (display-mask:0.3.0 lives here, not on Maven Central). See
         // docs/plans/repo-auth-msgraph-oauth-provider.md § 5.1 for MSAL rationale.

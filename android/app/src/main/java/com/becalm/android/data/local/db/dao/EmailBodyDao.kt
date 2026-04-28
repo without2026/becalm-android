@@ -54,9 +54,7 @@ public interface EmailBodyDao {
      * parsing failed and the body was cleared).
      *
      * Used by: EMAIL-002 person_ref derivation (reading [EmailBodyEntity.fromAddress]
-     * or the first entry of [EmailBodyEntity.toAddresses]) and by the future
-     * `CommitmentExtractionWorker` (EXTRACT-EMAIL-001) which needs the body text as
-     * LLM input.
+     * or the first entry of [EmailBodyEntity.toAddresses]) and local email detail views.
      *
      * The `LIMIT 1` is defensive — the 1:1 relationship is enforced by the
      * UNIQUE `raw_event_id` index declared on [EmailBodyEntity].

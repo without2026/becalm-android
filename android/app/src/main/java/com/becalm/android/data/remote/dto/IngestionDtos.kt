@@ -96,6 +96,13 @@ public data class RawIngestionEventDto(
      */
     @field:Json(name = "commitments_extracted_count") val commitmentsExtractedCount: Int? = null,
 
+    /**
+     * Email-only extraction context sent to Railway / Vertex Gemini. This field is not stored
+     * in `raw_ingestion_events`; the backend consumes it during the batch request to extract
+     * action / schedule / decision items from Naver, Daum, Gmail, and Outlook mail.
+     */
+    @field:Json(name = "email_body_plain") val emailBodyPlain: String? = null,
+
     /** ISO 8601 timestamp of when the event occurred (not upload time). */
     @field:Json(name = "timestamp") val timestamp: Instant,
 )

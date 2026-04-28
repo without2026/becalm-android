@@ -206,11 +206,6 @@ dependencies {
     // ─── libphonenumber (E.164 normalization for call-recording person_ref) ──
     implementation(libs.libphonenumber)
 
-    // ─── Gemini Nano (on-device LLM via AICore) ──────────────────────────────
-    // Powers CommitmentExtractionWorker's email-source on-device commitment extraction.
-    // Spec: EMAIL-001 / EMAIL-008 / KTR-GEMINI-NANO.
-    implementation(libs.gemini.nano.aicore)
-
     // ─── Timber ──────────────────────────────────────────────────────────────
     implementation(libs.timber)
 
@@ -233,7 +228,7 @@ dependencies {
     // fields). Unused at runtime — compileOnly on main would also work, but the reflection
     // is only exercised from src/test so it is declared as testImplementation.
     testImplementation(libs.kotlin.reflect)
-    // ApplicationProvider used by Robolectric unit tests (EmailPromptBuilderTest, CommitmentExtractionWorkerTest).
+    // ApplicationProvider used by Robolectric unit tests.
     testImplementation(libs.androidx.test.core)
 
     // ─── Instrumented Tests ───────────────────────────────────────────────────

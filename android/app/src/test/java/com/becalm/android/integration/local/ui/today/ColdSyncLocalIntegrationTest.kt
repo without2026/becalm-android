@@ -187,6 +187,7 @@ class ColdSyncLocalIntegrationTest {
         override fun enqueuePeriodic(sourceKey: String) = Unit
         override fun enqueueUpload(attempt: Int) = Unit
         override fun scheduleUploadRedundancy() = Unit
+        override fun scheduleBackendMailSync() = Unit
         override fun enqueueEnrichment() = Unit
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
@@ -198,7 +199,6 @@ class ColdSyncLocalIntegrationTest {
             rateLimitedAttempt: Int,
         ) = Unit
 
-        override fun enqueueCommitmentExtraction(rawEventId: String) = Unit
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit
 

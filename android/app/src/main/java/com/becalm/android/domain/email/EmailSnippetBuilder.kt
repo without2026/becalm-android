@@ -28,7 +28,7 @@ import org.jsoup.Jsoup
  * domain unit pure and the metric write site visible at the call site.
  *
  * ## Out of scope
- * - LLM-skip gating for subject-only emails — `CommitmentExtractionWorker` decides.
+ * - LLM-skip gating for subject-only emails — ingestion workers decide before backend upload.
  * - Persisting `EmailBody.parse_failed = true` — worker uses `parseFailed` flag.
  * - `<script>` / `<style>` whitelisting — handled implicitly by `Jsoup.text()`.
  *
@@ -114,7 +114,7 @@ public object EmailSnippetBuilder {
  *   when every input was null or blank.
  * @property sourceKind Which fallback layer produced [snippet]. Callers gate downstream
  *   behaviour on this — for example, `SUBJECT_FALLBACK` triggers a `MetricsStore` increment
- *   and skips `CommitmentExtractionWorker` enqueue.
+ *   and skips backend extraction upload.
  * @property parseFailed True when the HTML branch threw and the chain fell through to
  *   subject. Callers must mirror this flag onto `EmailBody.parse_failed` per EMAIL-007.
  */
@@ -128,7 +128,7 @@ public data class SnippetResult(
  * The provenance of a snippet returned by [EmailSnippetBuilder.buildSnippet].
  *
  * Used by callers to drive metrics (`SUBJECT_FALLBACK` → `email_subject_only_skipped += 1`)
- * and LLM-extraction gating (subject-only emails skip `CommitmentExtractionWorker`).
+ * and LLM-extraction gating (subject-only emails skip backend extraction upload).
  */
 public enum class SourceKind {
     /** The plain-text part was non-blank and used directly. */

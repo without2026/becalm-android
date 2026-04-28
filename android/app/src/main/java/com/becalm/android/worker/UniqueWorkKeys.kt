@@ -24,6 +24,9 @@ public object UniqueWorkKeys {
     /** One-shot and periodic Outlook Calendar refresh chain. */
     public const val OUTLOOK_CAL: String = "ingest.outlook_cal"
 
+    /** Periodic backend-managed Gmail / Outlook Mail refresh chain. */
+    public const val BACKEND_MAIL: String = "ingest.backend_mail"
+
     /** Batch upload to Railway backend via [com.becalm.android.worker.UploadWorker]. */
     public const val UPLOAD: String = "sync-all-upload"
 
@@ -64,34 +67,6 @@ public object UniqueWorkKeys {
      * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
      */
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
-
-    /**
-     * On-device commitment extraction via
-     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker].
-     *
-     * Each enqueue uses a per-event suffix so multiple raw ingestion events can be extracted
-     * concurrently — one email's LLM inference must not block another's. Use
-     * [commitmentExtractionKey] to generate the full unique-work name.
-     *
-     * Spec refs: EMAIL-001, EMAIL-008.
-     */
-    public const val COMMITMENT_EXTRACTION_PREFIX: String = "commitment-extraction-"
-
-    /**
-     * Returns the unique work name for a
-     * [com.becalm.android.worker.extraction.CommitmentExtractionWorker] processing the raw
-     * event identified by [rawEventId].
-     *
-     * Per-event stability means re-enqueueing with the same [rawEventId] collapses onto the
-     * same unique-work name, and [androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE] in
-     * [WorkSchedulerImpl.enqueueCommitmentExtraction] ensures either the in-flight job
-     * completes or the new request replaces it — never two parallel extractors for the same
-     * email.
-     *
-     * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
-     */
-    public fun commitmentExtractionKey(rawEventId: String): String =
-        COMMITMENT_EXTRACTION_PREFIX + rawEventId
 
     /**
      * Daily retention sweep via [com.becalm.android.worker.RetentionSweepWorker].

@@ -27,6 +27,7 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import java.io.File
@@ -62,7 +63,7 @@ public fun RecordingFolderScreen(
     val detection = detectionOverride ?: remember {
         RecordingFolderDetector.detect { path -> File(path).exists() }
     }
-    val navigateNext = { navController.navigate(BecalmRoute.OnboardingContacts.path) }
+    val navigateNext = { navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingContacts.path) }
 
     val treePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),

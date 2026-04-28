@@ -1,16 +1,17 @@
 package com.becalm.android.unit.worker
 
 import android.content.Context
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.Operation
+import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import com.becalm.android.core.util.Logger
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.WorkSchedulerImpl
 import com.becalm.android.worker.WorkSchedulerRequests
-import com.becalm.android.worker.extraction.CommitmentExtractionWorker
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -19,8 +20,6 @@ import io.mockk.unmockkStatic
 import io.mockk.verify
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -37,6 +36,7 @@ class WorkSchedulerImplSpecTest {
         mockkStatic(WorkManager::class)
         every { WorkManager.getInstance(appContext) } returns workManager
         every { workManager.enqueueUniqueWork(any(), any(), any<OneTimeWorkRequest>()) } returns operation
+        every { workManager.enqueueUniquePeriodicWork(any(), any(), any<PeriodicWorkRequest>()) } returns operation
     }
 
     @After
@@ -88,23 +88,24 @@ class WorkSchedulerImplSpecTest {
     }
 
     @Test
-    fun `EMAIL-001 commitment extraction keeps battery constraint without expedited request`() {
-        val request = slot<OneTimeWorkRequest>()
+    fun `backend mail sync is enrolled as 15 minute connected periodic work`() {
+        val workName = slot<String>()
+        val policy = slot<ExistingPeriodicWorkPolicy>()
+        val request = slot<PeriodicWorkRequest>()
 
-        WorkSchedulerImpl(appContext, logger).enqueueCommitmentExtraction("raw-1")
+        WorkSchedulerImpl(appContext, logger).scheduleBackendMailSync()
 
         verify(exactly = 1) {
-            workManager.enqueueUniqueWork(any(), any(), capture(request))
+            workManager.enqueueUniquePeriodicWork(capture(workName), capture(policy), capture(request))
         }
-        val workSpec = request.captured.workSpec
-        assertTrue(workSpec.constraints.requiresBatteryNotLow())
-        assertFalse(workSpec.expedited)
-        assertEquals("raw-1", workSpec.input.getString(CommitmentExtractionWorker.KEY_RAW_EVENT_ID))
-        assertTrue(request.captured.tags.contains(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION))
+        assertEquals("ingest.backend_mail", workName.captured)
+        assertEquals(ExistingPeriodicWorkPolicy.UPDATE, policy.captured)
+        assertEquals(NetworkType.CONNECTED, request.captured.workSpec.constraints.requiredNetworkType)
+        assertEquals(15 * 60 * 1000L, request.captured.workSpec.intervalDuration)
     }
 
     @Test
-    fun `AUTH-009 cancelAll cancels dynamic extraction and voice work by tag`() {
+    fun `AUTH-009 cancelAll cancels voice work and stale local extraction work by tag`() {
         every { workManager.cancelUniqueWork(any()) } returns operation
         every { workManager.cancelAllWorkByTag(any()) } returns operation
 
@@ -114,12 +115,12 @@ class WorkSchedulerImplSpecTest {
             workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
         }
         verify(exactly = 1) {
-            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         }
     }
 
     @Test
-    fun `startup legacy cleanup does not cancel live commitment extraction work by tag`() {
+    fun `startup legacy cleanup cancels stale local commitment extraction work by tag`() {
         every { workManager.cancelUniqueWork(any()) } returns operation
         every { workManager.cancelAllWorkByTag(any()) } returns operation
 
@@ -128,8 +129,8 @@ class WorkSchedulerImplSpecTest {
         verify(exactly = 2) {
             workManager.cancelUniqueWork(any())
         }
-        verify(exactly = 0) {
-            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
+        verify(exactly = 1) {
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         }
     }
 }

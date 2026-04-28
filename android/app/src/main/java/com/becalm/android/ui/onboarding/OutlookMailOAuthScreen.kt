@@ -20,6 +20,7 @@ import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
@@ -58,7 +59,7 @@ public fun OutlookMailOAuthScreen(
     } else {
         viewModel
     }
-    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigateAfterSourceReconnectOr(downstream) }
 
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_outlook_error_network),

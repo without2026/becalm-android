@@ -92,6 +92,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             return
         }
         PERIODIC_SOURCES.forEach(workScheduler::enqueuePeriodic)
+        workScheduler.scheduleBackendMailSync()
         workScheduler.scheduleUploadRedundancy()
         workScheduler.scheduleRetentionSweep()
         workScheduler.scheduleOverdueSweep()

@@ -2,19 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!--
-        Gemini Nano (AICore) declares minSdk 31 but only ~30% of our users run ≥ API 31 at
-        the moment. Keeping minSdk at 28 means the rest of the app still loads on Android 9 /
-        10 / 11 devices; CommitmentExtractionWorker gracefully no-ops on unsupported devices
-        by catching the AICore init `Throwable` and returning
-        BecalmError.ExtractorUnavailable(reason="AICORE_NOT_AVAILABLE") (see GeminiNanoExtractor).
-        The worker's handleFailure lookup returns Result.success() on that reason, so there is
-        no retry storm.
-
-        Spec refs: EMAIL-008, KTR-GEMINI-NANO, docs/plans/domain-email-commitment-extractor.md.
-    -->
-    <uses-sdk tools:overrideLibrary="com.google.ai.edge.aicore" />
-
     <!-- ── Permissions ──────────────────────────────────────────────────────── -->
 
     <!-- Network (Supabase + Railway API) -->

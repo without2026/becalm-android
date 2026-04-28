@@ -30,6 +30,7 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.flow.Flow
@@ -77,7 +78,7 @@ public fun GmailOAuthScreen(
     } else {
         viewModel
     }
-    val navigateDownstream = onNavigateDownstream ?: { navController.navigate(downstream) }
+    val navigateDownstream = onNavigateDownstream ?: { navController.navigateAfterSourceReconnectOr(downstream) }
 
     val errorCopyByCode = oauthErrorStringMap(
         network = stringResource(R.string.onb_gmail_error_network),
