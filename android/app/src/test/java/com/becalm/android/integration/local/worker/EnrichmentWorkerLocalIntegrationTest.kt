@@ -21,7 +21,10 @@ import com.becalm.android.worker.ProcessingPauseGate
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -55,9 +58,11 @@ class EnrichmentWorkerLocalIntegrationTest {
     )
     private val authRepository = mockk<AuthRepository>()
     private val sourceStatusRepository = mockk<SourceStatusRepository>()
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val processingPauseGate = ProcessingPauseGate(
         userPrefsStore = UserPrefsStoreImpl(LocalIntegrationSupport.prefsDataStore("enrichment-worker-pause")),
         logger = logger,
+        applicationScope = applicationScope,
     )
     private val rawIngestionRepositoryProvider = Provider { rawIngestionRepository }
     private val enrichmentRepositoryProvider = Provider { enrichmentRepository }

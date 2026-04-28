@@ -36,6 +36,7 @@ class DefaultAuthTokenProviderSpecTest {
             authClientProvider = Provider { error("SupabaseAuthClient must stay lazy until refresh") },
             sessionStore = store,
             ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            applicationScope = backgroundScope,
             logger = logger,
         )
 
@@ -56,6 +57,7 @@ class DefaultAuthTokenProviderSpecTest {
             },
             sessionStore = store,
             ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            applicationScope = backgroundScope,
             logger = logger,
         )
 

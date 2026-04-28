@@ -18,6 +18,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Moshi
@@ -93,6 +94,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val voiceApiProvider: Provider<VoiceApi>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val workSchedulerProvider: Provider<WorkScheduler>,
     private val processingPauseGate: ProcessingPauseGate,
     private val voiceFailureNotifier: VoiceFailureNotifier,
@@ -109,6 +111,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         voiceApi: VoiceApi,
         userPrefsStore: UserPrefsStore,
         sourceStatusRepository: SourceStatusRepository,
+        processingStatusRepository: ProcessingStatusRepository,
         workScheduler: WorkScheduler,
         processingPauseGate: ProcessingPauseGate,
         voiceFailureNotifier: VoiceFailureNotifier,
@@ -123,6 +126,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         voiceApiProvider = Provider { voiceApi },
         userPrefsStore = userPrefsStore,
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        processingStatusRepository = processingStatusRepository,
         workSchedulerProvider = Provider { workScheduler },
         processingPauseGate = processingPauseGate,
         voiceFailureNotifier = voiceFailureNotifier,
@@ -184,6 +188,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             logger.e(TAG, "RawIngestionEventEntity not found id=${redact(rawEventId)}")
             return@withContext Result.failure()
         }
+        processingStatusRepository.recordUploading(entity.sourceType, "Queued audio analysis")
 
         // VOI-004: PIPA consent gate (first check — pre-upload).
         if (parkIfConsentWithdrawn(entity, rawEventId, stage = "PIPA consent not granted")) {
@@ -205,6 +210,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                     TAG,
                     "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
                 )
+                processingStatusRepository.recordError(entity.sourceType, "Audio file unavailable")
                 markFailed(entity, reasonCode = "audio_unavailable")
                 return@withContext Result.success()
             }
@@ -275,6 +281,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 rawIngestionEventDao.update(updated)
 
                 sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
+                processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
                 logger.d(
                     TAG,
                     "upload success id=${redact(rawEventId)} items=${body.items.size}",
@@ -285,6 +292,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             401 -> {
                 // AuthInterceptor already attempted refresh; second 401 means token is invalid
                 logger.w(TAG, "HTTP 401 after refresh id=${redact(rawEventId)} — marking failed")
+                processingStatusRepository.recordError(entity.sourceType, "Unauthorized")
                 markFailed(entity, reasonCode = "unauthorized")
                 Result.success()
             }
@@ -292,6 +300,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             403, 413, 422 -> {
                 // Non-retryable: PIPA server-side guard failure, body too large, or duration exceeded
                 logger.w(TAG, "HTTP ${response.code()} non-retryable id=${redact(rawEventId)} — quarantining")
+                processingStatusRepository.recordError(entity.sourceType, "Upload rejected")
                 markFailed(entity, reasonCode = "non_retryable_http_${response.code()}")
                 Result.success()
             }
@@ -321,6 +330,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
             else -> {
                 logger.w(TAG, "HTTP ${response.code()} unexpected id=${redact(rawEventId)} — marking failed")
+                processingStatusRepository.recordError(entity.sourceType, "Unexpected HTTP ${response.code()}")
                 markFailed(entity, reasonCode = "unexpected_http_${response.code()}")
                 Result.success()
             }
@@ -344,6 +354,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         val hasConsent = userPrefsStore.observeThirdPartyProvisionConsent().first()
         if (hasConsent) return false
         logger.w(TAG, "$stage — parking id=${redact(rawEventId)} as awaiting_consent")
+        processingStatusRepository.recordBlocked(entity.sourceType, "PIPA consent required")
         val parked = entity.copy(syncStatus = STATUS_AWAITING_CONSENT)
         rawIngestionEventDao.update(parked)
         return true
@@ -377,6 +388,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             Voice502Action.Quarantine -> {
                 // Deterministic server-side failure — no point retrying.
                 logger.w(TAG, "HTTP 502 non-retryable ($errorCode) id=${redact(rawEventId)} — quarantining")
+                processingStatusRepository.recordError(entity.sourceType, errorCode ?: "Voice extraction failed")
                 markFailed(entity, reasonCode = errorCode ?: "vertex_502_unknown")
                 Result.success()
             }

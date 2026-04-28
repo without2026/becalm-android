@@ -264,6 +264,9 @@ public sealed class BecalmRoute(public val path: String) {
     /** Processing-pause control screen. */
     public data object ProcessingPause : BecalmRoute("settings/privacy/pause")
 
+    /** Read-only source processing status screen. */
+    public data object ProcessingStatus : BecalmRoute("settings/processing-status")
+
     /** Two-step local account deletion flow. */
     public data object AccountDeletion : BecalmRoute("settings/privacy/delete-account")
 

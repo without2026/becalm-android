@@ -107,6 +107,7 @@ public fun CommitmentDetailSheet(
         collectedState
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val entity = state.entity
 
     LaunchedEffect(effectsOverride, resolvedDetailViewModel) {
         (effectsOverride ?: requireNotNull(resolvedDetailViewModel).effects).collect { effect ->
@@ -134,7 +135,7 @@ public fun CommitmentDetailSheet(
                     CircularProgressIndicator()
                 }
             }
-            state.error != null || state.entity == null -> {
+            state.error != null || entity == null -> {
                 val errorLabel = if (state.error == CommitmentDetailViewModel.EMPTY_ERROR_KEY) {
                     stringResource(R.string.commitment_detail_empty_error)
                 } else {
@@ -150,7 +151,7 @@ public fun CommitmentDetailSheet(
             }
             else -> {
                 DetailSheetContent(
-                    entity = state.entity!!,
+                    entity = entity,
                     quote = state.quote,
                     actionState = state.actionState,
                     source = state.source,

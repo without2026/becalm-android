@@ -13,6 +13,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
@@ -38,6 +39,7 @@ class MediaStoreWorkerSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val processingPauseGate: ProcessingPauseGate = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
     private val directExecutor = java.util.concurrent.Executor { runnable -> runnable.run() }
@@ -70,13 +72,13 @@ class MediaStoreWorkerSpecTest {
     }
 
     @Test
-    fun `ING-001 retries when SAF recordings tree grant is missing`() = runTest {
+    fun `ING-001 blocks without retry when SAF recordings tree grant is missing`() = runTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
 
         val result = buildWorker().doWork()
 
-        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
     }
 
     @Test
@@ -96,6 +98,7 @@ class MediaStoreWorkerSpecTest {
         rawIngestionEventDao = rawIngestionEventDao,
         workScheduler = workScheduler,
         userPrefsStore = userPrefsStore,
+        processingStatusRepository = processingStatusRepository,
         processingPauseGate = processingPauseGate,
         logger = logger,
         ioDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,

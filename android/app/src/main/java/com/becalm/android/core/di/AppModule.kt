@@ -14,7 +14,13 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import javax.inject.Qualifier
 import javax.inject.Singleton
+import kotlin.annotation.AnnotationRetention.BINARY
+
+@Qualifier
+@Retention(BINARY)
+public annotation class ApplicationScope
 
 /**
  * Hilt module providing application-scoped infrastructure singletons.
@@ -49,6 +55,7 @@ public object AppModule {
 
     @Provides
     @Singleton
+    @ApplicationScope
     public fun provideApplicationScope(): CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

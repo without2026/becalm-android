@@ -98,7 +98,7 @@ public object KstInstantAdapterFactory : JsonAdapter.Factory {
                 if (reader.peek() == JsonReader.Token.NULL) {
                     return reader.nextNull()
                 }
-                return Instant.parse(delegate.fromJson(reader)!!)
+                return delegate.fromJson(reader)?.let(Instant::parse)
             }
         }
     }

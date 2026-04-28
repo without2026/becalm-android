@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -48,13 +51,7 @@ public fun SplashScreen(
     stateOverride: AuthUiState? = null,
     onNavigate: ((String) -> Unit)? = null,
 ) {
-    val state = if (stateOverride != null) {
-        stateOverride
-    } else {
-        val authViewModel = viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
-        val collectedState by authViewModel.uiState.collectAsStateWithLifecycle()
-        collectedState
-    }
+    val state = rememberSplashState(viewModel = viewModel, stateOverride = stateOverride)
     var navigated by rememberSaveable { mutableStateOf(false) }
     val navigate = onNavigate ?: { destination: String ->
         navController.navigate(destination) {
@@ -75,7 +72,31 @@ public fun SplashScreen(
         }
     }
 
-    SplashContent()
+    SplashContent(showLoading = state is AuthUiState.Loading)
+}
+
+@Composable
+private fun rememberSplashState(
+    viewModel: AuthViewModel?,
+    stateOverride: AuthUiState?,
+): AuthUiState {
+    var authBootstrapStarted by rememberSaveable { mutableStateOf(stateOverride != null) }
+    LaunchedEffect(stateOverride, authBootstrapStarted) {
+        if (stateOverride == null && !authBootstrapStarted) {
+            withFrameNanos { }
+            authBootstrapStarted = true
+        }
+    }
+
+    return when {
+        stateOverride != null -> stateOverride
+        !authBootstrapStarted -> AuthUiState.Loading
+        else -> {
+            val authViewModel = viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
+            val collectedState by authViewModel.uiState.collectAsStateWithLifecycle()
+            collectedState
+        }
+    }
 }
 
 internal fun splashDestinationFor(state: AuthUiState): String? =
@@ -97,7 +118,7 @@ internal fun splashDestinationFor(state: AuthUiState): String? =
     }
 
 @Composable
-internal fun SplashContent() {
+internal fun SplashContent(showLoading: Boolean = true) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -116,6 +137,20 @@ internal fun SplashContent() {
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (showLoading) {
+                Spacer(modifier = Modifier.height(24.dp))
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.splash_loading),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

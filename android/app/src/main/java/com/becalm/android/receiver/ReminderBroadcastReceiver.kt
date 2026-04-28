@@ -13,6 +13,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.becalm.android.MainActivity
 import com.becalm.android.R
+import com.becalm.android.core.di.ApplicationScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.CommitmentDao
@@ -20,9 +22,8 @@ import com.becalm.android.domain.commitment.CommitmentState
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 public data class ReminderNotificationSpec(
@@ -65,6 +66,14 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
     @Inject
     public lateinit var logger: Logger
 
+    @Inject
+    @ApplicationScope
+    public lateinit var applicationScope: CoroutineScope
+
+    @Inject
+    @IoDispatcher
+    public lateinit var ioDispatcher: CoroutineDispatcher
+
     override fun onReceive(context: Context, intent: Intent) {
         val commitmentId = intent.getStringExtra(EXTRA_COMMITMENT_ID) ?: return
         val scheduledUserId = intent.getStringExtra(EXTRA_USER_ID).orEmpty()
@@ -89,7 +98,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         // Extend the receiver's lifetime up to 10 seconds (Android platform cap) so we
         // can re-query Room on IO and post the notification on the main thread.
         val pending = goAsync()
-        receiverScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 handle(context, commitmentId, scheduledUserId)
             } finally {
@@ -217,14 +226,6 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
 
         private val TERMINAL_STATES =
             setOf(CommitmentState.COMPLETED, CommitmentState.CANCELLED)
-
-        /**
-         * Scope for the goAsync() coroutine. [SupervisorJob] prevents a single failing
-         * broadcast from cancelling subsequent ones; [Dispatchers.IO] is appropriate for
-         * Room disk access, and the Android notification-post path is thread-safe.
-         */
-        private val receiverScope: CoroutineScope =
-            CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         /**
          * Derives a stable notification ID from [commitmentId] matching the request code used

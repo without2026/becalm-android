@@ -30,7 +30,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
-            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger()),
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
 
@@ -65,7 +65,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
-            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger()),
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
 
@@ -95,7 +95,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
-            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger()),
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
 

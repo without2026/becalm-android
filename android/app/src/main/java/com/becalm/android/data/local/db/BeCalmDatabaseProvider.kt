@@ -1,12 +1,11 @@
 package com.becalm.android.data.local.db
 
 import android.content.Context
+import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
@@ -56,6 +55,7 @@ public class BeCalmDatabaseProvider @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
+    @ApplicationScope private val applicationScope: CoroutineScope,
 ) {
 
     private val lock: ReentrantLock = ReentrantLock()
@@ -68,7 +68,7 @@ public class BeCalmDatabaseProvider @Inject constructor(
     private var currentUserIdSnapshot: String? = null
 
     init {
-        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+        applicationScope.launch {
             userPrefsStore.observeCurrentUserId().collect { userId ->
                 currentUserIdSnapshot = userId
             }

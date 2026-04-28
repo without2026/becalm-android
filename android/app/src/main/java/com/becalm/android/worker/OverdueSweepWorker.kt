@@ -58,6 +58,8 @@ public class OverdueSweepWorker @AssistedInject constructor(
     )
 
     override suspend fun doWork(): Result {
+        if (hasExceededMaxRetries(logger, TAG, MAX_RETRIES)) return Result.failure()
+
         if (processingPauseGate.shouldSkip(TAG)) {
             return Result.success(
                 workDataOf(
@@ -121,6 +123,7 @@ public class OverdueSweepWorker @AssistedInject constructor(
 
         /** Worker page size; kept aligned with other batch-style background workers. */
         public const val BATCH_SIZE: Int = 100
+        private const val MAX_RETRIES: Int = 5
 
         /** Result output key for the number of candidate rows seen in this run. */
         public const val KEY_CANDIDATE_COUNT: String = "candidate_count"

@@ -186,12 +186,10 @@ public class WorkSchedulerImpl @Inject constructor(
     override fun cleanupLegacyWorkNames() {
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY)
         workManager.cancelUniqueWork(UniqueWorkKeys.LEGACY_UPLOAD_KEY)
-        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,
             "cleanupLegacyWorkNames — cancelled legacy keys=" +
-                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY} " +
-                "and stale commitment extractions by tag",
+                "${UniqueWorkKeys.LEGACY_MEDIA_STORE_KEY}, ${UniqueWorkKeys.LEGACY_UPLOAD_KEY}",
         )
     }
 

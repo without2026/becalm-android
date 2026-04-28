@@ -36,6 +36,7 @@ import com.becalm.android.ui.settings.ActivityLogScreen
 import com.becalm.android.ui.settings.ConsentWithdrawScreen
 import com.becalm.android.ui.settings.PrivacyManagementScreen
 import com.becalm.android.ui.settings.ProcessingPauseScreen
+import com.becalm.android.ui.settings.ProcessingStatusScreen
 import com.becalm.android.ui.settings.SettingsScreen
 import com.becalm.android.ui.sources.ContactsSourceDetailScreen
 import com.becalm.android.ui.sources.SourceDetailScreen
@@ -431,6 +432,15 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 ProcessingPauseScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.ProcessingStatus.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.ProcessingStatus.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                ProcessingStatusScreen(navController = navController)
             }
         }
 

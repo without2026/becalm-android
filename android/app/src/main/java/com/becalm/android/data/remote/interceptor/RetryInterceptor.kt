@@ -59,7 +59,7 @@ public class RetryInterceptor : Interceptor {
             val delayMs = overrideNextDelayMs ?: backoffDelayMs(attempt)
             overrideNextDelayMs = null
             if (delayMs > 0L) {
-                Thread.sleep(delayMs)
+                sleepBeforeRetry(delayMs)
             }
 
             try {
@@ -125,6 +125,15 @@ public class RetryInterceptor : Interceptor {
         HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS -> true
         in 500..599 -> true
         else -> false
+    }
+
+    private fun sleepBeforeRetry(delayMs: Long) {
+        try {
+            Thread.sleep(delayMs)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IOException("RetryInterceptor interrupted before retry", e)
+        }
     }
 
     private companion object {

@@ -12,6 +12,8 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
@@ -72,8 +74,8 @@ import kotlinx.datetime.Clock
  *
  * ## Permissions
  * - Voice path: `READ_MEDIA_AUDIO` on API 33+ (TIRAMISU), `READ_EXTERNAL_STORAGE` on
- *   API 28–32. Missing permission causes [Result.retry] so WorkManager re-attempts once
- *   the onboarding flow (ONB-003) has granted it.
+ *   API 28–32. Missing permission records a blocked status and exits successfully; the
+ *   onboarding/permission flow re-enqueues ingestion after the user grants access.
  *
  * ## PII
  * Audio file display names are logged only as their `hashCode()` in 8-char hex.
@@ -99,6 +101,7 @@ public class MediaStoreWorker @AssistedInject constructor(
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val workSchedulerProvider: Provider<WorkScheduler>,
     private val userPrefsStore: UserPrefsStore,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -112,6 +115,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         rawIngestionEventDao: RawIngestionEventDao,
         workScheduler: WorkScheduler,
         userPrefsStore: UserPrefsStore,
+        processingStatusRepository: ProcessingStatusRepository,
         processingPauseGate: ProcessingPauseGate,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
@@ -123,6 +127,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         workSchedulerProvider = Provider { workScheduler },
         userPrefsStore = userPrefsStore,
+        processingStatusRepository = processingStatusRepository,
         processingPauseGate = processingPauseGate,
         logger = logger,
         ioDispatcher = ioDispatcher,
@@ -145,17 +150,23 @@ public class MediaStoreWorker @AssistedInject constructor(
             .takeIf { it > 0 }
 
         if (audioMissing) {
-            logger.w(TAG, "audio permission missing — retrying")
-            return@withContext Result.retry()
+            logger.w(TAG, "audio permission missing — blocked until user grants permission")
+            processingStatusRepository.recordBlocked(SourceType.VOICE, "Audio permission missing")
+            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Audio permission missing")
+            return@withContext Result.success()
         }
 
         val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
         if (recordingsTreeUri.isNullOrBlank()) {
-            logger.w(TAG, "recordings tree grant missing — retrying")
-            return@withContext Result.retry()
+            logger.w(TAG, "recordings tree grant missing — blocked until user grants folder access")
+            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
+            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
+            return@withContext Result.success()
         }
 
         val now = Clock.System.now()
+        processingStatusRepository.recordScanning(SourceType.VOICE)
+        processingStatusRepository.recordScanning(SourceType.CALL_RECORDING)
         val voiceMediaStoreProbe = createProbe()
         val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
         val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
@@ -166,10 +177,13 @@ public class MediaStoreWorker @AssistedInject constructor(
         // [Result.retry] so WorkManager re-attempts this run (ING-001 data-loss guard).
         if (callOutcome is CallRecordingIngestOutcome.ScanFailed) {
             logger.w(TAG, "doWork call_recording scan failed — requesting retry")
+            processingStatusRepository.recordError(SourceType.CALL_RECORDING, "MediaStore scan failed")
             return@withContext Result.retry()
         }
 
         val callInserted = (callOutcome as CallRecordingIngestOutcome.Success).insertedCount
+        processingStatusRepository.recordScanResult(SourceType.VOICE, voiceInserted, "Queued upload")
+        processingStatusRepository.recordScanResult(SourceType.CALL_RECORDING, callInserted, "Queued upload")
         logger.d(
             TAG,
             "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted",

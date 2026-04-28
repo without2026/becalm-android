@@ -12,6 +12,7 @@ import androidx.work.impl.utils.taskexecutor.TaskExecutor
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.extraction.CommitmentExtractionWorker
 import io.mockk.coEvery
@@ -58,11 +59,27 @@ class CommitmentExtractionWorkerManualSourceSpecTest {
     }
 
     @Test
-    fun `EMAIL-001 non AICORE_ERROR extractor failures keep WorkManager retry semantics`() {
-        assertTrue(
+    fun `EMAIL-001 malformed LLM JSON does not retry the same prompt indefinitely`() {
+        assertFalse(
             CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
                 reason = "LLM_JSON_PARSE_FAILED",
                 runAttemptCount = 3,
+            ),
+        )
+    }
+
+    @Test
+    fun `EMAIL-001 unknown extractor failures use capped WorkManager retry semantics`() {
+        assertTrue(
+            CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
+                reason = "UNKNOWN_TRANSIENT",
+                runAttemptCount = 3,
+            ),
+        )
+        assertFalse(
+            CommitmentExtractionWorker.Companion.shouldRetryExtractorFailure(
+                reason = "UNKNOWN_TRANSIENT",
+                runAttemptCount = 5,
             ),
         )
     }
@@ -89,6 +106,7 @@ class CommitmentExtractionWorkerManualSourceSpecTest {
             promptBuilderProvider = failingProvider("prompt builder"),
             quotedBlockSplitterProvider = failingProvider("splitter"),
             geminiNanoExtractorProvider = failingProvider("extractor"),
+            processingStatusRepository = mockk<ProcessingStatusRepository>(relaxed = true),
             processingPauseGate = processingPauseGate,
             logger = mockk<Logger>(relaxed = true),
         )

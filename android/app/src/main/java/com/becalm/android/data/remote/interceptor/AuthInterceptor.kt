@@ -2,6 +2,7 @@ package com.becalm.android.data.remote.interceptor
 
 import com.becalm.android.data.auth.AuthFailureSessionInvalidator
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -82,12 +83,10 @@ public class AuthInterceptor(
 
         // Pass the token we attached to the failing request so the provider can detect
         // "cache already advanced past this 401" and coalesce duplicate refreshes.
-        when (val refresh = runBlocking { authTokenProvider.refresh(token) }) {
+        when (val refresh = refreshWithTimeout(token)) {
             is AuthTokenProvider.RefreshResult.Failed -> return bufferedResponse
             is AuthTokenProvider.RefreshResult.Unauthenticated -> {
-                runCatching {
-                    runBlocking { authFailureSessionInvalidator.invalidate() }
-                }
+                invalidateWithTimeout()
                 return bufferedResponse
             }
             is AuthTokenProvider.RefreshResult.Refreshed -> {
@@ -97,12 +96,36 @@ public class AuthInterceptor(
                     .build()
                 val retryResponse = chain.proceed(retryRequest)
                 if (retryResponse.code == 401) {
-                    runCatching {
-                        runBlocking { authFailureSessionInvalidator.invalidate() }
-                    }
+                    invalidateWithTimeout()
                 }
                 return retryResponse
             }
         }
+    }
+
+    private fun refreshWithTimeout(previousAccessToken: String): AuthTokenProvider.RefreshResult =
+        runCatching {
+            runBlocking {
+                withTimeout(AUTH_REFRESH_TIMEOUT_MS) {
+                    authTokenProvider.refresh(previousAccessToken)
+                }
+            }
+        }.getOrElse {
+            AuthTokenProvider.RefreshResult.Failed
+        }
+
+    private fun invalidateWithTimeout() {
+        runCatching {
+            runBlocking {
+                withTimeout(AUTH_INVALIDATE_TIMEOUT_MS) {
+                    authFailureSessionInvalidator.invalidate()
+                }
+            }
+        }
+    }
+
+    private companion object {
+        private const val AUTH_REFRESH_TIMEOUT_MS = 10_000L
+        private const val AUTH_INVALIDATE_TIMEOUT_MS = 2_000L
     }
 }

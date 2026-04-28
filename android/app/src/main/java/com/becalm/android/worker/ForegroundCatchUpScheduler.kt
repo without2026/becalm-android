@@ -3,6 +3,7 @@ package com.becalm.android.worker
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
@@ -72,18 +73,15 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  * Runs on the application-scoped [CoroutineScope] provided by AppModule
  * (`@ApplicationScope`). Exceptions in a single enqueue do not cancel the scope.
  *
- * @param scope Application-scoped coroutine scope. Provided by AppModule with
- *   `@ApplicationScope` qualifier. If the qualifier binding is absent, leave a
- *   TODO and inject a plain `CoroutineScope` until AppModule is updated.
+ * @param scope Application-scoped coroutine scope provided by AppModule with
+ *   the `@ApplicationScope` qualifier.
  * @param workScheduler SP-32 scheduler. Treat as declared; do not define here.
  * @param userPrefsStore Preference store used to read enabled sources.
  * @param logger Structured log sink.
  */
 @Singleton
 public class ForegroundCatchUpScheduler @Inject constructor(
-    // TODO(AppModule): ensure AppModule provides @ApplicationScope CoroutineScope.
-    // If the @ApplicationScope qualifier is not yet wired, a plain CoroutineScope
-    // binding will be substituted by Hilt until AppModule is updated.
+    @ApplicationScope
     private val scope: CoroutineScope,
     // WorkScheduler is owned by SP-32. ForegroundWorkScheduler (declared above) extends
     // WorkSchedulerCompat with per-source expedited enqueue methods. SP-32's binding must
