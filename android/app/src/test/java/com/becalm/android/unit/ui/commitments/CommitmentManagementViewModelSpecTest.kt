@@ -5,11 +5,10 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
-import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
@@ -31,7 +30,6 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlin.reflect.full.memberProperties
 import org.junit.After
@@ -46,7 +44,6 @@ class CommitmentManagementViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
-    private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -55,8 +52,7 @@ class CommitmentManagementViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(emptyList())
     }
 
     @After
@@ -79,13 +75,17 @@ class CommitmentManagementViewModelSpecTest {
         val fallbackPersonRefEntity = entity(id = "c", direction = "give", personRef = "park@corp.com")
         val legacyRawEntity = entity(id = "d", direction = "take", personRef = null, counterpartyRaw = "Legacy Raw Name")
 
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(displayNameEntity, samePersonEntity, nicknameEntity, fallbackPersonRefEntity, legacyRawEntity),
-        )
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
-            mapOf(
-                "lee@corp.com" to enrichment("lee@corp.com", displayName = "이대리", nickname = "lee"),
-                "kim@corp.com" to enrichment("kim@corp.com", displayName = null, nickname = "김팀장"),
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                displayNameEntity,
+                samePersonEntity,
+                nicknameEntity,
+                fallbackPersonRefEntity,
+                legacyRawEntity,
+                enrichment = mapOf(
+                    "lee@corp.com" to "이대리",
+                    "kim@corp.com" to "김팀장",
+                ),
             ),
         )
 
@@ -114,8 +114,8 @@ class CommitmentManagementViewModelSpecTest {
 
     @Test
     fun `CMT-002 filter tabs isolate give take and all commitments`() = runTest {
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
                 entity(id = "give-1", direction = "give"),
                 entity(id = "give-2", direction = "give"),
                 entity(id = "take-1", direction = "take"),
@@ -204,8 +204,8 @@ class CommitmentManagementViewModelSpecTest {
 
     @Test
     fun `CMT-009 completed and cancelled sections stay collapsed by default and toggle independently`() = runTest {
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
                 entity(id = "pending-1", actionState = "pending"),
                 entity(id = "completed-1", actionState = "completed"),
                 entity(id = "completed-2", actionState = "completed"),
@@ -240,8 +240,8 @@ class CommitmentManagementViewModelSpecTest {
 
     @Test
     fun `MAN-004 manual rows keep manual badge projection separate from lifecycle state`() = runTest {
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
                 entity(id = "manual-1", actionState = "pending", sourceType = "manual"),
                 entity(id = "voice-1", actionState = "pending", sourceType = "voice"),
             ),
@@ -258,8 +258,8 @@ class CommitmentManagementViewModelSpecTest {
 
     @Test
     fun `CMT-001 rows preserve type subtype and counterparty display`() = runTest {
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
                 entity(id = "action-1", direction = "give", personRef = "lee@corp.com"),
                 entity(
                     id = "schedule-1",
@@ -276,12 +276,10 @@ class CommitmentManagementViewModelSpecTest {
                     counterpartyRaw = "Legacy Person",
                     decisionStatus = "ongoing",
                 ),
-            ),
-        )
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
-            mapOf(
-                "lee@corp.com" to enrichment("lee@corp.com", displayName = "이대리", nickname = "lee"),
-                "park@corp.com" to enrichment("park@corp.com", displayName = "박과장", nickname = null),
+                enrichment = mapOf(
+                    "lee@corp.com" to "이대리",
+                    "park@corp.com" to "박과장",
+                ),
             ),
         )
 
@@ -322,7 +320,7 @@ class CommitmentManagementViewModelSpecTest {
     fun `CMT-005 remind success schedules reminder when dueAt is present`() = runTest {
         val dueAt = Instant.parse("2026-04-20T03:00:00Z")
         val pending = entity(id = "remind-1", dueAt = dueAt)
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(pending))
         coEvery { commitmentRepository.transitionState("remind-1", CommitmentEvent.Remind) } returns
             BecalmResult.Success(pending.copy(actionState = "reminded"))
         coEvery { reminderScheduler.schedule(any(), any()) } just runs
@@ -340,7 +338,7 @@ class CommitmentManagementViewModelSpecTest {
     @Test
     fun `CMT-005 remind forwards null dueAt to scheduler which owns alarm gating`() = runTest {
         val pending = entity(id = "remind-2", dueAt = null)
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(pending))
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(pending))
         coEvery { commitmentRepository.transitionState("remind-2", CommitmentEvent.Remind) } returns
             BecalmResult.Success(pending.copy(actionState = "reminded"))
         coEvery { reminderScheduler.schedule(any(), any()) } just runs
@@ -389,7 +387,7 @@ class CommitmentManagementViewModelSpecTest {
     @Test
     fun `CMT-007 complete cancels reminder and emits undo snapshot with prior state`() = runTest {
         val item = entity(id = "complete-1", actionState = "reminded")
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(item))
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(item))
         coEvery { commitmentRepository.transitionState("complete-1", CommitmentEvent.Complete) } returns
             BecalmResult.Success(item.copy(actionState = "completed"))
         every { reminderScheduler.cancel("complete-1") } just runs
@@ -432,7 +430,7 @@ class CommitmentManagementViewModelSpecTest {
     @Test
     fun `CMT-012 cancel from overdue remains legal and captures overdue as undo prior state`() = runTest {
         val overdue = entity(id = "cancel-overdue", actionState = "overdue")
-        every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(listOf(overdue))
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(overdue))
         coEvery { commitmentRepository.transitionState("cancel-overdue", CommitmentEvent.Cancel) } returns
             BecalmResult.Success(overdue.copy(actionState = "cancelled"))
         every { reminderScheduler.cancel("cancel-overdue") } just runs
@@ -500,7 +498,6 @@ class CommitmentManagementViewModelSpecTest {
 
     private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(
         commitmentRepository = commitmentRepository,
-        personEnrichmentRepository = personEnrichmentRepository,
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
         logger = logger,
@@ -510,20 +507,6 @@ class CommitmentManagementViewModelSpecTest {
 
     private fun propertyValue(instance: Any, name: String): Any? =
         instance::class.memberProperties.first { it.name == name }.getter.call(instance)
-
-    private fun enrichment(
-        personRef: String,
-        displayName: String?,
-        nickname: String?,
-    ): PersonEnrichmentEntity = PersonEnrichmentEntity(
-        personRef = personRef,
-        displayName = displayName,
-        nickname = nickname,
-        company = null,
-        title = null,
-        sourceContactId = null,
-        lastSyncedAt = Clock.System.now(),
-    )
 
     private fun entity(
         id: String,
@@ -564,4 +547,29 @@ class CommitmentManagementViewModelSpecTest {
         createdAt = Instant.parse("2026-04-18T00:00:00Z"),
         updatedAt = Instant.parse("2026-04-18T00:00:00Z"),
     )
+
+    private fun managementRows(
+        vararg entities: CommitmentEntity,
+        enrichment: Map<String, String> = emptyMap(),
+    ): List<CommitmentManagementRow> =
+        entities.map { entity ->
+            CommitmentManagementRow(
+                id = entity.id,
+                itemType = entity.itemType,
+                title = entity.title,
+                direction = entity.direction,
+                scheduleStatus = entity.scheduleStatus,
+                decisionStatus = entity.decisionStatus,
+                actionState = entity.actionState,
+                dueAt = entity.dueAt,
+                dueIsApproximate = entity.dueIsApproximate,
+                counterpartyDisplayName = entity.personRef?.let { ref ->
+                    enrichment[ref] ?: ref
+                } ?: entity.counterpartyRaw?.take(30),
+                sourceType = entity.sourceType,
+                sourceTitle = entity.sourceEventTitle,
+                sourceOccurredAt = entity.sourceEventOccurredAt,
+                dueHint = entity.dueHint,
+            )
+        }
 }

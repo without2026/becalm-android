@@ -13,6 +13,7 @@ import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.secure.OAuthCredentialStore
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.supabase.SupabaseAuthClient
@@ -81,6 +82,9 @@ class AuthRepositoryLocalIntegrationTest {
 
         override fun observeEnrichmentMap(): Flow<Map<String, PersonEnrichmentEntity>> =
             delegate().observeEnrichmentMap()
+
+        override fun observeSummary(): Flow<PersonEnrichmentSummary> =
+            delegate().observeSummary()
 
         override fun observeByPersonRef(personRef: String): Flow<PersonEnrichmentEntity?> =
             delegate().observeByPersonRef(personRef)

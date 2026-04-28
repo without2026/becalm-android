@@ -30,6 +30,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
 ) {
     private var lifecycleRegistered: Boolean = false
     private var startupRefreshJob: Job? = null
+    private var recurringWorkScheduled: Boolean = false
 
     public fun start() {
         registerForegroundCatchUp()
@@ -77,15 +78,22 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private suspend fun refreshNow() {
         if (hasSignedInUser()) {
             scheduleAuthenticatedRecurringWork()
+        } else {
+            recurringWorkScheduled = false
         }
         refreshPermissionManagedRegistrations()
     }
 
     private fun scheduleAuthenticatedRecurringWork() {
+        if (recurringWorkScheduled) {
+            logger.d(TAG, "recurring work already scheduled for this process")
+            return
+        }
         PERIODIC_SOURCES.forEach(workScheduler::enqueuePeriodic)
         workScheduler.scheduleUploadRedundancy()
         workScheduler.scheduleRetentionSweep()
         workScheduler.scheduleOverdueSweep()
+        recurringWorkScheduled = true
     }
 
     private suspend fun refreshPermissionManagedRegistrations() {

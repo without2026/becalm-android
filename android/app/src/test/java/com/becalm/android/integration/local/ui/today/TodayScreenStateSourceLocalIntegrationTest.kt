@@ -104,7 +104,6 @@ class TodayScreenStateSourceLocalIntegrationTest {
             commitmentRepository = commitmentRepository,
             calendarEventRepository = calendarRepository,
             sourceStatusRepository = sourceStatusRepository,
-            personEnrichmentRepository = enrichmentRepository,
             authRepository = authRepository,
             userPrefsStore = userPrefsStore,
             clock = clock,

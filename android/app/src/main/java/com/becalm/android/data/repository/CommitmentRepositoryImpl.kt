@@ -12,6 +12,8 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentManagementRow
+import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.api.RailwayApi
@@ -102,8 +104,14 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForUser(userId)
 
+    override fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>> =
+        dao.observeManagementRowsForUser(userId)
+
     override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> =
         dao.observePendingForToday(userId, endOfTodayEpochMs)
+
+    override fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>> =
+        dao.observeTimelineForToday(userId, endOfTodayEpochMs)
 
     override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForPerson(userId, personRef)

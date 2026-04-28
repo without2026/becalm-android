@@ -76,6 +76,11 @@ public interface RawIngestionRepository {
     ): Flow<List<PersonInteractionAggregateRow>>
 
     /**
+     * Returns distinct non-null person refs recently seen in raw events or commitments.
+     */
+    public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
+
+    /**
      * Emits a live list of the most recent events for a specific [personRef] owned by [userId],
      * newest-first.
      *
@@ -278,6 +283,9 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         limit: Int,
     ): Flow<List<PersonInteractionAggregateRow>> =
         dao.observePersonInteractionAggregates(userId, limit)
+
+    override suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String> =
+        dao.findDistinctPersonRefsForUser(userId, limit)
 
     override fun observeForPerson(
         userId: String,

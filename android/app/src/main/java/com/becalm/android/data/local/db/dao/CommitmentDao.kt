@@ -9,6 +9,33 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 
+public data class TodayCommitmentRow(
+    val id: String,
+    val itemType: String,
+    val title: String,
+    val direction: String?,
+    val scheduleStatus: String?,
+    val counterpartyDisplayName: String?,
+    val sortKey: Instant,
+)
+
+public data class CommitmentManagementRow(
+    val id: String,
+    val itemType: String,
+    val title: String,
+    val direction: String?,
+    val scheduleStatus: String?,
+    val decisionStatus: String?,
+    val actionState: String,
+    val dueAt: Instant?,
+    val dueIsApproximate: Boolean,
+    val counterpartyDisplayName: String?,
+    val sourceType: String?,
+    val sourceTitle: String?,
+    val sourceOccurredAt: Instant?,
+    val dueHint: String?,
+)
+
 /**
  * Room DAO for the `commitments` table.
  *
@@ -396,6 +423,34 @@ public interface CommitmentDao {
 
     @Query(
         """
+        SELECT c.id AS id,
+               c.item_type AS itemType,
+               c.title AS title,
+               c.direction AS direction,
+               c.schedule_status AS scheduleStatus,
+               c.decision_status AS decisionStatus,
+               c.action_state AS actionState,
+               c.due_at AS dueAt,
+               c.due_is_approximate AS dueIsApproximate,
+               CASE
+                   WHEN c.person_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.person_ref)
+                   ELSE SUBSTR(c.counterparty_raw, 1, 30)
+               END AS counterpartyDisplayName,
+               c.source_type AS sourceType,
+               c.source_event_title AS sourceTitle,
+               c.source_event_occurred_at AS sourceOccurredAt,
+               c.due_hint AS dueHint
+        FROM commitments AS c
+        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
+        WHERE c.user_id = :userId
+          AND c.deleted_at IS NULL
+        ORDER BY c.source_event_occurred_at DESC
+        """
+    )
+    public fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>>
+
+    @Query(
+        """
         SELECT * FROM commitments
         WHERE user_id = :userId
         ORDER BY created_at DESC
@@ -437,6 +492,30 @@ public interface CommitmentDao {
         """
     )
     public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
+
+    @Query(
+        """
+        SELECT c.id AS id,
+               c.item_type AS itemType,
+               c.title AS title,
+               c.direction AS direction,
+               c.schedule_status AS scheduleStatus,
+               CASE
+                   WHEN c.person_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.person_ref)
+                   ELSE SUBSTR(c.counterparty_raw, 1, 30)
+               END AS counterpartyDisplayName,
+               c.source_event_occurred_at AS sortKey
+        FROM commitments AS c
+        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
+        WHERE c.user_id      = :userId
+          AND c.item_type    IN ('action', 'schedule')
+          AND c.action_state = 'pending'
+          AND (c.due_at IS NULL OR c.due_at <= :endOfTodayEpochMs)
+          AND c.deleted_at IS NULL
+        ORDER BY c.due_at IS NULL ASC, c.due_at ASC, c.created_at DESC
+        """
+    )
+    public fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>>
 
     /**
      * Emits all live commitments for [userId] linked to [personRef], ordered by due date

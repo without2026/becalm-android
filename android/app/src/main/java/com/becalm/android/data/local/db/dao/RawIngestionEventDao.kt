@@ -243,6 +243,31 @@ public interface RawIngestionEventDao {
         limit: Int,
     ): Flow<List<PersonInteractionAggregateRow>>
 
+    @Query(
+        """
+        SELECT person_ref FROM (
+            SELECT person_ref, MAX(timestamp) AS last_seen_at
+            FROM raw_ingestion_events
+            WHERE user_id = :userId
+              AND person_ref IS NOT NULL
+            GROUP BY person_ref
+
+            UNION ALL
+
+            SELECT person_ref, MAX(source_event_occurred_at) AS last_seen_at
+            FROM commitments
+            WHERE user_id = :userId
+              AND person_ref IS NOT NULL
+              AND deleted_at IS NULL
+            GROUP BY person_ref
+        )
+        GROUP BY person_ref
+        ORDER BY MAX(last_seen_at) DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
+
     /**
      * Emits a live list of the most recent events for [sourceType] owned by [userId],
      * newest-first.

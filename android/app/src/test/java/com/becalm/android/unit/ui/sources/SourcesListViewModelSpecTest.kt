@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.sources
 
 import app.cash.turbine.test
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepository
@@ -64,7 +65,7 @@ class SourcesListViewModelSpecTest {
             SourceStatus(SourceType.OUTLOOK_CALENDAR, SourceConnectionStatus.NEVER_CONNECTED, now, null),
         )
         every { sourceStatusRepository.observeAll() } returns flowOf(seeded)
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(true)
 
         val viewModel = buildSourcesListViewModel()
@@ -97,12 +98,7 @@ class SourcesListViewModelSpecTest {
     fun `ENR-008 contacts pseudo source row reflects permission and enrichment metadata`() = runTest {
         val lastSync = Instant.parse("2026-04-19T03:30:00Z")
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeAll() } returns flowOf(
-            listOf(
-                enrichment(personRef = "+821011112222", lastSyncedAt = Instant.parse("2026-04-18T03:30:00Z")),
-                enrichment(personRef = "kim@corp.com", lastSyncedAt = lastSync),
-            ),
-        )
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(2, lastSync))
         contactsPermissionChecker.setGranted(true)
 
         val viewModel = buildSourcesListViewModel()
@@ -122,8 +118,8 @@ class SourcesListViewModelSpecTest {
     @Test
     fun `ENR-008 contacts pseudo source row is disconnected when permission is denied`() = runTest {
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeAll() } returns flowOf(
-            listOf(enrichment(personRef = "+821011112222", lastSyncedAt = Instant.parse("2026-04-18T03:30:00Z"))),
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(
+            PersonEnrichmentSummary(1, Instant.parse("2026-04-18T03:30:00Z")),
         )
         contactsPermissionChecker.setGranted(false)
 
@@ -143,7 +139,7 @@ class SourcesListViewModelSpecTest {
     @Test
     fun `ENR-008 selecting contacts routes to contacts detail when permission is granted`() = runTest {
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(true)
 
         val viewModel = buildSourcesListViewModel()
@@ -159,7 +155,7 @@ class SourcesListViewModelSpecTest {
     @Test
     fun `ENR-008 selecting contacts routes to permission screen when permission is denied`() = runTest {
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(false)
 
         val viewModel = buildSourcesListViewModel()
@@ -175,7 +171,7 @@ class SourcesListViewModelSpecTest {
     @Test
     fun `non-contacts source selection routes to source detail`() = runTest {
         every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
 
         val viewModel = buildSourcesListViewModel()
 
@@ -231,12 +227,7 @@ class ContactsSourceDetailContractSpecTest {
     @Test
     fun `ENR-008 contacts detail state exposes enrichment status and revoke action when granted`() = runTest {
         val lastSync = Instant.parse("2026-04-20T01:00:00Z")
-        every { personEnrichmentRepository.observeAll() } returns flowOf(
-            listOf(
-                enrichment(personRef = "+821011112222", lastSyncedAt = Instant.parse("2026-04-19T01:00:00Z")),
-                enrichment(personRef = "kim@corp.com", lastSyncedAt = lastSync),
-            ),
-        )
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(2, lastSync))
         contactsPermissionChecker.setGranted(true)
 
         val viewModel = ContactsSourceDetailViewModel(
@@ -258,7 +249,7 @@ class ContactsSourceDetailContractSpecTest {
 
     @Test
     fun `ENR-008 contacts permission action opens permission settings when already granted`() = runTest {
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(true)
 
         val viewModel = ContactsSourceDetailViewModel(
@@ -276,7 +267,7 @@ class ContactsSourceDetailContractSpecTest {
 
     @Test
     fun `ENR-008 contacts permission action opens permission request flow when not granted`() = runTest {
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(false)
 
         val viewModel = ContactsSourceDetailViewModel(
@@ -294,7 +285,7 @@ class ContactsSourceDetailContractSpecTest {
 
     @Test
     fun `ENR-008 contacts detail hides revoke action when permission is not granted`() = runTest {
-        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
         contactsPermissionChecker.setGranted(false)
 
         val viewModel = ContactsSourceDetailViewModel(

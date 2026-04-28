@@ -97,12 +97,12 @@ public class SourcesListViewModel @Inject constructor(
      */
     public val state: StateFlow<SourcesListUiState> = combine(
         sourceStatusRepository.observeAll(),
-        personEnrichmentRepository.observeAll(),
+        personEnrichmentRepository.observeSummary(),
         contactsPermissionChecker.observeGrantState(),
-    ) { statuses, enrichmentRows, permissionGranted ->
+    ) { statuses, enrichmentSummary, permissionGranted ->
             SourcesListProjector.buildState(
                 statuses = statuses,
-                enrichmentRows = enrichmentRows,
+                enrichmentSummary = enrichmentSummary,
                 permissionGranted = permissionGranted,
             )
         }
