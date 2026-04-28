@@ -103,6 +103,7 @@ public class MediaStoreWorker @AssistedInject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val processingPauseGate: ProcessingPauseGate,
+    private val callRecordingPersonMatcher: CallRecordingPersonMatcher,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -117,6 +118,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         userPrefsStore: UserPrefsStore,
         processingStatusRepository: ProcessingStatusRepository,
         processingPauseGate: ProcessingPauseGate,
+        callRecordingPersonMatcher: CallRecordingPersonMatcher = NoOpCallRecordingPersonMatcher,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
     ) : this(
@@ -129,6 +131,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         userPrefsStore = userPrefsStore,
         processingStatusRepository = processingStatusRepository,
         processingPauseGate = processingPauseGate,
+        callRecordingPersonMatcher = callRecordingPersonMatcher,
         logger = logger,
         ioDispatcher = ioDispatcher,
     )
@@ -204,6 +207,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             rawIngestionEventDao = rawIngestionEventDaoProvider.get(),
             workScheduler = workSchedulerProvider.get(),
             userPrefsStore = userPrefsStore,
+            callRecordingPersonMatcher = callRecordingPersonMatcher,
             logger = logger,
         )
 

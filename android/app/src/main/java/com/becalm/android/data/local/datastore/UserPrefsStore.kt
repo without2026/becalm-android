@@ -207,6 +207,25 @@ public interface UserPrefsStore {
      */
     public suspend fun setThirdPartyProvisionConsent(granted: Boolean)
 
+    /**
+     * Emits whether the user has explicitly consented to using Android CallLog metadata
+     * to match call recordings to people.
+     *
+     * This does not upload CallLog rows. It only allows local matching between a newly
+     * discovered call-recording file and nearby CallLog entries so `person_ref` can be
+     * populated from the counterparty phone number. The OS READ_CALL_LOG permission is
+     * checked separately at query time.
+     */
+    public fun observeCallLogMatchingConsent(): Flow<Boolean>
+
+    /**
+     * Persists the local CallLog matching consent flag.
+     *
+     * Writing `false` disables future CallLog queries immediately. Existing raw events are
+     * not rewritten, matching the existing non-retroactive PIPA consent semantics.
+     */
+    public suspend fun setCallLogMatchingConsent(granted: Boolean)
+
     /** Emits whether all background processing is temporarily paused (PIPA-004). */
     public fun observeProcessingPaused(): Flow<Boolean>
 
@@ -427,6 +446,7 @@ public data class PipaActionLogEntry(
  * | Onboarding completed             | `onboarding_completed`           | false   |
  * | PIPA third-party consent (voice) | `pipa_third_party_consent`       | false   |
  * | PIPA consent timestamp millis    | `pipa_consent_timestamp_millis`  | null    |
+ * | CallLog local matching consent   | `call_log_matching_consent`      | false   |
  * | Processing paused                | `processing_paused`              | false   |
  * | Processing pause started at      | `pause_started_at`               | null    |
  * | PIPA action log (JSON array)     | `pipa_action_log`                | []      |
@@ -613,6 +633,13 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
     }
 
+    override fun observeCallLogMatchingConsent(): Flow<Boolean> =
+        observeUserBoolean(default = false) { callLogMatchingConsentKey }
+
+    override suspend fun setCallLogMatchingConsent(granted: Boolean) {
+        editUserBoolean(granted) { callLogMatchingConsentKey }
+    }
+
     override fun observeProcessingPaused(): Flow<Boolean> =
         observeUserBoolean(default = false) { processingPausedKey }
 
@@ -780,6 +807,8 @@ public class UserPrefsStoreImpl @Inject constructor(
             booleanKey("pipa_third_party_consent")
         val pipaConsentTimestampKey: Preferences.Key<Long> =
             longKey("pipa_consent_timestamp_millis")
+        val callLogMatchingConsentKey: Preferences.Key<Boolean> =
+            booleanKey("call_log_matching_consent")
         val processingPausedKey: Preferences.Key<Boolean> =
             booleanKey("processing_paused")
         val pauseStartedAtKey: Preferences.Key<Long> =

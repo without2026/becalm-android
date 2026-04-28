@@ -44,7 +44,8 @@ import java.io.File
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingRecordingFolder]
- * Navigation exit: [BecalmRoute.OnboardingContacts]
+ * Navigation exit: [BecalmRoute.OnboardingCallLogMatching] when granted,
+ * [BecalmRoute.OnboardingContacts] when skipped/denied.
  */
 @Composable
 public fun RecordingFolderScreen(
@@ -63,14 +64,19 @@ public fun RecordingFolderScreen(
     val detection = detectionOverride ?: remember {
         RecordingFolderDetector.detect { path -> File(path).exists() }
     }
-    val navigateNext = { navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingContacts.path) }
+    val navigateAfterGrant = {
+        navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingCallLogMatching.path)
+    }
+    val navigateAfterSkip = {
+        navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingContacts.path)
+    }
 
     val treePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
         if (uri == null) {
             requireNotNull(onboardingViewModel).onRecordingFolderPermissionResult(false)
-            navigateNext()
+            navigateAfterSkip()
             return@rememberLauncherForActivityResult
         }
 
@@ -81,11 +87,11 @@ public fun RecordingFolderScreen(
             )
         } catch (_: SecurityException) {
             requireNotNull(onboardingViewModel).onRecordingFolderPermissionResult(false)
-            navigateNext()
+            navigateAfterSkip()
             return@rememberLauncherForActivityResult
         }
         requireNotNull(onboardingViewModel).onRecordingFolderTreeGranted(uri.toString())
-        navigateNext()
+        navigateAfterGrant()
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -93,7 +99,7 @@ public fun RecordingFolderScreen(
     ) { granted ->
         if (!granted) {
             requireNotNull(onboardingViewModel).onRecordingFolderPermissionResult(false)
-            navigateNext()
+            navigateAfterSkip()
             return@rememberLauncherForActivityResult
         }
 
@@ -119,7 +125,7 @@ public fun RecordingFolderScreen(
             onGrant = onGrantFlow ?: { launcher.launch(audioPermission) },
             onSkip = onSkipFlow ?: {
                 requireNotNull(onboardingViewModel).onSkipRecordingFolder()
-                navigateNext()
+                navigateAfterSkip()
             },
             modifier = Modifier.padding(padding),
         )

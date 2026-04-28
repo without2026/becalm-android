@@ -1,5 +1,9 @@
 package com.becalm.android.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,10 +32,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -39,6 +43,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
@@ -50,7 +55,6 @@ import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSignOut
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.coroutines.launch
 
 /**
  * Settings root screen.
@@ -76,6 +80,8 @@ public fun SettingsScreen(
     onErrorDismissed: (() -> Unit)? = null,
     onToggleNotifications: ((Boolean) -> Unit)? = null,
     onTogglePipaConsent: ((Boolean) -> Unit)? = null,
+    onToggleCallLogMatchingConsent: ((Boolean) -> Unit)? = null,
+    onCallLogPermissionDenied: (() -> Unit)? = null,
     onOpenSources: (() -> Unit)? = null,
     onOpenProcessingStatus: (() -> Unit)? = null,
     onOpenPrivacy: (() -> Unit)? = null,
@@ -87,6 +93,8 @@ public fun SettingsScreen(
             onErrorDismissed == null ||
             onToggleNotifications == null ||
             onTogglePipaConsent == null ||
+            onToggleCallLogMatchingConsent == null ||
+            onCallLogPermissionDenied == null ||
             onOpenSources == null ||
             onOpenProcessingStatus == null ||
             onOpenPrivacy == null ||
@@ -106,6 +114,27 @@ public fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val signedOut = signedOutOverride ?: state.signedOut
     val navigateAfterSignOut = onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() }
+    val context = LocalContext.current
+    val toggleCallLogMatching = onToggleCallLogMatchingConsent
+        ?: requireNotNull(settingsViewModel)::onToggleCallLogMatchingConsent
+    val handleCallLogPermissionDenied = onCallLogPermissionDenied
+        ?: requireNotNull(settingsViewModel)::onCallLogPermissionDenied
+    val callLogPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) toggleCallLogMatching(true) else handleCallLogPermissionDenied()
+    }
+
+    fun requestCallLogMatchingConsent() {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            toggleCallLogMatching(true)
+        } else {
+            callLogPermissionLauncher.launch(Manifest.permission.READ_CALL_LOG)
+        }
+    }
 
     // Navigate to auth graph after successful sign-out so the user isn't left on a dead session.
     LaunchedEffect(signedOut) {
@@ -125,6 +154,7 @@ public fun SettingsScreen(
     // PIPA 제3자 제공 동의 toggle dialogs (ONB-PIPA / VOI-004)
     var showPipaEnableDialog by remember { mutableStateOf(false) }
     var showPipaDisableDialog by remember { mutableStateOf(false) }
+    var showCallLogEnableDialog by remember { mutableStateOf(false) }
 
     if (showSignOutDialog) {
         ConfirmDialog(
@@ -191,6 +221,22 @@ public fun SettingsScreen(
         }
     }
 
+    if (showCallLogEnableDialog) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_call_log_matching_enable_dialog_title),
+            confirmText = stringResource(R.string.action_confirm),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showCallLogEnableDialog = false
+                requestCallLogMatchingConsent()
+            },
+            onDismiss = { showCallLogEnableDialog = false },
+            primaryConfirm = true,
+        ) {
+            Text(stringResource(R.string.settings_call_log_matching_enable_dialog_message))
+        }
+    }
+
     SettingsScreenContent(
         state = state,
         snackbarHostState = snackbarHostState,
@@ -199,6 +245,10 @@ public fun SettingsScreen(
         onTogglePipa = { wantsEnabled ->
             if (wantsEnabled) showPipaEnableDialog = true
             else showPipaDisableDialog = true
+        },
+        onToggleCallLogMatching = { wantsEnabled ->
+            if (wantsEnabled) showCallLogEnableDialog = true
+            else toggleCallLogMatching(false)
         },
         onSourcesClick = onOpenSources ?: { navController.navigate(BecalmRoute.SettingsSources.path) },
         onProcessingStatusClick = onOpenProcessingStatus ?: { navController.navigate(BecalmRoute.ProcessingStatus.path) },
@@ -215,6 +265,7 @@ public fun SettingsScreenContent(
     onBack: () -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
     onTogglePipa: (Boolean) -> Unit,
+    onToggleCallLogMatching: (Boolean) -> Unit = {},
     onSourcesClick: () -> Unit,
     onProcessingStatusClick: () -> Unit = {},
     onPrivacyClick: () -> Unit,
@@ -268,8 +319,10 @@ public fun SettingsScreenContent(
                 SettingsPipaSection(
                     notificationsEnabled = state.notificationsEnabled,
                     pipaConsentEnabled = state.pipaConsentEnabled,
+                    callLogMatchingConsentEnabled = state.callLogMatchingConsentEnabled,
                     onToggleNotifications = onToggleNotifications,
                     onTogglePipa = onTogglePipa,
+                    onToggleCallLogMatching = onToggleCallLogMatching,
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))

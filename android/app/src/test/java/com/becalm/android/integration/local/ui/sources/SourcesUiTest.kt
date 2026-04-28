@@ -43,7 +43,6 @@ class SourcesUiTest {
                                 status = "CONNECTED",
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
                                 lastError = null,
-                                itemsCount = 0,
                                 enrichedCount = 7,
                             ),
                         ),

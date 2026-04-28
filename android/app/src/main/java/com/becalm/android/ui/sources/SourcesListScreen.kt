@@ -203,9 +203,9 @@ private fun PreviewSourcesListScreen() {
             ) {
                 items(
                     listOf(
-                        SourceStatusRow("gmail", "CONNECTED", null, null, 0),
-                        SourceStatusRow("outlook", "ERROR", null, "Auth expired", 0),
-                        SourceStatusRow("imap", "NEVER_CONNECTED", null, null, 0),
+                        SourceStatusRow("gmail", "CONNECTED", null, null),
+                        SourceStatusRow("outlook", "ERROR", null, "Auth expired"),
+                        SourceStatusRow("imap", "NEVER_CONNECTED", null, null),
                     ),
                 ) { row ->
                     SourceRowItem(

@@ -50,6 +50,7 @@ class SettingsViewModelSpecTest {
         every { userPrefsStore.observeLocaleTag() } returns flowOf("ko")
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(true)
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(false)
+        every { userPrefsStore.observeCallLogMatchingConsent() } returns flowOf(false)
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
     }

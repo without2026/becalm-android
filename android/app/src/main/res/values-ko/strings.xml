@@ -76,7 +76,7 @@
     <!-- Onboarding: IMAP -->
     <string name="onb_imap_title">IMAP / 앱 비밀번호</string>
     <string name="onb_imap_headline">IMAP으로 연결</string>
-    <string name="onb_imap_body">IMAP 서버 정보를 입력해 이메일 약속을 동기화하세요. 주 계정 비밀번호가 아닌 앱 전용 비밀번호를 사용하세요. 자격 증명은 기기에만 암호화 저장될 예정입니다 (출시 예정).</string>
+    <string name="onb_imap_body">IMAP 서버 정보를 입력해 이메일 약속을 동기화하세요. 주 계정 비밀번호가 아닌 앱 전용 비밀번호를 사용하세요. 자격 증명은 이 기기에 암호화 저장됩니다.</string>
     <string name="onb_imap_host_label">IMAP 서버</string>
     <string name="onb_imap_host_placeholder">imap.example.com</string>
     <string name="onb_imap_email_label">이메일 주소</string>
@@ -211,9 +211,7 @@
     <string name="raw_event_commitments_extracted">약속 추출 %1$d건</string>
     <string name="raw_event_body_expand">전체 보기</string>
     <string name="raw_event_body_collapse">접기</string>
-    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이라 본문 표시가 어렵습니다.</string>
-    <string name="raw_event_view_html_original">원문보기</string>
-    <string name="raw_event_view_html_original_todo_toast">원문보기는 다음 업데이트에서 제공됩니다.</string>
+    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이며 로컬 저장소에 plain text 본문이 없습니다.</string>
 
     <!-- Raw event detail — 출처 배지 -->
     <string name="raw_event_source_badge_gmail">Gmail</string>
@@ -306,6 +304,9 @@
     <!-- Source detail -->
     <string name="source_detail_title">소스 상세</string>
     <string name="source_detail_status_section">상태</string>
+    <string name="source_detail_last_sync_fmt">마지막 동기화 %1$s</string>
+    <string name="source_detail_events_synced_fmt">최근 항목 %1$d개 표시</string>
+    <string name="source_detail_last_error_fmt">마지막 오류: %1$s</string>
     <string name="source_detail_recent_events_section">최근 이벤트</string>
     <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
     <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>

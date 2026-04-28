@@ -85,7 +85,7 @@
     <!-- Onboarding: IMAP -->
     <string name="onb_imap_title">IMAP / App Password</string>
     <string name="onb_imap_headline">Connect via IMAP</string>
-    <string name="onb_imap_body">Enter your IMAP server details to sync email commitments. Use an app-specific password, not your main account password. Your credentials will be stored encrypted on your device only (coming soon).</string>
+    <string name="onb_imap_body">Enter your IMAP server details to sync email commitments. Use an app-specific password, not your main account password. Your credentials are stored encrypted on this device.</string>
     <string name="onb_imap_host_label">IMAP Server</string>
     <string name="onb_imap_host_placeholder">imap.example.com</string>
     <string name="onb_imap_email_label">Email address</string>
@@ -121,9 +121,9 @@
     <string name="onb_outlook_error_network">Couldn\'t reach Microsoft. Please check your connection and try again.</string>
     <string name="onb_outlook_error_permission_denied">BeCalm needs Mail.Read access. Please grant the scope to continue.</string>
     <string name="onb_outlook_error_unknown">Outlook connection failed. Please try again or skip for now.</string>
-    <string name="onb_gcal_error_unavailable">Google Calendar connection is not available in this build yet. Skip for now.</string>
+    <string name="onb_gcal_error_unavailable">Google Calendar connection could not start. Check backend OAuth configuration or skip for now.</string>
     <string name="onb_gcal_error_unknown">Google Calendar connection failed. Please try again or skip for now.</string>
-    <string name="onb_outlook_cal_error_unavailable">Outlook Calendar connection is not available in this build yet. Skip for now.</string>
+    <string name="onb_outlook_cal_error_unavailable">Outlook Calendar connection could not start. Check backend OAuth configuration or skip for now.</string>
     <string name="onb_outlook_cal_error_unknown">Outlook Calendar connection failed. Please try again or skip for now.</string>
 
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
@@ -215,7 +215,7 @@
     <string name="person_detail_stat_meeting">Meeting</string>
     <string name="person_detail_stat_commitment">Commitment</string>
     <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
-    <string name="source_detail_events_synced_fmt">%1$d synced items</string>
+    <string name="source_detail_events_synced_fmt">%1$d recent items shown</string>
     <string name="source_detail_last_error_fmt">Last error: %1$s</string>
     <string name="source_detail_disconnect_confirm_title">Disconnect source?</string>
     <string name="source_detail_disconnect_confirm_body">This removes the current source connection. Existing imported data stays on device.</string>
@@ -232,9 +232,7 @@
     <string name="raw_event_commitments_extracted">Commitments extracted: %1$d</string>
     <string name="raw_event_body_expand">Show full message</string>
     <string name="raw_event_body_collapse">Collapse</string>
-    <string name="raw_event_body_html_only_notice">This message arrived as HTML only. Plain text is not available.</string>
-    <string name="raw_event_view_html_original">View original</string>
-    <string name="raw_event_view_html_original_todo_toast">Original view is coming in a future update.</string>
+    <string name="raw_event_body_html_only_notice">This message arrived as HTML only. Plain text is not available in local storage.</string>
 
     <!-- Raw event detail — source badges -->
     <string name="raw_event_source_badge_gmail">Gmail</string>
@@ -460,6 +458,16 @@
     <string name="settings_pipa_toggle_label">음성 자동 업로드 (PIPA 제3자 제공 동의)</string>
     <string name="settings_pipa_enable_dialog_title">개인정보 제3자 제공 동의</string>
     <string name="settings_pipa_disable_dialog_warning">향후 녹음 파일은 자동 업로드되지 않습니다. 이미 업로드된 데이터는 영향받지 않습니다.</string>
+    <string name="settings_call_log_matching_toggle_label">통화기록 기반 인물 매칭</string>
+    <string name="settings_call_log_matching_enable_dialog_title">통화기록 기반 인물 매칭 동의</string>
+    <string name="settings_call_log_matching_enable_dialog_message">통화 녹음 파일을 인물별로 정리하기 위해 기기 내 통화기록의 번호, 통화 시각, 통화 길이만 로컬에서 대조합니다. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다.</string>
+
+    <!-- Onboarding: CallLog matching consent -->
+    <string name="onb_call_log_matching_title">통화기록 기반 인물 매칭</string>
+    <string name="onb_call_log_matching_headline">통화 녹음을 사람별로 자동 정리</string>
+    <string name="onb_call_log_matching_body">통화 녹음 파일명에 전화번호가 없을 수 있어, BeCalm은 기기 내 통화기록과 녹음 파일의 시각·길이를 로컬에서 대조해 상대방을 추정할 수 있습니다.</string>
+    <string name="onb_call_log_matching_scope">사용 항목: 전화번호, 통화 시각, 통화 길이. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다. 동의하지 않아도 파일명 기반 매칭과 다른 기능은 계속 사용할 수 있습니다.</string>
+    <string name="onb_call_log_matching_agree">동의하고 권한 허용</string>
 
     <!-- Source detail -->
     <string name="source_detail_title">Source Detail</string>

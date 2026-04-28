@@ -28,15 +28,12 @@ import javax.inject.Inject
  *   [com.becalm.android.data.repository.SourceConnectionStatus.name].
  * @param lastSyncAt Wall-clock instant of the last successful sync, or null if never synced.
  * @param lastError Human-readable error from the last failed sync, or null when healthy.
- * @param itemsCount Reserved for future use; always 0 in the current data model because
- *   no per-source count query exists. Surfaced in the UI spec but not yet backed by data.
  */
 public data class SourceStatusRow(
     val sourceType: String,
     val status: String,
     val lastSyncAt: Instant?,
     val lastError: String?,
-    val itemsCount: Int,
     val enrichedCount: Int? = null,
 )
 

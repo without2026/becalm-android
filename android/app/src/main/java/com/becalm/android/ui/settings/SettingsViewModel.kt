@@ -33,6 +33,8 @@ import javax.inject.Inject
  * @property pipaConsentEnabled    Whether the user has granted PIPA 제3자 제공 + 국외 이전 동의
  *                                 for voice auto-upload. Persisted under `pipa_third_party_consent`.
  *                                 False means voice events are stored as awaiting_consent.
+ * @property callLogMatchingConsentEnabled Whether local CallLog metadata may be used to match
+ *                                 call recordings to people. Also requires READ_CALL_LOG at runtime.
  * @property storageMb             Local Room DB size in megabytes, or null when unavailable.
  *                                 Populated in future iteration; reserved for UI forward-compat.
  * @property loading               True while the initial load is in progress.
@@ -43,6 +45,7 @@ public data class SettingsUiState(
     val language: String = "",
     val notificationsEnabled: Boolean = true,
     val pipaConsentEnabled: Boolean = false,
+    val callLogMatchingConsentEnabled: Boolean = false,
     val processingPaused: Boolean = false,
     val storageMb: Long? = null,
     val loading: Boolean = true,
@@ -140,6 +143,12 @@ public class SettingsViewModel @Inject constructor(
                 ) {
                     userPrefsStore.observeThirdPartyProvisionConsent().first()
                 }
+                val callLogMatchingConsentEnabled = readPrefOrDefault(
+                    op = "observeCallLogMatchingConsent",
+                    defaultValue = false,
+                ) {
+                    userPrefsStore.observeCallLogMatchingConsent().first()
+                }
                 val processingPaused = readPrefOrDefault(
                     op = "observeProcessingPaused",
                     defaultValue = false,
@@ -152,6 +161,7 @@ public class SettingsViewModel @Inject constructor(
                         language = localeTag,
                         notificationsEnabled = notificationsEnabled,
                         pipaConsentEnabled = pipaConsentEnabled,
+                        callLogMatchingConsentEnabled = callLogMatchingConsentEnabled,
                         processingPaused = processingPaused,
                         loading = false,
                     )
@@ -215,6 +225,27 @@ public class SettingsViewModel @Inject constructor(
             write = { userPrefsStore.setNotificationsEnabled(enabled) },
             onSuccess = { state -> state.copy(notificationsEnabled = enabled, error = null) },
         )
+    }
+
+    /**
+     * Persists local CallLog matching consent. The OS READ_CALL_LOG runtime permission is
+     * requested by the composable before this method is called with `true`.
+     */
+    public fun onToggleCallLogMatchingConsent(enabled: Boolean) {
+        persistPref(
+            opTag = "onToggleCallLogMatchingConsent",
+            successLog = "calllog matching consent toggled to $enabled",
+            failureMessage = "calllog matching consent toggle failed",
+            write = { userPrefsStore.setCallLogMatchingConsent(enabled) },
+            onSuccess = { state ->
+                state.copy(callLogMatchingConsentEnabled = enabled, error = null)
+            },
+        )
+    }
+
+    /** Surfaces READ_CALL_LOG denial without writing consent. */
+    public fun onCallLogPermissionDenied() {
+        _uiState.update { it.copy(error = "통화기록 권한이 필요합니다.") }
     }
 
     /**

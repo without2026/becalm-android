@@ -29,8 +29,10 @@ import com.becalm.android.ui.theme.glassPanel
 internal fun SettingsPipaSection(
     notificationsEnabled: Boolean,
     pipaConsentEnabled: Boolean,
+    callLogMatchingConsentEnabled: Boolean,
     onToggleNotifications: (Boolean) -> Unit,
     onTogglePipa: (Boolean) -> Unit,
+    onToggleCallLogMatching: (Boolean) -> Unit,
 ) {
     SettingsSectionLabel(stringResource(R.string.settings_preferences_section))
     Spacer(modifier = Modifier.height(8.dp))
@@ -51,6 +53,12 @@ internal fun SettingsPipaSection(
             checked = pipaConsentEnabled,
             onCheckedChange = onTogglePipa,
             toggleTestTag = "settings-pipa-toggle",
+        )
+        SettingsToggleRow(
+            label = stringResource(R.string.settings_call_log_matching_toggle_label),
+            checked = callLogMatchingConsentEnabled,
+            onCheckedChange = onToggleCallLogMatching,
+            toggleTestTag = "settings-calllog-matching-toggle",
         )
     }
 }

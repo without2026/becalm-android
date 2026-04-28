@@ -89,6 +89,33 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
     }
 
     @Test
+    fun `onStart catch-up runs once per source per process`() = runTest {
+        val userPrefsStore = UserPrefsStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("foreground-onstart-once"),
+        )
+        val workScheduler = FakeForegroundWorkScheduler()
+        val scheduler = ForegroundCatchUpScheduler(
+            scope = this,
+            workScheduler = workScheduler,
+            userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = FakeRuntimeSyncSourceResolver(userPrefsStore),
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
+            logger = RecordingLogger(),
+        )
+
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
+
+        scheduler.onStart(FakeLifecycleOwner)
+        advanceUntilIdle()
+        scheduler.onStart(FakeLifecycleOwner)
+        advanceUntilIdle()
+
+        assertEquals(1, workScheduler.mediaStoreCount)
+        assertEquals(listOf(SourceType.VOICE), workScheduler.enqueuedSources)
+    }
+
+    @Test
     fun `pre-auth catch-up paths do not enqueue any workers`() = runTest {
         val userPrefsStore = UserPrefsStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("foreground-preauth"),

@@ -15,7 +15,6 @@ internal object SourcesListProjector {
                 status = status.status.name,
                 lastSyncAt = status.lastSyncedAt,
                 lastError = status.errorMessage,
-                itemsCount = 0,
             )
         }
         val contactsRow = SourceStatusRow(
@@ -23,7 +22,6 @@ internal object SourcesListProjector {
             status = if (permissionGranted) "CONNECTED" else "DISCONNECTED",
             lastSyncAt = enrichmentSummary.lastSyncedAt,
             lastError = null,
-            itemsCount = 0,
             enrichedCount = enrichmentSummary.count,
         )
         return SourcesListUiState(items = listOf(contactsRow) + mappedStatuses)

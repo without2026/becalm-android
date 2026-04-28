@@ -64,7 +64,8 @@ internal object OnboardingStateReducer {
                 currentStepIndex = targetIndex.coerceAtMost(steps.lastIndex),
                 stepStates = state.stepStates +
                     (OnboardingStep.PIPA_CONSENT to StepStatus.DENIED) +
-                    (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED),
+                    (OnboardingStep.RECORDING_FOLDER to StepStatus.SKIPPED) +
+                    (OnboardingStep.CALL_LOG_MATCHING to StepStatus.SKIPPED),
                 error = null,
             )
         }

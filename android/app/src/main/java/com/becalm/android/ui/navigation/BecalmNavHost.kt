@@ -16,6 +16,7 @@ import com.becalm.android.ui.commitments.CommitmentDetailSheet
 import com.becalm.android.ui.commitments.CommitmentEditSheet
 import com.becalm.android.ui.commitments.CommitmentManagementScreen
 import com.becalm.android.ui.onboarding.BatteryOptimizationScreen
+import com.becalm.android.ui.onboarding.CallLogMatchingConsentScreen
 import com.becalm.android.ui.onboarding.ColdSyncScreen
 import com.becalm.android.ui.onboarding.ContactsPermissionScreen
 import com.becalm.android.ui.onboarding.PipaThirdPartyConsentScreen
@@ -147,6 +148,15 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 RecordingFolderScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingCallLogMatching.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingCallLogMatching.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                CallLogMatchingConsentScreen(navController = navController)
             }
         }
 
