@@ -1,5 +1,7 @@
 package com.becalm.android.ui.today
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -27,13 +31,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
@@ -170,6 +178,7 @@ public fun TodayTimelineContent(
                     else -> {
                         TimelineList(
                             items = state.timeline,
+                            personFocus = state.personFocus,
                             contentPadding = PaddingValues(vertical = 4.dp),
                         )
                     }
@@ -188,12 +197,23 @@ public fun TodayTimelineContent(
 @Composable
 private fun TimelineList(
     items: List<TimelineItem>,
+    personFocus: List<TodayPersonFocus>,
     contentPadding: PaddingValues,
 ) {
     LazyColumn(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
+        if (personFocus.isNotEmpty()) {
+            item(key = "today-person-focus") {
+                TodayPersonFocusPanel(
+                    people = personFocus,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+        }
         items(
             items = items,
             key = { item ->
@@ -211,6 +231,74 @@ private fun TimelineList(
                     .padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun TodayPersonFocusPanel(
+    people: List<TodayPersonFocus>,
+    modifier: Modifier = Modifier,
+) {
+    val totalCommitments = people.sumOf { it.commitmentCount }
+    Column(
+        modifier = modifier
+            .glassPanel(MaterialTheme.shapes.large)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.today_person_focus_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.today_person_focus_subtitle_fmt, people.size, totalCommitments),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        people.forEach { person ->
+            TodayPersonFocusRow(person = person)
+        }
+    }
+}
+
+@Composable
+private fun TodayPersonFocusRow(person: TodayPersonFocus) {
+    val label = person.displayName ?: stringResource(R.string.today_counterparty_unknown)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = stringResource(
+                R.string.today_person_focus_commitments_fmt,
+                person.commitmentCount,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -238,8 +326,20 @@ private fun TimelineItemRow(
         if (item is TimelineItem.Commitment) {
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                DirectionBadge(direction = item.direction)
-                Spacer(modifier = Modifier.size(size = 8.dp))
+                when (item.itemType) {
+                    CommitmentItemType.ACTION -> item.direction?.let { direction ->
+                        DirectionBadge(direction = direction)
+                        Spacer(modifier = Modifier.size(size = 8.dp))
+                    }
+                    CommitmentItemType.SCHEDULE -> {
+                        Text(
+                            text = scheduleLabel(item.scheduleStatus),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.size(size = 8.dp))
+                    }
+                }
                 CounterpartyText(name = item.counterpartyDisplayName)
             }
         }
@@ -254,6 +354,19 @@ private fun sectionLabelFor(item: TimelineItem): String = when (item) {
     is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
     is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
+}
+
+@Composable
+private fun scheduleLabel(scheduleStatus: String?): String {
+    val status = when (scheduleStatus) {
+        CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+        CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
+        CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
+        CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)
+        CommitmentScheduleStatus.FOLLOW_UP -> stringResource(R.string.commitment_subtype_schedule_follow_up)
+        else -> null
+    }
+    return status ?: stringResource(R.string.commitment_item_type_schedule)
 }
 
 @PreviewLightDark

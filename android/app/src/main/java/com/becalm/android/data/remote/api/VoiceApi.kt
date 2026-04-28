@@ -24,7 +24,7 @@ import retrofit2.http.Part
  * read/write timeout on the server's streaming response.
  *
  * ## Idempotency
- * The `client_event_id` part carries the same UUID v4 used in the corresponding
+ * The `client_event_id` part carries the same UUID used in the corresponding
  * `/v1/raw_ingestion_events:batch` upload. Railway deduplicates on (user_id, client_event_id)
  * and returns the cached extraction result on duplicate submissions without re-running Gemini.
  *
@@ -51,7 +51,7 @@ public interface VoiceApi {
      *
      * @param audio          Audio file as a multipart binary part (name="audio").
      *                       Content type should be "audio/m4a" or "audio/&#42;".
-     * @param clientEventId  UUID v4 idempotency key matching the raw_ingestion_event row.
+     * @param clientEventId  UUID idempotency key matching the raw_ingestion_event row.
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
      * @param durationSeconds Duration of the audio file in seconds (integer, voice only).
      * @param timestamp      ISO-8601 timestamp of when the recording occurred.

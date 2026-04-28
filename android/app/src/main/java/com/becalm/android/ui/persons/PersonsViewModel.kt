@@ -46,6 +46,38 @@ public data class PersonRow(
             ?: personRef
 }
 
+public enum class PersonSectionKind {
+    PENDING_COMMITMENTS,
+    RECENT_CONTACTS,
+}
+
+public data class PersonSection(
+    val kind: PersonSectionKind,
+    val people: List<PersonRow>,
+)
+
+public fun buildPersonSections(people: List<PersonRow>): List<PersonSection> {
+    val pending = ArrayList<PersonRow>()
+    val recent = ArrayList<PersonRow>()
+    people.forEach { person ->
+        if (person.pendingCommitmentCount > 0) {
+            pending += person
+        } else {
+            recent += person
+        }
+    }
+    return listOf(
+        PersonSection(
+            kind = PersonSectionKind.PENDING_COMMITMENTS,
+            people = pending,
+        ),
+        PersonSection(
+            kind = PersonSectionKind.RECENT_CONTACTS,
+            people = recent,
+        ),
+    )
+}
+
 /**
  * Immutable snapshot of the PersonsScreen UI.
  *
@@ -57,6 +89,7 @@ public data class PersonRow(
 public data class PersonsUiState(
     val query: String = "",
     val people: List<PersonRow> = emptyList(),
+    val personSections: List<PersonSection> = buildPersonSections(people),
     val unassignedEvents: List<UnassignedEventSummary> = emptyList(),
     val showOfflineBadge: Boolean = false,
     val offlineLastSyncAt: Instant? = null,

@@ -11,7 +11,6 @@ import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
-import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
@@ -294,26 +293,35 @@ public class ImapNaverWorker @AssistedInject constructor(
 
         // ── Convert + insert raw events ───────────────────────────────────────
         if (fetched.messages.isNotEmpty()) {
-            val entities = fetched.messages.map { msg -> msg.toEntity(userId, mailboxKey) }
-            val insertResult = rawIngestionRepository.insertLocalBatch(entities)
-            if (insertResult is BecalmResult.Failure) {
+            val folderLabel = folderLabelFor(mailboxKey)
+            val resolutionResult = resolveImapRawEventIds(
+                messages = fetched.messages,
+                userId = userId,
+                sourceType = SourceType.NAVER_IMAP,
+                provider = PROVIDER_NAVER,
+                folderLabel = folderLabel,
+                emailBodyRepository = emailBodyRepository,
+                rawIngestionRepository = rawIngestionRepository,
+                toEntity = { message -> message.toEntity(userId, mailboxKey) },
+            )
+            if (resolutionResult is BecalmResult.Failure) {
                 logger.e(
                     TAG,
-                    "insertLocalBatch failed mailbox=$mailboxKey error=${insertResult.error::class.simpleName}",
+                    "insertLocalBatch failed mailbox=$mailboxKey error=${resolutionResult.error::class.simpleName}",
                 )
                 return PassOutcome.Terminal(Result.retry())
             }
-            val rawEventIds = (insertResult as BecalmResult.Success).value
+            val resolution = (resolutionResult as BecalmResult.Success).value
 
             logger.d(
                 TAG,
-                "inserted mailbox=$mailboxKey count=${entities.size} " +
-                    "uidHashes=${entities.map { redact(it.clientEventId) }}",
+                "inserted mailbox=$mailboxKey count=${resolution.insertedCount} " +
+                    "deduped=${fetched.messages.size - resolution.insertedCount}",
             )
 
             // Persist EmailBody + optional extraction enqueue per message.
             fetched.messages.forEachIndexed { index, message ->
-                val rawEventId = rawEventIds.getOrNull(index) ?: return@forEachIndexed
+                val rawEventId = resolution.rawEventIds.getOrNull(index) ?: return@forEachIndexed
                 persistEmailBody(message, rawEventId, mailboxKey)
             }
         }
@@ -340,10 +348,11 @@ public class ImapNaverWorker @AssistedInject constructor(
     /**
      * Maps an [ImapMessage] to a [RawIngestionEventEntity].
      *
-     * `clientEventId` is folder-scoped (`"naver:<folder>:<uid>:<uidValidity>"`) so that
-     * the same UID in INBOX and Sent (possible on servers that duplicate on send) is
-     * retained as two distinct rows. The deterministic layout keeps the UNIQUE index on
-     * `(user_id, client_event_id)` authoritative for at-least-once re-delivery dedupe.
+     * `clientEventId` is folder-scoped and Message-ID based when the provider exposes
+     * an RFC 5322 `Message-ID`; it falls back to `UIDVALIDITY:UID` only when that header
+     * is absent. This keeps the UNIQUE index on `(user_id, client_event_id)` stable
+     * across UIDVALIDITY rebuilds for normal messages while still preserving INBOX/Sent
+     * as distinct rows.
      *
      * `sourceRef` is a JSON [SourceRefEnvelope]: the RFC 5322 `Message-Id` header is
      * preferred; when absent (rare but permissible) the composite `"$uidValidity:$uid"`
@@ -357,7 +366,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         val personRef = derivePersonRef(mailboxKey)
         val sourceRefJson = sourceRefAdapter.toJson(
             SourceRefEnvelope(
-                messageId = messageId?.takeIf { it.isNotBlank() } ?: "$uidValidity:$uid",
+                messageId = providerMessageId(),
                 inReplyTo = inReplyTo,
                 references = references,
             ),
@@ -370,7 +379,11 @@ public class ImapNaverWorker @AssistedInject constructor(
         return RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
-            clientEventId = "naver:${folderLabel.lowercase()}:$uid:$uidValidity",
+            clientEventId = imapClientEventId(
+                provider = PROVIDER_NAVER,
+                folder = folderLabel,
+                providerMessageId = providerMessageId(),
+            ),
             sourceType = SourceType.NAVER_IMAP,
             sourceRef = sourceRefJson,
             personRef = personRef,
@@ -418,8 +431,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         val body = EmailBodyEntity(
             id = UUID.randomUUID().toString(),
             rawEventId = rawEventId,
-            providerMessageId = message.messageId?.takeIf { it.isNotBlank() }
-                ?: "${message.uidValidity}:${message.uid}",
+            providerMessageId = message.providerMessageId(),
             folder = folderLabel,
             subject = message.subject,
             fromAddress = message.fromEmail?.let(::canonicalizeEmail),
@@ -504,6 +516,7 @@ public class ImapNaverWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "ImapNaverWorker"
+        private const val PROVIDER_NAVER = "naver"
 
         /** Maximum number of WorkManager retry attempts before failing permanently. */
         public const val MAX_RETRIES: Int = 5

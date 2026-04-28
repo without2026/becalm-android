@@ -83,7 +83,7 @@ public data class EmailBodyEntity(
      * Provider-side message identifier used for idempotent re-polling:
      * - Gmail: `messages/{id}`
      * - Microsoft Graph: message `id` field
-     * - IMAP (Naver / Daum): composite `UIDVALIDITY + UID`
+     * - IMAP (Naver / Daum): RFC 5322 `Message-ID`, falling back to `UIDVALIDITY:UID`
      *
      * Indexed via `index_email_body_provider_message_id` so ingestion workers can
      * short-circuit "already stored" checks without a full scan.

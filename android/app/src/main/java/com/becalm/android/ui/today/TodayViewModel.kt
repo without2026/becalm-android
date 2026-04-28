@@ -38,7 +38,7 @@ public sealed class TimelineItem {
     public abstract val title: String
 
     /**
-     * A commitment that is pending on today's date.
+     * A trackable commitment item that belongs on today's date.
      *
      * Only display-safe fields are exposed to the UI layer; raw entity fields
      * (quote, body, personRef, etc.) are intentionally excluded to avoid leaking
@@ -46,8 +46,10 @@ public sealed class TimelineItem {
      */
     public data class Commitment(
         val id: String,
+        val itemType: String,
         override val title: String,
-        val direction: String,
+        val direction: String?,
+        val scheduleStatus: String?,
         val counterpartyDisplayName: String?,
         override val sortKey: Instant,
     ) : TimelineItem()
@@ -74,6 +76,32 @@ public sealed class TimelineItem {
         val attendeesRaw: String?,
         override val sortKey: Instant,
     ) : TimelineItem()
+}
+
+public data class TodayPersonFocus(
+    val displayName: String?,
+    val commitmentCount: Int,
+)
+
+public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPersonFocus> {
+    val countsByName = linkedMapOf<String?, Int>()
+    timeline.forEach { item ->
+        if (item is TimelineItem.Commitment) {
+            val name = item.counterpartyDisplayName?.takeIf { it.isNotBlank() }
+            countsByName[name] = countsByName.getOrDefault(name, 0) + 1
+        }
+    }
+    return countsByName
+        .map { (displayName, count) ->
+            TodayPersonFocus(
+                displayName = displayName,
+                commitmentCount = count,
+            )
+        }
+        .sortedWith(
+            compareByDescending<TodayPersonFocus> { it.commitmentCount }
+                .thenBy { it.displayName ?: "~" },
+        )
 }
 
 /**
@@ -110,6 +138,7 @@ public data class SourceStatusUi(
 public data class TodayUiState(
     val loading: Boolean = true,
     val timeline: List<TimelineItem> = emptyList(),
+    val personFocus: List<TodayPersonFocus> = buildTodayPersonFocus(timeline),
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
     val overall: OverallSyncState = OverallSyncState.Idle,
@@ -130,7 +159,7 @@ private const val TAG = "TodayViewModel"
 /**
  * ViewModel for the Today screen (TDY-001..010).
  *
- * Combines commitments pending today, calendar events starting today, per-source
+ * Combines action/schedule commitment items due by today, calendar events starting today, per-source
  * sync health, and the on-device person-enrichment map (PIPA Room-only) into a
  * single [TodayUiState] flow. If the user is not authenticated the state immediately
  * shows an error and no downstream repository flows are subscribed.

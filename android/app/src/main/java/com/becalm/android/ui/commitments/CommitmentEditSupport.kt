@@ -4,7 +4,6 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentEditDraft
-import kotlinx.datetime.Instant
 
 internal object CommitmentEditProjector {
     fun seed(entity: CommitmentEntity): EditUiState = EditUiState(
@@ -42,17 +41,8 @@ internal object CommitmentEditProjector {
         direction = state.direction,
     )
 
-    fun toSaveError(error: BecalmError): String = when (error) {
-        is BecalmError.NotFound -> "삭제된 약속입니다"
-        is BecalmError.Unauthorized -> "로그인이 필요합니다"
-        is BecalmError.Validation -> error.message
-        else -> "저장 실패 — 다시 시도해주세요"
-    }
+    fun toSaveError(error: BecalmError): String = CommitmentSaveErrorFormatter.format(error)
 
     private fun buildSourceLabel(entity: CommitmentEntity): String =
-        if (entity.sourceType == SourceType.MANUAL) {
-            "manual:${CommitmentDetailFormatter.formatShortKst(entity.createdAt)}"
-        } else {
-            "${entity.sourceEventTitle ?: entity.sourceType}:${CommitmentDetailFormatter.formatShortKst(entity.sourceEventOccurredAt)}"
-        }
+        CommitmentDetailFormatter.buildCompactSourceLabel(entity)
 }

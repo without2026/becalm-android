@@ -31,11 +31,10 @@ import kotlinx.datetime.Instant
  *   server-owned UUID.
  *
  * Idempotency note:
- * Dedup on `(user_id, client_event_id)` is enforced at Railway/Supabase via a UNIQUE
- * constraint; the local Room layer relies on the read-then-insert guard in
- * [RawIngestionEventDao.findByClientEventId] and does NOT declare a local UNIQUE
- * index (out of spec — `data-model.yml § raw_ingestion_events.indexes` lists only
- * the three btree indexes above).
+ * Dedup on `(user_id, client_event_id)` is enforced both locally and at
+ * Railway/Supabase via a UNIQUE constraint. Local enforcement is required because
+ * IMAP and MediaStore workers intentionally re-discover rows on cursor rebuilds and
+ * one-second overlap scans.
  */
 @Entity(
     tableName = "raw_ingestion_events",
@@ -51,6 +50,11 @@ import kotlinx.datetime.Instant
         Index(
             name = "idx_raw_events_user_person_time",
             value = ["user_id", "person_ref", "timestamp"],
+        ),
+        Index(
+            name = "ux_raw_events_user_client_event",
+            value = ["user_id", "client_event_id"],
+            unique = true,
         ),
     ],
 )
@@ -70,7 +74,9 @@ public data class RawIngestionEventEntity(
     val userId: String,
 
     /**
-     * Client-generated UUID v4 idempotency key.
+     * Client-generated UUID idempotency key. Fresh ad-hoc callers use UUID v4;
+     * source adapters may use deterministic name-based UUIDs derived from provider
+     * identifiers.
      * Railway deduplicates on (user_id, client_event_id) UNIQUE constraint.
      * Queried by [RawIngestionEventDao.findByClientEventId] before every insert.
      */

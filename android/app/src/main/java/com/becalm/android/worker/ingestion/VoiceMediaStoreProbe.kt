@@ -88,9 +88,10 @@ internal class VoiceMediaStoreProbe(
      *   `"pending"` when the user has granted PIPA third-party provision consent, else
      *   `"awaiting_consent"` (cold-sync.spec:49 / VOI-004). The consent is snapshotted
      *   once per batch so mid-batch toggles do not split rows across states.
-     *   `clientEventId = "mediastore:voice:<mediaId>"` is deterministic, so re-running on
-     *   the same file is idempotent (the DB UNIQUE index on (user_id, client_event_id)
-     *   drops duplicates via [androidx.room.OnConflictStrategy.IGNORE]).
+     *   The clientEventId is a deterministic UUID derived from
+     *   `"mediastore:voice:<mediaId>"`, so re-running on the same file is idempotent
+     *   (the DB UNIQUE index on (user_id, client_event_id) drops duplicates via
+     *   [androidx.room.OnConflictStrategy.IGNORE]).
      * - Enqueues [WorkScheduler.enqueueVoiceUpload] only when the row was freshly inserted
      *   (insert return value != -1L), preventing double-enqueue on retry runs.
      *
@@ -293,9 +294,10 @@ internal class VoiceMediaStoreProbe(
      *   [PhoneNumberUtils.extractCounterpartyNumberFromDisplayName]. Null when no valid
      *   phone number can be parsed — per ING-001 "없으면 null", we never throw on
      *   unparseable inputs (the user can still link the event manually later).
-     * - [clientEventId] uses the prefix `"mediastore:call_recording:<mediaId>"`, disjoint
-     *   from voice's `"mediastore:voice:<mediaId>"` so a single row never collides across
-     *   the two source_types at the UNIQUE (user_id, client_event_id) index.
+     * - [clientEventId] is a deterministic UUID derived from a key with the
+     *   `"mediastore:call_recording:"` prefix, disjoint from voice's
+     *   `"mediastore:voice:"` prefix so a single row never collides across the two
+     *   source_types at the UNIQUE (user_id, client_event_id) index.
      *
      * The watermark cursor is **independent** from the voice branch's
      * [MediaStoreWorker.KIND_VOICE]; this scan reads and advances
@@ -515,6 +517,7 @@ internal class VoiceMediaStoreProbe(
         val displayName: String,
         val audioUri: String,
         val clientEventId: String,
+        val legacyClientEventId: String,
         /**
          * `MediaStore.Audio.Media.TITLE` when projected by the caller, otherwise null.
          * Populated only by the call-recording branch per ING-001 contract
@@ -544,7 +547,8 @@ internal class VoiceMediaStoreProbe(
      *
      * - DURATION은 MediaStore 규약에 따라 밀리초이므로 정수 초로 변환한다.
      * - 표시 이름이 null이면 빈 문자열로 표준화한다 (원본과 동일 — PII hash 계산 안정성 보존).
-     * - audioUri / clientEventId는 원본 생성 식과 byte-identical 하다.
+     * - audioUri는 원본 생성 식과 byte-identical 하며 clientEventId는 해당 source key의
+     *   deterministic UUID다.
      * - [clientEventIdPrefix] 는 voice 분기에서는 `"mediastore:voice:"` (기본값),
      *   call_recording 분기에서는 `"mediastore:call_recording:"` 를 주입받는다.
      *   두 prefix 는 서로 다른 Railway dedup key space 를 구성해 voice/call_recording
@@ -572,14 +576,16 @@ internal class VoiceMediaStoreProbe(
         // TITLE is only projected by the call-recording branch (ING-001 contract). When
         // [idxTitle] is null the voice branch's byte-identical behavior is preserved.
         val title = idxTitle?.let { cursor.getString(it) }
+        val legacyClientEventId = "$clientEventIdPrefix$mediaId"
         return VoiceRow(
             mediaId = mediaId,
             dateAddedSec = dateAddedSec,
             durationSec = durationSec,
             displayName = displayName,
             audioUri = audioUri,
-            // Deterministic idempotency key: same mediaId always yields same clientEventId
-            clientEventId = "$clientEventIdPrefix$mediaId",
+            // Server-compatible deterministic UUID derived from the legacy source key.
+            clientEventId = stableClientEventId(legacyClientEventId),
+            legacyClientEventId = legacyClientEventId,
             title = title,
         )
     }
@@ -601,8 +607,7 @@ internal class VoiceMediaStoreProbe(
      *
      * [sourceType] 과 [personRef] 는 분기별로 주입된다 — voice 분기는
      * ([SourceType.VOICE], null), call_recording 분기는
-     * ([SourceType.CALL_RECORDING], E.164 또는 null). voice 분기는 기존 호출부가
-     * 기본값을 사용하므로 byte-identical 동작을 유지한다.
+     * ([SourceType.CALL_RECORDING], E.164 또는 null).
      */
     private suspend fun insertVoiceRow(
         row: VoiceRow,
@@ -612,6 +617,10 @@ internal class VoiceMediaStoreProbe(
         personRef: String? = null,
         eventTitle: String? = null,
     ): VoiceInsertResult {
+        rawIngestionEventDao.findByClientEventId(userId, row.legacyClientEventId)?.let { legacy ->
+            return classifyExistingVoiceRow(legacy)
+        }
+
         val entity = RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
@@ -638,15 +647,15 @@ internal class VoiceMediaStoreProbe(
 
         // UNIQUE(user_id, client_event_id) 충돌 — 기존 row 조회 후 재업로드 가능 여부 판정.
         val existing = rawIngestionEventDao.findByClientEventId(userId, row.clientEventId)
-        return if (existing == null ||
-            existing.syncStatus != "pending" ||
-            existing.commitmentsExtractedCount > 0
-        ) {
+        return existing?.let(::classifyExistingVoiceRow) ?: VoiceInsertResult.DedupSkip
+    }
+
+    private fun classifyExistingVoiceRow(existing: RawIngestionEventEntity): VoiceInsertResult =
+        if (existing.syncStatus != "pending" || existing.commitmentsExtractedCount > 0) {
             VoiceInsertResult.DedupSkip
         } else {
             VoiceInsertResult.Dedup(existing.id)
         }
-    }
 
     /**
      * [WorkScheduler.enqueueVoiceUpload] 호출을 감싸고 성공/실패를 로그한다.

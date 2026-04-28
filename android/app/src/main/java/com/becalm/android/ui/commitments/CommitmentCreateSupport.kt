@@ -22,10 +22,6 @@ internal object CommitmentCreateProjector {
             }
         }
 
-    fun saveError(error: BecalmError): String = when (error) {
-        is BecalmError.Unauthorized -> "로그인이 필요합니다"
-        is BecalmError.NotFound -> "삭제된 약속입니다"
-        is BecalmError.Validation -> error.message
-        else -> "저장 실패 — 다시 시도해주세요"
-    }
+    fun saveError(error: BecalmError): String =
+        CommitmentSaveErrorFormatter.format(error)
 }

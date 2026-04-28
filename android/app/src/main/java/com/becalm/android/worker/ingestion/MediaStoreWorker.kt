@@ -50,7 +50,8 @@ import kotlinx.datetime.Clock
  *    `person_ref` is the E.164 normalization of the counterparty number extracted from
  *    the DISPLAY_NAME (null when no valid phone number can be parsed — per ING-001
  *    "없으면 null"). The `clientEventId` is deterministic
- *    (`"mediastore:voice:<mediaId>"` or `"mediastore:call_recording:<mediaId>"`) so
+ *    (deterministic UUID derived from `"mediastore:voice:<mediaId>"` or
+ *    `"mediastore:call_recording:<mediaId>"`) so
  *    re-running the worker against the same file is idempotent — the DB unique index
  *    on (user_id, client_event_id) silently drops duplicates.
  * 2. If the row was freshly inserted (not a duplicate), `WorkScheduler.enqueueVoiceUpload`

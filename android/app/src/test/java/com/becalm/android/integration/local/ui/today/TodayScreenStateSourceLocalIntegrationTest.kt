@@ -5,7 +5,9 @@ import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
@@ -134,6 +136,33 @@ class TodayScreenStateSourceLocalIntegrationTest {
                     sourceEventOccurredAt = Instant.parse("2026-04-23T01:00:00Z"),
                 ),
             )
+            db.commitmentDao().insert(
+                commitment(
+                    id = "schedule-today",
+                    userId = userId,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CHANGED,
+                    personRef = "+821012345678",
+                    counterpartyRaw = "01012345678",
+                    title = "영희와 일정 변경",
+                    dueAt = Instant.parse("2026-04-23T09:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-23T01:30:00Z"),
+                ),
+            )
+            db.commitmentDao().insert(
+                commitment(
+                    id = "decision-today",
+                    userId = userId,
+                    itemType = CommitmentItemType.DECISION,
+                    direction = null,
+                    personRef = "+821012345678",
+                    counterpartyRaw = "01012345678",
+                    title = "영희와 결정",
+                    dueAt = Instant.parse("2026-04-23T09:30:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-23T01:40:00Z"),
+                ),
+            )
             db.calendarEventDao().insertAll(
                 listOf(
                     calendarEvent(
@@ -156,16 +185,18 @@ class TodayScreenStateSourceLocalIntegrationTest {
             )
 
             var updated = awaitItem()
-            while (updated.timeline.size < 2) {
+            while (updated.timeline.size < 3) {
                 updated = awaitItem()
             }
 
-            val commitment = updated.timeline.filterIsInstance<TimelineItem.Commitment>().single()
+            val commitments = updated.timeline.filterIsInstance<TimelineItem.Commitment>()
             val meeting = updated.timeline.filterIsInstance<TimelineItem.Meeting>().single()
-            assertEquals("김영희", commitment.counterpartyDisplayName)
-            assertEquals("영희에게 송금", commitment.title)
+            assertEquals(listOf("영희에게 송금", "영희와 일정 변경"), commitments.map { it.title })
+            assertEquals(listOf(CommitmentItemType.ACTION, CommitmentItemType.SCHEDULE), commitments.map { it.itemType })
+            assertEquals("김영희", commitments.first().counterpartyDisplayName)
             assertEquals("Daily standup", meeting.title)
             assertFalse(updated.timeline.any { it.title == "Tomorrow planning" })
+            assertFalse(updated.timeline.any { it.title == "영희와 결정" })
             assertFalse(updated.overallSyncing)
 
             cancelAndIgnoreRemainingEvents()
@@ -175,6 +206,9 @@ class TodayScreenStateSourceLocalIntegrationTest {
     private fun commitment(
         id: String,
         userId: String,
+        itemType: String = CommitmentItemType.ACTION,
+        direction: String? = "give",
+        scheduleStatus: String? = null,
         personRef: String?,
         counterpartyRaw: String?,
         title: String,
@@ -183,7 +217,9 @@ class TodayScreenStateSourceLocalIntegrationTest {
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = userId,
-        direction = "give",
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
         counterpartyRaw = counterpartyRaw,
         personRef = personRef,
         title = title,

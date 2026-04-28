@@ -407,8 +407,8 @@ public interface CommitmentDao {
     public suspend fun countForUser(userId: String): Int
 
     /**
-     * Emits all live pending commitments for [userId] that are either undated or due
-     * on/before end-of-today in Asia/Seoul.
+     * Emits live action/schedule commitment items for [userId] that are either undated
+     * or due on/before end-of-today in Asia/Seoul.
      *
      * `endOfTodayEpochMs` is an inclusive UTC epoch-millisecond upper bound. The caller
      * must compute it as `Asia/Seoul` 23:59:59.999 converted to UTC epoch ms so that the
@@ -419,7 +419,7 @@ public interface CommitmentDao {
      * Soft-deleted rows (`deleted_at IS NOT NULL`) are excluded per
      * `.spec/contracts/data-model.yml:204-205` MUST-invariant.
      *
-     * Used by the daily reminder widget and the home screen "due today" badge.
+     * Used by the daily reminder widget and the home screen "due today" timeline.
      *
      * @param userId Supabase auth.users UUID of the owning user.
      * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch ms (Asia/Seoul 23:59:59.999).
@@ -429,7 +429,7 @@ public interface CommitmentDao {
         """
         SELECT * FROM commitments
         WHERE user_id      = :userId
-          AND item_type    = 'action'
+          AND item_type    IN ('action', 'schedule')
           AND action_state = 'pending'
           AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs)
           AND deleted_at IS NULL

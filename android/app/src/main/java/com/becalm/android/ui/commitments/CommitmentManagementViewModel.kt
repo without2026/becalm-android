@@ -109,6 +109,30 @@ public data class CommitmentRow(
     val isManual: Boolean = false,
 )
 
+/**
+ * Display-only grouping for the commitments list. The group key is intentionally
+ * the already-resolved display name rather than raw personRef, because the UI
+ * layer must not receive canonical identifiers that may contain PII.
+ */
+public data class CommitmentPersonGroup(
+    val displayName: String?,
+    val items: List<CommitmentRow>,
+) {
+    public val count: Int get() = items.size
+    public val stableKey: String get() = displayName?.let { "person-$it" } ?: "person-unassigned"
+}
+
+public fun buildCommitmentPersonGroups(rows: List<CommitmentRow>): List<CommitmentPersonGroup> {
+    val grouped = linkedMapOf<String?, MutableList<CommitmentRow>>()
+    rows.forEach { row ->
+        val displayName = row.counterpartyDisplayName?.takeIf { it.isNotBlank() }
+        grouped.getOrPut(displayName) { mutableListOf() }.add(row)
+    }
+    return grouped.map { (displayName, items) ->
+        CommitmentPersonGroup(displayName = displayName, items = items)
+    }
+}
+
 // ─── Undo snapshot ────────────────────────────────────────────────────────────
 
 /**
@@ -171,7 +195,10 @@ public data class CommitmentUiState(
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val error: String? = null,
-)
+) {
+    public val activePersonGroups: List<CommitmentPersonGroup>
+        get() = buildCommitmentPersonGroups(activeItems)
+}
 
 /** Test-visible projection of one expandable terminal section (CMT-009 / CMT-012). */
 public data class CommitmentSectionUiState(

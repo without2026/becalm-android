@@ -61,7 +61,7 @@ class TodayTimelineScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("동기화 중 1/7").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeTestRule.onNodeWithText("Voice").assertIsDisplayed()
         composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
         composeTestRule.onNodeWithText("Outlook Mail").assertIsDisplayed()
@@ -141,7 +141,8 @@ class TodayTimelineScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("동기화됨", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_synced_time_fmt, ""), substring = true)
+            .assertIsDisplayed()
     }
 
     @Test
@@ -152,7 +153,7 @@ class TodayTimelineScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("일부 소스 실패").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_partial_failure)).assertIsDisplayed()
     }
 
     @Test
@@ -180,6 +181,6 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithText("Outlook Calendar").assertIsDisplayed()
     }
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

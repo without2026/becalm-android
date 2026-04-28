@@ -23,7 +23,8 @@ public data class RawIngestionEventDto(
     @field:Json(name = "id") val id: String? = null,
 
     /**
-     * Client-generated UUID v4 idempotency key.
+     * Client-generated UUID idempotency key. Some adapters use deterministic
+     * name-based UUIDs derived from source-system ids.
      * Railway deduplicates on (user_id, client_event_id) UNIQUE constraint.
      * Duplicate submissions receive 200 without a new INSERT.
      */

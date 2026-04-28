@@ -22,8 +22,10 @@ internal object TodayTimelineProjector {
     ): TimelineItem.Commitment =
         TimelineItem.Commitment(
             id = id,
+            itemType = itemType,
             title = title,
-            direction = requireNotNull(direction) { "Today action timeline requires direction" },
+            direction = direction,
+            scheduleStatus = scheduleStatus,
             counterpartyDisplayName = resolveCounterpartyDisplay(this, enrichment),
             sortKey = sourceEventOccurredAt,
         )
@@ -79,13 +81,15 @@ internal object TodaySyncProjector {
                 lastSyncedAt = status.lastSyncedAt,
             )
         }
+        val timeline = TodayTimelineProjector.buildTimeline(
+            commitments = snapshot.commitments,
+            calendarEvents = snapshot.calendarEvents,
+            enrichment = snapshot.enrichment,
+        )
         return TodayUiState(
             loading = false,
-            timeline = TodayTimelineProjector.buildTimeline(
-                commitments = snapshot.commitments,
-                calendarEvents = snapshot.calendarEvents,
-                enrichment = snapshot.enrichment,
-            ),
+            timeline = timeline,
+            personFocus = buildTodayPersonFocus(timeline),
             sourceStatus = statusMap,
             overallSyncing = snapshot.sourceStatuses.any { it.status == SourceConnectionStatus.SYNCING },
             overall = deriveOverallState(snapshot.sourceStatuses),
