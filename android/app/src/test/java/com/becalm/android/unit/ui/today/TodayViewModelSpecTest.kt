@@ -5,6 +5,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
@@ -71,6 +72,7 @@ class TodayViewModelSpecTest {
                 SourceStatus("outlook_mail", SourceConnectionStatus.ERROR, now, "token expired"),
             ),
         )
+        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
     }
 
@@ -82,8 +84,8 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-001 timeline merges sorted rows and resolves counterparty display with enrichment`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+            todayRows(
                 commitment(
                     id = "c1",
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
@@ -97,6 +99,7 @@ class TodayViewModelSpecTest {
                     occurredAt = Instant.parse("2026-04-18T01:30:00Z"),
                     personRef = "lee@corp.com",
                 ),
+                enrichment = mapOf("lee@corp.com" to "이대리"),
             ),
         )
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
@@ -113,10 +116,6 @@ class TodayViewModelSpecTest {
                 ),
             ),
         )
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
-            mapOf("lee@corp.com" to enrichment("lee@corp.com", displayName = "이대리")),
-        )
-
         val viewModel = buildViewModel()
 
         viewModel.state.test {
@@ -164,17 +163,16 @@ class TodayViewModelSpecTest {
 
     @Test
     fun `TDY-004 today commitments stay room-backed and react to local invalidation within the KST day`() = runTest {
-        val commitmentsFlow = MutableStateFlow<List<CommitmentEntity>>(emptyList())
+        val commitmentsFlow = MutableStateFlow<List<TodayCommitmentRow>>(emptyList())
         val dayEndEpochMs = slot<Long>()
         coEvery { authRepository.currentSession() } returns session()
         every {
-            commitmentRepository.observePendingForToday(
+            commitmentRepository.observeTimelineForToday(
                 userId = "user-1",
                 endOfTodayEpochMs = capture(dayEndEpochMs),
             )
         } returns commitmentsFlow
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
         val viewModel = buildViewModel()
 
@@ -188,7 +186,7 @@ class TodayViewModelSpecTest {
                 dayEndEpochMs.captured,
             )
 
-            commitmentsFlow.value = listOf(
+            commitmentsFlow.value = todayRows(
                 commitment(
                     id = "c-kst",
                     occurredAt = Instant.parse("2026-04-18T04:00:00Z"),
@@ -279,8 +277,8 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY counterparty display falls back to personRef when enrichment is missing`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(
-            listOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+            todayRows(
                 commitment(
                     id = "c2",
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
@@ -289,7 +287,6 @@ class TodayViewModelSpecTest {
             ),
         )
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
-        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
         val viewModel = buildViewModel()
 
@@ -513,7 +510,6 @@ class TodayViewModelSpecTest {
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
         sourceStatusRepository = sourceStatusRepository,
-        personEnrichmentRepository = personEnrichmentRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
         foregroundCatchUpScheduler = foregroundCatchUpScheduler,
@@ -571,6 +567,24 @@ class TodayViewModelSpecTest {
         createdAt = occurredAt,
         updatedAt = occurredAt,
     )
+
+    private fun todayRows(
+        vararg commitments: CommitmentEntity,
+        enrichment: Map<String, String> = emptyMap(),
+    ): List<TodayCommitmentRow> =
+        commitments.map { commitment ->
+            TodayCommitmentRow(
+                id = commitment.id,
+                itemType = commitment.itemType,
+                title = commitment.title,
+                direction = commitment.direction,
+                scheduleStatus = commitment.scheduleStatus,
+                counterpartyDisplayName = commitment.personRef?.let { ref ->
+                    enrichment[ref] ?: ref
+                } ?: commitment.counterpartyRaw?.take(30),
+                sortKey = commitment.sourceEventOccurredAt,
+            )
+        }
 
     private fun calendarEvent(
         id: String,

@@ -9,7 +9,6 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
-import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -159,8 +158,8 @@ private const val TAG = "TodayViewModel"
 /**
  * ViewModel for the Today screen (TDY-001..010).
  *
- * Combines action/schedule commitment items due by today, calendar events starting today, per-source
- * sync health, and the on-device person-enrichment map (PIPA Room-only) into a
+ * Combines action/schedule commitment projection rows due by today, calendar events starting today,
+ * per-source sync health, and processing pause state into a
  * single [TodayUiState] flow. If the user is not authenticated the state immediately
  * shows an error and no downstream repository flows are subscribed.
  *
@@ -168,23 +167,18 @@ private const val TAG = "TodayViewModel"
  * 1. A [userIdFlow] resolves the session once and emits either a userId string or null.
  * 2. [commitmentFlow] and [calendarFlow] flatMapLatest on [userIdFlow], emitting empty
  *    lists when userId is null so the combine always has active flows.
- * 3. Six upstream flows are combined into [state]: [userIdFlow], [commitmentFlow],
- *    [calendarFlow], [SourceStatusRepository.observeAll],
- *    [PersonEnrichmentRepository.observeEnrichmentMap], and the [refreshingFlow]
- *    side-channel.
+ * 3. Upstream flows are combined into [state]: [userIdFlow], [commitmentFlow],
+ *    [calendarFlow], [SourceStatusRepository.observeAll], processing pause state, and
+ *    the [refreshingFlow] side-channel.
  *
- * Enrichment resolution for commitment counterparty display (TDY-001):
- * 1. `enrichment[personRef]?.displayName` (ContactsContract DISPLAY_NAME), then
- * 2. `enrichment[personRef]?.nickname`, then
- * 3. `personRef` itself (already canonicalized — phone E.164 / email / display name), then
- * 4. `counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows with no personRef.
+ * Commitment counterparty display is resolved in SQL so the home screen does not load the full
+ * PIPA enrichment map just to render Today rows.
  */
 @HiltViewModel
 public class TodayViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceStatusRepository: SourceStatusRepository,
-    personEnrichmentRepository: PersonEnrichmentRepository,
     private val authRepository: AuthRepository,
     userPrefsStore: UserPrefsStore,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
@@ -202,7 +196,6 @@ public class TodayViewModel @Inject constructor(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
         sourceStatusRepository = sourceStatusRepository,
-        personEnrichmentRepository = personEnrichmentRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
         clock = clock,

@@ -15,7 +15,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.internal.mergeServerState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
@@ -214,11 +214,13 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         // PRODUCT_SOURCES (7 user-facing sources) — NOT the schema-level ALL set.
         // ALL still includes CALL_RECORDING, but that remains a schema-only carve-out
         // and must not appear in the Sources strip or Today aggregate banner.
-        val flows: List<Flow<SourceStatus>> = SourceType.PRODUCT_SOURCES.map { source ->
-            observeFor(source)
-        }
-        // combine(List<Flow>) requires at least one flow; PRODUCT_SOURCES is non-empty.
-        return combine(flows) { statuses -> statuses.toList() }
+        return userPrefs.data
+            .map { prefs ->
+                SourceType.PRODUCT_SOURCES.map { source ->
+                    prefs.toSourceStatus(source)
+                }
+            }
+            .distinctUntilChanged()
     }
 
     override fun observeSources(): Flow<Map<String, SourceStatus>> =
@@ -226,11 +228,16 @@ public class SourceStatusRepositoryImpl @Inject constructor(
 
     override fun observeFor(sourceType: String): Flow<SourceStatus> =
         userPrefs.data.map { prefs ->
-            val lastSyncedAtMs = prefs[SourceStatusPrefsKeys.lastSyncedAt(sourceType)]
-            val lastError = prefs[SourceStatusPrefsKeys.lastError(sourceType)]
-            val isInProgress = prefs[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false
-            SourceStatusDeriver.derive(sourceType, lastSyncedAtMs, lastError, isInProgress)
-        }
+            prefs.toSourceStatus(sourceType)
+        }.distinctUntilChanged()
+
+    private fun Preferences.toSourceStatus(sourceType: String): SourceStatus =
+        SourceStatusDeriver.derive(
+            sourceType = sourceType,
+            lastSyncedAtMs = this[SourceStatusPrefsKeys.lastSyncedAt(sourceType)],
+            lastError = this[SourceStatusPrefsKeys.lastError(sourceType)],
+            isInProgress = this[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false,
+        )
 
     // ─── Server refresh (TDY-006 / TDY-008) ──────────────────────────────────
 

@@ -3,6 +3,7 @@ package com.becalm.android.ui.persons
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentItemType
@@ -12,6 +13,8 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 
 // ─── UI models ────────────────────────────────────────────────────────────────
@@ -152,6 +156,7 @@ public class PersonDetailViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
     private val personRef: String = savedStateHandle[ARG_PERSON_REF] ?: ""
@@ -200,14 +205,16 @@ public class PersonDetailViewModel @Inject constructor(
                             calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
                             _completedExpanded,
                         ) { enrichment, rawEvents, commitments, calendarEvents, completedExpanded ->
-                            PersonDetailProjector.buildState(
-                                personRef = personRef,
-                                enrichment = enrichment,
-                                rawEvents = rawEvents,
-                                commitments = commitments,
-                                calendarEvents = calendarEvents,
-                                completedExpanded = completedExpanded,
-                            )
+                            withContext(ioDispatcher) {
+                                PersonDetailProjector.buildState(
+                                    personRef = personRef,
+                                    enrichment = enrichment,
+                                    rawEvents = rawEvents,
+                                    commitments = commitments,
+                                    calendarEvents = calendarEvents,
+                                    completedExpanded = completedExpanded,
+                                )
+                            }
                         }.catch { e ->
                             logger.e(TAG, "observeDetail failed", e)
                             emit(

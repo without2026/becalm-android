@@ -6,6 +6,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
+import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import java.io.IOException
 import javax.inject.Inject
@@ -48,6 +49,11 @@ public interface PersonEnrichmentRepository {
      * a blank — see TDY-001 / CMT-001.
      */
     public fun observeEnrichmentMap(): Flow<Map<String, PersonEnrichmentEntity>>
+
+    /**
+     * Emits count and newest sync timestamp without materializing every enrichment row.
+     */
+    public fun observeSummary(): Flow<PersonEnrichmentSummary>
 
     /**
      * Emits the enrichment row for [personRef] whenever the underlying Room row changes,
@@ -118,6 +124,9 @@ public class PersonEnrichmentRepositoryImpl @Inject constructor(
 
     override fun observeEnrichmentMap(): Flow<Map<String, PersonEnrichmentEntity>> =
         dao.observeAll().map { list -> list.associateBy { it.personRef } }
+
+    override fun observeSummary(): Flow<PersonEnrichmentSummary> =
+        dao.observeSummary()
 
     override fun observeByPersonRef(personRef: String): Flow<PersonEnrichmentEntity?> =
         dao.observeByPersonRef(personRef)

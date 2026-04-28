@@ -19,7 +19,6 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -54,7 +53,7 @@ import kotlin.time.Duration.Companion.days
  *
  * ## ENR-005 — PersonRef collection
  * Collects the set of distinct personRefs present in [RawIngestionRepository] for the
- * authenticated user via a one-shot snapshot of [RawIngestionRepository.observeTimelineForUser].
+ * authenticated user via a bounded distinct-person-ref query.
  *
  * ## ENR-006 — Freshness gate (7-day TTL)
  * Skips ContactsContract lookup for any personRef whose existing [PersonEnrichmentEntity]
@@ -134,11 +133,8 @@ public class EnrichmentWorker @AssistedInject constructor(
         val now = Clock.System.now()
 
         // ENR-005: one-shot snapshot of distinct non-null personRefs for this user
-        val personRefs: Set<String> = rawIngestionRepository
-            .observeTimelineForUser(userId, limit = MAX_PERSON_REF_SCAN)
-            .first()
-            .mapNotNull { it.personRef }
-            .toSet()
+        val personRefs: List<String> = rawIngestionRepository
+            .findDistinctPersonRefsForUser(userId, limit = MAX_PERSON_REF_SCAN)
 
         if (personRefs.isEmpty()) {
             logger.d(TAG, "doWork — no personRefs found, nothing to enrich")

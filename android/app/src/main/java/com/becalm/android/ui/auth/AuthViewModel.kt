@@ -339,10 +339,15 @@ public class AuthViewModel @Inject constructor(
 
     private suspend fun SupabaseSession?.toUiState(): AuthUiState =
         if (this != null) {
+            val onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first()
             AuthUiState.SignedIn(
                 userId = userId,
-                onboardingCompleted = userPrefsStore.observeOnboardingCompleted().first(),
-                onboardingResumeRoute = onboardingResumeRoute(),
+                onboardingCompleted = onboardingCompleted,
+                onboardingResumeRoute = if (onboardingCompleted) {
+                    com.becalm.android.ui.navigation.BecalmRoute.OnboardingPipaConsent.path
+                } else {
+                    onboardingResumeRoute()
+                },
             )
         } else {
             AuthUiState.SignedOut(

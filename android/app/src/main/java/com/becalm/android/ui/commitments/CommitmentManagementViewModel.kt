@@ -5,12 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
-import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentRepository
-import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
@@ -25,12 +23,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
@@ -222,24 +220,19 @@ private const val TAG = "CommitmentMgmtVM"
 /**
  * ViewModel for CommitmentManagementScreen.
  *
- * Collects all commitments for the current user from [CommitmentRepository.observeAllForUser]
- * and joins them against the on-device enrichment map from
- * [PersonEnrichmentRepository.observeEnrichmentMap] (Room-only; PIPA-protected, never
- * uploaded). [CommitmentFilter] is applied in-memory so that a single Room subscription
- * drives all filter tabs.
+ * Collects display-safe commitment rows for the current user from
+ * [CommitmentRepository.observeManagementRowsForUser]. The repository query pre-joins
+ * PIPA-local enrichment in SQL, so the UI path does not materialize full commitment rows
+ * or the full enrichment map. [CommitmentFilter] is applied in-memory so that a single
+ * Room subscription drives all filter tabs.
  *
  * All mutating actions delegate to [CommitmentRepository.transitionState]; on
  * [BecalmResult.Failure] the error is surfaced via [CommitmentUiState.error] — never
  * swallowed.
  *
- * Enrichment resolution for commitment counterparty display (CMT-001):
- * 1. `enrichment[personRef]?.displayName`
- * 2. `enrichment[personRef]?.nickname`
- * 3. `personRef` itself (already canonicalized — phone E.164 / email / display name)
- * 4. `counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)` for legacy rows without personRef
+ * Enrichment resolution for commitment counterparty display is owned by the DAO projection.
  *
  * @param commitmentRepository      Source of truth for commitment data.
- * @param personEnrichmentRepository On-device PIPA-only contact enrichment map source.
  * @param reminderScheduler         Schedules / cancels AlarmManager reminders.
  * @param userPrefsStore            Provides the reactive current user ID.
  * @param logger                    Structured log sink.
@@ -247,7 +240,6 @@ private const val TAG = "CommitmentMgmtVM"
 @HiltViewModel
 public class CommitmentManagementViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
-    private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
@@ -294,7 +286,7 @@ public class CommitmentManagementViewModel @Inject constructor(
      * Backing store for the unfiltered entity list from Room. Required so that
      * [onFilterChange] can re-apply a different filter without re-querying Room.
      */
-    private val allEntities: MutableStateFlow<List<CommitmentEntity>> = MutableStateFlow(emptyList())
+    private val allRows: MutableStateFlow<List<CommitmentManagementRow>> = MutableStateFlow(emptyList())
 
     init {
         observeCommitments()
@@ -302,15 +294,9 @@ public class CommitmentManagementViewModel @Inject constructor(
 
     // ─── Private observation ──────────────────────────────────────────────────
 
-    /** Latest enrichment map from [PersonEnrichmentRepository], kept in-memory so filter
-     *  switches can re-render with the current enrichment without re-collecting.
-     */
-    private val enrichmentMap: MutableStateFlow<Map<String, PersonEnrichmentEntity>> =
-        MutableStateFlow(emptyMap())
-
     /**
-     * Subscribes to the reactive commitment list for the current user, joined against the
-     * on-device enrichment map (CMT-001 — person_ref → display_name / nickname).
+     * Subscribes to the display-safe commitment list for the current user, pre-joined
+     * against the on-device enrichment table in SQL.
      *
      * The current user ID is sourced from [UserPrefsStore.observeCurrentUserId]. When the
      * ID is absent (not yet signed in) the item list is cleared. When present, all commitments
@@ -324,31 +310,25 @@ public class CommitmentManagementViewModel @Inject constructor(
                     if (userId == null) {
                         flowOf(emptyList())
                     } else {
-                        commitmentRepository.observeAllForUser(userId)
+                        commitmentRepository.observeManagementRowsForUser(userId)
                     }
                 }
-            combine(
-                commitmentsByUser,
-                personEnrichmentRepository.observeEnrichmentMap(),
-            ) { entities, enrichment ->
-                entities to enrichment
-            }
+            commitmentsByUser
                 .catch { e ->
                     _uiState.update {
                         it.copy(loading = false, error = e.message ?: "load failed")
                     }
                 }
-                .collect { (entities, enrichment) ->
-                    allEntities.value = entities
-                    enrichmentMap.value = enrichment
-                    _uiState.update { state ->
+                .collect { rows ->
+                    val projectedState = withContext(ioDispatcher) {
                         CommitmentManagementProjector.buildUiState(
-                            current = state,
-                            entities = entities,
-                            enrichment = enrichment,
+                            current = _uiState.value,
+                            rows = rows,
                             loading = false,
                         )
                     }
+                    allRows.value = rows
+                    _uiState.value = projectedState
                 }
         }
     }
@@ -369,13 +349,15 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-003
     public fun onFilterChange(filter: CommitmentFilter) {
-        _uiState.update { state ->
-            CommitmentManagementProjector.buildUiState(
-                current = state,
-                entities = allEntities.value,
-                enrichment = enrichmentMap.value,
-                filter = filter,
-            )
+        viewModelScope.launch {
+            val projectedState = withContext(ioDispatcher) {
+                CommitmentManagementProjector.buildUiState(
+                    current = _uiState.value,
+                    rows = allRows.value,
+                    filter = filter,
+                )
+            }
+            _uiState.value = projectedState
         }
     }
 
@@ -457,7 +439,7 @@ public class CommitmentManagementViewModel @Inject constructor(
             name = "onRemind",
             id = id,
             effect = {
-                val dueAt: Instant? = allEntities.value.firstOrNull { it.id == id }?.dueAt
+                val dueAt: Instant? = allRows.value.firstOrNull { it.id == id }?.dueAt
                 reminderScheduler.schedule(id, dueAt)
             },
         ) {
@@ -582,8 +564,8 @@ public class CommitmentManagementViewModel @Inject constructor(
      * caller must short-circuit rather than emit a snapshot with stale data.
      */
     private fun snapshotPriorState(id: String): CommitmentState? {
-        val entity = allEntities.value.firstOrNull { it.id == id } ?: return null
-        return CommitmentState.fromWire(entity.actionState)
+        val row = allRows.value.firstOrNull { it.id == id } ?: return null
+        return CommitmentState.fromWire(row.actionState)
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────

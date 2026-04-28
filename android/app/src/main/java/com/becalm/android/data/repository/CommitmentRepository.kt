@@ -3,6 +3,8 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.db.dao.CommitmentManagementRow
+import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.domain.commitment.CommitmentEditPatch
 import com.becalm.android.domain.commitment.CommitmentEvent
@@ -38,6 +40,12 @@ public interface CommitmentRepository {
     public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
 
     /**
+     * Emits display-safe commitment rows for management UI without loading quote,
+     * description, sync metadata, or a separate enrichment map.
+     */
+    public fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>>
+
+    /**
      * Emits pending action/schedule commitment items for [userId] that are undated or due
      * on/before end-of-today.
      *
@@ -45,6 +53,13 @@ public interface CommitmentRepository {
      *   compute it as Asia/Seoul 23:59:59.999 converted to UTC epoch ms.
      */
     public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
+
+    /**
+     * Emits the same Today commitment set as [observePendingForToday], but pre-joined and
+     * narrowed to display fields so the home screen does not load full rows or the full
+     * enrichment map.
+     */
+    public fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>>
 
     /** Emits all commitments for [userId] linked to [personRef], re-emits on change. */
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>

@@ -1,12 +1,12 @@
 package com.becalm.android.ui.sources
 
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.repository.SourceStatus
 
 internal object SourcesListProjector {
     fun buildState(
         statuses: List<SourceStatus>,
-        enrichmentRows: List<PersonEnrichmentEntity>,
+        enrichmentSummary: PersonEnrichmentSummary,
         permissionGranted: Boolean,
     ): SourcesListUiState {
         val mappedStatuses = statuses.map { status ->
@@ -18,14 +18,13 @@ internal object SourcesListProjector {
                 itemsCount = 0,
             )
         }
-        val contactsLastSyncedAt = enrichmentRows.maxOfOrNull { it.lastSyncedAt }
         val contactsRow = SourceStatusRow(
             sourceType = CONTACTS_SOURCE_TYPE,
             status = if (permissionGranted) "CONNECTED" else "DISCONNECTED",
-            lastSyncAt = contactsLastSyncedAt,
+            lastSyncAt = enrichmentSummary.lastSyncedAt,
             lastError = null,
             itemsCount = 0,
-            enrichedCount = enrichmentRows.size,
+            enrichedCount = enrichmentSummary.count,
         )
         return SourcesListUiState(items = listOf(contactsRow) + mappedStatuses)
     }

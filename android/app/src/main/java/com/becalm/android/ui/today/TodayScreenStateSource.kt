@@ -4,13 +4,11 @@ import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
-import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
-import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import javax.inject.Inject
@@ -30,10 +28,9 @@ import kotlinx.datetime.plus
 
 internal data class TodaySnapshot(
     val userId: String?,
-    val commitments: List<CommitmentEntity>,
+    val commitments: List<TodayCommitmentRow>,
     val calendarEvents: List<CalendarEventEntity>,
     val sourceStatuses: List<SourceStatus>,
-    val enrichment: Map<String, PersonEnrichmentEntity>,
     val processingPaused: Boolean,
 )
 
@@ -41,7 +38,6 @@ internal class TodayScreenStateSource @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceStatusRepository: SourceStatusRepository,
-    private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
     private val clock: Clock,
@@ -65,7 +61,7 @@ internal class TodayScreenStateSource @Inject constructor(
     ): Flow<TodayUiState> {
         val commitmentFlow = userIdFlow.flatMapLatest { userId ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
-            commitmentRepository.observePendingForToday(userId, endOfTodayEpochMs())
+            commitmentRepository.observeTimelineForToday(userId, endOfTodayEpochMs())
         }
 
         val calendarFlow = userIdFlow.flatMapLatest { userId ->
@@ -79,14 +75,12 @@ internal class TodayScreenStateSource @Inject constructor(
             commitmentFlow,
             calendarFlow,
             sourceStatusRepository.observeAll(),
-            personEnrichmentRepository.observeEnrichmentMap(),
-        ) { userId, commitments, calendarEvents, sourceStatuses, enrichment ->
+        ) { userId, commitments, calendarEvents, sourceStatuses ->
             TodaySnapshot(
                 userId = userId,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
                 sourceStatuses = sourceStatuses,
-                enrichment = enrichment,
                 processingPaused = false,
             )
         }

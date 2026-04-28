@@ -43,13 +43,13 @@ public class ContactsSourceDetailViewModel @Inject constructor(
     public val effects: SharedFlow<ContactsSourceDetailEffect> = _effects.asSharedFlow()
 
     public val state: StateFlow<ContactsSourceDetailUiState> = combine(
-        personEnrichmentRepository.observeAll(),
+        personEnrichmentRepository.observeSummary(),
         contactsPermissionChecker.observeGrantState(),
-    ) { enrichmentRows, permissionGranted ->
+    ) { enrichmentSummary, permissionGranted ->
         ContactsSourceDetailUiState(
             connectionState = if (permissionGranted) "CONNECTED" else "DISCONNECTED",
-            enrichedCount = enrichmentRows.size,
-            lastSyncAt = enrichmentRows.maxOfOrNull { it.lastSyncedAt },
+            enrichedCount = enrichmentSummary.count,
+            lastSyncAt = enrichmentSummary.lastSyncedAt,
             showPermissionRevokeButton = permissionGranted,
         )
     }.stateIn(

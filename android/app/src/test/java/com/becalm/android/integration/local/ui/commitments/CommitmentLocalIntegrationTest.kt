@@ -112,7 +112,6 @@ class CommitmentLocalIntegrationTest {
 
         val viewModel = CommitmentManagementViewModel(
             commitmentRepository = commitmentRepository,
-            personEnrichmentRepository = enrichmentRepository,
             reminderScheduler = reminderScheduler,
             userPrefsStore = userPrefsStore,
             logger = logger,

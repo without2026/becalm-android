@@ -6,6 +6,12 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.datetime.Instant
+
+public data class PersonEnrichmentSummary(
+    val count: Int,
+    val lastSyncedAt: Instant?,
+)
 
 /**
  * Room DAO for the `persons_enrichment` table.
@@ -83,6 +89,15 @@ public interface PersonEnrichmentDao {
      */
     @Query("SELECT * FROM persons_enrichment ORDER BY person_ref ASC")
     public fun observeAll(): Flow<List<PersonEnrichmentEntity>>
+
+    /**
+     * Emits only the aggregate fields needed by source/settings UI.
+     *
+     * This avoids loading every PIPA-local contact row just to render a count and
+     * last-sync timestamp.
+     */
+    @Query("SELECT COUNT(*) AS count, MAX(last_synced_at) AS lastSyncedAt FROM persons_enrichment")
+    public fun observeSummary(): Flow<PersonEnrichmentSummary>
 
     /**
      * Deletes every row in `persons_enrichment`.

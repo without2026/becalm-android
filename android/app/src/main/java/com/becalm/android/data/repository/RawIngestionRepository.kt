@@ -4,6 +4,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -67,6 +68,17 @@ public interface RawIngestionRepository {
 
     /** Emits every event with a non-null `person_ref` for [userId], newest-first. */
     public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
+
+    /** Emits bounded person-list aggregate rows for the people screen. */
+    public fun observePersonInteractionAggregates(
+        userId: String,
+        limit: Int,
+    ): Flow<List<PersonInteractionAggregateRow>>
+
+    /**
+     * Returns distinct non-null person refs recently seen in raw events or commitments.
+     */
+    public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
 
     /**
      * Emits a live list of the most recent events for a specific [personRef] owned by [userId],
@@ -265,6 +277,15 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     override fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>> =
         dao.observeAssignedForUser(userId)
+
+    override fun observePersonInteractionAggregates(
+        userId: String,
+        limit: Int,
+    ): Flow<List<PersonInteractionAggregateRow>> =
+        dao.observePersonInteractionAggregates(userId, limit)
+
+    override suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String> =
+        dao.findDistinctPersonRefsForUser(userId, limit)
 
     override fun observeForPerson(
         userId: String,

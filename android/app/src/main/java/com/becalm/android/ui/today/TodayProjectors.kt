@@ -1,8 +1,7 @@
 package com.becalm.android.ui.today
 
+import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
-import com.becalm.android.data.local.db.entity.CommitmentEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 
@@ -10,38 +9,22 @@ internal object TodayTimelineProjector {
     private const val COUNTERPARTY_DISPLAY_MAX = 30
 
     fun buildTimeline(
-        commitments: List<CommitmentEntity>,
+        commitments: List<TodayCommitmentRow>,
         calendarEvents: List<CalendarEventEntity>,
-        enrichment: Map<String, PersonEnrichmentEntity>,
     ): List<TimelineItem> =
-        (commitments.map { it.toTimelineItem(enrichment) } + calendarEvents.map { it.toTimelineItem() })
+        (commitments.map { it.toTimelineItem() } + calendarEvents.map { it.toTimelineItem() })
             .sortedBy { it.sortKey }
 
-    private fun CommitmentEntity.toTimelineItem(
-        enrichment: Map<String, PersonEnrichmentEntity>,
-    ): TimelineItem.Commitment =
+    private fun TodayCommitmentRow.toTimelineItem(): TimelineItem.Commitment =
         TimelineItem.Commitment(
             id = id,
             itemType = itemType,
             title = title,
             direction = direction,
             scheduleStatus = scheduleStatus,
-            counterpartyDisplayName = resolveCounterpartyDisplay(this, enrichment),
-            sortKey = sourceEventOccurredAt,
+            counterpartyDisplayName = counterpartyDisplayName?.take(COUNTERPARTY_DISPLAY_MAX),
+            sortKey = sortKey,
         )
-
-    private fun resolveCounterpartyDisplay(
-        commitment: CommitmentEntity,
-        enrichment: Map<String, PersonEnrichmentEntity>,
-    ): String? {
-        val ref = commitment.personRef
-        return if (ref != null) {
-            val hit = enrichment[ref]
-            hit?.displayName ?: hit?.nickname ?: ref
-        } else {
-            commitment.counterpartyRaw?.take(COUNTERPARTY_DISPLAY_MAX)
-        }
-    }
 
     private fun CalendarEventEntity.toTimelineItem(): TimelineItem =
         if (!attendeesRaw.isNullOrBlank()) {
@@ -84,7 +67,6 @@ internal object TodaySyncProjector {
         val timeline = TodayTimelineProjector.buildTimeline(
             commitments = snapshot.commitments,
             calendarEvents = snapshot.calendarEvents,
-            enrichment = snapshot.enrichment,
         )
         return TodayUiState(
             loading = false,
