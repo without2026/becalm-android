@@ -9,9 +9,11 @@ version: 1
 # Android does NOT call Supabase REST (rest/v1/*) directly for data.
 # All commitments, raw events, and calendar data flow through Railway.
 # Railway holds the Supabase service_role key; Android sends only its Supabase JWT as Bearer.
-# Today/Settings의 SourceStatusStrip, SourcesList, OverallSyncIndicator는 Railway 응답 타입이 아니라 Android local-derived state다.
-# 사용자-facing status 대상 source는 7개(voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar)이며,
-# call_recording은 voice pipeline provenance subtype으로만 남고 별도 status chip을 만들지 않는다.
+# Today/Settings의 SourceStatusStrip, SourcesList, OverallSyncIndicator는 Railway `GET /v1/source_status`
+# 값을 우선 merge하고, 네트워크/서버 실패 시 Android local-derived state로 fallback한다. voice처럼 Android-only
+# runtime 상태가 더 정확한 source는 로컬 기록(recordSyncStart/Success/Error)이 동일 cache를 갱신한다.
+# 사용자-facing status 대상 source는 7개(voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar,
+# outlook_calendar)이며, call_recording은 voice pipeline provenance subtype으로만 남고 별도 status chip을 만들지 않는다.
 #
 # Error envelope for all Railway endpoints:
 #   4xx/5xx: { error: string, message: string, request_id?: string }
@@ -37,8 +39,8 @@ types:
     disposition: string         # "inserted" | "duplicate" — 둘 다 durable commit success
     committed_at: datetime      # 서버 durable commit 완료 시각 (UTC)
 
-  LocalDerivedSourceStatus:
-    owner: android_client_only
+  SourceStatusItem:
+    owner: railway_first_with_android_fallback
     source_id: string           # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
     label: string               # Voice | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
     connection_state: string    # connected | disconnected | error
@@ -46,8 +48,9 @@ types:
     last_sync_at?: datetime
     last_error?: string
     events_synced_count?: int
-    # Railway는 이 타입을 직접 반환하지 않는다. Android가 DataStore connection flags/cursors, Keystore credential 존재 여부,
-    # WorkManager/runtime sync 상태, Room 보조 메타데이터를 조합해 파생한다.
+    # Railway가 provider-owned/server-visible source 상태를 반환한다. Android는 이 값을 DataStore cache에 merge한다.
+    # 실패/오프라인 시 DataStore connection flags/cursors, Keystore/SAF credential 존재 여부,
+    # WorkManager/runtime sync 상태, Room 보조 메타데이터를 조합한 local-derived cache가 fallback으로 쓰인다.
 
   LocalDerivedContactsSourceStatus:
     owner: android_client_only
@@ -64,6 +67,18 @@ types:
     state: string
 
   CalendarOAuthStatus:
+    provider: string
+    connected: boolean
+    account_email?: string
+    display_name?: string
+
+  MailOAuthStart:
+    provider: string
+    authorization_url: string
+    redirect_uri: string
+    state: string
+
+  MailOAuthStatus:
     provider: string
     connected: boolean
     account_email?: string
@@ -340,6 +355,70 @@ endpoints:
       #   - validation_failed: title/quote/item_type/subtype 규칙 위반
     spec_refs: [MAN-003, EDIT-007]
 
+  - method: POST
+    path: /v1/commitments:batch
+    auth: required
+    idempotency: id
+    body:
+      commitments:
+        - id: uuid
+          item_type: string
+          direction?: string
+          schedule_status?: string
+          decision_status?: string
+          person_ref?: string
+          title: string
+          description?: string
+          quote: string
+          source_event_title?: string
+          source_event_occurred_at: string
+          due_at?: string
+          due_hint?: string
+          due_is_approximate: boolean
+          action_state: string
+          source_type: string
+          source_ref?: string
+          confidence: float
+          last_edited_by?: string
+          last_edited_at?: string
+          quote_disputed?: boolean
+          quote_disputed_at?: string
+          deleted_at?: string
+          supersedes_commitment_id?: string
+    constraints:
+      max_batch_size: 100
+      max_body_bytes: 1048576
+    response:
+      200:
+        acknowledged: int
+        failed: "FailedEvent[]"
+      401: { error: string, message: string }
+      413: { error: string, message: string }
+      422: { error: string, message: string }
+      429: { error: string, message: string }
+      500: { error: string, message: string }
+      503: { error: string, message: string }
+    spec_refs: [SYNC-001, SYNC-002, SYNC-003, SYNC-005, CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, EDIT-003, EDIT-005, EDIT-006, MAN-003]
+
+  # ========== RAILWAY — SOURCE STATUS ==========
+
+  - method: GET
+    path: /v1/source_status
+    auth: required
+    response:
+      200:
+        sources:
+          - source_type: string   # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+            state: string         # idle | syncing | synced | error
+            last_sync_at?: datetime
+            last_error?: string
+        # 서버는 자신이 알고 있는 source 상태만 반환할 수 있다. Android는 반환된 source만 DataStore cache에 merge하고,
+        # 누락 source(예: voice local runtime 상태)는 기존 local-derived 값으로 유지한다.
+      401: { error: string, message: string }
+      500: { error: string, message: string }
+      503: { error: string, message: string }
+    spec_refs: [TDY-003, TDY-008, SMG-001, SMG-002, ERR-002, ERR-003]
+
   # ========== RAILWAY — CALENDAR EVENTS ==========
 
   - method: GET
@@ -364,6 +443,45 @@ endpoints:
       401: { error: string, message: string }
       429: { error: string, message: string }
     spec_refs: [TDY-005]
+
+  # ========== RAILWAY — MAIL ==========
+
+  - method: POST
+    path: /v1/mail_sources:sync
+    auth: required
+    query:
+      provider?: string       # gmail | outlook_mail. Omit for backend default/all enabled mail sources.
+    response:
+      200: { synced: int }
+      401: { error: string, message: string }
+      429: { error: string, message: string }
+      500: { error: string, message: string }
+      503: { error: string, message: string }
+    spec_refs: [ING-006, ING-007, SMG-005]
+
+  - method: GET
+    path: /v1/oauth/mail/{provider}:start
+    auth: required
+    response:
+      200: "MailOAuthStart"
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+      503: { error: string, message: string }
+    notes:
+      - "provider는 gmail | outlook_mail"
+      - "Android는 반환된 authorization_url을 외부 브라우저/Custom Tab으로 연다"
+    spec_refs: [ONB-004, SMG-003]
+
+  - method: GET
+    path: /v1/oauth/mail/{provider}:status
+    auth: required
+    response:
+      200: "MailOAuthStatus"
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+    notes:
+      - "callback 이후 user_mail_connections 존재 여부를 Android가 polling하는 최소 external integration surface"
+    spec_refs: [ONB-004, SMG-003]
 
   - method: GET
     path: /v1/oauth/calendar/{provider}:start

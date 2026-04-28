@@ -11,9 +11,11 @@ import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
@@ -105,6 +107,7 @@ public class ImapNaverWorker @AssistedInject constructor(
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
+    private val userPrefsStore: UserPrefsStore,
     private val workScheduler: WorkScheduler,
     private val metricsStore: MetricsStore,
     private val processingPauseGate: ProcessingPauseGate,
@@ -146,6 +149,9 @@ public class ImapNaverWorker @AssistedInject constructor(
         // ── 1. Read credentials from EncryptedSharedPreferences (CRIT-01) ────
         val credentials = loadCredentials() ?: run {
             processingStatusRepository.recordBlocked(SourceType.NAVER_IMAP, "IMAP credentials missing")
+            userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, false)
+            userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.NAVER_IMAP, false)
+            sourceStatusRepository.clear(SourceType.NAVER_IMAP)
             return Result.success()
         }
         val imapEmail = credentials.username

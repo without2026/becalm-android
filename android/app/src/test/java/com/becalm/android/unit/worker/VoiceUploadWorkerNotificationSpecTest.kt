@@ -131,6 +131,9 @@ class VoiceUploadWorkerNotificationSpecTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         coVerify(exactly = 1) {
+            processingStatusRepository.recordGemini(SourceType.VOICE, "Analyzing audio with Gemini")
+        }
+        coVerify(exactly = 1) {
             voiceFailureNotifier.notifyFailure(
                 context = appContext,
                 rawEventId = "raw-1",

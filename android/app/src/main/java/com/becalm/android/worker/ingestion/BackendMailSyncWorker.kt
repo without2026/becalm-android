@@ -88,6 +88,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         processingStatusRepository.recordScanning(provider.sourceType, "Checking new mail")
 
         return try {
+            processingStatusRepository.recordGemini(provider.sourceType, "Checking mail with Gemini")
             val response = apiProvider.get().syncMailSource(provider = provider.sourceType)
             if (!response.isSuccessful) {
                 return response.code().toProviderFailure(provider)

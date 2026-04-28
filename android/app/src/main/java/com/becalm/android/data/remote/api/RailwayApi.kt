@@ -185,16 +185,20 @@ public interface RailwayApi {
     // =========================================================================
 
     /**
-     * Fetches per-source sync health for the six ingestion sources (voice excluded).
+     * Fetches per-source sync health from Railway and merges it with Android's local
+     * source-status cache.
      *
-     * The server returns exactly six items — one per source_type in the TDY-003 chip strip:
-     * gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar.
+     * The product-facing strip has seven sources:
+     * voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar.
+     * The server may return only the sources it can authoritatively observe; omitted sources
+     * keep their current local-derived values (for example, voice runtime state is recorded
+     * directly by Android workers).
      *
      * Possible responses: 200, 401 (token refresh), 500 (server error), 503 (upstream unavailable).
      * The client falls back to local [com.becalm.android.data.local.datastore.SyncCursorStore]
      * derivation on any non-2xx — see [com.becalm.android.data.repository.SourceStatusRepository].
      *
-     * Spec refs: TDY-003, SMG-001.
+     * Spec refs: TDY-003, TDY-008, SMG-001, SMG-002.
      */
     @GET("v1/source_status")
     public suspend fun getSourceStatus(): Response<SourceStatusResponseDto>

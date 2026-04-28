@@ -57,14 +57,20 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
         runCatching {
             val userId = requireCurrentUserId()
             bootstrapUserProfile(userId)
+            val enabledSources = userPrefsStore.observeEnabledSources().first()
+            val stageSources = STAGE1_SOURCE_TYPES.filter { it in enabledSources }
 
-            STAGE1_SOURCE_TYPES.forEach { sourceStatusRepository.recordSyncStart(it) }
-            foregroundWorkScheduler.enqueueGCalOneShotNow(STAGE1_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueOutlookCalOneShotNow(STAGE1_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE1_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE1_LOOKBACK_DAYS)
+            stageSources.forEach { sourceStatusRepository.recordSyncStart(it) }
+            stageSources.forEach { sourceType ->
+                when (sourceType) {
+                    SourceType.GOOGLE_CALENDAR -> foregroundWorkScheduler.enqueueGCalOneShotNow(STAGE1_LOOKBACK_DAYS)
+                    SourceType.OUTLOOK_CALENDAR -> foregroundWorkScheduler.enqueueOutlookCalOneShotNow(STAGE1_LOOKBACK_DAYS)
+                    SourceType.NAVER_IMAP -> foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE1_LOOKBACK_DAYS)
+                    SourceType.DAUM_IMAP -> foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE1_LOOKBACK_DAYS)
+                }
+            }
             workScheduler.enqueueUpload(attempt = 0)
-            logger.d(TAG, "startStage1 complete at=$now userIdHash=${userId.hashCode()}")
+            logger.d(TAG, "startStage1 complete at=$now userIdHash=${userId.hashCode()} sources=$stageSources")
         }.fold(
             onSuccess = { BecalmResult.Success(Unit) },
             onFailure = { BecalmResult.Failure(BecalmError.Unknown(it)) },
@@ -73,11 +79,18 @@ public class DefaultColdSyncRuntimeCoordinator @Inject constructor(
     override suspend fun startStage2(now: Instant): BecalmResult<Unit> =
         runCatching {
             requireCurrentUserId()
-            STAGE2_SOURCE_TYPES.forEach { sourceStatusRepository.recordSyncStart(it) }
-            foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE2_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE2_LOOKBACK_DAYS)
-            foregroundWorkScheduler.enqueueMediaStoreOneShotNow(STAGE2_LOOKBACK_DAYS)
-            logger.d(TAG, "startStage2 complete at=$now")
+            val enabledSources = userPrefsStore.observeEnabledSources().first()
+            val stageSources = STAGE2_SOURCE_TYPES.filter { it in enabledSources }
+
+            stageSources.forEach { sourceStatusRepository.recordSyncStart(it) }
+            stageSources.forEach { sourceType ->
+                when (sourceType) {
+                    SourceType.NAVER_IMAP -> foregroundWorkScheduler.enqueueImapNaverOneShotNow(STAGE2_LOOKBACK_DAYS)
+                    SourceType.DAUM_IMAP -> foregroundWorkScheduler.enqueueImapDaumOneShotNow(STAGE2_LOOKBACK_DAYS)
+                    SourceType.VOICE -> foregroundWorkScheduler.enqueueMediaStoreOneShotNow(STAGE2_LOOKBACK_DAYS)
+                }
+            }
+            logger.d(TAG, "startStage2 complete at=$now sources=$stageSources")
         }.fold(
             onSuccess = { BecalmResult.Success(Unit) },
             onFailure = { BecalmResult.Failure(BecalmError.Unknown(it)) },
