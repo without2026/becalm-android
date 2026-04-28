@@ -9,6 +9,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import dagger.assisted.Assisted
@@ -24,6 +25,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val calendarEventRepositoryProvider: Provider<CalendarEventRepository>,
+    private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingPauseGate: ProcessingPauseGate,
     private val clock: Clock,
@@ -41,6 +43,7 @@ public class OutlookCalendarWorker @AssistedInject constructor(
             inputData = inputData,
             authRepository = authRepositoryProvider.get(),
             calendarEventRepository = calendarEventRepositoryProvider.get(),
+            commitmentRepository = commitmentRepositoryProvider.get(),
             sourceStatusRepository = sourceStatusRepositoryProvider.get(),
             processingPauseGate = processingPauseGate,
             clock = clock,

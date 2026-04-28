@@ -3,6 +3,7 @@ package com.becalm.android.ui.commitments
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -12,6 +13,7 @@ import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -116,6 +120,7 @@ public class CommitmentDetailViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     private val id: String =
@@ -166,19 +171,23 @@ public class CommitmentDetailViewModel @Inject constructor(
             combine(
                 commitmentFlow,
                 personEnrichmentRepository.observeEnrichmentMap(),
-            ) { entity, enrichment -> entity to enrichment }
+            ) { entity, enrichment ->
+                if (entity == null) {
+                    CommitmentDetailProjector.buildMissingState()
+                } else {
+                    CommitmentDetailProjector.buildLoadedState(entity, enrichment)
+                }
+            }
+                .distinctUntilChanged()
+                .flowOn(ioDispatcher)
                 .catch { e ->
                     logger.e(TAG, "observe failed id=${hashId(id)}", e)
                     _uiState.update {
                         it.copy(loading = false, error = e.message ?: "load failed")
                     }
                 }
-                .collect { (entity, enrichment) ->
-                    if (entity == null) {
-                        _uiState.value = CommitmentDetailProjector.buildMissingState()
-                    } else {
-                        _uiState.value = CommitmentDetailProjector.buildLoadedState(entity, enrichment)
-                    }
+                .collect { state ->
+                    _uiState.value = state
                 }
         }
     }

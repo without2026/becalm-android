@@ -180,6 +180,7 @@ class CommitmentDetailViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to id)),
         logger = logger,
+        ioDispatcher = testDispatcher,
     )
 
     private fun propertyValue(instance: Any, name: String): Any? =

@@ -8,6 +8,7 @@ import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
@@ -20,6 +21,7 @@ internal suspend fun runServerBackedCalendarSync(
     inputData: Data,
     authRepository: AuthRepository,
     calendarEventRepository: CalendarEventRepository,
+    commitmentRepository: CommitmentRepository,
     sourceStatusRepository: SourceStatusRepository,
     processingPauseGate: ProcessingPauseGate,
     clock: Clock,
@@ -122,6 +124,40 @@ internal suspend fun runServerBackedCalendarSync(
     logger.d(
         tag,
         "refreshSince complete fetched=${refreshStats.fetched} upserted=${refreshStats.upserted} hasMore=${refreshStats.hasMore}",
+    )
+
+    val commitmentRefreshStats = when (
+        val refreshResult = commitmentRepository.refreshSince(
+            userId = userId,
+            since = null,
+        )
+    ) {
+        is BecalmResult.Success -> refreshResult.value
+        is BecalmResult.Failure -> {
+            val error = refreshResult.error
+            val msg = error.toCalendarSyncMessage()
+            return when (error) {
+                is BecalmError.Network, is BecalmError.ServerError -> {
+                    logger.w(tag, "commitment refresh after calendar sync transient error: $msg — scheduling retry")
+                    Result.retry()
+                }
+                else -> {
+                    logger.e(tag, "commitment refresh after calendar sync failed: $msg")
+                    sourceStatusRepository.recordSyncError(
+                        sourceType,
+                        msg,
+                        clock.nowInstant(),
+                    )
+                    Result.failure()
+                }
+            }
+        }
+    }
+
+    logger.d(
+        tag,
+        "commitment refresh after calendar sync complete fetched=${commitmentRefreshStats.fetched} " +
+            "upserted=${commitmentRefreshStats.upserted} hasMore=${commitmentRefreshStats.hasMore}",
     )
 
     sourceStatusRepository.recordSyncSuccess(sourceType, clock.nowInstant())

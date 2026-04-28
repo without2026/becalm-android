@@ -295,8 +295,8 @@
     <string name="commitment_counterparty_unknown">Unassigned counterparty</string>
     <string name="commitment_source_context_fmt">%1$s · %2$s</string>
     <string name="commitment_source_manual">Manual entry</string>
-    <string name="commitments_empty_title">No commitments</string>
-    <string name="commitments_empty_message">When BeCalm finds commitments in email, calls, and meetings, they will be organized by person here.</string>
+    <string name="commitments_empty_title">No commitments found yet</string>
+    <string name="commitments_empty_message">Sync is working, but no actionable promises, schedules, or decisions have been detected yet. New items from email, calls, and calendar events will appear here by person.</string>
     <string name="commitments_person_group_count_fmt">%1$d commitments</string>
 
     <!-- Commitment action_state labels (CMT-005..012) -->

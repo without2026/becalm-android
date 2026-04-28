@@ -167,6 +167,7 @@ class CommitmentLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to "manual-detail")),
             logger = logger,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
 
         viewModel.uiState.test {

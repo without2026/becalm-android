@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -12,6 +13,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
@@ -37,6 +39,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val apiProvider: Provider<RailwayApi>,
+    private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -54,7 +57,8 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
             return@withContext Result.failure()
         }
-        if (authRepositoryProvider.get().currentSession() == null) {
+        val userId = authRepositoryProvider.get().currentSession()?.userId
+        if (userId == null) {
             logger.w(TAG, "no active session — skipping backend mail sync")
             return@withContext Result.success()
         }
@@ -67,7 +71,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
 
         var shouldRetry = false
         providers.forEach { provider ->
-            val result = syncProvider(provider)
+            val result = syncProvider(provider, userId)
             if (result == ProviderSyncResult.RETRY) shouldRetry = true
         }
         if (shouldRetry) Result.retry() else Result.success()
@@ -83,7 +87,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         userPrefsStore.observeEmailSourceConnected(provider).first() &&
             userPrefsStore.observeEmailSourceManagedByBackend(provider).first()
 
-    private suspend fun syncProvider(provider: MailProviderSpec): ProviderSyncResult {
+    private suspend fun syncProvider(provider: MailProviderSpec, userId: String): ProviderSyncResult {
         sourceStatusRepository.recordSyncStart(provider.sourceType)
         processingStatusRepository.recordScanning(provider.sourceType, "Checking new mail")
 
@@ -102,7 +106,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             )
             sourceStatusRepository.recordSyncSuccess(provider.sourceType, clock.nowInstant())
             logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=$synced")
-            ProviderSyncResult.SUCCESS
+            refreshCommitments(provider, userId)
         } catch (error: Exception) {
             when (error) {
                 is HttpException -> error.code().toProviderFailure(provider)
@@ -112,6 +116,33 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                     processingStatusRepository.recordError(provider.sourceType, "Network error")
                     ProviderSyncResult.RETRY
                 }
+            }
+        }
+    }
+
+    private suspend fun refreshCommitments(provider: MailProviderSpec, userId: String): ProviderSyncResult {
+        return when (val result = commitmentRepositoryProvider.get().refreshSince(userId = userId, since = null)) {
+            is BecalmResult.Success -> {
+                logger.d(
+                    TAG,
+                    "commitment refresh after mail sync source=${provider.sourceType} " +
+                        "fetched=${result.value.fetched} upserted=${result.value.upserted}",
+                )
+                ProviderSyncResult.SUCCESS
+            }
+            is BecalmResult.Failure -> {
+                sourceStatusRepository.recordSyncError(
+                    provider.sourceType,
+                    "Commitment refresh failed",
+                    clock.nowInstant(),
+                )
+                processingStatusRepository.recordError(provider.sourceType, "Commitment refresh failed")
+                logger.w(
+                    TAG,
+                    "commitment refresh after mail sync failed source=${provider.sourceType} " +
+                        "error=${result.error::class.simpleName}",
+                )
+                ProviderSyncResult.RETRY
             }
         }
     }

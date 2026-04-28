@@ -16,6 +16,8 @@ public data class TodayCommitmentRow(
     val direction: String?,
     val scheduleStatus: String?,
     val counterpartyDisplayName: String?,
+    val sourceType: String?,
+    val sourceRef: String?,
     val sortKey: Instant,
 )
 
@@ -504,6 +506,8 @@ public interface CommitmentDao {
                    WHEN c.person_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.person_ref)
                    ELSE SUBSTR(c.counterparty_raw, 1, 30)
                END AS counterpartyDisplayName,
+               c.source_type AS sourceType,
+               c.source_ref AS sourceRef,
                c.source_event_occurred_at AS sortKey
         FROM commitments AS c
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
