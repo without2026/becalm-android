@@ -192,15 +192,20 @@ private fun composeSubtitle(jobTitle: String?, companyName: String?): String? {
     }
 }
 
+@Composable
 private fun composeMetaLine(
     nickname: String?,
     eventCount: Int,
     pendingCommitmentCount: Int,
 ): String? {
     val parts = buildList {
-        nickname?.takeIf { it.isNotBlank() }?.let { add("($it)") }
-        if (eventCount > 0) add("이벤트 ${eventCount}건")
-        if (pendingCommitmentCount > 0) add("미이행 약속 ${pendingCommitmentCount}건")
+        nickname?.takeIf { it.isNotBlank() }?.let {
+            add(stringResource(R.string.person_header_nickname_fmt, it))
+        }
+        if (eventCount > 0) add(stringResource(R.string.person_header_event_count_fmt, eventCount))
+        if (pendingCommitmentCount > 0) {
+            add(stringResource(R.string.person_header_pending_count_fmt, pendingCommitmentCount))
+        }
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }

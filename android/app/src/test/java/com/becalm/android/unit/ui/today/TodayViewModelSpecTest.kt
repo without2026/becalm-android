@@ -121,6 +121,9 @@ class TodayViewModelSpecTest {
                 "이대리",
                 (emission.timeline[1] as TimelineItem.Commitment).counterpartyDisplayName,
             )
+            assertEquals(1, emission.personFocus.size)
+            assertEquals("이대리", emission.personFocus.single().displayName)
+            assertEquals(1, emission.personFocus.single().commitmentCount)
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -1,5 +1,7 @@
 package com.becalm.android.ui.today
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -27,7 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -170,6 +176,7 @@ public fun TodayTimelineContent(
                     else -> {
                         TimelineList(
                             items = state.timeline,
+                            personFocus = state.personFocus,
                             contentPadding = PaddingValues(vertical = 4.dp),
                         )
                     }
@@ -188,12 +195,23 @@ public fun TodayTimelineContent(
 @Composable
 private fun TimelineList(
     items: List<TimelineItem>,
+    personFocus: List<TodayPersonFocus>,
     contentPadding: PaddingValues,
 ) {
     LazyColumn(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
     ) {
+        if (personFocus.isNotEmpty()) {
+            item(key = "today-person-focus") {
+                TodayPersonFocusPanel(
+                    people = personFocus,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+        }
         items(
             items = items,
             key = { item ->
@@ -211,6 +229,68 @@ private fun TimelineList(
                     .padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun TodayPersonFocusPanel(
+    people: List<TodayPersonFocus>,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .glassPanel(MaterialTheme.shapes.large)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.today_person_focus_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        people.forEach { person ->
+            TodayPersonFocusRow(person = person)
+        }
+    }
+}
+
+@Composable
+private fun TodayPersonFocusRow(person: TodayPersonFocus) {
+    val label = person.displayName ?: stringResource(R.string.today_counterparty_unknown)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = stringResource(
+                R.string.today_person_focus_commitments_fmt,
+                person.commitmentCount,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

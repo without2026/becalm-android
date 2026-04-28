@@ -141,26 +141,20 @@ private fun PersonList(
     onPersonClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val pendingPeople = state.people.filter { it.pendingCommitmentCount > 0 }
-    val recentPeople = state.people.filter { it.pendingCommitmentCount <= 0 }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .testTag("persons-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        personSection(
-            key = "pending-people",
-            titleRes = R.string.persons_section_pending_commitments,
-            people = pendingPeople,
-            onPersonClick = onPersonClick,
-        )
-        personSection(
-            key = "recent-people",
-            titleRes = R.string.persons_section_recent_contacts,
-            people = recentPeople,
-            onPersonClick = onPersonClick,
-        )
+        state.personSections.forEach { section ->
+            personSection(
+                key = section.kind.key,
+                titleRes = section.kind.titleRes,
+                people = section.people,
+                onPersonClick = onPersonClick,
+            )
+        }
         if (state.unassignedEvents.isNotEmpty()) {
             item(key = "unassigned-spacer") {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -181,6 +175,18 @@ private fun PersonList(
         }
     }
 }
+
+private val PersonSectionKind.key: String
+    get() = when (this) {
+        PersonSectionKind.PENDING_COMMITMENTS -> "pending-people"
+        PersonSectionKind.RECENT_CONTACTS -> "recent-people"
+    }
+
+private val PersonSectionKind.titleRes: Int
+    get() = when (this) {
+        PersonSectionKind.PENDING_COMMITMENTS -> R.string.persons_section_pending_commitments
+        PersonSectionKind.RECENT_CONTACTS -> R.string.persons_section_recent_contacts
+    }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
     key: String,

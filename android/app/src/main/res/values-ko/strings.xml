@@ -163,6 +163,8 @@
     <string name="today_section_commitments">약속</string>
     <string name="today_section_meetings">회의</string>
     <string name="today_section_events">이벤트</string>
+    <string name="today_person_focus_title">오늘 챙길 사람</string>
+    <string name="today_person_focus_commitments_fmt">약속 %1$d건</string>
 
     <!-- Persons -->
     <string name="persons_title">사람</string>
@@ -233,6 +235,9 @@
     <string name="person_header_job_subtitle">%1$s · %2$s</string>
     <string name="person_header_company_only">%1$s</string>
     <string name="person_header_job_only">%1$s</string>
+    <string name="person_header_nickname_fmt">(%1$s)</string>
+    <string name="person_header_event_count_fmt">이벤트 %1$d건</string>
+    <string name="person_header_pending_count_fmt">미이행 약속 %1$d건</string>
     <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
 
     <!-- Person 상세 섹션 (SRC-008) -->

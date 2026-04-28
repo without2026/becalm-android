@@ -79,13 +79,15 @@ internal object TodaySyncProjector {
                 lastSyncedAt = status.lastSyncedAt,
             )
         }
+        val timeline = TodayTimelineProjector.buildTimeline(
+            commitments = snapshot.commitments,
+            calendarEvents = snapshot.calendarEvents,
+            enrichment = snapshot.enrichment,
+        )
         return TodayUiState(
             loading = false,
-            timeline = TodayTimelineProjector.buildTimeline(
-                commitments = snapshot.commitments,
-                calendarEvents = snapshot.calendarEvents,
-                enrichment = snapshot.enrichment,
-            ),
+            timeline = timeline,
+            personFocus = buildTodayPersonFocus(timeline),
             sourceStatus = statusMap,
             overallSyncing = snapshot.sourceStatuses.any { it.status == SourceConnectionStatus.SYNCING },
             overall = deriveOverallState(snapshot.sourceStatuses),

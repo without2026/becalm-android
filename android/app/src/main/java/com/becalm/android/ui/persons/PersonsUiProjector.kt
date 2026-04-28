@@ -37,6 +37,7 @@ internal object PersonsUiProjector {
         return PersonsUiState(
             query = query,
             people = rows,
+            personSections = buildPersonSections(rows),
             unassignedEvents = unassigned,
             showOfflineBadge = offlineStatus.isOffline && offlineStatus.lastSyncAt != null,
             offlineLastSyncAt = offlineStatus.lastSyncAt,

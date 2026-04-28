@@ -4,6 +4,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
+import com.becalm.android.ui.persons.PersonSectionKind
 import com.becalm.android.ui.persons.PersonsListPageProjection
 import com.becalm.android.ui.persons.PersonsOfflineStatus
 import com.becalm.android.ui.persons.PersonsRefreshCoordinator
@@ -92,6 +93,16 @@ class PersonsViewModelSpecTest {
         assertEquals(2, primary.pendingCommitmentCount)
         assertEquals(setOf(SourceType.VOICE, SourceType.GMAIL), primary.channelSources)
         assertEquals("latest snippet", primary.lastInteractionSnippet)
+
+        val sections = viewModel.uiState.value.personSections.associateBy { it.kind }
+        assertEquals(
+            listOf("display@example.com"),
+            sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.map { it.personRef },
+        )
+        assertEquals(
+            listOf("nick@example.com", "+821012345678"),
+            sections.getValue(PersonSectionKind.RECENT_CONTACTS).people.map { it.personRef },
+        )
     }
 
     @Test

@@ -176,6 +176,8 @@
     <string name="today_section_commitments">Commitments</string>
     <string name="today_section_meetings">Meetings</string>
     <string name="today_section_events">Events</string>
+    <string name="today_person_focus_title">People to follow up</string>
+    <string name="today_person_focus_commitments_fmt">Commitments %1$d</string>
 
     <!-- Persons -->
     <string name="persons_title">People</string>
@@ -253,6 +255,9 @@
     <string name="person_header_job_subtitle">%1$s @ %2$s</string>
     <string name="person_header_company_only">%1$s</string>
     <string name="person_header_job_only">%1$s</string>
+    <string name="person_header_nickname_fmt">(%1$s)</string>
+    <string name="person_header_event_count_fmt">%1$d events</string>
+    <string name="person_header_pending_count_fmt">%1$d pending commitments</string>
     <string name="person_interaction_snippet_placeholder">(No preview)</string>
 
     <!-- Person detail sections (SRC-008) -->
