@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
@@ -43,6 +44,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -160,7 +162,7 @@ public fun CommitmentCard(
     val isTerminal = isCompleted || isCancelled
     val cardAlpha = if (isTerminal) 0.6f else 1.0f
     // Chip is always shown so the terminal-state reason is visible even when dimmed.
-    val showChip = normalizedItemType == CommitmentItemType.ACTION
+    val showChip = normalizedItemType == CommitmentItemType.ACTION && normalized.isNotBlank()
     val itemTypeLabel = remember(normalizedItemType) {
         when (normalizedItemType) {
             CommitmentItemType.ACTION -> R.string.commitment_item_type_action
@@ -257,23 +259,16 @@ public fun CommitmentCard(
                     .weight(1f)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                // Top row: title + badge/mark-done
+                // Prototype-aligned hierarchy: person/context first, then promise text.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    PersonContext(
+                        name = counterpartyDisplayName ?: stringResource(R.string.commitment_counterparty_unknown),
+                        sourceContextLabel = sourceContextLabel,
                         modifier = Modifier.weight(1f),
                     )
-                    // Manual-add chip (MAN-004). Rendered before the D-N badge so the
-                    // `📝 수동 추가` label sits nearest the title — it identifies the
-                    // origin of the row, whereas the D-N badge is a deadline indicator.
-                    // Re-uses the pending-action token for a neutral tone; the chip is
-                    // intentionally not colour-coded by lifecycle state (source_type is
-                    // orthogonal to action_state per MAN-006 invariant).
                     if (isManual) {
                         Spacer(modifier = Modifier.width(8.dp))
                         PillBadge(
@@ -283,7 +278,6 @@ public fun CommitmentCard(
                             verticalPadding = 2.dp,
                         )
                     }
-                    // D-N badge
                     if (badge != null) {
                         val (badgeLabel, badgeColors) = badge
                         Spacer(modifier = Modifier.width(8.dp))
@@ -294,8 +288,8 @@ public fun CommitmentCard(
                             verticalPadding = 2.dp,
                         )
                     }
-                    // Mark-done button — showMarkDone already implies onMarkDone is non-null.
                     if (showMarkDone) {
+                        Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
                             onClick = requireNotNull(onMarkDone),
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
@@ -310,7 +304,25 @@ public fun CommitmentCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                if (shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = dueHint)) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = dueHint!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -330,81 +342,92 @@ public fun CommitmentCard(
                             verticalPadding = 2.dp,
                         )
                     }
-                }
-
-                // Due-hint line — original verbatim expression from the source event
-                // (e.g. "월말"). Gated to approximate deadlines per
-                // commitment-management.spec.yml:9,13: on exact deadlines the D-N
-                // badge already communicates the date unambiguously, so rendering
-                // the raw hint would be duplicative noise.
-                if (shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = dueHint)) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = dueHint!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-
-                // Counterparty
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = counterpartyDisplayName ?: stringResource(R.string.commitment_counterparty_unknown),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-
-                if (counterpartyDisplayName != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = stringResource(R.string.commitment_detail_counterparty_label),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                if (!sourceContextLabel.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = sourceContextLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                }
-
-                // Status chip — stateColors computed only when chip is drawn. Maps the
-                // six spec-aligned action_state keys onto BecalmStateColors tokens. No
-                // new theme tokens are introduced in this commit: CANCELLED re-uses the
-                // pending tone and relies on the dimmed cardAlpha to read as "closed",
-                // and OVERDUE falls back to the shared `dayBadgeOverdue` token.
-                if (showChip) {
-                    val stateColors: BecalmStateColors = when (normalized) {
-                        "PENDING" -> colors.actionStatePending
-                        "REMINDED" -> colors.actionStateReminded
-                        "FOLLOWED_UP" -> colors.actionStateFollowedUp
-                        "COMPLETED" -> colors.actionStateCompleted
-                        "OVERDUE" -> colors.dayBadgeOverdue
-                        "CANCELLED" -> colors.actionStatePending
-                        else -> colors.actionStatePending
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (showChip) {
                         PillBadge(
-                            label = requireNotNull(derivedStatus),
-                            stateColors = stateColors,
+                            label = statusLabel(normalized),
+                            stateColors = statusColors(normalized),
                             horizontalPadding = 8.dp,
                             verticalPadding = 3.dp,
                         )
                     }
                 }
+
             }
         }
+    }
+}
+
+// ─── Card hierarchy helpers ──────────────────────────────────────────────────
+
+@Composable
+private fun PersonContext(
+    name: String,
+    sourceContextLabel: String?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!sourceContextLabel.isNullOrBlank()) {
+                Text(
+                    text = sourceContextLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun statusLabel(normalized: String): String = when (normalized) {
+    "PENDING" -> stringResource(R.string.commitment_state_pending)
+    "REMINDED" -> stringResource(R.string.commitment_state_reminded)
+    "FOLLOWED_UP" -> stringResource(R.string.commitment_state_followed_up)
+    "COMPLETED" -> stringResource(R.string.commitment_state_completed)
+    "OVERDUE" -> stringResource(R.string.commitment_state_overdue)
+    "CANCELLED" -> stringResource(R.string.commitment_state_cancelled)
+    else -> normalized
+}
+
+@Composable
+private fun statusColors(normalized: String): BecalmStateColors {
+    val colors = MaterialTheme.becalmColors
+    return when (normalized) {
+        "PENDING" -> colors.actionStatePending
+        "REMINDED" -> colors.actionStateReminded
+        "FOLLOWED_UP" -> colors.actionStateFollowedUp
+        "COMPLETED" -> colors.actionStateCompleted
+        "OVERDUE" -> colors.dayBadgeOverdue
+        "CANCELLED" -> colors.actionStatePending
+        else -> colors.actionStatePending
     }
 }
 
