@@ -24,6 +24,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val workScheduler: WorkScheduler,
     private val userPrefsStore: UserPrefsStore,
+    private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver,
     private val contactsPermissionChecker: ContactsPermissionChecker,
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker,
     private val logger: Logger,
@@ -86,13 +87,16 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         refreshPermissionManagedRegistrations()
     }
 
-    private fun scheduleAuthenticatedRecurringWork() {
+    private suspend fun scheduleAuthenticatedRecurringWork() {
         if (recurringWorkScheduled) {
             logger.d(TAG, "recurring work already scheduled for this process")
             return
         }
-        PERIODIC_SOURCES.forEach(workScheduler::enqueuePeriodic)
-        workScheduler.scheduleBackendMailSync()
+        val periodicSources = runtimeSyncSourceResolver.periodicSources()
+        periodicSources.forEach(workScheduler::enqueuePeriodic)
+        if (runtimeSyncSourceResolver.hasBackendMailSource()) {
+            workScheduler.scheduleBackendMailSync()
+        }
         workScheduler.scheduleUploadRedundancy()
         workScheduler.scheduleRetentionSweep()
         workScheduler.scheduleOverdueSweep()
@@ -135,11 +139,5 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private companion object {
         private const val TAG = "AppRuntimeSync"
         private const val STARTUP_RUNTIME_DELAY_MS: Long = 5_000L
-        private val PERIODIC_SOURCES: List<String> = listOf(
-            SourceType.NAVER_IMAP,
-            SourceType.DAUM_IMAP,
-            SourceType.GOOGLE_CALENDAR,
-            SourceType.OUTLOOK_CALENDAR,
-        )
     }
 }

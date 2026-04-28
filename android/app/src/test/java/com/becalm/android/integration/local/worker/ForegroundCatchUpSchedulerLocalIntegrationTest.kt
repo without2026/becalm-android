@@ -9,6 +9,7 @@ import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.ForegroundWorkScheduler
 import com.becalm.android.worker.ProcessingPauseGate
+import com.becalm.android.worker.RuntimeSyncSourceResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -30,6 +31,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = FakeRuntimeSyncSourceResolver(userPrefsStore),
             processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
@@ -65,6 +67,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = FakeRuntimeSyncSourceResolver(userPrefsStore),
             processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
@@ -95,6 +98,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             scope = this,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = FakeRuntimeSyncSourceResolver(userPrefsStore),
             processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
             logger = RecordingLogger(),
         )
@@ -116,6 +120,17 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
 
     private object FakeLifecycleOwner : LifecycleOwner {
         override val lifecycle = androidx.lifecycle.LifecycleRegistry(this)
+    }
+
+    private class FakeRuntimeSyncSourceResolver(
+        private val userPrefsStore: UserPrefsStoreImpl,
+    ) : RuntimeSyncSourceResolver {
+        override suspend fun foregroundSources(): Set<String> =
+            userPrefsStore.observeEnabledSources().first()
+
+        override suspend fun periodicSources(): Set<String> = emptySet()
+
+        override suspend fun hasBackendMailSource(): Boolean = false
     }
 
     private class FakeForegroundWorkScheduler : ForegroundWorkScheduler {
