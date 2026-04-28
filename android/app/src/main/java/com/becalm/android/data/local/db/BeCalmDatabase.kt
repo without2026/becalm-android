@@ -94,7 +94,7 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         EmailBodyEntity::class,
         UserProfileEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -104,8 +104,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 8) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 8) literal"
+        require(DATABASE_VERSION == 9) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 9) literal"
         }
     }
 
@@ -177,7 +177,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 8
+        public const val DATABASE_VERSION: Int = 9
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

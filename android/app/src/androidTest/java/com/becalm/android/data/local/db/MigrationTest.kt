@@ -484,7 +484,65 @@ class MigrationTest {
         assertTableRowCount(migrated, "raw_ingestion_events", 0)
     }
 
+    @Test
+    fun migrate8To9_dropsExactRawEventDuplicatesAndAddsLocalUniqueClientEventIndex() {
+        helper.createDatabase(TEST_DB, 8).use { db ->
+            insertV8RawIngestionEvent(db, id = "raw-keep", clientEventId = "client-dup")
+            insertV8RawIngestionEvent(db, id = "raw-drop", clientEventId = "client-dup")
+            insertV8EmailBody(db, id = "email-keep", rawEventId = "raw-keep")
+            insertV8EmailBody(db, id = "email-drop", rawEventId = "raw-drop")
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 9, true, MIGRATIONS[7])
+
+        assertTableRowCount(migrated, "raw_ingestion_events", 1)
+        assertTableRowCount(migrated, "email_body", 1)
+        assertIndexPresent(migrated, "ux_raw_events_user_client_event")
+        assertIndexIsUnique(migrated, "ux_raw_events_user_client_event")
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
+
+    private fun insertV8RawIngestionEvent(
+        db: SupportSQLiteDatabase,
+        id: String,
+        clientEventId: String,
+    ) {
+        db.execSQL(
+            """
+            INSERT INTO raw_ingestion_events (
+                id, user_id, client_event_id, source_type, source_ref,
+                person_ref, event_title, event_snippet, duration_seconds, location,
+                folder, commitments_extracted_count, timestamp, sync_status,
+                retry_count, last_attempt_at
+            ) VALUES (
+                '$id', '$USER_ID', '$clientEventId', 'naver_imap', 'msg-$id',
+                'a@example.com', 'subject', 'snippet', NULL, NULL,
+                'INBOX', 0, $TS, 'pending', 0, NULL
+            )
+            """.trimIndent(),
+        )
+    }
+
+    private fun insertV8EmailBody(
+        db: SupportSQLiteDatabase,
+        id: String,
+        rawEventId: String,
+    ) {
+        db.execSQL(
+            """
+            INSERT INTO email_body (
+                id, raw_event_id, provider_message_id, folder, subject,
+                from_address, to_addresses, body_plain, body_html, attachments_meta,
+                raw_headers, parse_failed, group_email, received_at
+            ) VALUES (
+                '$id', '$rawEventId', 'provider-$rawEventId', 'INBOX', 'subject',
+                'a@example.com', NULL, 'body', NULL, NULL,
+                '{}', 0, 0, $TS
+            )
+            """.trimIndent(),
+        )
+    }
 
     private fun insertV1Commitment(
         db: SupportSQLiteDatabase,

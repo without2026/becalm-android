@@ -38,7 +38,8 @@ public interface CommitmentRepository {
     public fun observeAllForUser(userId: String): Flow<List<CommitmentEntity>>
 
     /**
-     * Emits pending commitments for [userId] that are undated or due on/before end-of-today.
+     * Emits pending action/schedule commitment items for [userId] that are undated or due
+     * on/before end-of-today.
      *
      * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch milliseconds; callers
      *   compute it as Asia/Seoul 23:59:59.999 converted to UTC epoch ms.

@@ -11,7 +11,6 @@ import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
-import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.ImapCursorState
 import com.becalm.android.data.local.datastore.MetricsStore
 import com.becalm.android.data.local.datastore.SyncCursorStore
@@ -257,25 +256,34 @@ public class ImapDaumWorker @AssistedInject constructor(
         )
 
         if (fetched.messages.isNotEmpty()) {
-            val entities = fetched.messages.map { msg -> msg.toEntity(userId, mailboxKey) }
-            val insertResult = rawIngestionRepository.insertLocalBatch(entities)
-            if (insertResult is BecalmResult.Failure) {
+            val folderLabel = folderLabelFor(mailboxKey)
+            val resolutionResult = resolveImapRawEventIds(
+                messages = fetched.messages,
+                userId = userId,
+                sourceType = SourceType.DAUM_IMAP,
+                provider = PROVIDER_DAUM,
+                folderLabel = folderLabel,
+                emailBodyRepository = emailBodyRepository,
+                rawIngestionRepository = rawIngestionRepository,
+                toEntity = { message -> message.toEntity(userId, mailboxKey) },
+            )
+            if (resolutionResult is BecalmResult.Failure) {
                 logger.e(
                     TAG,
-                    "insertLocalBatch failed mailbox=$mailboxKey error=${insertResult.error::class.simpleName}",
+                    "insertLocalBatch failed mailbox=$mailboxKey error=${resolutionResult.error::class.simpleName}",
                 )
                 return PassOutcome.Terminal(Result.retry())
             }
-            val rawEventIds = (insertResult as BecalmResult.Success).value
+            val resolution = (resolutionResult as BecalmResult.Success).value
 
             logger.d(
                 TAG,
-                "inserted mailbox=$mailboxKey count=${entities.size} " +
-                    "uidHashes=${entities.map { redact(it.clientEventId) }}",
+                "inserted mailbox=$mailboxKey count=${resolution.insertedCount} " +
+                    "deduped=${fetched.messages.size - resolution.insertedCount}",
             )
 
             fetched.messages.forEachIndexed { index, message ->
-                val rawEventId = rawEventIds.getOrNull(index) ?: return@forEachIndexed
+                val rawEventId = resolution.rawEventIds.getOrNull(index) ?: return@forEachIndexed
                 persistEmailBody(message, rawEventId, mailboxKey)
             }
         }
@@ -299,8 +307,9 @@ public class ImapDaumWorker @AssistedInject constructor(
     // ─── Raw event + EmailBody mapping ────────────────────────────────────────
 
     /**
-     * Maps an [ImapMessage] to a [RawIngestionEventEntity] with folder-aware
-     * `clientEventId` (`"daum:<folder>:<uid>:<uidValidity>"`).
+     * Maps an [ImapMessage] to a [RawIngestionEventEntity] with a folder-aware
+     * Message-ID based `clientEventId`, falling back to `UIDVALIDITY:UID` only
+     * when the provider omits the RFC 5322 `Message-ID` header.
      *
      * See [ImapNaverWorker.toEntity] for the invariants shared across providers.
      */
@@ -309,7 +318,7 @@ public class ImapDaumWorker @AssistedInject constructor(
         val personRef = derivePersonRef(mailboxKey)
         val sourceRefJson = sourceRefAdapter.toJson(
             SourceRefEnvelope(
-                messageId = messageId?.takeIf { it.isNotBlank() } ?: "$uidValidity:$uid",
+                messageId = providerMessageId(),
                 inReplyTo = inReplyTo,
                 references = references,
             ),
@@ -322,7 +331,11 @@ public class ImapDaumWorker @AssistedInject constructor(
         return RawIngestionEventEntity(
             id = UUID.randomUUID().toString(),
             userId = userId,
-            clientEventId = "daum:${folderLabel.lowercase()}:$uid:$uidValidity",
+            clientEventId = imapClientEventId(
+                provider = PROVIDER_DAUM,
+                folder = folderLabel,
+                providerMessageId = providerMessageId(),
+            ),
             sourceType = SourceType.DAUM_IMAP,
             sourceRef = sourceRefJson,
             personRef = personRef,
@@ -356,8 +369,7 @@ public class ImapDaumWorker @AssistedInject constructor(
         val body = EmailBodyEntity(
             id = UUID.randomUUID().toString(),
             rawEventId = rawEventId,
-            providerMessageId = message.messageId?.takeIf { it.isNotBlank() }
-                ?: "${message.uidValidity}:${message.uid}",
+            providerMessageId = message.providerMessageId(),
             folder = folderLabel,
             subject = message.subject,
             fromAddress = message.fromEmail?.let(::canonicalizeEmail),
@@ -423,6 +435,7 @@ public class ImapDaumWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "ImapDaumWorker"
+        private const val PROVIDER_DAUM = "daum"
 
         /** Maximum number of WorkManager retry attempts before failing permanently. */
         public const val MAX_RETRIES: Int = 5

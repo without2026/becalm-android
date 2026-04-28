@@ -58,9 +58,8 @@ public interface EmailBodyDao {
      * `CommitmentExtractionWorker` (EXTRACT-EMAIL-001) which needs the body text as
      * LLM input.
      *
-     * The `LIMIT 1` is defensive — the 1:1 relationship is logically enforced by the
-     * `raw_event_id` btree index (which is non-unique at the storage layer but is
-     * treated as unique in application code).
+     * The `LIMIT 1` is defensive — the 1:1 relationship is enforced by the
+     * UNIQUE `raw_event_id` index declared on [EmailBodyEntity].
      *
      * @param rawEventId Foreign-key value pointing at [RawIngestionEventEntity.id].
      * @return The matching body row, or null if none exists.
@@ -69,6 +68,30 @@ public interface EmailBodyDao {
         "SELECT * FROM email_body WHERE raw_event_id = :rawEventId LIMIT 1",
     )
     suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity?
+
+    /**
+     * Returns an existing body for the same provider message scoped by the owning
+     * raw event. IMAP workers use this as a second dedupe guard when UIDVALIDITY
+     * changes and a provider returns the same RFC 5322 Message-ID under a new UID.
+     */
+    @Query(
+        """
+        SELECT email_body.* FROM email_body
+        INNER JOIN raw_ingestion_events ON raw_ingestion_events.id = email_body.raw_event_id
+        WHERE raw_ingestion_events.user_id = :userId
+          AND raw_ingestion_events.source_type = :sourceType
+          AND raw_ingestion_events.folder = :folder
+          AND email_body.provider_message_id = :providerMessageId
+        ORDER BY raw_ingestion_events.timestamp DESC
+        LIMIT 1
+        """,
+    )
+    suspend fun findByProviderMessage(
+        userId: String,
+        sourceType: String,
+        folder: String,
+        providerMessageId: String,
+    ): EmailBodyEntity?
 
     /**
      * Marks an email body as unparseable: sets `parse_failed = 1` and clears

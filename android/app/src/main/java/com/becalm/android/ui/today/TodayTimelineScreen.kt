@@ -40,6 +40,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
@@ -237,16 +239,22 @@ private fun TodayPersonFocusPanel(
     people: List<TodayPersonFocus>,
     modifier: Modifier = Modifier,
 ) {
+    val totalCommitments = people.sumOf { it.commitmentCount }
     Column(
         modifier = modifier
             .glassPanel(MaterialTheme.shapes.large)
-            .padding(12.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = stringResource(R.string.today_person_focus_title),
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.today_person_focus_subtitle_fmt, people.size, totalCommitments),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         people.forEach { person ->
             TodayPersonFocusRow(person = person)
@@ -318,8 +326,20 @@ private fun TimelineItemRow(
         if (item is TimelineItem.Commitment) {
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                DirectionBadge(direction = item.direction)
-                Spacer(modifier = Modifier.size(size = 8.dp))
+                when (item.itemType) {
+                    CommitmentItemType.ACTION -> item.direction?.let { direction ->
+                        DirectionBadge(direction = direction)
+                        Spacer(modifier = Modifier.size(size = 8.dp))
+                    }
+                    CommitmentItemType.SCHEDULE -> {
+                        Text(
+                            text = scheduleLabel(item.scheduleStatus),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.size(size = 8.dp))
+                    }
+                }
                 CounterpartyText(name = item.counterpartyDisplayName)
             }
         }
@@ -334,6 +354,19 @@ private fun sectionLabelFor(item: TimelineItem): String = when (item) {
     is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
     is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
+}
+
+@Composable
+private fun scheduleLabel(scheduleStatus: String?): String {
+    val status = when (scheduleStatus) {
+        CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
+        CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
+        CommitmentScheduleStatus.POSTPONED -> stringResource(R.string.commitment_subtype_schedule_postponed)
+        CommitmentScheduleStatus.CANCELLED -> stringResource(R.string.commitment_subtype_schedule_cancelled)
+        CommitmentScheduleStatus.FOLLOW_UP -> stringResource(R.string.commitment_subtype_schedule_follow_up)
+        else -> null
+    }
+    return status ?: stringResource(R.string.commitment_item_type_schedule)
 }
 
 @PreviewLightDark

@@ -74,12 +74,13 @@ class CommitmentManagementViewModelSpecTest {
             sourceEventTitle = "Kickoff mail",
             sourceEventOccurredAt = Instant.parse("2026-04-24T01:00:00Z"),
         )
+        val samePersonEntity = entity(id = "a2", direction = "take", personRef = "lee@corp.com")
         val nicknameEntity = entity(id = "b", direction = "take", personRef = "kim@corp.com")
         val fallbackPersonRefEntity = entity(id = "c", direction = "give", personRef = "park@corp.com")
         val legacyRawEntity = entity(id = "d", direction = "take", personRef = null, counterpartyRaw = "Legacy Raw Name")
 
         every { commitmentRepository.observeAllForUser("user-1") } returns flowOf(
-            listOf(displayNameEntity, nicknameEntity, fallbackPersonRefEntity, legacyRawEntity),
+            listOf(displayNameEntity, samePersonEntity, nicknameEntity, fallbackPersonRefEntity, legacyRawEntity),
         )
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(
             mapOf(
@@ -93,7 +94,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.uiState.test {
             awaitItem()
             val settled = awaitItem()
-            assertEquals(4, settled.items.size)
+            assertEquals(5, settled.items.size)
             assertEquals("이대리", settled.items.single { it.id == "a" }.counterpartyDisplayName)
             assertEquals("gmail", settled.items.single { it.id == "a" }.sourceType)
             assertEquals("Kickoff mail", settled.items.single { it.id == "a" }.sourceTitle)
@@ -104,6 +105,8 @@ class CommitmentManagementViewModelSpecTest {
             assertEquals("김팀장", settled.items.single { it.id == "b" }.counterpartyDisplayName)
             assertEquals("park@corp.com", settled.items.single { it.id == "c" }.counterpartyDisplayName)
             assertEquals("Legacy Raw Name", settled.items.single { it.id == "d" }.counterpartyDisplayName)
+            assertEquals(listOf(2, 1, 1, 1), settled.activePersonGroups.map { it.count })
+            assertEquals(listOf("a", "a2"), settled.activePersonGroups.first().items.map { it.id })
 
             cancelAndIgnoreRemainingEvents()
         }

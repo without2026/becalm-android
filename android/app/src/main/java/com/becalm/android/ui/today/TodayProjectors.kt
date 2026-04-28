@@ -22,8 +22,10 @@ internal object TodayTimelineProjector {
     ): TimelineItem.Commitment =
         TimelineItem.Commitment(
             id = id,
+            itemType = itemType,
             title = title,
-            direction = requireNotNull(direction) { "Today action timeline requires direction" },
+            direction = direction,
+            scheduleStatus = scheduleStatus,
             counterpartyDisplayName = resolveCounterpartyDisplay(this, enrichment),
             sortKey = sourceEventOccurredAt,
         )

@@ -164,6 +164,7 @@
     <string name="today_section_meetings">회의</string>
     <string name="today_section_events">이벤트</string>
     <string name="today_person_focus_title">오늘 챙길 사람</string>
+    <string name="today_person_focus_subtitle_fmt">%1$d명에게 걸린 약속 %2$d건을 먼저 정리했어요</string>
     <string name="today_person_focus_commitments_fmt">약속 %1$d건</string>
     <string name="today_syncing_fmt">동기화 중 %1$d/%2$d</string>
     <string name="today_synced_time_fmt">동기화됨 %1$s</string>
@@ -176,9 +177,9 @@
     <string name="persons_empty_title">아직 사람이 없습니다</string>
     <string name="persons_empty_message">상호작용이 감지되면 여기에 사람이 표시됩니다.</string>
     <string name="persons_unidentified">미식별 연락처</string>
-    <string name="persons_unassigned_title">미할당 이벤트</string>
+    <string name="persons_unassigned_title">사람을 찾는 중인 상호작용</string>
     <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
-    <string name="persons_unassigned_empty_message">모든 이벤트가 특정 사람과 연결되었습니다.</string>
+    <string name="persons_unassigned_empty_message">모든 상호작용이 사람별로 정리되었습니다.</string>
     <string name="persons_interactions_count">%d회 상호작용</string>
     <string name="persons_pending_commitments_fmt">미이행 %1$d건</string>
     <string name="persons_section_pending_commitments">미이행 약속</string>
@@ -273,7 +274,8 @@
     <string name="commitment_source_context_fmt">%1$s · %2$s</string>
     <string name="commitment_source_manual">사용자 직접 추가</string>
     <string name="commitments_empty_title">약속 없음</string>
-    <string name="commitments_empty_message">회의와 이메일에서 추출된 약속이 여기에 표시됩니다.</string>
+    <string name="commitments_empty_message">메일, 통화, 미팅에서 약속이 발견되면 사람별로 정리됩니다.</string>
+    <string name="commitments_person_group_count_fmt">약속 %1$d건</string>
 
     <!-- Settings -->
     <string name="settings_title">설정</string>

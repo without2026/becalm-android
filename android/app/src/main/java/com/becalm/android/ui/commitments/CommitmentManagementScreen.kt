@@ -1,14 +1,20 @@
 package com.becalm.android.ui.commitments
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -31,8 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -207,11 +215,24 @@ public fun CommitmentManagementScreenContent(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            items(items = state.activeItems, key = { "active-${it.id}" }) { row ->
-                                CommitmentRowCard(
-                                    row = row,
-                                    onOpenDetail = onOpenDetail,
-                                )
+                            state.activePersonGroups.forEach { group ->
+                                item(key = "active-group-${group.stableKey}") {
+                                    CommitmentPersonGroupHeader(
+                                        group = group,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 10.dp, bottom = 4.dp),
+                                    )
+                                }
+                                items(
+                                    items = group.items,
+                                    key = { "active-${it.id}" },
+                                ) { row ->
+                                    CommitmentRowCard(
+                                        row = row,
+                                        onOpenDetail = onOpenDetail,
+                                    )
+                                }
                             }
 
                             if (state.completedSection.visible) {
@@ -274,6 +295,47 @@ public fun CommitmentManagementScreenContent(
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
  */
 private const val UNDO_WINDOW_MS: Long = 5_000L
+
+@Composable
+private fun CommitmentPersonGroupHeader(
+    group: CommitmentPersonGroup,
+    modifier: Modifier = Modifier,
+) {
+    val displayName = group.displayName ?: stringResource(R.string.commitment_counterparty_unknown)
+    Row(
+        modifier = modifier.padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = displayName,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(R.string.commitments_person_group_count_fmt, group.count),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 /**
  * Renders one [CommitmentRow] as a [CommitmentCard]. Extracted so the LazyColumn call

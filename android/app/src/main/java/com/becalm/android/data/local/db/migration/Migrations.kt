@@ -478,6 +478,45 @@ private val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+// ─── Migration 8 → 9 (local raw-event idempotency constraint) ─────────────────
+//
+// The ingestion workers rely on `(user_id, client_event_id)` being a storage-level
+// idempotency key. Supabase already has this UNIQUE constraint, but Room v8 only had
+// read-before-write guards, so batch inserts and MediaStore overlap scans could persist
+// duplicate local raw events. Before creating the unique index, remove exact local
+// duplicates and their 1:1 email bodies, keeping the oldest rowid in each duplicate group.
+private val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            DELETE FROM `email_body`
+            WHERE `raw_event_id` IN (
+                SELECT `id` FROM `raw_ingestion_events`
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM `raw_ingestion_events`
+                    GROUP BY `user_id`, `client_event_id`
+                )
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            DELETE FROM `raw_ingestion_events`
+            WHERE rowid NOT IN (
+                SELECT MIN(rowid)
+                FROM `raw_ingestion_events`
+                GROUP BY `user_id`, `client_event_id`
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_raw_events_user_client_event` " +
+                "ON `raw_ingestion_events` (`user_id`, `client_event_id`)",
+        )
+    }
+}
+
 public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -486,4 +525,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_5_6,
     MIGRATION_6_7,
     MIGRATION_7_8,
+    MIGRATION_8_9,
 )

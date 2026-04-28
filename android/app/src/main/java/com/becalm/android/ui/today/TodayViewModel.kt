@@ -38,7 +38,7 @@ public sealed class TimelineItem {
     public abstract val title: String
 
     /**
-     * A commitment that is pending on today's date.
+     * A trackable commitment item that belongs on today's date.
      *
      * Only display-safe fields are exposed to the UI layer; raw entity fields
      * (quote, body, personRef, etc.) are intentionally excluded to avoid leaking
@@ -46,8 +46,10 @@ public sealed class TimelineItem {
      */
     public data class Commitment(
         val id: String,
+        val itemType: String,
         override val title: String,
-        val direction: String,
+        val direction: String?,
+        val scheduleStatus: String?,
         val counterpartyDisplayName: String?,
         override val sortKey: Instant,
     ) : TimelineItem()
@@ -157,7 +159,7 @@ private const val TAG = "TodayViewModel"
 /**
  * ViewModel for the Today screen (TDY-001..010).
  *
- * Combines commitments pending today, calendar events starting today, per-source
+ * Combines action/schedule commitment items due by today, calendar events starting today, per-source
  * sync health, and the on-device person-enrichment map (PIPA Room-only) into a
  * single [TodayUiState] flow. If the user is not authenticated the state immediately
  * shows an error and no downstream repository flows are subscribed.

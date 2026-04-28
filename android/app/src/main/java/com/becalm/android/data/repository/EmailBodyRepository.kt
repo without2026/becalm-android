@@ -63,6 +63,17 @@ public interface EmailBodyRepository {
     public suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity?
 
     /**
+     * Returns the body row for an already-ingested provider message, scoped through
+     * its parent raw event so cross-user and cross-provider rows never collide.
+     */
+    public suspend fun findByProviderMessage(
+        userId: String,
+        sourceType: String,
+        folder: String,
+        providerMessageId: String,
+    ): EmailBodyEntity?
+
+    /**
      * Marks the body row identified by [id] as unparseable: sets `parse_failed = 1`
      * and clears `body_plain`. Per EMAIL-007 a partially parsed body must never be
      * left visible — clearing in the same statement is the contract.
@@ -97,6 +108,21 @@ public class EmailBodyRepositoryImpl @Inject constructor(
     override suspend fun getByRawEventId(rawEventId: String): EmailBodyEntity? =
         withContext(ioDispatcher) {
             dao.getByRawEventId(rawEventId)
+        }
+
+    override suspend fun findByProviderMessage(
+        userId: String,
+        sourceType: String,
+        folder: String,
+        providerMessageId: String,
+    ): EmailBodyEntity? =
+        withContext(ioDispatcher) {
+            dao.findByProviderMessage(
+                userId = userId,
+                sourceType = sourceType,
+                folder = folder,
+                providerMessageId = providerMessageId,
+            )
         }
 
     override suspend fun markParseFailed(id: String) {

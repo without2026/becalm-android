@@ -7,7 +7,9 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -87,6 +89,14 @@ class TodayViewModelSpecTest {
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
                     personRef = "lee@corp.com",
                 ),
+                commitment(
+                    id = "s1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CHANGED,
+                    occurredAt = Instant.parse("2026-04-18T01:30:00Z"),
+                    personRef = "lee@corp.com",
+                ),
             ),
         )
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
@@ -113,17 +123,22 @@ class TodayViewModelSpecTest {
             var emission = awaitItem()
             while (emission.loading) emission = awaitItem()
 
-            assertEquals(3, emission.timeline.size)
+            assertEquals(4, emission.timeline.size)
             assertTrue(emission.timeline[0] is TimelineItem.Meeting)
             assertTrue(emission.timeline[1] is TimelineItem.Commitment)
-            assertTrue(emission.timeline[2] is TimelineItem.CalendarEvent)
+            assertTrue(emission.timeline[2] is TimelineItem.Commitment)
+            assertTrue(emission.timeline[3] is TimelineItem.CalendarEvent)
             assertEquals(
                 "이대리",
                 (emission.timeline[1] as TimelineItem.Commitment).counterpartyDisplayName,
             )
+            assertEquals(
+                CommitmentItemType.SCHEDULE,
+                (emission.timeline[2] as TimelineItem.Commitment).itemType,
+            )
             assertEquals(1, emission.personFocus.size)
             assertEquals("이대리", emission.personFocus.single().displayName)
-            assertEquals(1, emission.personFocus.single().commitmentCount)
+            assertEquals(2, emission.personFocus.single().commitmentCount)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -528,10 +543,15 @@ class TodayViewModelSpecTest {
         id: String,
         occurredAt: Instant,
         personRef: String?,
+        itemType: String = CommitmentItemType.ACTION,
+        direction: String? = "give",
+        scheduleStatus: String? = null,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
-        direction = "give",
+        itemType = itemType,
+        direction = direction,
+        scheduleStatus = scheduleStatus,
         counterpartyRaw = null,
         personRef = personRef,
         title = "title-$id",

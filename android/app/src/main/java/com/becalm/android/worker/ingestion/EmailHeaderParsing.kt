@@ -2,6 +2,9 @@ package com.becalm.android.worker.ingestion
 
 import com.becalm.android.data.remote.dto.FOLDER_INBOX
 import com.becalm.android.data.remote.dto.FOLDER_SENT
+import com.becalm.android.data.remote.imap.ImapMessage
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 /**
  * Shared email-header parsing helpers retained for IMAP ingestion and header-focused tests.
@@ -19,6 +22,61 @@ internal fun canonicalizeEmail(raw: String): String? {
         .lowercase()
     return candidate.ifBlank { null }
 }
+
+/**
+ * Normalizes RFC 5322 Message-ID enough for local idempotency while preserving the
+ * provider identity. JavaMail commonly returns the value without angle brackets,
+ * but some servers keep them; stripping only the wrapper avoids treating those
+ * representations as different messages.
+ */
+internal fun canonicalizeMessageId(raw: String?): String? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return trimmed
+        .removePrefix("<")
+        .removeSuffix(">")
+        .trim()
+        .takeIf { it.isNotBlank() }
+}
+
+internal fun imapProviderMessageId(
+    messageId: String?,
+    uidValidity: Long,
+    uid: Long,
+): String = canonicalizeMessageId(messageId) ?: "$uidValidity:$uid"
+
+internal fun imapClientEventId(
+    provider: String,
+    folder: String,
+    providerMessageId: String,
+): String = stableClientEventId("$provider:${folder.lowercase()}:message:$providerMessageId")
+
+internal fun legacyImapClientEventId(
+    provider: String,
+    folder: String,
+    uid: Long,
+    uidValidity: Long,
+): String = "$provider:${folder.lowercase()}:$uid:$uidValidity"
+
+internal fun stableClientEventId(sourceKey: String): String =
+    UUID.nameUUIDFromBytes(sourceKey.toByteArray(StandardCharsets.UTF_8)).toString()
+
+internal fun ImapMessage.providerMessageId(): String =
+    imapProviderMessageId(messageId = messageId, uidValidity = uidValidity, uid = uid)
+
+internal fun ImapMessage.stableImapClientEventId(provider: String, folder: String): String =
+    imapClientEventId(
+        provider = provider,
+        folder = folder,
+        providerMessageId = providerMessageId(),
+    )
+
+internal fun ImapMessage.legacyImapClientEventId(provider: String, folder: String): String =
+    legacyImapClientEventId(
+        provider = provider,
+        folder = folder,
+        uid = uid,
+        uidValidity = uidValidity,
+    )
 
 /**
  * Returns the first recipient email from a comma-delimited header, ignoring commas inside

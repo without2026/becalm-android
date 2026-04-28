@@ -177,6 +177,7 @@
     <string name="today_section_meetings">Meetings</string>
     <string name="today_section_events">Events</string>
     <string name="today_person_focus_title">People to follow up</string>
+    <string name="today_person_focus_subtitle_fmt">%1$d people need attention across %2$d commitments</string>
     <string name="today_person_focus_commitments_fmt">Commitments %1$d</string>
     <string name="today_syncing_fmt">Syncing %1$d/%2$d</string>
     <string name="today_synced_time_fmt">Synced %1$s</string>
@@ -189,9 +190,9 @@
     <string name="persons_empty_title">No people yet</string>
     <string name="persons_empty_message">People will appear here once BeCalm detects interactions.</string>
     <string name="persons_unidentified">Unidentified contact</string>
-    <string name="persons_unassigned_title">Unassigned Events</string>
+    <string name="persons_unassigned_title">Interactions waiting for a person</string>
     <string name="persons_unassigned_empty_title">No unassigned events</string>
-    <string name="persons_unassigned_empty_message">All events have been matched to a person.</string>
+    <string name="persons_unassigned_empty_message">Every interaction is already organized around a person.</string>
     <string name="persons_interactions_count">%d interactions</string>
     <string name="persons_pending_commitments_fmt">Pending %1$d</string>
     <string name="persons_section_pending_commitments">Pending commitments</string>
@@ -293,7 +294,8 @@
     <string name="commitment_source_context_fmt">%1$s · %2$s</string>
     <string name="commitment_source_manual">Manual entry</string>
     <string name="commitments_empty_title">No commitments</string>
-    <string name="commitments_empty_message">Commitments extracted from meetings and emails will appear here.</string>
+    <string name="commitments_empty_message">When BeCalm finds commitments in email, calls, and meetings, they will be organized by person here.</string>
+    <string name="commitments_person_group_count_fmt">%1$d commitments</string>
 
     <!-- Commitment action_state labels (CMT-005..012) -->
     <string name="commitment_state_pending">미확인</string>

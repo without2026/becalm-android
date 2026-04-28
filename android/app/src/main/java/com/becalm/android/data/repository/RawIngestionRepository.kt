@@ -240,11 +240,14 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     override suspend fun insertLocalBatch(events: List<RawIngestionEventEntity>): BecalmResult<List<String>> {
         if (events.isEmpty()) return BecalmResult.Success(emptyList())
         val resolved = events.map { it.ensureClientEventId() }
-        // Room @Insert(onConflict = IGNORE) on insertAll handles duplicates at the schema layer.
         return logger.daoOp(TAG, "batch insert failed") {
-            dao.insertAll(resolved)
+            val idsByKey = mutableMapOf<Pair<String, String>, String>()
+            val ids = resolved.map { event ->
+                val key = event.userId to event.clientEventId
+                idsByKey[key] ?: insertOrFindExisting(event).also { idsByKey[key] = it }
+            }
             logger.d(TAG, "insertLocalBatch ok count=${resolved.size}")
-            resolved.map { it.id }
+            ids
         }
     }
 
@@ -372,6 +375,16 @@ public class RawIngestionRepositoryImpl @Inject constructor(
      */
     private fun RawIngestionEventEntity.ensureClientEventId(): RawIngestionEventEntity =
         if (clientEventId.isBlank()) copy(clientEventId = UUID.randomUUID().toString()) else this
+
+    private suspend fun insertOrFindExisting(event: RawIngestionEventEntity): String {
+        val existing = dao.findByClientEventId(event.userId, event.clientEventId)
+        if (existing != null) return existing.id
+
+        val rowId = dao.insert(event)
+        if (rowId != -1L) return event.id
+
+        return dao.findByClientEventId(event.userId, event.clientEventId)?.id ?: event.id
+    }
 
     private fun RawIngestionEventEntity.toDto(): RawIngestionEventDto =
         RawIngestionEventDto(
