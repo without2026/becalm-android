@@ -8,8 +8,10 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -27,15 +29,42 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
 ) {
     private var lifecycleRegistered: Boolean = false
+    private var startupRefreshJob: Job? = null
 
     public fun start() {
+        registerForegroundCatchUp()
+        refresh()
+    }
+
+    /**
+     * Cold-start path used after auth resolution. It registers lifecycle catch-up immediately
+     * but defers WorkManager cleanup/scheduling and observer work until the first screen has
+     * had time to draw.
+     */
+    public fun startAfterStartup() {
+        registerForegroundCatchUp()
+        if (startupRefreshJob?.isActive == true) {
+            logger.d(TAG, "startup runtime sync already pending")
+            return
+        }
+        startupRefreshJob = scope.launch(ioDispatcher) {
+            delay(STARTUP_RUNTIME_DELAY_MS)
+            runCatching {
+                workScheduler.cleanupLegacyWorkNames()
+            }.onFailure { error ->
+                logger.e(TAG, "legacy work cleanup failed", error)
+            }
+            refreshNow()
+        }
+    }
+
+    private fun registerForegroundCatchUp() {
         scope.launch(mainDispatcher) {
             if (!lifecycleRegistered) {
                 foregroundCatchUpScheduler.start()
                 lifecycleRegistered = true
             }
         }
-        refresh()
     }
 
     /** Recomputes runtime registrations after same-process auth or permission changes. */
@@ -94,6 +123,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
 
     private companion object {
         private const val TAG = "AppRuntimeSync"
+        private const val STARTUP_RUNTIME_DELAY_MS: Long = 5_000L
         private val PERIODIC_SOURCES: List<String> = listOf(
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,

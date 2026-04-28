@@ -10,7 +10,6 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -22,7 +21,6 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
@@ -43,7 +41,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     private val db = LocalIntegrationSupport.inMemoryDatabase()
     private val logger = RecordingLogger()
     private val api = mockk<RailwayApi>(relaxed = true)
-    private val cursorStore = mockk<com.becalm.android.data.local.datastore.SyncCursorStore>(relaxed = true)
     private val userPrefsStore = UserPrefsStoreImpl(
         dataStore = LocalIntegrationSupport.prefsDataStore("persons-state-source"),
     )
@@ -56,15 +53,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         api = api,
         logger = logger,
     )
-    private val commitmentRepository = CommitmentRepositoryImpl(
-        dao = db.commitmentDao(),
-        api = api,
-        cursorStore = cursorStore,
-        userPrefsStore = userPrefsStore,
-        database = db,
-        logger = logger,
-        ioDispatcher = UnconfinedTestDispatcher(),
-    )
     private val enrichmentRepository = PersonEnrichmentRepositoryImpl(
         dao = db.personEnrichmentDao(),
         logger = logger,
@@ -72,7 +60,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     private val projectionPort = EnrichmentBackedPersonsScreenProjectionPort(
         personEnrichmentRepository = enrichmentRepository,
         rawIngestionRepository = rawIngestionRepository,
-        commitmentRepository = commitmentRepository,
         sourceStatusRepository = sourceStatusRepository,
     )
 

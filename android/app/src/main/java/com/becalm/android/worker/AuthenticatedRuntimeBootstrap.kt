@@ -28,7 +28,6 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
     private val imapCredentialStoreMigrator: ImapCredentialStoreMigrator,
     private val syncCursorStore: SyncCursorStore,
     private val databaseProvider: BeCalmDatabaseProvider,
-    private val workScheduler: WorkScheduler,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -84,14 +83,11 @@ public class AuthenticatedRuntimeBootstrap @Inject constructor(
                 runStep("database warm-open") {
                     databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
                 }
-                runStep("legacy work cleanup") {
-                    workScheduler.cleanupLegacyWorkNames()
-                }
             }
 
             withContext(mainDispatcher) {
-                runStep("runtime sync start") {
-                    appRuntimeSyncCoordinator.start()
+                runStep("deferred runtime sync start") {
+                    appRuntimeSyncCoordinator.startAfterStartup()
                 }
             }
             markBootstrapped(userId)

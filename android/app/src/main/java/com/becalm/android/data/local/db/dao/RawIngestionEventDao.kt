@@ -10,6 +10,15 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 
+public data class PersonInteractionAggregateRow(
+    val personRef: String,
+    val eventCount: Int,
+    val pendingCommitmentCount: Int,
+    val channelSources: String?,
+    val lastInteractionAt: Instant?,
+    val lastInteractionSnippet: String?,
+)
+
 /*
  * [DAO 인덱스/트랜잭션 규약]
  * - idx_raw_events_user_sync        (user_id, sync_status)            → sync_status 필터링 쿼리 전반
@@ -161,6 +170,78 @@ public interface RawIngestionEventDao {
         """,
     )
     public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
+
+    /**
+     * Emits a bounded persons-screen aggregate across raw events and commitments.
+     *
+     * The previous UI projection observed full entity lists from both tables and grouped them
+     * in the ViewModel path. This query keeps the same person-centric semantics while returning
+     * only the columns required by the list row, avoiding large object graphs during navigation.
+     */
+    @Query(
+        """
+        WITH interactions AS (
+            SELECT
+                person_ref AS personRef,
+                source_type AS sourceType,
+                timestamp AS interactionAt,
+                COALESCE(event_snippet, event_title) AS snippet,
+                1 AS eventCount,
+                0 AS pendingCommitmentCount
+            FROM raw_ingestion_events
+            WHERE user_id = :userId
+              AND person_ref IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                person_ref AS personRef,
+                source_type AS sourceType,
+                source_event_occurred_at AS interactionAt,
+                COALESCE(source_event_title, title) AS snippet,
+                0 AS eventCount,
+                CASE
+                    WHEN item_type != 'action'
+                      OR LOWER(action_state) NOT IN ('completed', 'cancelled')
+                    THEN 1
+                    ELSE 0
+                END AS pendingCommitmentCount
+            FROM commitments
+            WHERE user_id = :userId
+              AND person_ref IS NOT NULL
+              AND deleted_at IS NULL
+        ),
+        ranked AS (
+            SELECT
+                personRef,
+                sourceType,
+                interactionAt,
+                snippet,
+                eventCount,
+                pendingCommitmentCount,
+                ROW_NUMBER() OVER (
+                    PARTITION BY personRef
+                    ORDER BY interactionAt DESC
+                ) AS interactionRank
+            FROM interactions
+        )
+        SELECT
+            personRef,
+            SUM(eventCount) AS eventCount,
+            SUM(pendingCommitmentCount) AS pendingCommitmentCount,
+            GROUP_CONCAT(DISTINCT sourceType) AS channelSources,
+            MAX(interactionAt) AS lastInteractionAt,
+            MAX(CASE WHEN interactionRank = 1 THEN snippet END) AS lastInteractionSnippet
+        FROM ranked
+        GROUP BY personRef
+        ORDER BY lastInteractionAt DESC, personRef ASC
+        LIMIT :limit
+        """,
+    )
+    public fun observePersonInteractionAggregates(
+        userId: String,
+        limit: Int,
+    ): Flow<List<PersonInteractionAggregateRow>>
 
     /**
      * Emits a live list of the most recent events for [sourceType] owned by [userId],

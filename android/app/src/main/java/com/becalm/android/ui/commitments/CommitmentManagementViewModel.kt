@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
@@ -339,16 +340,17 @@ public class CommitmentManagementViewModel @Inject constructor(
                     }
                 }
                 .collect { (entities, enrichment) ->
-                    allEntities.value = entities
-                    enrichmentMap.value = enrichment
-                    _uiState.update { state ->
+                    val projectedState = withContext(ioDispatcher) {
                         CommitmentManagementProjector.buildUiState(
-                            current = state,
+                            current = _uiState.value,
                             entities = entities,
                             enrichment = enrichment,
                             loading = false,
                         )
                     }
+                    allEntities.value = entities
+                    enrichmentMap.value = enrichment
+                    _uiState.value = projectedState
                 }
         }
     }
@@ -369,13 +371,16 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-003
     public fun onFilterChange(filter: CommitmentFilter) {
-        _uiState.update { state ->
-            CommitmentManagementProjector.buildUiState(
-                current = state,
-                entities = allEntities.value,
-                enrichment = enrichmentMap.value,
-                filter = filter,
-            )
+        viewModelScope.launch {
+            val projectedState = withContext(ioDispatcher) {
+                CommitmentManagementProjector.buildUiState(
+                    current = _uiState.value,
+                    entities = allEntities.value,
+                    enrichment = enrichmentMap.value,
+                    filter = filter,
+                )
+            }
+            _uiState.value = projectedState
         }
     }
 

@@ -8,6 +8,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.ingestion.WorkSchedulerCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -93,6 +94,8 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     private val logger: Logger,
 ) : DefaultLifecycleObserver {
 
+    private var onStartCatchUpJob: Job? = null
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
@@ -152,7 +155,11 @@ public class ForegroundCatchUpScheduler @Inject constructor(
      * per unique work name, so rapid foreground transitions are safe.
      */
     override fun onStart(owner: LifecycleOwner) {
-        scope.launch {
+        if (onStartCatchUpJob?.isActive == true) {
+            logger.d(TAG, "onStart: catch-up already pending — skipping duplicate enqueue")
+            return
+        }
+        onStartCatchUpJob = scope.launch {
             try {
                 delay(ON_START_CATCH_UP_DELAY_MS)
                 if (!hasSignedInUser()) {
@@ -237,6 +244,6 @@ public class ForegroundCatchUpScheduler @Inject constructor(
 
     private companion object {
         private const val TAG = "ForegroundCatchUpScheduler"
-        private const val ON_START_CATCH_UP_DELAY_MS: Long = 1_500L
+        private const val ON_START_CATCH_UP_DELAY_MS: Long = 8_000L
     }
 }
