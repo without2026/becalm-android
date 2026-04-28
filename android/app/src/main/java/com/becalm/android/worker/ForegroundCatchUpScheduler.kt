@@ -88,6 +88,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
     // expose a ForegroundWorkScheduler implementation (or adapter) to satisfy this injection.
     private val workScheduler: ForegroundWorkScheduler,
     private val userPrefsStore: UserPrefsStore,
+    private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : DefaultLifecycleObserver {
@@ -127,7 +128,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
                     logger.d(TAG, "triggerCatchUp: processing paused — skipping")
                     return@launch
                 }
-                val enabledSources: Set<String> = userPrefsStore.observeEnabledSources().first()
+                val enabledSources: Set<String> = runtimeSyncSourceResolver.foregroundSources()
 
                 if (enabledSources.isEmpty()) {
                     logger.d(TAG, "triggerCatchUp: no enabled sources — skipping")
@@ -168,7 +169,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
                     logger.d(TAG, "onStart: processing paused — skipping catch-up enqueue")
                     return@launch
                 }
-                val enabledSources: Set<String> = userPrefsStore.observeEnabledSources().first()
+                val enabledSources: Set<String> = runtimeSyncSourceResolver.foregroundSources()
 
                 if (enabledSources.isEmpty()) {
                     logger.d(TAG, "onStart: no enabled sources — skipping catch-up enqueue")

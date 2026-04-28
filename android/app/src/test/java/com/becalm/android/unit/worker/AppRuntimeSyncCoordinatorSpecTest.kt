@@ -8,7 +8,9 @@ import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.MediaAudioPermissionChecker
+import com.becalm.android.worker.RuntimeSyncSourceResolver
 import com.becalm.android.worker.WorkScheduler
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -24,6 +26,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     private val contentObserverBootstrap: ContentObserverBootstrap = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver = mockk(relaxed = true)
     private val contactsPermissionChecker: ContactsPermissionChecker = mockk(relaxed = true)
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -35,6 +38,13 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns setOf(
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns true
 
         val coordinator = buildCoordinator()
 
@@ -61,6 +71,8 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns false
         every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
 
         val coordinator = buildCoordinator()
 
@@ -82,6 +94,8 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
 
         val coordinator = buildCoordinator()
 
@@ -99,6 +113,8 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
 
         val coordinator = buildCoordinator()
 
@@ -134,6 +150,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
             contentObserverBootstrap = contentObserverBootstrap,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = runtimeSyncSourceResolver,
             contactsPermissionChecker = contactsPermissionChecker,
             mediaAudioPermissionChecker = mediaAudioPermissionChecker,
             logger = logger,

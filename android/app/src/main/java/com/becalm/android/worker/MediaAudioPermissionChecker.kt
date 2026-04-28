@@ -41,4 +41,10 @@ public abstract class MediaAudioPermissionModule {
     public abstract fun bindMediaAudioPermissionChecker(
         impl: AndroidMediaAudioPermissionChecker,
     ): MediaAudioPermissionChecker
+
+    @Binds
+    @Singleton
+    public abstract fun bindRuntimeSyncSourceResolver(
+        impl: DefaultRuntimeSyncSourceResolver,
+    ): RuntimeSyncSourceResolver
 }
