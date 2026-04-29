@@ -1,6 +1,7 @@
 package com.becalm.android.ui.persons
 
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
@@ -8,6 +9,7 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
@@ -101,6 +103,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private val personIndexDao: PersonIndexDao,
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val userPrefsStore: UserPrefsStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : PersonsScreenProjectionPort {
 
@@ -109,16 +112,25 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             personEnrichmentRepository.observeAll(),
             personIndexDao.observeAggregates(userId, PAGE_SIZE + 1),
             rawIngestionRepository.observePersonInteractionAggregates(userId, PAGE_SIZE + 1),
-        ) { enrichmentRows, indexAggregateRows, legacyAggregateRows ->
-            if (indexAggregateRows.isNotEmpty()) {
+            userPrefsStore.observeBlockedPersonRefs(),
+        ) { enrichmentRows, indexAggregateRows, legacyAggregateRows, blockedPersonRefs ->
+            val filteredIndexRows = indexAggregateRows.filterNot { row ->
+                PersonIdentityResolver.isBlocked(row.primaryIdentityKey, blockedPersonRefs) ||
+                    PersonIdentityResolver.isLikelyAutomated(row.primaryIdentityKey) ||
+                    PersonIdentityResolver.isLikelyAutomated(row.displayNameHint)
+            }
+            if (filteredIndexRows.isNotEmpty()) {
                 buildProjectionPage(
                     enrichmentRows = enrichmentRows,
-                    aggregateRows = indexAggregateRows,
+                    aggregateRows = filteredIndexRows,
                 )
             } else {
                 buildLegacyProjectionPage(
                     enrichmentRows = enrichmentRows,
-                    aggregateRows = legacyAggregateRows,
+                    aggregateRows = legacyAggregateRows.filterNot { row ->
+                        PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
+                            PersonIdentityResolver.isLikelyAutomated(row.personRef)
+                    },
                 )
             }
         }
@@ -126,19 +138,27 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             .flowOn(ioDispatcher)
 
     override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> =
-        personIndexDao.observeUnmatchedInteractions(userId, limit).map { events ->
-            events.map { event ->
-                UnassignedEventSummary(
-                    id = event.id,
-                    sourceType = event.sourceType,
-                    sourceRef = event.sourceRef,
-                    interactionKind = event.interactionKind,
-                    title = event.title,
-                    snippet = event.snippet,
-                    suggestedLabel = event.suggestedLabel,
-                    timestamp = event.occurredAt,
-                )
-            }
+        combine(
+            personIndexDao.observeUnmatchedInteractions(userId, limit),
+            userPrefsStore.observeBlockedPersonRefs(),
+        ) { events, blockedPersonRefs ->
+            events
+                .filterNot { event ->
+                    PersonIdentityResolver.isBlocked(event.suggestedLabel, blockedPersonRefs) ||
+                        PersonIdentityResolver.isLikelyAutomated(event.suggestedLabel)
+                }
+                .map { event ->
+                    UnassignedEventSummary(
+                        id = event.id,
+                        sourceType = event.sourceType,
+                        sourceRef = event.sourceRef,
+                        interactionKind = event.interactionKind,
+                        title = event.title,
+                        snippet = event.snippet,
+                        suggestedLabel = event.suggestedLabel,
+                        timestamp = event.occurredAt,
+                    )
+                }
         }
             .distinctUntilChanged()
             .flowOn(ioDispatcher)

@@ -340,6 +340,9 @@ public fun BecalmNavHost(
                     onOpenCreate = {
                         navController.navigate(BecalmRoute.CommitmentCreate(null).path)
                     },
+                    onOpenSettings = {
+                        navController.navigate(BecalmRoute.Settings.path)
+                    },
                 )
             }
         }

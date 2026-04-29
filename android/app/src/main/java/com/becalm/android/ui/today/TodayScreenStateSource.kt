@@ -66,7 +66,11 @@ internal class TodayScreenStateSource @Inject constructor(
     ): Flow<TodayUiState> {
         val commitmentFlow = userIdFlow.flatMapLatest { userId ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
-            commitmentRepository.observeTimelineForToday(userId, endOfTodayEpochMs())
+            commitmentRepository.observeTimelineForToday(
+                userId = userId,
+                endOfTodayEpochMs = endOfTodayEpochMs(),
+                startOfTodayEpochMs = startOfTodayEpochMs(),
+            )
         }
 
         val calendarFlow = userIdFlow.flatMapLatest { userId ->
@@ -118,15 +122,15 @@ internal class TodayScreenStateSource @Inject constructor(
         return tomorrowStart.toEpochMilliseconds() - 1L
     }
 
+    fun startOfTodayEpochMs(): Long = clock.today(KST).atStartOfDayIn(KST).toEpochMilliseconds()
+
     /**
      * KST-anchored today range `[start, end)` expressed as [Instant] bounds.
      */
     fun todayRange(): Pair<Instant, Instant> {
         val today = clock.today(KST)
         val start = today.atStartOfDayIn(KST)
-        val end = Instant.fromEpochMilliseconds(
-            today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST).toEpochMilliseconds() - 1L,
-        )
+        val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
         return start to end
     }
 

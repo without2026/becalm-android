@@ -64,13 +64,15 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val manualMatches = personIndexDaoProvider.get().findManualMatchesForUser(userId)
         val aliasRules = personIndexDaoProvider.get().findEnabledAliasRulesForUser(userId)
         val existingStates = personIndexDaoProvider.get().findSourceStatesForUser(userId)
+        val blockedPersonRefs = userPrefsStore.observeBlockedPersonRefs().first()
 
-        val generatedAliasRules = buildGeneratedAliasRules(userId, existingCandidates)
+        val generatedAliasRules = buildGeneratedAliasRules(userId, existingCandidates, blockedPersonRefs)
         val resolverFingerprint = resolverFingerprint(
             manualMatches = manualMatches,
             aliasRules = aliasRules,
             generatedAliasRules = generatedAliasRules,
             candidates = existingCandidates,
+            blockedPersonRefs = blockedPersonRefs,
         )
         val sourceRecords = buildSourceRecords(
             userId = userId,
@@ -91,6 +93,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         if (changedRecords.isEmpty() && obsoleteStates.isEmpty()) {
             logger.d(TAG, "person index unchanged sources=${sourceRecords.size}")
+            notifyMatchingState(userId)
             return@withContext Result.success()
         }
 
@@ -99,6 +102,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             manualMatches = manualMatches,
             aliasRules = aliasRules + generatedAliasRules,
             sourceCandidates = existingCandidates,
+            blockedPersonRefs = blockedPersonRefs,
         )
         changedRecords.forEach { it.applyTo(builder) }
 
@@ -143,7 +147,18 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 "identities=${snapshot.identities.size} interactions=${snapshot.interactions.size} " +
                 "candidates=${snapshot.candidates.size} unmatched=${snapshot.unmatched.size}",
         )
+        notifyMatchingState(userId)
         Result.success()
+    }
+
+    private suspend fun notifyMatchingState(userId: String) {
+        val unmatchedCount = personIndexDaoProvider.get().countUnmatchedInteractions(userId)
+        MatchingRequiredNotifier.update(
+            context = applicationContext,
+            userPrefsStore = userPrefsStore,
+            unmatchedCount = unmatchedCount,
+            logger = logger,
+        )
     }
 
     private fun buildSourceRecords(
@@ -258,6 +273,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         manualMatches: List<PersonManualMatchEntity>,
         aliasRules: List<PersonAliasRuleEntity>,
         sourceCandidates: List<SourcePersonCandidateEntity>,
+        private val blockedPersonRefs: Set<String>,
     ) {
         private val now = Clock.System.now()
         private val identities = linkedMapOf<String, PersonIdentityEntity>()
@@ -273,7 +289,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             .groupBy { candidateKey(it.sourceType, it.sourceRef) }
 
         fun addRawEvent(row: RawIngestionEventEntity) {
-            if (PersonIdentityResolver.isLikelyAutomated(row.personRef)) return
+            if (shouldSuppress(row.personRef)) return
             val sourceRef = "raw:${row.id}"
             val candidateSourceRefs = candidateSourceRefs(sourceRef, row.sourceRef)
             val kind = interactionKindFor(row.sourceType)
@@ -366,7 +382,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         }
 
         fun addCalendarAttendee(row: CalendarEventEntity, attendee: String, sourceRef: String) {
-            if (PersonIdentityResolver.isLikelyAutomated(attendee)) return
+            if (shouldSuppress(attendee)) return
             val resolved = resolveForSource(
                 sourceType = row.sourceType,
                 sourceRef = sourceRef,
@@ -446,6 +462,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             lastSeenAt: kotlinx.datetime.Instant,
         ): PersonIdentityResolution? {
             manualMatchesBySource[manualKey(sourceType, sourceRef, kind)]?.let { match ->
+                if (match.matchedIdentityKey.substringAfter(':', missingDelimiterValue = match.matchedIdentityKey) in blockedPersonRefs) {
+                    return null
+                }
                 return upsertIdentityResolution(
                     resolved = PersonIdentityResolver.resolveIdentityKey(
                         userId = userId,
@@ -475,6 +494,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             sourceType: String,
             lastSeenAt: kotlinx.datetime.Instant,
         ): PersonIdentityResolution? {
+            if (shouldSuppress(raw)) return null
             val resolved = PersonIdentityResolver.resolve(userId, raw) ?: return null
             return upsertIdentityResolution(resolved, sourceType, lastSeenAt)
         }
@@ -507,7 +527,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 texts.mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }.joinToString(" "),
             ) ?: return null
             val rule = aliasRules.firstOrNull { rule ->
-                (rule.sourceScope == null || rule.sourceScope == sourceType) &&
+                rule.identityKey.substringAfter(':', missingDelimiterValue = rule.identityKey) !in blockedPersonRefs &&
+                    (rule.sourceScope == null || rule.sourceScope == sourceType) &&
                     haystack.contains(rule.normalizedAlias)
             } ?: return null
             return PersonIdentityResolver.resolveIdentityKey(
@@ -523,9 +544,13 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         private fun candidateAnchorFor(sourceType: String, vararg sourceRefs: String?): String? =
             candidatesFor(sourceType, *sourceRefs)
                 .mapNotNull { it.email ?: it.phone ?: it.name }
-                .filterNot(PersonIdentityResolver::isLikelyAutomated)
+                .filterNot(::shouldSuppress)
                 .distinct()
                 .singleOrNull()
+
+        private fun shouldSuppress(raw: String?): Boolean =
+            PersonIdentityResolver.isLikelyAutomated(raw) ||
+                PersonIdentityResolver.isBlocked(raw, blockedPersonRefs)
 
         private fun candidateAnchorFor(sourceType: String, sourceRefs: List<String?>): String? =
             candidateAnchorFor(sourceType, *sourceRefs.toTypedArray())
@@ -705,6 +730,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         aliasRules: List<PersonAliasRuleEntity>,
         generatedAliasRules: List<PersonAliasRuleEntity>,
         candidates: List<SourcePersonCandidateEntity>,
+        blockedPersonRefs: Set<String>,
     ): String = fingerprintOf(
         *(
             manualMatches.map {
@@ -718,6 +744,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 } +
                 candidates.map {
                     "c|${it.sourceType}|${it.sourceRef}|${it.candidateRef}|${it.role}|${it.name}|${it.email}|${it.phone}|${it.evidence}|${it.confidence}|${it.createdAt}"
+                } +
+                blockedPersonRefs.sorted().map {
+                    "b|$it"
                 }
             ).sorted().toTypedArray(),
     )
@@ -725,12 +754,14 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private fun buildGeneratedAliasRules(
         userId: String,
         candidates: List<SourcePersonCandidateEntity>,
+        blockedPersonRefs: Set<String>,
     ): List<PersonAliasRuleEntity> =
         candidates.mapNotNull { candidate ->
             if (candidate.confidence < 0.8) return@mapNotNull null
             val name = candidate.name?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
             val anchor = candidate.email ?: candidate.phone ?: return@mapNotNull null
             if (PersonIdentityResolver.isLikelyAutomated(anchor)) return@mapNotNull null
+            if (PersonIdentityResolver.isBlocked(anchor, blockedPersonRefs)) return@mapNotNull null
             val resolved = PersonIdentityResolver.resolve(userId, anchor) ?: return@mapNotNull null
             val normalizedAlias = PersonIdentityResolver.normalizeAlias(name) ?: return@mapNotNull null
             val id = UUID.nameUUIDFromBytes(

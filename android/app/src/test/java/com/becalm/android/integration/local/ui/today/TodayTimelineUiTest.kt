@@ -14,9 +14,9 @@ import com.becalm.android.ui.components.ChipState
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusChip
 import com.becalm.android.ui.components.SourceStatusStrip
+import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.today.OverallSyncState
-import com.becalm.android.ui.today.SourceStatusUi
 import com.becalm.android.ui.today.TodayTimelineContent
 import com.becalm.android.ui.today.TodayUiState
 import kotlinx.datetime.Instant

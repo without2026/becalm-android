@@ -23,6 +23,13 @@
     <string name="voice_failure_notification_title">Voice processing failed</string>
     <string name="voice_failure_notification_body_generic">%1$s could not be processed. Open BeCalm to review or retry.</string>
     <string name="voice_failure_notification_body_output_truncated">%1$s was too long to process. Try a shorter recording.</string>
+    <string name="person_matching_required_channel_name">Person Matching Required</string>
+    <string name="person_matching_required_channel_desc">Alerts when synced interactions need a person match.</string>
+    <string name="person_matching_required_notification_title">Person matching needed</string>
+    <plurals name="person_matching_required_notification_body">
+        <item quantity="one">%1$d synced interaction needs a person match. Open People to assign it.</item>
+        <item quantity="other">%1$d synced interactions need person matches. Open People to assign them.</item>
+    </plurals>
 
     <!-- Error / empty states -->
     <string name="error_generic_title">Something went wrong</string>
@@ -198,10 +205,14 @@
     <string name="persons_unassigned_title">Interactions waiting for a person</string>
     <string name="persons_unassigned_empty_title">No unassigned events</string>
     <string name="persons_unassigned_empty_message">Every interaction is already organized around a person.</string>
+    <string name="person_matching_required_banner_title">Person matching required</string>
+    <string name="person_matching_required_banner_body">%1$d synced interactions are not attached to a person yet. Match them so People, Today, and Commitments stay accurate.</string>
+    <string name="person_matching_required_banner_action">Review</string>
     <string name="persons_manual_match_anchor_hint">Person email, phone, or name</string>
     <string name="persons_manual_match_nickname_hint">Nickname to remember next time</string>
     <string name="persons_manual_add_person_action">Add new person</string>
     <string name="persons_manual_match_action">Match person</string>
+    <string name="persons_block_person_action">Hide</string>
     <string name="persons_interactions_count">%d interactions</string>
     <string name="persons_pending_commitments_fmt">Pending %1$d</string>
     <string name="persons_section_pending_commitments">Pending commitments</string>

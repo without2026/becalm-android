@@ -5,7 +5,8 @@ import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
-import com.becalm.android.data.repository.SourceStatus
+import com.becalm.android.ui.main.buildSourceStatusUiMap
+import com.becalm.android.ui.main.deriveOverallState
 
 internal object TodayTimelineProjector {
     private const val COUNTERPARTY_DISPLAY_MAX = 30
@@ -83,14 +84,7 @@ internal object TodaySyncProjector {
                 error = "not authenticated",
             )
         }
-        val statusMap = snapshot.sourceStatuses.associate { status ->
-            status.sourceType to SourceStatusUi(
-                syncing = status.status == SourceConnectionStatus.SYNCING,
-                statusLabel = status.status.name,
-                errorMessage = status.errorMessage,
-                lastSyncedAt = status.lastSyncedAt,
-            )
-        }
+        val statusMap = buildSourceStatusUiMap(snapshot.sourceStatuses)
         val timeline = TodayTimelineProjector.buildTimeline(
             commitments = snapshot.commitments,
             calendarEvents = snapshot.calendarEvents,

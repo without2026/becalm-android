@@ -204,6 +204,13 @@ public class PersonsViewModel @Inject constructor(
         }
     }
 
+    public fun onBlockPerson(person: PersonRow) {
+        viewModelScope.launch(ioDispatcher) {
+            userPrefsStore.blockPersonRef(person.displayLabel)
+            refreshCoordinator.refresh()
+        }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     private fun observePeople() {

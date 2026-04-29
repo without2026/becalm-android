@@ -21,7 +21,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.ui.today.OverallSyncState
+import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.ui.today.TodayEffect
 import com.becalm.android.ui.today.TodayViewModel
@@ -73,7 +73,7 @@ class TodayViewModelSpecTest {
                 SourceStatus("outlook_mail", SourceConnectionStatus.ERROR, now, "token expired"),
             ),
         )
-        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
     }
 
@@ -85,7 +85,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-001 timeline merges sorted rows and resolves counterparty display with enrichment`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "c1",
@@ -146,7 +146,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `calendar event is hidden from today timeline when mirrored as schedule commitment`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "calendar-schedule-1",
@@ -184,7 +184,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `today timeline places commitments without exact due time after timed items`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "untimed",
@@ -228,7 +228,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-002 authenticated empty today state stays crash free and renders no items`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
@@ -247,12 +247,14 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-004 today commitments stay room-backed and react to local invalidation within the KST day`() = runTest {
         val commitmentsFlow = MutableStateFlow<List<TodayCommitmentRow>>(emptyList())
+        val dayStartEpochMs = slot<Long>()
         val dayEndEpochMs = slot<Long>()
         coEvery { authRepository.currentSession() } returns session()
         every {
             commitmentRepository.observeTimelineForToday(
                 userId = "user-1",
                 endOfTodayEpochMs = capture(dayEndEpochMs),
+                startOfTodayEpochMs = capture(dayStartEpochMs),
             )
         } returns commitmentsFlow
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
@@ -264,6 +266,10 @@ class TodayViewModelSpecTest {
             while (emission.loading) emission = awaitItem()
 
             assertTrue(emission.timeline.isEmpty())
+            assertEquals(
+                Instant.parse("2026-04-17T15:00:00Z").toEpochMilliseconds(),
+                dayStartEpochMs.captured,
+            )
             assertEquals(
                 Instant.parse("2026-04-18T14:59:59.999Z").toEpochMilliseconds(),
                 dayEndEpochMs.captured,
@@ -295,7 +301,7 @@ class TodayViewModelSpecTest {
         val todayStart = slot<Instant>()
         val todayEnd = slot<Instant>()
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every {
             calendarEventRepository.observeForUser(
                 userId = "user-1",
@@ -314,7 +320,7 @@ class TodayViewModelSpecTest {
             assertTrue(emission.timeline.isEmpty())
             assertEquals(Instant.parse("2026-04-17T15:00:00Z"), todayStart.captured)
             assertEquals(
-                Instant.parse("2026-04-18T14:59:59.999Z").toEpochMilliseconds(),
+                Instant.parse("2026-04-18T15:00:00Z").toEpochMilliseconds(),
                 todayEnd.captured.toEpochMilliseconds(),
             )
 
@@ -341,7 +347,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY unauthenticated state surfaces explicit error and empty timeline`() = runTest {
         coEvery { authRepository.currentSession() } returns null
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
@@ -360,7 +366,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY counterparty display falls back to personRef when enrichment is missing`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "c2",
@@ -386,7 +392,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-008 source status map and overall syncing are derived from repository state`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
@@ -406,7 +412,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-008 overall state resolves synced at earliest timestamp when all sources connected`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         every { sourceStatusRepository.observeAll() } returns flowOf(
@@ -439,7 +445,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-008 source status keeps voice naver and daum distinct in seven-source aggregate`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         every { sourceStatusRepository.observeAll() } returns flowOf(
@@ -472,7 +478,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-006 authenticated pull refresh fans out to room-backed refreshes and catch-up`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
@@ -526,7 +532,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-007 onOpenSettings emits settings navigation effect`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
 
@@ -543,7 +549,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-009 error status wins over syncing in overall state`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         every { sourceStatusRepository.observeAll() } returns flowOf(
@@ -571,7 +577,7 @@ class TodayViewModelSpecTest {
     @Test
     fun `TDY-009 pull refresh always triggers catch-up and skips repository refresh when unauthenticated`() = runTest {
         coEvery { authRepository.currentSession() } returns null
-        every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)

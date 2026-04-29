@@ -107,11 +107,19 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>> =
         dao.observeManagementRowsForUser(userId)
 
-    override fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>> =
-        dao.observePendingForToday(userId, endOfTodayEpochMs)
+    override fun observePendingForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long,
+    ): Flow<List<CommitmentEntity>> =
+        dao.observePendingForToday(userId, endOfTodayEpochMs, startOfTodayEpochMs)
 
-    override fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>> =
-        dao.observeTimelineForToday(userId, endOfTodayEpochMs)
+    override fun observeTimelineForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long,
+    ): Flow<List<TodayCommitmentRow>> =
+        dao.observeTimelineForToday(userId, endOfTodayEpochMs, startOfTodayEpochMs)
 
     override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
         dao.observeAllForPerson(userId, personRef)

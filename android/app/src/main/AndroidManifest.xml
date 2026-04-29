@@ -89,6 +89,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="becalm" android:host="commitments" />
             </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="becalm" android:host="persons" />
+            </intent-filter>
         </activity>
 
         <!-- ── Receivers ──────────────────────────────────────────────────── -->

@@ -164,6 +164,20 @@ class TodayScreenStateSourceLocalIntegrationTest {
                     sourceEventOccurredAt = Instant.parse("2026-04-23T01:40:00Z"),
                 ),
             )
+            db.commitmentDao().insert(
+                commitment(
+                    id = "schedule-past",
+                    userId = userId,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    personRef = "+821012345678",
+                    counterpartyRaw = "01012345678",
+                    title = "4월 초 과거 일정",
+                    dueAt = Instant.parse("2026-04-01T09:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-01T08:30:00Z"),
+                ),
+            )
             db.calendarEventDao().insertAll(
                 listOf(
                     calendarEvent(
@@ -198,6 +212,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
             assertEquals("Daily standup", meeting.title)
             assertFalse(updated.timeline.any { it.title == "Tomorrow planning" })
             assertFalse(updated.timeline.any { it.title == "영희와 결정" })
+            assertFalse(updated.timeline.any { it.title == "4월 초 과거 일정" })
             assertFalse(updated.overallSyncing)
 
             cancelAndIgnoreRemainingEvents()

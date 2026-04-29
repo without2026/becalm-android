@@ -238,6 +238,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             sourceType = SourceType.NAVER_IMAP,
             at = Clock.System.now(),
         )
+        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "doWork complete")
         return Result.success()
     }

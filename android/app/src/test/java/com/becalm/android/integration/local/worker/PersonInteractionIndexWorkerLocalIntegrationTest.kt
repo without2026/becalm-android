@@ -279,6 +279,37 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         assertTrue(interactions.none { it.sourceRef == "commitment:commitment-decision-candidate-only" })
     }
 
+    @Test
+    fun `user blocked person refs are removed on next index rebuild`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-blocked-1",
+                clientEventId = "client-blocked-1",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "gmail-blocked-1",
+                personRef = "merchant@example.com",
+                title = "결제 알림",
+                snippet = "구매 확인",
+                folder = "INBOX",
+                at = "2026-04-29T07:00:00Z",
+            ),
+        )
+
+        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "merchant@example.com")).personId
+        assertTrue(
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first().isNotEmpty(),
+        )
+
+        userPrefsStore.blockPersonRef("merchant@example.com")
+        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
+
+        assertTrue(
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first().isEmpty(),
+        )
+    }
+
     private suspend fun seedSourceRows() {
         db.rawIngestionEventDao().insertAll(
             listOf(

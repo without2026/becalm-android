@@ -46,20 +46,32 @@ public interface CommitmentRepository {
     public fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>>
 
     /**
-     * Emits pending action/schedule commitment items for [userId] that are undated or due
-     * on/before end-of-today.
+     * Emits pending action/schedule commitment items for [userId] in the Today window.
+     *
+     * Actions include overdue and undated rows; schedules are bounded to the current
+     * KST day so calendar-backed events from previous days do not remain in Today.
      *
      * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch milliseconds; callers
      *   compute it as Asia/Seoul 23:59:59.999 converted to UTC epoch ms.
+     * @param startOfTodayEpochMs Inclusive lower bound as UTC epoch milliseconds; callers
+     *   compute it as Asia/Seoul 00:00:00.000 converted to UTC epoch ms.
      */
-    public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
+    public fun observePendingForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long = Long.MIN_VALUE,
+    ): Flow<List<CommitmentEntity>>
 
     /**
      * Emits the same Today commitment set as [observePendingForToday], but pre-joined and
      * narrowed to display fields so the home screen does not load full rows or the full
      * enrichment map.
      */
-    public fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>>
+    public fun observeTimelineForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long = Long.MIN_VALUE,
+    ): Flow<List<TodayCommitmentRow>>
 
     /** Emits all commitments for [userId] linked to [personRef], re-emits on change. */
     public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>

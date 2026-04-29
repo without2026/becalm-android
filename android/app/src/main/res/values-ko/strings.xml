@@ -15,6 +15,13 @@
     <string name="action_reconnect">다시 연결</string>
     <string name="action_disconnect">연결 해제</string>
     <string name="label_settings">설정</string>
+    <string name="person_matching_required_channel_name">인물 매칭 필요</string>
+    <string name="person_matching_required_channel_desc">동기화된 상호작용에 사람 매칭이 필요할 때 알립니다.</string>
+    <string name="person_matching_required_notification_title">인물 매칭이 필요합니다</string>
+    <plurals name="person_matching_required_notification_body">
+        <item quantity="one">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. People에서 지정해 주세요.</item>
+        <item quantity="other">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. People에서 지정해 주세요.</item>
+    </plurals>
 
     <!-- Error / empty states -->
     <string name="error_generic_title">오류가 발생했습니다</string>
@@ -183,6 +190,10 @@
     <string name="persons_unassigned_title">사람을 찾는 중인 상호작용</string>
     <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
     <string name="persons_unassigned_empty_message">모든 상호작용이 사람별로 정리되었습니다.</string>
+    <string name="person_matching_required_banner_title">인물 매칭이 필요합니다</string>
+    <string name="person_matching_required_banner_body">동기화된 상호작용 %1$d건이 아직 사람에 연결되지 않았습니다. 매칭해야 People, Today, Commitments가 정확해집니다.</string>
+    <string name="person_matching_required_banner_action">확인</string>
+    <string name="persons_block_person_action">숨기기</string>
     <string name="persons_interactions_count">%d회 상호작용</string>
     <string name="persons_pending_commitments_fmt">미이행 %1$d건</string>
     <string name="persons_section_pending_commitments">미이행 약속</string>

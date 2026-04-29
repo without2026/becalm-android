@@ -7,6 +7,7 @@ import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.receiver.ReminderBroadcastReceiver
+import com.becalm.android.worker.MatchingRequiredNotifier
 import com.becalm.android.worker.VoiceFailureNotifier
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -59,6 +60,7 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // this channel after re-querying Room for the commitment's live state.
         registerCommitmentDueSoonChannel()
         VoiceFailureNotifier.ensureChannel(this)
+        MatchingRequiredNotifier.ensureChannel(this)
     }
 
     private fun installDebugStrictMode() {
