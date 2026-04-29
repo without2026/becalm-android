@@ -90,12 +90,8 @@ public data class CommitmentRow(
     val sourceTitle: String? = null,
     val sourceOccurredAt: Instant? = null,
     /**
-     * Verbatim due-date expression captured from the source event
-     * (e.g. "다음주", "월말"). Surfaced alongside the rendered due date so users
-     * can understand inferred deadlines — commitment-management.spec.yml:9,13.
-     *
-     * Preserved even when [dueAt] is non-null; especially prominent when
-     * [dueIsApproximate] is true.
+     * Reserved for exact user-visible due text. Fuzzy source hints are intentionally
+     * not surfaced on commitment cards because they look like actionable dates.
      */
     val dueHint: String? = null,
     /**

@@ -3,9 +3,7 @@ package com.becalm.android.ui.components
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommitmentCardFormatterSpecTest {
@@ -20,14 +18,6 @@ class CommitmentCardFormatterSpecTest {
         assertEquals("D~3", formatDayBadgeLabel(days = 3, approximate = true))
         assertEquals("D+2", formatDayBadgeLabel(days = -2, approximate = false))
         assertEquals("D+2", formatDayBadgeLabel(days = -2, approximate = true))
-    }
-
-    @Test
-    fun `CMT-001 due hint is only shown for approximate deadlines with non-blank hint`() {
-        assertTrue(shouldShowDueHint(dueIsApproximate = true, dueHint = "월말"))
-        assertFalse(shouldShowDueHint(dueIsApproximate = false, dueHint = "월말"))
-        assertFalse(shouldShowDueHint(dueIsApproximate = true, dueHint = null))
-        assertFalse(shouldShowDueHint(dueIsApproximate = true, dueHint = "   "))
     }
 
     @Test

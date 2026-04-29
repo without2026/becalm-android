@@ -18,6 +18,9 @@ public data class TodayCommitmentRow(
     val counterpartyDisplayName: String?,
     val sourceType: String?,
     val sourceRef: String?,
+    val dueAt: Instant?,
+    val dueIsApproximate: Boolean,
+    val dueHint: String?,
     val sortKey: Instant,
 )
 
@@ -456,7 +459,16 @@ public interface CommitmentDao {
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
         WHERE c.user_id = :userId
           AND c.deleted_at IS NULL
-        ORDER BY c.source_event_occurred_at DESC
+        ORDER BY
+            CASE
+                WHEN c.due_at IS NOT NULL AND c.due_is_approximate = 0 THEN 0
+                ELSE 1
+            END ASC,
+            CASE
+                WHEN c.due_at IS NOT NULL AND c.due_is_approximate = 0 THEN c.due_at
+                ELSE NULL
+            END ASC,
+            c.source_event_occurred_at DESC
         """
     )
     public fun observeManagementRowsForUser(userId: String): Flow<List<CommitmentManagementRow>>
@@ -518,6 +530,9 @@ public interface CommitmentDao {
                END AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_ref AS sourceRef,
+               c.due_at AS dueAt,
+               c.due_is_approximate AS dueIsApproximate,
+               c.due_hint AS dueHint,
                c.source_event_occurred_at AS sortKey
         FROM commitments AS c
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref

@@ -143,6 +143,34 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 0) { workScheduler.scheduleEnrichmentSweep() }
     }
 
+    @Test
+    fun `refresh schedules newly enabled sources after initial recurring enrollment`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returnsMany listOf(
+            emptySet(),
+            setOf(SourceType.GOOGLE_CALENDAR),
+        )
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returnsMany listOf(
+            false,
+            true,
+        )
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+        coordinator.refresh()
+
+        verify(exactly = 1) { workScheduler.enqueuePeriodic(SourceType.GOOGLE_CALENDAR) }
+        verify(exactly = 1) { workScheduler.scheduleBackendMailSync() }
+        verify(exactly = 1) { workScheduler.scheduleUploadRedundancy() }
+        verify(exactly = 1) { workScheduler.scheduleRetentionSweep() }
+        verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
+    }
+
     private fun buildCoordinator(): AppRuntimeSyncCoordinator =
         AppRuntimeSyncCoordinator(
             scope = CoroutineScope(Dispatchers.Unconfined),

@@ -51,12 +51,14 @@ internal object PersonDetailProjector {
         identities: List<PersonIdentityEntity>,
         enrichmentRows: List<PersonEnrichmentEntity>,
         interactions: List<PersonInteractionEntity>,
+        rawEvents: List<RawIngestionEventEntity>,
         completedExpanded: Boolean,
     ): PersonDetailUiState {
         val enrichment = findEnrichment(identities, enrichmentRows)
         val displayFallback = identities.firstOrNull { !it.displayNameHint.isNullOrBlank() }?.displayNameHint
             ?: identities.firstOrNull()?.rawValue
             ?: personId
+        val rawEventIds = rawEvents.mapTo(mutableSetOf()) { it.id }
         val commitmentRows = interactions
             .filter { it.interactionKind == "commitment" }
             .map(::toIndexedCommitmentRow)
@@ -66,7 +68,7 @@ internal object PersonDetailProjector {
         }
         val history = interactions
             .filterNot { it.interactionKind == "commitment" }
-            .map(::toIndexedHistoryRow)
+            .map { toIndexedHistoryRow(it, rawEventIds) }
             .sortedByDescending { row ->
                 when (row) {
                     is InteractionRow.Event -> row.timestamp
@@ -125,6 +127,7 @@ internal object PersonDetailProjector {
     private fun toEventRow(event: RawIngestionEventEntity): InteractionRow.Event =
         InteractionRow.Event(
             id = event.id,
+            rawEventId = event.id,
             timestamp = event.timestamp,
             source = event.sourceType,
             summary = event.eventTitle,
@@ -160,15 +163,23 @@ internal object PersonDetailProjector {
             decisionStatus = interaction.status.takeIf { interaction.role == CommitmentItemType.DECISION },
         )
 
-    private fun toIndexedHistoryRow(interaction: PersonInteractionEntity): InteractionRow =
+    private fun toIndexedHistoryRow(
+        interaction: PersonInteractionEntity,
+        rawEventIds: Set<String>,
+    ): InteractionRow =
         if (interaction.interactionKind == "calendar") {
             InteractionRow.CalendarMeeting(
                 timestamp = interaction.occurredAt,
                 title = interaction.title.orEmpty(),
             )
         } else {
+            val rawEventId = interaction.sourceRef
+                .takeIf { it.startsWith("raw:") }
+                ?.removePrefix("raw:")
+                ?.takeIf { it in rawEventIds }
             InteractionRow.Event(
-                id = interaction.sourceRef.removePrefix("raw:"),
+                id = interaction.sourceRef,
+                rawEventId = rawEventId,
                 timestamp = interaction.occurredAt,
                 source = interaction.sourceType,
                 summary = interaction.title,

@@ -2,11 +2,13 @@ package com.becalm.android.unit.ui.onboarding
 
 import app.cash.turbine.test
 import com.becalm.android.core.observability.ObservabilityClient
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.onboarding.ContactsPermissionEffect
 import com.becalm.android.ui.onboarding.CalendarConnectEvent
 import com.becalm.android.ui.onboarding.CalendarOAuthConnector
@@ -52,6 +54,7 @@ class OnboardingViewModelSpecTest {
     private val emailOAuthConnector: EmailOAuthConnector = mockk(relaxed = true)
     private val calendarOAuthConnector: CalendarOAuthConnector = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
+    private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -62,6 +65,7 @@ class OnboardingViewModelSpecTest {
         EmailPipaProvider.entries.forEach { provider ->
             every { userPrefsStore.observeEmailPipaConsent(provider) } returns flowOf(false)
         }
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
     }
 
     @After
@@ -681,5 +685,6 @@ class OnboardingViewModelSpecTest {
         emailOAuthConnector = emailOAuthConnector,
         calendarOAuthConnector = calendarOAuthConnector,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
+        sourceStatusRepository = sourceStatusRepository,
     )
 }

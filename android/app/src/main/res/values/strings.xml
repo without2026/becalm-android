@@ -258,6 +258,16 @@
     <string name="today_direction_badge_take">I take</string>
     <string name="today_direction_badge_unknown">—</string>
     <string name="today_counterparty_unknown">Unknown</string>
+    <string name="today_timed_section">Timeline</string>
+    <string name="today_untimed_section">Needs time</string>
+    <string name="today_no_due_time">No time</string>
+    <string name="today_add_due_time">Add time</string>
+    <string name="today_type_action_give">Action · I give</string>
+    <string name="today_type_action_take">Action · I take</string>
+    <string name="today_type_action">Action</string>
+    <string name="today_type_schedule">Schedule</string>
+    <string name="today_type_meeting">Meeting</string>
+    <string name="today_type_event">Event</string>
     <string name="today_since_just_now">Just now</string>
     <string name="today_since_minutes">%1$d min ago</string>
     <string name="today_since_hours">%1$d hr ago</string>

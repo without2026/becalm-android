@@ -25,7 +25,11 @@ internal object TodayTimelineProjector {
             event.sourceRef != null && (event.sourceType to event.sourceRef) in scheduleCommitmentKeys
         }
         return (commitments.map { it.toTimelineItem() } + visibleCalendarEvents.map { it.toTimelineItem() })
-            .sortedBy { it.sortKey }
+            .sortedWith(
+                compareBy<TimelineItem> { !it.isTimed }
+                    .thenBy { it.timelineAt ?: it.sortKey }
+                    .thenBy { it.title },
+            )
     }
 
     private fun TodayCommitmentRow.toTimelineItem(): TimelineItem.Commitment =
@@ -36,7 +40,12 @@ internal object TodayTimelineProjector {
             direction = direction,
             scheduleStatus = scheduleStatus,
             counterpartyDisplayName = counterpartyDisplayName?.take(COUNTERPARTY_DISPLAY_MAX),
+            dueAt = dueAt,
+            dueIsApproximate = dueIsApproximate,
+            dueHint = dueHint,
             sortKey = sortKey,
+            timelineAt = dueAt?.takeUnless { dueIsApproximate },
+            isTimed = dueAt != null && !dueIsApproximate,
         )
 
     private fun CalendarEventEntity.toTimelineItem(): TimelineItem =

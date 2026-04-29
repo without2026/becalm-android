@@ -16,6 +16,19 @@ public data class PersonIdentityResolution(
 public object PersonIdentityResolver {
     private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
     private val PHONE_CHARS = Regex("[^0-9+]")
+    private val AUTOMATED_EMAIL_LOCALS = setOf(
+        "noreply",
+        "no-reply",
+        "do-not-reply",
+        "donotreply",
+        "mailer-daemon",
+        "postmaster",
+        "notification",
+        "notifications",
+        "calendar-notification",
+        "automated",
+        "bot",
+    )
 
     public fun resolve(userId: String, raw: String?): PersonIdentityResolution? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -77,6 +90,17 @@ public object PersonIdentityResolver {
             ?.replace(Regex("\\s+"), " ")
             ?.trim()
             ?.takeIf { it.length >= 2 }
+
+    public fun isLikelyAutomated(raw: String?): Boolean {
+        val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return false
+        val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+        val local = email?.substringBefore('@')
+            ?.replace(".", "-")
+            ?.replace("_", "-")
+        return local in AUTOMATED_EMAIL_LOCALS || AUTOMATED_EMAIL_LOCALS.any { marker ->
+            local?.contains(marker) == true
+        }
+    }
 
     private fun resolution(
         userId: String,

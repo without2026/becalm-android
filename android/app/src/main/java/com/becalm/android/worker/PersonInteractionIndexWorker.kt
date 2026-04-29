@@ -15,6 +15,7 @@ import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonAliasRuleEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
@@ -64,7 +65,13 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val aliasRules = personIndexDaoProvider.get().findEnabledAliasRulesForUser(userId)
         val existingStates = personIndexDaoProvider.get().findSourceStatesForUser(userId)
 
-        val resolverFingerprint = resolverFingerprint(manualMatches, aliasRules)
+        val generatedAliasRules = buildGeneratedAliasRules(userId, existingCandidates)
+        val resolverFingerprint = resolverFingerprint(
+            manualMatches = manualMatches,
+            aliasRules = aliasRules,
+            generatedAliasRules = generatedAliasRules,
+            candidates = existingCandidates,
+        )
         val sourceRecords = buildSourceRecords(
             userId = userId,
             resolverFingerprint = resolverFingerprint,
@@ -87,7 +94,12 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        val builder = PersonIndexBuild(userId, manualMatches, aliasRules)
+        val builder = PersonIndexBuild(
+            userId = userId,
+            manualMatches = manualMatches,
+            aliasRules = aliasRules + generatedAliasRules,
+            sourceCandidates = existingCandidates,
+        )
         changedRecords.forEach { it.applyTo(builder) }
 
         val snapshot = builder.snapshot()
@@ -211,29 +223,24 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     applyTo = { it.addCalendarAttendee(row, attendee, key.sourceRef) },
                 )
             }
-        }
-        candidates.forEach { row ->
-            val key = SourceKey(
-                sourceType = row.sourceType,
-                sourceRef = row.sourceRef,
-                interactionKind = interactionKindFor(row.sourceType),
-            )
-            records += SourceRecord(
-                key = key,
-                fingerprint = fingerprintOf(
-                    resolverFingerprint,
-                    row.candidateRef,
-                    row.role,
-                    row.name,
-                    row.email,
-                    row.phone,
-                    row.organization,
-                    row.evidence,
-                    row.confidence.toString(),
-                    row.createdAt.toString(),
-                ),
-                applyTo = { it.addStoredCandidate(row) },
-            )
+            if (!row.title.isNullOrBlank()) {
+                val key = SourceKey(
+                    sourceType = row.sourceType,
+                    sourceRef = "calendar:${row.id}:title",
+                    interactionKind = "calendar",
+                )
+                records += SourceRecord(
+                    key = key,
+                    fingerprint = fingerprintOf(
+                        resolverFingerprint,
+                        row.title,
+                        row.attendeesRaw,
+                        row.startAt.toString(),
+                        row.endAt.toString(),
+                    ),
+                    applyTo = { it.addCalendarTitle(row, key.sourceRef) },
+                )
+            }
         }
         return records
             .groupBy { it.key }
@@ -250,6 +257,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         private val userId: String,
         manualMatches: List<PersonManualMatchEntity>,
         aliasRules: List<PersonAliasRuleEntity>,
+        sourceCandidates: List<SourcePersonCandidateEntity>,
     ) {
         private val now = Clock.System.now()
         private val identities = linkedMapOf<String, PersonIdentityEntity>()
@@ -260,15 +268,20 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             manualKey(it.sourceType, it.sourceRef, it.interactionKind)
         }
         private val aliasRules = aliasRules.filter { it.enabled && it.normalizedAlias.isNotBlank() }
+        private val candidatesBySource = sourceCandidates
+            .filter { it.confidence >= 0.8 }
+            .groupBy { candidateKey(it.sourceType, it.sourceRef) }
 
         fun addRawEvent(row: RawIngestionEventEntity) {
+            if (PersonIdentityResolver.isLikelyAutomated(row.personRef)) return
             val sourceRef = "raw:${row.id}"
+            val candidateSourceRefs = candidateSourceRefs(sourceRef, row.sourceRef)
             val kind = interactionKindFor(row.sourceType)
             val resolved = resolveForSource(
                 sourceType = row.sourceType,
                 sourceRef = sourceRef,
                 kind = kind,
-                explicitAnchor = row.personRef,
+                explicitAnchor = row.personRef ?: candidateAnchorFor(row.sourceType, candidateSourceRefs),
                 texts = listOf(row.personRef, row.eventTitle, row.eventSnippet),
                 lastSeenAt = row.timestamp,
             ) ?: return upsertUnmatched(
@@ -304,11 +317,17 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         fun addCommitment(row: CommitmentEntity) {
             val sourceRef = "commitment:${row.id}"
+            val candidateSourceRefs = candidateSourceRefs(sourceRef, row.sourceRef)
+            val candidateFallback = if (row.itemType == CommitmentItemType.DECISION) {
+                null
+            } else {
+                candidateAnchorFor(row.sourceType, candidateSourceRefs)
+            }
             val resolved = resolveForSource(
                 sourceType = row.sourceType,
                 sourceRef = sourceRef,
                 kind = "commitment",
-                explicitAnchor = row.personRef ?: row.counterpartyRaw,
+                explicitAnchor = row.personRef ?: row.counterpartyRaw ?: candidateFallback,
                 texts = listOf(row.personRef, row.counterpartyRaw, row.title, row.description, row.quote),
                 lastSeenAt = row.sourceEventOccurredAt,
             ) ?: return upsertUnmatched(
@@ -335,8 +354,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 role = row.itemType,
                 direction = row.direction,
                 status = when (row.itemType) {
-                    com.becalm.android.data.local.db.entity.CommitmentItemType.SCHEDULE -> row.scheduleStatus
-                    com.becalm.android.data.local.db.entity.CommitmentItemType.DECISION -> row.decisionStatus
+                    CommitmentItemType.SCHEDULE -> row.scheduleStatus
+                    CommitmentItemType.DECISION -> row.decisionStatus
                     else -> row.actionState
                 },
                 occurredAt = row.sourceEventOccurredAt,
@@ -347,6 +366,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         }
 
         fun addCalendarAttendee(row: CalendarEventEntity, attendee: String, sourceRef: String) {
+            if (PersonIdentityResolver.isLikelyAutomated(attendee)) return
             val resolved = resolveForSource(
                 sourceType = row.sourceType,
                 sourceRef = sourceRef,
@@ -385,37 +405,27 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             )
         }
 
-        fun addStoredCandidate(row: SourcePersonCandidateEntity) {
-            val kind = interactionKindFor(row.sourceType)
-            val anchor = row.email ?: row.phone ?: row.name ?: row.organization
+        fun addCalendarTitle(row: CalendarEventEntity, sourceRef: String) {
             val resolved = resolveForSource(
                 sourceType = row.sourceType,
-                sourceRef = row.sourceRef,
-                kind = kind,
-                explicitAnchor = anchor,
-                texts = listOf(row.email, row.phone, row.name, row.organization, row.evidence),
-                lastSeenAt = row.createdAt,
-            ) ?: return upsertUnmatched(
-                sourceType = row.sourceType,
-                sourceRef = row.sourceRef,
-                kind = kind,
-                title = row.name ?: row.organization,
-                snippet = row.evidence,
-                suggestedLabel = anchor,
-                occurredAt = row.createdAt,
-            )
+                sourceRef = sourceRef,
+                kind = "calendar",
+                explicitAnchor = null,
+                texts = listOf(row.title, row.attendeesRaw),
+                lastSeenAt = row.startAt,
+            ) ?: return
             upsertInteraction(
                 personId = resolved.personId,
                 sourceType = row.sourceType,
-                sourceRef = row.sourceRef,
-                kind = kind,
-                role = row.role,
+                sourceRef = sourceRef,
+                kind = "calendar",
+                role = "title_mention",
                 direction = null,
                 status = null,
-                occurredAt = row.createdAt,
-                title = row.name ?: row.organization,
-                snippet = row.evidence,
-                confidence = row.confidence,
+                occurredAt = row.startAt,
+                title = row.title,
+                snippet = row.attendeesRaw,
+                confidence = resolved.confidence,
             )
         }
 
@@ -509,6 +519,29 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 verified = true,
             )
         }
+
+        private fun candidateAnchorFor(sourceType: String, vararg sourceRefs: String?): String? =
+            candidatesFor(sourceType, *sourceRefs)
+                .mapNotNull { it.email ?: it.phone ?: it.name }
+                .filterNot(PersonIdentityResolver::isLikelyAutomated)
+                .distinct()
+                .singleOrNull()
+
+        private fun candidateAnchorFor(sourceType: String, sourceRefs: List<String?>): String? =
+            candidateAnchorFor(sourceType, *sourceRefs.toTypedArray())
+
+        private fun candidateSourceRefs(recordSourceRef: String, providerSourceRef: String?): List<String?> =
+            listOf(
+                recordSourceRef,
+                providerSourceRef,
+                providerSourceRef?.takeIf { !it.startsWith("raw:") }?.let { "raw:$it" },
+            )
+
+        private fun candidatesFor(sourceType: String, vararg sourceRefs: String?): List<SourcePersonCandidateEntity> =
+            sourceRefs
+                .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+                .flatMap { ref -> candidatesBySource[candidateKey(sourceType, ref)].orEmpty() }
+                .distinctBy { it.id }
 
         private fun upsertCandidate(
             sourceType: String,
@@ -620,6 +653,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         private fun manualKey(sourceType: String, sourceRef: String, kind: String): String =
             "$sourceType|$sourceRef|$kind"
+
+        private fun candidateKey(sourceType: String, sourceRef: String): String =
+            "$sourceType|$sourceRef"
     }
 
     private data class Snapshot(
@@ -667,6 +703,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private fun resolverFingerprint(
         manualMatches: List<PersonManualMatchEntity>,
         aliasRules: List<PersonAliasRuleEntity>,
+        generatedAliasRules: List<PersonAliasRuleEntity>,
+        candidates: List<SourcePersonCandidateEntity>,
     ): String = fingerprintOf(
         *(
             manualMatches.map {
@@ -674,9 +712,43 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             } +
                 aliasRules.map {
                     "a|${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}|${it.enabled}|${it.updatedAt}"
+                } +
+                generatedAliasRules.map {
+                    "g|${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}|${it.enabled}|${it.updatedAt}"
+                } +
+                candidates.map {
+                    "c|${it.sourceType}|${it.sourceRef}|${it.candidateRef}|${it.role}|${it.name}|${it.email}|${it.phone}|${it.evidence}|${it.confidence}|${it.createdAt}"
                 }
             ).sorted().toTypedArray(),
     )
+
+    private fun buildGeneratedAliasRules(
+        userId: String,
+        candidates: List<SourcePersonCandidateEntity>,
+    ): List<PersonAliasRuleEntity> =
+        candidates.mapNotNull { candidate ->
+            if (candidate.confidence < 0.8) return@mapNotNull null
+            val name = candidate.name?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val anchor = candidate.email ?: candidate.phone ?: return@mapNotNull null
+            if (PersonIdentityResolver.isLikelyAutomated(anchor)) return@mapNotNull null
+            val resolved = PersonIdentityResolver.resolve(userId, anchor) ?: return@mapNotNull null
+            val normalizedAlias = PersonIdentityResolver.normalizeAlias(name) ?: return@mapNotNull null
+            val id = UUID.nameUUIDFromBytes(
+                "generated-alias:$userId:$normalizedAlias:${resolved.identityKey}".toByteArray(Charsets.UTF_8),
+            ).toString()
+            PersonAliasRuleEntity(
+                id = id,
+                userId = userId,
+                alias = name,
+                normalizedAlias = normalizedAlias,
+                personId = resolved.personId,
+                identityKey = resolved.identityKey,
+                sourceScope = null,
+                enabled = true,
+                createdAt = candidate.createdAt,
+                updatedAt = candidate.createdAt,
+            )
+        }
 
     private fun fingerprintOf(vararg parts: String?): String {
         val digest = MessageDigest.getInstance("SHA-256")
