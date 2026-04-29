@@ -6,8 +6,12 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -47,6 +51,7 @@ public fun OutlookCalendarOAuthScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var pendingOAuthResumeRefresh by rememberSaveable { mutableStateOf(false) }
     val downstream = BecalmRoute.OnboardingNotificationPerm.path
     val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
@@ -63,8 +68,8 @@ public fun OutlookCalendarOAuthScreen(
         "unknown" to stringResource(R.string.onb_outlook_cal_error_unknown),
     )
 
-    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
-        if (eventsOverride != null || onboardingViewModel == null) {
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride, pendingOAuthResumeRefresh) {
+        if (!pendingOAuthResumeRefresh || eventsOverride != null || onboardingViewModel == null) {
             onDispose { }
         } else {
             val observer = LifecycleEventObserver { _, event ->
@@ -82,8 +87,12 @@ public fun OutlookCalendarOAuthScreen(
             .filter { it.provider == CalendarOAuthProvider.OUTLOOK_CALENDAR }
             .collect { event ->
                 when (event) {
-                    is CalendarConnectEvent.Connected -> navigateDownstream()
+                    is CalendarConnectEvent.Connected -> {
+                        pendingOAuthResumeRefresh = false
+                        navigateDownstream()
+                    }
                     is CalendarConnectEvent.Failed -> {
+                        pendingOAuthResumeRefresh = false
                         snackbarHostState.showSnackbar(
                             errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
                         )
@@ -103,6 +112,7 @@ public fun OutlookCalendarOAuthScreen(
                 if (hostActivity == null) {
                     scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
                 } else {
+                    pendingOAuthResumeRefresh = true
                     requireNotNull(onboardingViewModel).onConnectCalendarProvider(
                         provider = CalendarOAuthProvider.OUTLOOK_CALENDAR,
                         activity = hostActivity,
