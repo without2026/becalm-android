@@ -1,5 +1,6 @@
 package com.becalm.android.ui.sources
 
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -8,6 +9,8 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourcePersonCandidateRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
@@ -17,6 +20,9 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import retrofit2.Response
 
@@ -37,15 +43,18 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val apiProvider: Provider<RailwayApi>,
     private val calendarEventRepository: CalendarEventRepository,
     private val commitmentRepository: CommitmentRepository,
+    private val rawIngestionRepository: RawIngestionRepository,
+    private val sourcePersonCandidateRepository: SourcePersonCandidateRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SourceSyncPort {
 
     private val api: RailwayApi
         get() = apiProvider.get()
 
-    override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> =
+    override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> = withContext(ioDispatcher) {
         when (sourceType) {
             SourceType.GMAIL,
             SourceType.OUTLOOK_MAIL,
@@ -61,6 +70,7 @@ public class DefaultSourceSyncPort @Inject constructor(
                 BecalmResult.Success(Unit)
             }
         }
+    }
 
     private suspend fun syncBackendManagedMail(sourceType: String): BecalmResult<Unit> {
         val userId = authRepository.currentSession()?.userId ?: return onBackendSyncFailure(
@@ -72,6 +82,22 @@ public class DefaultSourceSyncPort @Inject constructor(
         if (!response.isSuccessful) {
             return onBackendSyncFailure(sourceType, response.toSyncError())
         }
+        when (val refresh = rawIngestionRepository.refreshSince(userId = userId, sourceType = sourceType, since = null)) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "raw event refresh after backend mail sync sourceType=$sourceType " +
+                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
+            )
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
+        }
+        when (val refresh = sourcePersonCandidateRepository.refreshSince(userId = userId, sourceType = sourceType, since = null)) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "person candidate refresh after backend mail sync sourceType=$sourceType " +
+                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
+            )
+            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
+        }
         when (val refresh = commitmentRepository.refreshSince(userId = userId, since = null)) {
             is BecalmResult.Success -> logger.d(
                 TAG,
@@ -80,6 +106,7 @@ public class DefaultSourceSyncPort @Inject constructor(
             )
             is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
         }
+        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "manual sync delegated to backend mail sourceType=$sourceType")
         return finalizeBackendSyncSuccess(sourceType)
     }
@@ -109,6 +136,7 @@ public class DefaultSourceSyncPort @Inject constructor(
                             "fetched=${commitmentRefresh.value.fetched} upserted=${commitmentRefresh.value.upserted}",
                     )
                 }
+                workScheduler.enqueuePersonInteractionIndex()
                 logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
                 return finalizeBackendSyncSuccess(sourceType)
             }

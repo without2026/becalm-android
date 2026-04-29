@@ -17,8 +17,10 @@ import com.becalm.android.data.remote.dto.MailSyncResponse
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
+import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
+import com.becalm.android.data.remote.dto.SourcePersonCandidatesResponse
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -82,6 +84,34 @@ public interface RailwayApi {
         @Header("X-BeCalm-Idempotent") idem: String = "1",
         @Body request: BatchUploadRequest,
     ): Response<BatchUploadResponse>
+
+    /**
+     * Lists backend-persisted raw ingestion events for the current user.
+     *
+     * Android uses this after backend-managed mail sync so Gmail / Outlook Mail rows written
+     * server-side are mirrored into Room and can feed the local person index.
+     */
+    @GET("v1/raw_ingestion_events")
+    public suspend fun getRawIngestionEvents(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("source_type") sourceType: String? = null,
+    ): Response<RawIngestionEventsResponse>
+
+    /**
+     * Lists backend-persisted AI person candidates for current user.
+     *
+     * Android mirrors these rows into Room so backend-managed mail extraction and
+     * local voice/call extraction feed the same person-index worker contract.
+     */
+    @GET("v1/source_person_candidates")
+    public suspend fun getSourcePersonCandidates(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("source_type") sourceType: String? = null,
+    ): Response<SourcePersonCandidatesResponse>
 
     // =========================================================================
     // COMMITMENTS

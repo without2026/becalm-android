@@ -27,6 +27,7 @@ internal data class SourceWorkSpec(
 internal object WorkSchedulerRequests {
     const val PERIODIC_INTERVAL_MINUTES: Long = 15L
     const val BACKOFF_DELAY_SECONDS: Long = 30L
+    const val UPLOAD_DEBOUNCE_SECONDS: Long = 10L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
     const val LEGACY_TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
 
@@ -83,13 +84,18 @@ internal object WorkSchedulerRequests {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
             .build()
 
-    fun uploadRequest(attempt: Int): OneTimeWorkRequest =
-        OneTimeWorkRequest.Builder(UploadWorker::class.java)
+    fun uploadRequest(attempt: Int): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(UploadWorker::class.java)
             .setConstraints(uploadConstraints)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
             .setInputData(workDataOf(UploadWorker.INPUT_KEY_ATTEMPT to attempt))
-            .build()
+        if (attempt == 0) {
+            builder.setInitialDelay(UPLOAD_DEBOUNCE_SECONDS, TimeUnit.SECONDS)
+        } else {
+            builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        }
+        return builder.build()
+    }
 
     fun voiceUploadRequest(
         rawEventId: String,
@@ -125,6 +131,7 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.GCAL,
         UniqueWorkKeys.OUTLOOK_CAL,
         UniqueWorkKeys.BACKEND_MAIL,
+        UniqueWorkKeys.PERSON_INDEX,
         UniqueWorkKeys.ENRICHMENT,
         UniqueWorkKeys.UPLOAD,
         UniqueWorkKeys.UPLOAD_PERIODIC,
@@ -170,6 +177,28 @@ internal object WorkSchedulerRequests {
                     .build(),
             ),
             logMessage = "scheduleBackendMailSync key=${UniqueWorkKeys.BACKEND_MAIL}",
+        )
+
+    fun personIndexRequest(initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(PersonInteractionIndexWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun personIndexPlan(initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.PERSON_INDEX,
+            policy = ExistingWorkPolicy.REPLACE,
+            request = personIndexRequest(initialDelaySeconds.coerceAtLeast(0L)),
+            logMessage = "enqueuePersonInteractionIndex key=${UniqueWorkKeys.PERSON_INDEX} delaySec=$initialDelaySeconds",
         )
 
     fun enrichmentPeriodicPlan(): UniquePeriodicWorkPlan =

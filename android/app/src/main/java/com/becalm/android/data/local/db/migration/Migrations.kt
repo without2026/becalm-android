@@ -516,6 +516,221 @@ private val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
+// ─── Migration 9 → 10 (local person identity / interaction index) ───────────
+//
+// Adds local-only index tables that group interactions by deterministic person_id.
+// These tables are rebuilt by PersonInteractionIndexWorker from source rows, so they
+// intentionally do not alter the Supabase mirror schema.
+private val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_identities` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `person_id` TEXT NOT NULL,
+                `identity_key` TEXT NOT NULL,
+                `identity_type` TEXT NOT NULL,
+                `raw_value` TEXT NOT NULL,
+                `display_name_hint` TEXT,
+                `source_type` TEXT NOT NULL,
+                `confidence` REAL NOT NULL,
+                `verified` INTEGER NOT NULL,
+                `last_seen_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_identities_user_identity_key` " +
+                "ON `person_identities` (`user_id`, `identity_key`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_identities_user_person` " +
+                "ON `person_identities` (`user_id`, `person_id`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_interactions` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `person_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `interaction_kind` TEXT NOT NULL,
+                `role` TEXT NOT NULL,
+                `direction` TEXT,
+                `status` TEXT,
+                `occurred_at` INTEGER NOT NULL,
+                `title` TEXT,
+                `snippet` TEXT,
+                `confidence` REAL NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_interactions_user_source_person` " +
+                "ON `person_interactions` (`user_id`, `source_type`, `source_ref`, `person_id`, `interaction_kind`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_person_time` " +
+                "ON `person_interactions` (`user_id`, `person_id`, `occurred_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_time` " +
+                "ON `person_interactions` (`user_id`, `occurred_at`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `source_person_candidates` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `candidate_ref` TEXT NOT NULL,
+                `role` TEXT NOT NULL,
+                `name` TEXT,
+                `email` TEXT,
+                `phone` TEXT,
+                `organization` TEXT,
+                `evidence` TEXT,
+                `confidence` REAL NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_source_person_candidates_user_source_candidate` " +
+                "ON `source_person_candidates` (`user_id`, `source_type`, `source_ref`, `candidate_ref`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_person_candidates_user_source` " +
+                "ON `source_person_candidates` (`user_id`, `source_type`, `source_ref`)",
+        )
+    }
+}
+
+// ─── Migration 10 → 11 (manual person matching / alias learning) ─────────────
+//
+// Adds local-only repair tables for unresolved source rows. These tables preserve unmatched
+// interactions for UI repair and let user-confirmed nicknames resolve future rows.
+private val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `unmatched_person_interactions` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `interaction_kind` TEXT NOT NULL,
+                `title` TEXT,
+                `snippet` TEXT,
+                `suggested_label` TEXT,
+                `occurred_at` INTEGER NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_unmatched_person_interactions_user_source` " +
+                "ON `unmatched_person_interactions` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_unmatched_person_interactions_user_time` " +
+                "ON `unmatched_person_interactions` (`user_id`, `occurred_at`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_manual_matches` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `interaction_kind` TEXT NOT NULL,
+                `matched_person_id` TEXT NOT NULL,
+                `matched_identity_key` TEXT NOT NULL,
+                `nickname` TEXT,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_manual_matches_user_source` " +
+                "ON `person_manual_matches` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_manual_matches_user_person` " +
+                "ON `person_manual_matches` (`user_id`, `matched_person_id`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_alias_rules` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `alias` TEXT NOT NULL,
+                `normalized_alias` TEXT NOT NULL,
+                `person_id` TEXT NOT NULL,
+                `identity_key` TEXT NOT NULL,
+                `source_scope` TEXT,
+                `enabled` INTEGER NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_alias_rules_user_alias_scope` " +
+                "ON `person_alias_rules` (`user_id`, `normalized_alias`, `source_scope`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_alias_rules_user_person` " +
+                "ON `person_alias_rules` (`user_id`, `person_id`)",
+        )
+    }
+}
+
+// ─── Migration 11 → 12 (incremental person index state) ─────────────────────
+//
+// Tracks the source fingerprint processed by PersonInteractionIndexWorker so unchanged
+// source rows do not force a full person-interaction table rebuild on every sync.
+private val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_index_source_state` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `interaction_kind` TEXT NOT NULL,
+                `fingerprint` TEXT NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_index_source_state_user_source` " +
+                "ON `person_index_source_state` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_index_source_state_user_updated` " +
+                "ON `person_index_source_state` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
 public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -525,4 +740,7 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_6_7,
     MIGRATION_7_8,
     MIGRATION_8_9,
+    MIGRATION_9_10,
+    MIGRATION_10_11,
+    MIGRATION_11_12,
 )

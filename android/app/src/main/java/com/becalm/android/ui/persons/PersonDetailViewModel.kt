@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
@@ -153,6 +154,7 @@ public class PersonDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
+    private val personIndexDao: PersonIndexDao,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -199,21 +201,31 @@ public class PersonDetailViewModel @Inject constructor(
                         flowOf(PersonDetailUiState(personRef = personRef, loading = false))
                     } else {
                         combine(
-                            personEnrichmentRepository.observeByPersonRef(personRef),
-                            rawIngestionRepository.observeForPerson(userId, personRef, RAW_EVENTS_LIMIT),
-                            commitmentRepository.observeAllForPerson(userId, personRef),
-                            calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
+                            personIndexDao.observeIdentitiesForPerson(userId, personRef),
+                            personEnrichmentRepository.observeAll(),
+                            personIndexDao.observeInteractionsForPerson(userId, personRef, RAW_EVENTS_LIMIT + CALENDAR_EVENTS_LIMIT),
+                            legacyDetailFlow(userId),
                             _completedExpanded,
-                        ) { enrichment, rawEvents, commitments, calendarEvents, completedExpanded ->
+                        ) { identities, enrichmentRows, interactions, legacy, completedExpanded ->
                             withContext(ioDispatcher) {
-                                PersonDetailProjector.buildState(
-                                    personRef = personRef,
-                                    enrichment = enrichment,
-                                    rawEvents = rawEvents,
-                                    commitments = commitments,
-                                    calendarEvents = calendarEvents,
-                                    completedExpanded = completedExpanded,
-                                )
+                                if (interactions.isNotEmpty()) {
+                                    PersonDetailProjector.buildIndexedState(
+                                        personId = personRef,
+                                        identities = identities,
+                                        enrichmentRows = enrichmentRows,
+                                        interactions = interactions,
+                                        completedExpanded = completedExpanded,
+                                    )
+                                } else {
+                                    PersonDetailProjector.buildState(
+                                        personRef = personRef,
+                                        enrichment = legacy.enrichment,
+                                        rawEvents = legacy.rawEvents,
+                                        commitments = legacy.commitments,
+                                        calendarEvents = legacy.calendarEvents,
+                                        completedExpanded = completedExpanded,
+                                    )
+                                }
                             }
                         }.catch { e ->
                             logger.e(TAG, "observeDetail failed", e)
@@ -232,5 +244,27 @@ public class PersonDetailViewModel @Inject constructor(
                 }
         }
     }
+
+    private fun legacyDetailFlow(userId: String) =
+        combine(
+            personEnrichmentRepository.observeByPersonRef(personRef),
+            rawIngestionRepository.observeForPerson(userId, personRef, RAW_EVENTS_LIMIT),
+            commitmentRepository.observeAllForPerson(userId, personRef),
+            calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
+        ) { enrichment, rawEvents, commitments, calendarEvents ->
+            LegacyDetailSnapshot(
+                enrichment = enrichment,
+                rawEvents = rawEvents,
+                commitments = commitments,
+                calendarEvents = calendarEvents,
+            )
+        }
+
+    private data class LegacyDetailSnapshot(
+        val enrichment: com.becalm.android.data.local.db.entity.PersonEnrichmentEntity?,
+        val rawEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
+        val commitments: List<com.becalm.android.data.local.db.entity.CommitmentEntity>,
+        val calendarEvents: List<com.becalm.android.data.local.db.entity.CalendarEventEntity>,
+    )
 
 }

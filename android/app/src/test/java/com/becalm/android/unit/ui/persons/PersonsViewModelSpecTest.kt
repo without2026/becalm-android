@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.persons
 
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
 import com.becalm.android.ui.persons.PersonSectionKind
@@ -42,6 +43,7 @@ class PersonsViewModelSpecTest {
     private val userPrefsStore: UserPrefsStore = mockk()
     private val projectionPort = FakePersonsScreenProjectionPort()
     private val refreshCoordinator = FakePersonsRefreshCoordinator()
+    private val manualMatchRepository: PersonManualMatchRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -229,6 +231,7 @@ class PersonsViewModelSpecTest {
 
         assertEquals(0, refreshCoordinator.refreshCount)
         viewModel.onPullRefresh()
+        advanceUntilIdle()
         assertEquals(1, refreshCoordinator.refreshCount)
         assertTrue(viewModel.uiState.value.lastRefreshSnapshot?.roomRequeryTriggered == true)
         assertFalse(viewModel.uiState.value.lastRefreshSnapshot?.catchUpTriggered == true)
@@ -257,6 +260,8 @@ class PersonsViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         projectionPort = projectionPort,
         refreshCoordinator = refreshCoordinator,
+        manualMatchRepository = manualMatchRepository,
+        ioDispatcher = testDispatcher,
     )
 
     private fun person(

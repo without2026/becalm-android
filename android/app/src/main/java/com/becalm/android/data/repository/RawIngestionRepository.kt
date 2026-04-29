@@ -3,6 +3,7 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.daoOp
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
@@ -12,7 +13,10 @@ import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventDto
 import com.becalm.android.data.remote.dto.SourceType
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import retrofit2.Response
 import java.io.IOException
@@ -163,6 +167,26 @@ public interface RawIngestionRepository {
      */
     public suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse>
 
+    /**
+     * Pulls backend-persisted raw events into Room.
+     *
+     * This is required for backend-managed sources where Railway writes raw rows directly
+     * (for example Gmail / Outlook Mail OAuth sync) rather than receiving rows from Android.
+     */
+    public suspend fun refreshSince(
+        userId: String,
+        sourceType: String? = null,
+        since: Instant? = null,
+    ): BecalmResult<RefreshStats>
+
+    /** Aggregated outcome of a single raw-event refresh pass. */
+    public data class RefreshStats(
+        val fetched: Int,
+        val upserted: Int,
+        val hasMore: Boolean,
+        val nextCursor: String?,
+    )
+
     // ── PIPA consent release / park ───────────────────────────────────────────
 
     /**
@@ -219,6 +243,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     private val apiProvider: Provider<RailwayApi>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : RawIngestionRepository {
 
     private val api: RailwayApi
@@ -360,6 +385,65 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun refreshSince(
+        userId: String,
+        sourceType: String?,
+        since: Instant?,
+    ): BecalmResult<RawIngestionRepository.RefreshStats> = withContext(ioDispatcher) {
+        var cursor: String? = null
+        var totalFetched = 0
+        var totalUpserted = 0
+        var lastHasMore = false
+        var lastCursor: String? = null
+
+        repeat(REFRESH_PAGE_CAP) { pageIndex ->
+            if (pageIndex > 0 && !lastHasMore) return@repeat
+
+            val response = try {
+                api.getRawIngestionEvents(
+                    cursor = cursor,
+                    limit = PAGE_LIMIT,
+                    since = since?.toString(),
+                    sourceType = sourceType,
+                )
+            } catch (e: IOException) {
+                logger.e(TAG, "refreshSince network error on page $pageIndex", e)
+                return@withContext BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+            } catch (e: Exception) {
+                logger.e(TAG, "refreshSince unexpected error on page $pageIndex", e)
+                return@withContext BecalmResult.Failure(BecalmError.Unknown(e))
+            }
+
+            if (!response.isSuccessful) {
+                logger.w(TAG, "refreshSince HTTP ${response.code()} on page $pageIndex")
+                return@withContext BecalmResult.Failure(response.toRefreshError())
+            }
+
+            val body = response.body()
+                ?: return@withContext BecalmResult.Failure(
+                    BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
+                )
+            val entities = body.data.map { it.toEntity(userId) }
+            dao.upsertSyncedFromServer(entities)
+
+            totalFetched += body.data.size
+            totalUpserted += entities.size
+            lastHasMore = body.hasMore
+            lastCursor = body.cursor
+            cursor = body.cursor
+        }
+
+        logger.d(TAG, "refreshSince done sourceType=$sourceType fetched=$totalFetched upserted=$totalUpserted")
+        BecalmResult.Success(
+            RawIngestionRepository.RefreshStats(
+                fetched = totalFetched,
+                upserted = totalUpserted,
+                hasMore = lastHasMore,
+                nextCursor = lastCursor,
+            ),
+        )
+    }
+
     // ── PIPA consent release / park ───────────────────────────────────────────
 
     override suspend fun releaseAwaitingConsentVoiceAndReturnIds(userId: String): BecalmResult<List<String>> =
@@ -438,6 +522,33 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             timestamp = timestamp,
         )
 
+    private fun RawIngestionEventDto.toEntity(userId: String): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = id ?: UUID.nameUUIDFromBytes("$userId:$sourceType:$clientEventId".toByteArray()).toString(),
+            userId = userId,
+            clientEventId = clientEventId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            personRef = personRef,
+            eventTitle = eventTitle,
+            eventSnippet = eventSnippet,
+            durationSeconds = durationSeconds,
+            location = location,
+            folder = folder,
+            commitmentsExtractedCount = commitmentsExtractedCount ?: 0,
+            timestamp = timestamp,
+            syncStatus = "synced",
+        )
+
+    private fun <T> Response<T>.toRefreshError(): BecalmError = when (code()) {
+        401 -> BecalmError.Unauthorized
+        404 -> BecalmError.NotFound("raw_ingestion_events")
+        422 -> BecalmError.Validation(null, message())
+        429 -> BecalmError.RateLimited(headers()["Retry-After"]?.toLongOrNull())
+        in 500..599 -> BecalmError.ServerError(code(), errorBody()?.string())
+        else -> BecalmError.Network(code(), message())
+    }
+
     /**
      * Maps a Retrofit [Response] to a [BecalmResult], applying the error semantics
      * documented in api-contract.yml for the ingestion batch endpoint.
@@ -468,6 +579,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     }
 
     private companion object {
+        private const val PAGE_LIMIT = 100
         private val EMAIL_SOURCE_TYPES = setOf(
             SourceType.GMAIL,
             SourceType.OUTLOOK_MAIL,

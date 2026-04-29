@@ -197,6 +197,10 @@
     <string name="persons_unassigned_title">Interactions waiting for a person</string>
     <string name="persons_unassigned_empty_title">No unassigned events</string>
     <string name="persons_unassigned_empty_message">Every interaction is already organized around a person.</string>
+    <string name="persons_manual_match_anchor_hint">Person email, phone, or name</string>
+    <string name="persons_manual_match_nickname_hint">Nickname to remember next time</string>
+    <string name="persons_manual_add_person_action">Add new person</string>
+    <string name="persons_manual_match_action">Match person</string>
     <string name="persons_interactions_count">%d interactions</string>
     <string name="persons_pending_commitments_fmt">Pending %1$d</string>
     <string name="persons_section_pending_commitments">Pending commitments</string>

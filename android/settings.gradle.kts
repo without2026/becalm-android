@@ -26,3 +26,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "becalm-android"
 include(":app")
+include(":baselineprofile")

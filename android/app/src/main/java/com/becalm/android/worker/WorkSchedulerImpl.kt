@@ -87,6 +87,10 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
+    override fun enqueuePersonInteractionIndex(initialDelaySeconds: Long) {
+        planRunner.run(WorkSchedulerRequests.personIndexPlan(initialDelaySeconds))
+    }
+
     override fun scheduleEnrichmentSweep() {
         planRunner.run(WorkSchedulerRequests.enrichmentPeriodicPlan())
     }

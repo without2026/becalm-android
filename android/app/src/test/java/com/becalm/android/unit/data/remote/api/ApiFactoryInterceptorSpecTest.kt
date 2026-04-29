@@ -83,6 +83,20 @@ class ApiFactoryInterceptorSpecTest {
         }
     }
 
+    @Test
+    fun `network client caps parallel calls to protect app worker threads`() {
+        val client = ApiFactory.createOkHttpClient(
+            authProvider = StaticAuthTokenProvider(),
+            authFailureSessionInvalidator = NoOpAuthFailureSessionInvalidator,
+            idempotencyProvider = CountingIdempotencyKeyProvider(),
+            railwayHost = "railway.example.com",
+            isDebug = false,
+        )
+
+        assertEquals(8, client.dispatcher.maxRequests)
+        assertEquals(4, client.dispatcher.maxRequestsPerHost)
+    }
+
     private fun idempotentPost(server: MockWebServer): Request =
         Request.Builder()
             .url(server.url("/v1/raw_ingestion_events:batch"))

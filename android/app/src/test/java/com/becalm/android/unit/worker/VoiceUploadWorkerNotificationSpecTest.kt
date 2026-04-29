@@ -15,6 +15,7 @@ import androidx.work.impl.utils.taskexecutor.TaskExecutor
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
@@ -54,6 +55,7 @@ class VoiceUploadWorkerNotificationSpecTest {
     private val parsedUri: Uri = mockk(relaxed = true)
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
+    private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
     private val voiceApi: VoiceApi = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
@@ -148,6 +150,7 @@ class VoiceUploadWorkerNotificationSpecTest {
         workerParams = workerParams(),
         rawIngestionEventDao = rawIngestionEventDao,
         commitmentDao = commitmentDao,
+        personIndexDao = personIndexDao,
         voiceApi = voiceApi,
         userPrefsStore = userPrefsStore,
         sourceStatusRepository = sourceStatusRepository,

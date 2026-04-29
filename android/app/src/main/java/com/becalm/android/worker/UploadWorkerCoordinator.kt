@@ -12,6 +12,7 @@ internal class UploadWorkerCoordinator(
     private val rawEventUploader: RawEventUploader,
     private val commitmentUploader: CommitmentUploader,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) {
 
@@ -53,6 +54,9 @@ internal class UploadWorkerCoordinator(
         }
 
         sourceStatusRepository.recordSyncSuccess(UploadWorker.SOURCE_TYPE, now)
+        if (rawCount > 0 || commitmentCount > 0) {
+            workScheduler.enqueuePersonInteractionIndex()
+        }
         logger.i(
             TAG,
             "doWork complete rawUploaded=$rawCount commitUploaded=$commitmentCount attempt=$attempt",

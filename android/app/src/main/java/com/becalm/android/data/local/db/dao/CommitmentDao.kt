@@ -397,6 +397,16 @@ public interface CommitmentDao {
     @Query("SELECT * FROM commitments WHERE user_id = :userId AND id IN (:ids)")
     public suspend fun findByIdsForMerge(userId: String, ids: List<String>): List<CommitmentEntity>
 
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC
+        """,
+    )
+    public suspend fun findLiveForPersonIndex(userId: String): List<CommitmentEntity>
+
     // ─── List reads ────────────────────────────────────────────────────────────
 
     /**

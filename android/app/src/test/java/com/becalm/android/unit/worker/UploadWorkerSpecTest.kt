@@ -24,6 +24,7 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.UploadWorker
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.coEvery
@@ -169,6 +170,7 @@ class UploadWorkerSpecTest {
             rawRepository(),
             commitmentRepository(),
             sourceStatusRepository(),
+            mockk<WorkScheduler>(relaxed = true),
             processingPauseGate,
             logger,
         )

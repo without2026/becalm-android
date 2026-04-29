@@ -3,12 +3,15 @@ package com.becalm.android
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import com.becalm.android.worker.VoiceFailureNotifier
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import timber.log.Timber
 
 /**
@@ -28,15 +31,26 @@ public class BecalmApplication : Application(), Configuration.Provider {
     @Inject
     public lateinit var workerFactory: HiltWorkerFactory
 
+    private val workExecutor by lazy {
+        val threadIndex = AtomicInteger(1)
+        Executors.newFixedThreadPool(WORK_MANAGER_THREAD_COUNT) { runnable ->
+            Thread(runnable, "becalm-wm-${threadIndex.getAndIncrement()}").apply {
+                isDaemon = false
+            }
+        }
+    }
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
+            .setExecutor(workExecutor)
             .build()
 
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
+            installDebugStrictMode()
         }
 
         // CMT-008: register the commitment_due_soon high-importance notification
@@ -45,6 +59,24 @@ public class BecalmApplication : Application(), Configuration.Provider {
         // this channel after re-querying Room for the commitment's live state.
         registerCommitmentDueSoonChannel()
         VoiceFailureNotifier.ensureChannel(this)
+    }
+
+    private fun installDebugStrictMode() {
+        StrictMode.setThreadPolicy(
+            StrictMode.ThreadPolicy.Builder()
+                .detectDiskReads()
+                .detectDiskWrites()
+                .detectNetwork()
+                .penaltyLog()
+                .build(),
+        )
+        StrictMode.setVmPolicy(
+            StrictMode.VmPolicy.Builder()
+                .detectLeakedClosableObjects()
+                .detectLeakedSqlLiteObjects()
+                .penaltyLog()
+                .build(),
+        )
     }
 
     /**
@@ -69,3 +101,5 @@ public class BecalmApplication : Application(), Configuration.Provider {
     }
 
 }
+
+private const val WORK_MANAGER_THREAD_COUNT = 2

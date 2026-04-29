@@ -2,6 +2,8 @@ package com.becalm.android.ui.persons
 
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
+import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -43,6 +45,10 @@ public data class UnassignedEventSummary(
     val sourceType: String,
     val title: String?,
     val timestamp: Instant,
+    val sourceRef: String = id,
+    val interactionKind: String = sourceType,
+    val snippet: String? = null,
+    val suggestedLabel: String? = null,
 )
 
 /** Offline badge contract for the persons screen. */
@@ -69,6 +75,7 @@ public data class PersonsRefreshSnapshot(
     val roomRequeryTriggered: Boolean,
     val catchUpTriggered: Boolean,
     val enrichmentTriggered: Boolean,
+    val personIndexTriggered: Boolean = false,
 )
 
 /**
@@ -91,6 +98,7 @@ public interface PersonsRefreshCoordinator {
 @Singleton
 public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val personIndexDao: PersonIndexDao,
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -99,24 +107,36 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     override fun observePeople(userId: String): Flow<PersonsListPageProjection> =
         combine(
             personEnrichmentRepository.observeAll(),
+            personIndexDao.observeAggregates(userId, PAGE_SIZE + 1),
             rawIngestionRepository.observePersonInteractionAggregates(userId, PAGE_SIZE + 1),
-        ) { enrichmentRows, aggregateRows ->
-            buildProjectionPage(
-                enrichmentRows = enrichmentRows,
-                aggregateRows = aggregateRows,
-            )
+        ) { enrichmentRows, indexAggregateRows, legacyAggregateRows ->
+            if (indexAggregateRows.isNotEmpty()) {
+                buildProjectionPage(
+                    enrichmentRows = enrichmentRows,
+                    aggregateRows = indexAggregateRows,
+                )
+            } else {
+                buildLegacyProjectionPage(
+                    enrichmentRows = enrichmentRows,
+                    aggregateRows = legacyAggregateRows,
+                )
+            }
         }
             .distinctUntilChanged()
             .flowOn(ioDispatcher)
 
     override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> =
-        rawIngestionRepository.observeTimelineForUser(userId, limit).map { events ->
+        personIndexDao.observeUnmatchedInteractions(userId, limit).map { events ->
             events.map { event ->
                 UnassignedEventSummary(
                     id = event.id,
                     sourceType = event.sourceType,
-                    title = event.eventTitle,
-                    timestamp = event.timestamp,
+                    sourceRef = event.sourceRef,
+                    interactionKind = event.interactionKind,
+                    title = event.title,
+                    snippet = event.snippet,
+                    suggestedLabel = event.suggestedLabel,
+                    timestamp = event.occurredAt,
                 )
             }
         }
@@ -129,6 +149,40 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             .flowOn(ioDispatcher)
 
     private fun buildProjectionPage(
+        enrichmentRows: List<PersonEnrichmentEntity>,
+        aggregateRows: List<PersonIndexAggregateRow>,
+    ): PersonsListPageProjection {
+        val enrichmentByRef = enrichmentRows.associateBy { it.personRef }
+        val hasMore = aggregateRows.size > PAGE_SIZE
+        val pageRows = aggregateRows
+            .take(PAGE_SIZE)
+            .map { aggregate ->
+                val enrichment = aggregate.primaryIdentityKey
+                    ?.removeIdentityPrefix()
+                    ?.let(enrichmentByRef::get)
+                PersonListProjection(
+                    personRef = aggregate.personId,
+                    displayName = enrichment?.displayName ?: aggregate.displayNameHint,
+                    nickname = enrichment?.nickname,
+                    companyName = enrichment?.company,
+                    jobTitle = enrichment?.title,
+                    eventCount = aggregate.eventCount,
+                    pendingCommitmentCount = aggregate.pendingCommitmentCount,
+                    channelSources = aggregate.channelSources.toSourceSet(),
+                    lastInteractionAt = aggregate.lastInteractionAt,
+                    lastInteractionSnippet = aggregate.lastInteractionSnippet,
+                )
+            }
+
+        return PersonsListPageProjection(
+            rows = pageRows,
+            hasMorePages = hasMore,
+            nextCursor = pageRows.lastOrNull()?.let(::toCursor),
+            sortOrder = PersonsSortOrder.MOST_RECENT_EVENT_DESC,
+        )
+    }
+
+    private fun buildLegacyProjectionPage(
         enrichmentRows: List<PersonEnrichmentEntity>,
         aggregateRows: List<PersonInteractionAggregateRow>,
     ): PersonsListPageProjection {
@@ -151,7 +205,6 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                     lastInteractionSnippet = aggregate.lastInteractionSnippet,
                 )
             }
-
         return PersonsListPageProjection(
             rows = pageRows,
             hasMorePages = hasMore,
@@ -170,6 +223,9 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
 
     private fun toCursor(row: PersonListProjection): String =
         "${row.lastInteractionAt?.toEpochMilliseconds() ?: 0}|${row.personRef}"
+
+    private fun String.removeIdentityPrefix(): String =
+        substringAfter(':', this)
 
     private fun String?.toSourceSet(): Set<String> =
         this
@@ -192,10 +248,12 @@ public class WorkManagerPersonsRefreshCoordinator @Inject constructor(
     override fun refresh(): PersonsRefreshSnapshot {
         foregroundCatchUpScheduler.triggerCatchUp()
         workScheduler.enqueueEnrichment()
+        workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
         return PersonsRefreshSnapshot(
             roomRequeryTriggered = true,
             catchUpTriggered = true,
             enrichmentTriggered = true,
+            personIndexTriggered = true,
         )
     }
 }

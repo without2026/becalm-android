@@ -10,6 +10,8 @@ import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import com.becalm.android.core.util.Logger
 import com.becalm.android.worker.ColdSyncWorkInputs
+import com.becalm.android.worker.UniqueWorkKeys
+import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.WorkSchedulerImpl
 import com.becalm.android.worker.WorkSchedulerRequests
 import io.mockk.every
@@ -50,7 +52,7 @@ class WorkSchedulerImplSpecTest {
         val policy = slot<ExistingWorkPolicy>()
         val request = slot<OneTimeWorkRequest>()
 
-        WorkSchedulerImpl(appContext, logger).enqueueUpload(attempt = 7)
+        WorkSchedulerImpl(appContext, logger).enqueueUpload(attempt = 0)
 
         verify(exactly = 1) {
             workManager.enqueueUniqueWork(capture(workName), capture(policy), capture(request))
@@ -58,7 +60,21 @@ class WorkSchedulerImplSpecTest {
         assertEquals("sync-all-upload", workName.captured)
         assertEquals(ExistingWorkPolicy.REPLACE, policy.captured)
         assertEquals(NetworkType.CONNECTED, request.captured.workSpec.constraints.requiredNetworkType)
-        assertEquals(7, request.captured.workSpec.input.getInt("attempt", -1))
+        assertEquals(0, request.captured.workSpec.input.getInt("attempt", -1))
+        assertEquals(WorkSchedulerRequests.UPLOAD_DEBOUNCE_SECONDS * 1_000L, request.captured.workSpec.initialDelay)
+    }
+
+    @Test
+    fun `retry upload attempts are not debounced`() {
+        val request = slot<OneTimeWorkRequest>()
+
+        WorkSchedulerImpl(appContext, logger).enqueueUpload(attempt = 2)
+
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork(any(), any(), capture(request))
+        }
+        assertEquals(2, request.captured.workSpec.input.getInt("attempt", -1))
+        assertEquals(0L, request.captured.workSpec.initialDelay)
     }
 
     @Test
@@ -102,6 +118,22 @@ class WorkSchedulerImplSpecTest {
         assertEquals(ExistingPeriodicWorkPolicy.UPDATE, policy.captured)
         assertEquals(NetworkType.CONNECTED, request.captured.workSpec.constraints.requiredNetworkType)
         assertEquals(15 * 60 * 1000L, request.captured.workSpec.intervalDuration)
+    }
+
+    @Test
+    fun `person index work is debounced by default and can be forced immediate`() {
+        val workName = mutableListOf<String>()
+        val request = mutableListOf<OneTimeWorkRequest>()
+
+        WorkSchedulerImpl(appContext, logger).enqueuePersonInteractionIndex()
+        WorkSchedulerImpl(appContext, logger).enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
+
+        verify(exactly = 2) {
+            workManager.enqueueUniqueWork(capture(workName), any(), capture(request))
+        }
+        assertEquals(listOf(UniqueWorkKeys.PERSON_INDEX, UniqueWorkKeys.PERSON_INDEX), workName)
+        assertEquals(WorkScheduler.PERSON_INDEX_DEBOUNCE_SECONDS * 1_000L, request[0].workSpec.initialDelay)
+        assertEquals(0L, request[1].workSpec.initialDelay)
     }
 
     @Test

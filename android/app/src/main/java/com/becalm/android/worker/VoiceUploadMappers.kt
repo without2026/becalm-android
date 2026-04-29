@@ -3,7 +3,9 @@ package com.becalm.android.worker
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
+import com.becalm.android.data.remote.dto.PersonCandidateDto
 import com.becalm.android.data.remote.dto.VoiceExtractItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import kotlinx.datetime.Instant
@@ -135,6 +137,34 @@ internal fun VoiceExtractItemDto.toTrackableCommitmentEntity(
     createdAt = now,
     updatedAt = now,
 )
+
+internal fun PersonCandidateDto.toSourcePersonCandidateEntity(
+    userId: String,
+    sourceType: String,
+    sourceRef: String,
+    index: Int,
+    now: Instant,
+): SourcePersonCandidateEntity {
+    val candidateRef = email ?: phone ?: name ?: organization ?: "candidate-$index"
+    val id = UUID.nameUUIDFromBytes(
+        "candidate:$userId:$sourceType:$sourceRef:$index:$candidateRef".toByteArray(Charsets.UTF_8),
+    ).toString()
+    return SourcePersonCandidateEntity(
+        id = id,
+        userId = userId,
+        sourceType = sourceType,
+        sourceRef = sourceRef,
+        candidateRef = "$role:$candidateRef",
+        role = role,
+        name = name,
+        email = email,
+        phone = phone,
+        organization = organization,
+        evidence = evidence,
+        confidence = confidence.coerceIn(0.0, 1.0),
+        createdAt = now,
+    )
+}
 
 /** Convenience: creates a plain-text [RequestBody] from this String. */
 private fun String.toPlainRequestBody(): RequestBody =

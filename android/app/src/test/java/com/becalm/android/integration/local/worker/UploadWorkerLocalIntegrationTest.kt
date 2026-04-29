@@ -13,6 +13,7 @@ import com.becalm.android.data.repository.SourceStatusRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.UploadWorker
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
@@ -143,6 +144,7 @@ class UploadWorkerLocalIntegrationTest {
         rawIngestionRepository = rawRepository,
         commitmentRepository = commitmentRepository,
         sourceStatusRepository = sourceStatusRepository,
+        workScheduler = mockk<WorkScheduler>(relaxed = true),
         processingPauseGate = processingPauseGate,
         logger = logger,
     )

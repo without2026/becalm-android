@@ -120,6 +120,54 @@ public data class BatchUploadRequest(
 )
 
 /**
+ * Paginated response for GET /v1/raw_ingestion_events.
+ *
+ * Used to mirror backend-managed raw mail events (Gmail / Outlook Mail) back into
+ * the local Room cache after Railway performs OAuth-provider sync.
+ */
+@JsonClass(generateAdapter = true)
+public data class RawIngestionEventsResponse(
+    @field:Json(name = "data") val data: List<RawIngestionEventDto>,
+    @field:Json(name = "cursor") val cursor: String,
+    @field:Json(name = "has_more") val hasMore: Boolean,
+)
+
+/**
+ * Person candidate emitted by backend AI extraction for backend-managed sources.
+ *
+ * Voice/call candidates are stored directly from the `TranscribeExtractResponse`.
+ * Gmail/Outlook candidates are generated on Railway during backend-managed mail sync
+ * and mirrored through this DTO into the same local Room table.
+ */
+@JsonClass(generateAdapter = true)
+public data class SourcePersonCandidateDto(
+    @field:Json(name = "id") val id: String,
+    @field:Json(name = "source_type") val sourceType: String,
+    @field:Json(name = "source_ref") val sourceRef: String,
+    @field:Json(name = "candidate_ref") val candidateRef: String,
+    @field:Json(name = "role") val role: String,
+    @field:Json(name = "name") val name: String? = null,
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "phone") val phone: String? = null,
+    @field:Json(name = "organization") val organization: String? = null,
+    @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
+    @field:Json(name = "created_at") val createdAt: Instant,
+)
+
+/**
+ * Paginated response for GET /v1/source_person_candidates.
+ *
+ * Mirrored into Room so all source types feed the same PersonInteractionIndexWorker.
+ */
+@JsonClass(generateAdapter = true)
+public data class SourcePersonCandidatesResponse(
+    @field:Json(name = "data") val data: List<SourcePersonCandidateDto>,
+    @field:Json(name = "cursor") val cursor: String,
+    @field:Json(name = "has_more") val hasMore: Boolean,
+)
+
+/**
  * Response body for a successful POST /v1/raw_ingestion_events:batch (HTTP 200).
  *
  * Wire format (api-contract.yml):
