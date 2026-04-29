@@ -14,7 +14,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -62,7 +61,7 @@ public fun OutlookMailOAuthScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var pendingOAuthResumeRefresh by rememberSaveable { mutableStateOf(false) }
+    var pendingOAuthResumeRefresh by remember { mutableStateOf(false) }
     val downstream = BecalmRoute.OnboardingEmailPipa("imap").path
     val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
