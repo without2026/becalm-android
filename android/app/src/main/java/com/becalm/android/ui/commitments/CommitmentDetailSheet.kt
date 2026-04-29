@@ -271,23 +271,15 @@ internal fun DetailSheetContent(
         }
 
         // 6. Due line
-        val dueAt = entity.dueAt
+        val dueAt = entity.dueAt?.takeUnless { entity.dueIsApproximate }
         if (dueAt != null) {
             SectionLabel(text = stringResource(R.string.commitment_detail_due_label))
             Spacer(modifier = Modifier.height(2.dp))
-            val prefix = if (entity.dueIsApproximate) "~" else ""
             Text(
-                text = prefix + CommitmentDetailFormatter.formatShortKst(dueAt),
+                text = CommitmentDetailFormatter.formatShortKst(dueAt),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            if (entity.dueIsApproximate && !entity.dueHint.isNullOrBlank()) {
-                Text(
-                    text = entity.dueHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             Spacer(modifier = Modifier.height(16.dp))
         }
 

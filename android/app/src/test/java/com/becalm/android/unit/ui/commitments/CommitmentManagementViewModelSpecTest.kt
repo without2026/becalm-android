@@ -188,6 +188,41 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `commitment cards only expose exact due dates`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(
+                    id = "exact",
+                    dueAt = Instant.parse("2026-04-20T03:00:00Z"),
+                    dueIsApproximate = false,
+                    dueHint = "정확한 시간",
+                ),
+                entity(
+                    id = "approx",
+                    dueAt = Instant.parse("2026-04-21T03:00:00Z"),
+                    dueIsApproximate = true,
+                    dueHint = "다음주",
+                ),
+                entity(id = "missing", dueAt = null, dueHint = "언젠가"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+            assertEquals(Instant.parse("2026-04-20T03:00:00Z"), settled.items.single { it.id == "exact" }.dueAt)
+            assertNull(settled.items.single { it.id == "exact" }.dueHint)
+            assertNull(settled.items.single { it.id == "approx" }.dueAt)
+            assertNull(settled.items.single { it.id == "approx" }.dueHint)
+            assertNull(settled.items.single { it.id == "missing" }.dueAt)
+            assertNull(settled.items.single { it.id == "missing" }.dueHint)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-003 card selection emits detail navigation with tapped commitment id`() = runTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -516,6 +551,8 @@ class CommitmentManagementViewModelSpecTest {
         personRef: String? = null,
         counterpartyRaw: String? = null,
         dueAt: Instant? = null,
+        dueIsApproximate: Boolean = false,
+        dueHint: String? = null,
         sourceType: String = "voice",
         sourceEventTitle: String? = null,
         sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T00:00:00Z"),
@@ -536,8 +573,8 @@ class CommitmentManagementViewModelSpecTest {
         sourceEventTitle = sourceEventTitle,
         sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
-        dueHint = null,
-        dueIsApproximate = false,
+        dueHint = dueHint,
+        dueIsApproximate = dueIsApproximate,
         actionState = actionState,
         sourceType = sourceType,
         sourceRef = null,

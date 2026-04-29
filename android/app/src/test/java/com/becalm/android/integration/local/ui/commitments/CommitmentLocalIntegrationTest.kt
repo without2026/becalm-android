@@ -187,12 +187,64 @@ class CommitmentLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `management rows order by exact due date before fallback source time`() = runTest {
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "no-due",
+                    title = "시간 없는 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = null,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T04:00:00Z"),
+                ),
+                commitment(
+                    id = "late-exact",
+                    title = "늦은 정확한 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-25T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T03:00:00Z"),
+                ),
+                commitment(
+                    id = "approx",
+                    title = "대략적인 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-23T01:00:00Z"),
+                    dueIsApproximate = true,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T02:00:00Z"),
+                ),
+                commitment(
+                    id = "early-exact",
+                    title = "빠른 정확한 약속",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
+                ),
+            ),
+        )
+
+        commitmentRepository.observeManagementRowsForUser(USER_ID).test {
+            val rows = awaitItem()
+            assertEquals(
+                listOf("early-exact", "late-exact", "no-due", "approx"),
+                rows.map { it.id },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun commitment(
         id: String,
         title: String,
         actionState: String,
         sourceType: String,
         dueAt: Instant?,
+        dueIsApproximate: Boolean = false,
+        sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T05:00:00Z"),
         createdAt: Instant = Instant.parse("2026-04-18T05:30:00Z"),
         lastEditedAt: Instant? = null,
         quoteDisputedAt: Instant? = null,
@@ -207,10 +259,10 @@ class CommitmentLocalIntegrationTest {
         description = null,
         quote = "quote-$id",
         sourceEventTitle = "source-$id",
-        sourceEventOccurredAt = Instant.parse("2026-04-18T05:00:00Z"),
+        sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
         dueHint = null,
-        dueIsApproximate = false,
+        dueIsApproximate = dueIsApproximate,
         actionState = actionState,
         sourceType = sourceType,
         sourceRef = "ref-$id",

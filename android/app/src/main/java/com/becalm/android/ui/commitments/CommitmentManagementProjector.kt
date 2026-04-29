@@ -52,6 +52,7 @@ internal object CommitmentManagementProjector {
 
     private fun CommitmentManagementRow.toUiRow(): CommitmentRow {
         val state = CommitmentState.fromWire(actionState)
+        val exactDueAt = dueAt?.takeUnless { dueIsApproximate }
         return CommitmentRow(
             id = id,
             itemType = itemType,
@@ -61,13 +62,13 @@ internal object CommitmentManagementProjector {
             decisionStatus = decisionStatus,
             derivedStatus = direction?.let { state.name },
             actionState = state,
-            dueAt = dueAt,
-            dueIsApproximate = dueIsApproximate,
+            dueAt = exactDueAt,
+            dueIsApproximate = false,
             counterpartyDisplayName = counterpartyDisplayName,
             sourceType = sourceType,
             sourceTitle = sourceTitle,
             sourceOccurredAt = sourceOccurredAt,
-            dueHint = dueHint,
+            dueHint = null,
             isManual = sourceType == SourceType.MANUAL,
         )
     }

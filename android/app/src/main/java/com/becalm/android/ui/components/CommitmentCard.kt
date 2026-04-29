@@ -209,8 +209,9 @@ public fun CommitmentCard(
     // [KST] is the canonical business-calendar zone shared with
     // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
     // here.
-    val daysUntil: Int? = remember(dueAt) {
-        daysUntilInKst(dueAt = dueAt, now = Clock.System.now(), zone = KST)
+    val exactDueAt = dueAt?.takeUnless { dueIsApproximate }
+    val daysUntil: Int? = remember(exactDueAt) {
+        daysUntilInKst(dueAt = exactDueAt, now = Clock.System.now(), zone = KST)
     }
     val badge: Pair<String, BecalmStateColors>? = daysUntil?.let { days ->
         val stateColors = when {
@@ -219,7 +220,7 @@ public fun CommitmentCard(
             days >= 4 -> colors.dayBadgeUpcoming
             else -> colors.dayBadgeOverdue // negative = past due
         }
-        val label = formatDayBadgeLabel(days = days, approximate = dueIsApproximate)
+        val label = formatDayBadgeLabel(days = days, approximate = false)
         label to stateColors
     }
 
@@ -312,18 +313,6 @@ public fun CommitmentCard(
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
-
-                val visibleDueHint = dueHint.takeIf {
-                    shouldShowDueHint(dueIsApproximate = dueIsApproximate, dueHint = it)
-                }
-                if (visibleDueHint != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = visibleDueHint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
@@ -462,22 +451,6 @@ internal fun formatDayBadgeLabel(days: Int, approximate: Boolean): String = when
     approximate -> "D~$days"
     else -> "D-$days"
 }
-
-/**
- * Visibility gate for the due-hint auxiliary line on [CommitmentCard].
- *
- * Per commitment-management.spec.yml:9,13 the verbatim due-date expression is
- * only displayed alongside *approximate* deadlines — exact deadlines already
- * carry full information via the D-N badge. Extracted so the gating contract
- * can be asserted as a pure unit test without spinning up a Compose host, and
- * so the card site reads as a single boolean rather than an inline compound
- * expression.
- *
- * @return true iff the hint should render, i.e. the deadline is approximate
- *         AND the hint is a non-blank string.
- */
-internal fun shouldShowDueHint(dueIsApproximate: Boolean, dueHint: String?): Boolean =
-    dueIsApproximate && !dueHint.isNullOrBlank()
 
 /**
  * Pure KST-boundary calculation for the D-N badge. Returns signed day-delta of

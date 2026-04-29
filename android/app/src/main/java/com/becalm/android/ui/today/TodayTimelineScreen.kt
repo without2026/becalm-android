@@ -525,16 +525,6 @@ private fun TimelineCard(
                 CounterpartyText(name = item.counterpartyDisplayName)
             }
             if (!item.isTimed) {
-                item.dueHint?.takeIf { it.isNotBlank() }?.let { hint ->
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = hint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = { onAddDueTime(item.id) },
