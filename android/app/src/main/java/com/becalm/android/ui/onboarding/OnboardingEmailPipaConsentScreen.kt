@@ -19,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,7 +108,7 @@ public fun OnboardingEmailPipaConsentScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var pendingResumeRefreshProvider by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingResumeRefreshProvider by remember { mutableStateOf<String?>(null) }
     val writeFailedCopy = stringResource(R.string.onb_pipa_email_error_write_failed)
     val missingActivityCopy = stringResource(R.string.onb_gmail_error_unknown)
     val imapErrorCopyByCode = imapErrorStringMap(
