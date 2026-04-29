@@ -16,8 +16,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +81,7 @@ public fun GmailOAuthScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var pendingOAuthResumeRefresh by rememberSaveable { mutableStateOf(false) }
     val downstream = BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.OUTLOOK_MAIL.storageKey).path
     val onboardingViewModel = if (eventsOverride == null || onConnect == null || onSkip == null) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
@@ -101,8 +106,8 @@ public fun GmailOAuthScreen(
     }
     val launchPendingIntent = onLaunchPendingIntent ?: { request -> pendingIntentLauncher.launch(request) }
 
-    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
-        if (eventsOverride != null || onboardingViewModel == null) {
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride, pendingOAuthResumeRefresh) {
+        if (!pendingOAuthResumeRefresh || eventsOverride != null || onboardingViewModel == null) {
             onDispose { }
         } else {
             val observer = LifecycleEventObserver { _, event ->
@@ -120,11 +125,15 @@ public fun GmailOAuthScreen(
             .filter { it.provider == EmailPipaProvider.GMAIL }
             .collect { event ->
                 when (event) {
-                    is EmailConnectEvent.Connected -> navigateDownstream()
+                    is EmailConnectEvent.Connected -> {
+                        pendingOAuthResumeRefresh = false
+                        navigateDownstream()
+                    }
                     is EmailConnectEvent.PendingIntentRequired -> {
                         launchPendingIntent(IntentSenderRequest.Builder(event.pendingIntent).build())
                     }
                     is EmailConnectEvent.Failed -> {
+                        pendingOAuthResumeRefresh = false
                         if (event.errorCode != "user_cancelled") {
                             snackbarHostState.showSnackbar(
                                 errorCopyByCode[event.errorCode] ?: errorCopyByCode.getValue("unknown"),
@@ -146,6 +155,7 @@ public fun GmailOAuthScreen(
                 if (hostActivity == null) {
                     scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
                 } else {
+                    pendingOAuthResumeRefresh = true
                     requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.GMAIL, hostActivity)
                 }
                 Unit

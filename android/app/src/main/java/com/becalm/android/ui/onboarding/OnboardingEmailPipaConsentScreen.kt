@@ -15,8 +15,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -105,6 +109,7 @@ public fun OnboardingEmailPipaConsentScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var pendingResumeRefreshProvider by rememberSaveable { mutableStateOf<String?>(null) }
     val writeFailedCopy = stringResource(R.string.onb_pipa_email_error_write_failed)
     val missingActivityCopy = stringResource(R.string.onb_gmail_error_unknown)
     val imapErrorCopyByCode = imapErrorStringMap(
@@ -137,11 +142,13 @@ public fun OnboardingEmailPipaConsentScreen(
         fallbackFailureCopy = writeFailedCopy,
         snackbarHostState = snackbarHostState,
         navigate = navigate,
+        onEventConsumed = { pendingResumeRefreshProvider = null },
     )
     EmailOAuthResumeRefreshEffect(
         lifecycleOwner = lifecycleOwner,
         viewModel = resolvedViewModel,
         provider = oauthProvider,
+        enabled = pendingResumeRefreshProvider == oauthProvider?.storageKey,
     )
     SecureImapWindowEffect(activity = activity, enabled = copy.connectionTarget == EmailPipaConnectionTarget.Imap)
 
@@ -155,6 +162,9 @@ public fun OnboardingEmailPipaConsentScreen(
                 activity = activity,
                 persistConsent = persistConsent,
                 connectEmailProvider = connectEmailProvider,
+                onOAuthLaunchRequested = {
+                    pendingResumeRefreshProvider = oauthProvider?.storageKey
+                },
                 navigate = navigate,
                 missingActivityCopy = missingActivityCopy,
                 writeFailedCopy = writeFailedCopy,
@@ -185,12 +195,14 @@ private fun EmailConnectionEventsEffect(
     fallbackFailureCopy: String,
     snackbarHostState: SnackbarHostState,
     navigate: (String) -> Unit,
+    onEventConsumed: () -> Unit,
 ) {
     LaunchedEffect(events, copy) {
         val eventFlow = events ?: return@LaunchedEffect
         when (val target = copy.connectionTarget) {
             is EmailPipaConnectionTarget.OAuth -> {
                 eventFlow.filter { it.provider == target.provider }.collect { event ->
+                    onEventConsumed()
                     when (event) {
                         is EmailConnectEvent.Connected -> navigate(copy.skipAheadRoute)
                         is EmailConnectEvent.PendingIntentRequired -> Unit
@@ -221,9 +233,10 @@ private fun EmailOAuthResumeRefreshEffect(
     lifecycleOwner: LifecycleOwner,
     viewModel: OnboardingViewModel?,
     provider: EmailPipaProvider?,
+    enabled: Boolean,
 ) {
-    DisposableEffect(lifecycleOwner, viewModel, provider) {
-        if (viewModel == null || provider == null) {
+    DisposableEffect(lifecycleOwner, viewModel, provider, enabled) {
+        if (!enabled || viewModel == null || provider == null) {
             return@DisposableEffect onDispose { }
         }
         val observer = LifecycleEventObserver { _, event ->
@@ -258,6 +271,7 @@ private fun OAuthEmailConsentConnectContent(
     activity: Activity?,
     persistConsent: suspend (List<EmailPipaProvider>, Boolean) -> Boolean,
     connectEmailProvider: (EmailPipaProvider, Activity) -> Unit,
+    onOAuthLaunchRequested: () -> Unit,
     navigate: (String) -> Unit,
     missingActivityCopy: String,
     writeFailedCopy: String,
@@ -274,7 +288,10 @@ private fun OAuthEmailConsentConnectContent(
                 when {
                     !ok -> snackbarHostState.showSnackbar(writeFailedCopy)
                     activity == null -> snackbarHostState.showSnackbar(missingActivityCopy)
-                    else -> connectEmailProvider(provider, activity)
+                    else -> {
+                        onOAuthLaunchRequested()
+                        connectEmailProvider(provider, activity)
+                    }
                 }
             }
         },

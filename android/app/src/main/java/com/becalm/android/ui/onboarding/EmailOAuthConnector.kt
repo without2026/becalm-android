@@ -13,7 +13,6 @@ import com.squareup.moshi.Moshi
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
-import kotlinx.coroutines.delay
 
 /**
  * Thin production seam for backend-managed mail OAuth launches.
@@ -45,19 +44,7 @@ public class EmailOAuthConnector @Inject constructor(
             return EmailOAuthResult.Failed(errorCode = "browser_unavailable")
         }
 
-        repeat(POLL_ATTEMPTS) {
-            delay(POLL_INTERVAL_MILLIS)
-            when (val status = refreshConnectionStatus(provider)) {
-                EmailOAuthResult.Connected -> return EmailOAuthResult.Connected
-                EmailOAuthResult.NotConnected -> return@repeat
-                is EmailOAuthResult.Failed -> {
-                    logger.w(TAG, "mail OAuth status poll failed error=${status.errorCode}")
-                    return@repeat
-                }
-            }
-        }
-
-        return EmailOAuthResult.Failed(errorCode = "oauth_timeout")
+        return EmailOAuthResult.NotConnected
     }
 
     /**
@@ -91,8 +78,6 @@ public class EmailOAuthConnector @Inject constructor(
 
     private companion object {
         private const val TAG = "EmailOAuthConnector"
-        private const val POLL_INTERVAL_MILLIS: Long = 2_000L
-        private const val POLL_ATTEMPTS: Int = 60
     }
 }
 
