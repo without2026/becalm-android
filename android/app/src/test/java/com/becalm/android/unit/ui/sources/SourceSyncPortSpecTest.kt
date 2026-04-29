@@ -10,6 +10,8 @@ import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourcePersonCandidateRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.DefaultSourceSyncPort
 import com.becalm.android.worker.WorkScheduler
@@ -29,6 +31,8 @@ class SourceSyncPortSpecTest {
     private val api: RailwayApi = mockk()
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val commitmentRepository: CommitmentRepository = mockk()
+    private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val sourcePersonCandidateRepository: SourcePersonCandidateRepository = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -38,6 +42,8 @@ class SourceSyncPortSpecTest {
         apiProvider = Provider { api },
         calendarEventRepository = calendarEventRepository,
         commitmentRepository = commitmentRepository,
+        rawIngestionRepository = rawIngestionRepository,
+        sourcePersonCandidateRepository = sourcePersonCandidateRepository,
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = workScheduler,
         logger = logger,
@@ -49,6 +55,24 @@ class SourceSyncPortSpecTest {
         coEvery { api.syncMailSource(provider = SourceType.GMAIL) } returns Response.success(
             MailSyncResponse(synced = 1),
         )
+        coEvery { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
+            BecalmResult.Success(
+                RawIngestionRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "raw-cursor-1",
+                ),
+            )
+        coEvery { sourcePersonCandidateRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
+            BecalmResult.Success(
+                SourcePersonCandidateRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "candidate-cursor-1",
+                ),
+            )
         coEvery { commitmentRepository.refreshSince(userId = "user-1", since = null) } returns
             BecalmResult.Success(
                 CommitmentRepository.RefreshStats(
@@ -64,8 +88,11 @@ class SourceSyncPortSpecTest {
 
         assertTrue(result is BecalmResult.Success)
         coVerify(exactly = 1) { api.syncMailSource(provider = SourceType.GMAIL) }
+        coVerify(exactly = 1) { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
+        coVerify(exactly = 1) { sourcePersonCandidateRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
     @Test
@@ -101,6 +128,7 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { calendarEventRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
     private fun session(): SupabaseSession = SupabaseSession(

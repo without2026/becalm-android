@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
@@ -59,6 +60,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     )
     private val projectionPort = EnrichmentBackedPersonsScreenProjectionPort(
         personEnrichmentRepository = enrichmentRepository,
+        personIndexDao = db.personIndexDao(),
         rawIngestionRepository = rawIngestionRepository,
         sourceStatusRepository = sourceStatusRepository,
     )
@@ -139,6 +141,22 @@ class PersonsScreenStateSourceLocalIntegrationTest {
                         actionState = "completed",
                         sourceType = SourceType.GMAIL,
                         sourceEventOccurredAt = Instant.parse("2026-04-23T02:00:00Z"),
+                    ),
+                ),
+            )
+            db.personIndexDao().upsertUnmatchedInteractions(
+                listOf(
+                    UnmatchedPersonInteractionEntity(
+                        id = "raw-unassigned",
+                        userId = USER_ID,
+                        sourceType = SourceType.OUTLOOK_MAIL,
+                        sourceRef = "raw:raw-unassigned",
+                        interactionKind = "email",
+                        title = "No counterparty",
+                        snippet = null,
+                        suggestedLabel = null,
+                        occurredAt = Instant.parse("2026-04-23T01:00:00Z"),
+                        createdAt = Instant.parse("2026-04-23T01:00:00Z"),
                     ),
                 ),
             )

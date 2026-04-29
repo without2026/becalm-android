@@ -4,10 +4,13 @@ import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonIdentityEntity
+import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 
 internal object PersonDetailProjector {
     private const val ACTION_STATE_COMPLETED: String = "completed"
+    private const val ACTION_STATE_CANCELLED: String = "cancelled"
     private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
 
     fun buildState(
@@ -38,6 +41,55 @@ internal object PersonDetailProjector {
             pendingCommitments = sections.pendingCommitments,
             completedCommitments = sections.completedCommitments,
             interactionHistory = sections.interactionHistory,
+            loading = false,
+            error = null,
+        )
+    }
+
+    fun buildIndexedState(
+        personId: String,
+        identities: List<PersonIdentityEntity>,
+        enrichmentRows: List<PersonEnrichmentEntity>,
+        interactions: List<PersonInteractionEntity>,
+        completedExpanded: Boolean,
+    ): PersonDetailUiState {
+        val enrichment = findEnrichment(identities, enrichmentRows)
+        val displayFallback = identities.firstOrNull { !it.displayNameHint.isNullOrBlank() }?.displayNameHint
+            ?: identities.firstOrNull()?.rawValue
+            ?: personId
+        val commitmentRows = interactions
+            .filter { it.interactionKind == "commitment" }
+            .map(::toIndexedCommitmentRow)
+        val (completed, pending) = commitmentRows.partition { row ->
+            row.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true) ||
+                row.actionState.equals(ACTION_STATE_CANCELLED, ignoreCase = true)
+        }
+        val history = interactions
+            .filterNot { it.interactionKind == "commitment" }
+            .map(::toIndexedHistoryRow)
+            .sortedByDescending { row ->
+                when (row) {
+                    is InteractionRow.Event -> row.timestamp
+                    is InteractionRow.CalendarMeeting -> row.timestamp
+                    is InteractionRow.Commitment -> row.timestamp
+                }
+            }
+        return PersonDetailUiState(
+            personRef = personId,
+            displayName = enrichment?.displayName ?: enrichment?.nickname ?: displayFallback,
+            nickname = enrichment?.nickname,
+            companyName = enrichment?.company,
+            jobTitle = enrichment?.title,
+            eventCount = interactions.count { it.interactionKind != "commitment" },
+            emailInteractionCount = interactions.count { it.interactionKind == "email" },
+            callInteractionCount = interactions.count { it.interactionKind == "call" },
+            meetingCount = interactions.count { it.interactionKind == "calendar" },
+            pendingCommitmentCount = pending.size,
+            channelSources = interactions.map { it.sourceType }.toSet(),
+            completedExpanded = completedExpanded,
+            pendingCommitments = pending.sortedByDescending { it.timestamp },
+            completedCommitments = completed.sortedByDescending { it.timestamp },
+            interactionHistory = history,
             loading = false,
             error = null,
         )
@@ -96,6 +148,46 @@ internal object PersonDetailProjector {
             timestamp = meeting.startAt,
             title = meeting.title,
         )
+
+    private fun toIndexedCommitmentRow(interaction: PersonInteractionEntity): InteractionRow.Commitment =
+        InteractionRow.Commitment(
+            timestamp = interaction.occurredAt,
+            title = interaction.title.orEmpty(),
+            itemType = interaction.role,
+            direction = interaction.direction,
+            actionState = interaction.status,
+            scheduleStatus = interaction.status.takeIf { interaction.role == CommitmentItemType.SCHEDULE },
+            decisionStatus = interaction.status.takeIf { interaction.role == CommitmentItemType.DECISION },
+        )
+
+    private fun toIndexedHistoryRow(interaction: PersonInteractionEntity): InteractionRow =
+        if (interaction.interactionKind == "calendar") {
+            InteractionRow.CalendarMeeting(
+                timestamp = interaction.occurredAt,
+                title = interaction.title.orEmpty(),
+            )
+        } else {
+            InteractionRow.Event(
+                id = interaction.sourceRef.removePrefix("raw:"),
+                timestamp = interaction.occurredAt,
+                source = interaction.sourceType,
+                summary = interaction.title,
+                snippet = interaction.snippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
+                commitmentsExtractedCount = 0,
+            )
+        }
+
+    private fun findEnrichment(
+        identities: List<PersonIdentityEntity>,
+        enrichmentRows: List<PersonEnrichmentEntity>,
+    ): PersonEnrichmentEntity? {
+        if (identities.isEmpty() || enrichmentRows.isEmpty()) return null
+        val enrichmentByRef = enrichmentRows.associateBy { it.personRef }
+        return identities.firstNotNullOfOrNull { identity ->
+            enrichmentByRef[identity.rawValue]
+                ?: enrichmentByRef[identity.identityKey.substringAfter(':', identity.identityKey)]
+        }
+    }
 
     private fun String.isEmailSource(): Boolean =
         equals("gmail", ignoreCase = true) ||

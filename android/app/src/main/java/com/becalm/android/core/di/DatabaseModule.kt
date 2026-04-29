@@ -6,6 +6,7 @@ import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import dagger.Module
@@ -87,6 +88,13 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): PersonEnrichmentDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::personEnrichmentDao)
+
+    /** Provides a lazy [PersonIndexDao] proxy backed by the current user-scoped DB. */
+    @Provides
+    public fun providePersonIndexDao(
+        provider: BeCalmDatabaseProvider,
+    ): PersonIndexDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::personIndexDao)
 
     /**
      * Provides the room-only [EmailBodyDao] from the singleton [BeCalmDatabase].

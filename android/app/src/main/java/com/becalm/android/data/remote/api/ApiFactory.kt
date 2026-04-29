@@ -12,6 +12,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
+import okhttp3.Dispatcher
 
 /**
  * Pure factory object for constructing the Retrofit + OkHttp network stack.
@@ -59,6 +60,12 @@ public object ApiFactory {
         }
 
         return OkHttpClient.Builder()
+            .dispatcher(
+                Dispatcher().apply {
+                    maxRequests = MAX_PARALLEL_REQUESTS
+                    maxRequestsPerHost = MAX_PARALLEL_REQUESTS_PER_HOST
+                },
+            )
             .connectTimeout(timeouts.connectSeconds, TimeUnit.SECONDS)
             .readTimeout(timeouts.readSeconds, TimeUnit.SECONDS)
             .writeTimeout(timeouts.writeSeconds, TimeUnit.SECONDS)
@@ -108,4 +115,7 @@ public object ApiFactory {
      */
     public fun createVoiceApi(retrofit: Retrofit): VoiceApi =
         retrofit.create(VoiceApi::class.java)
+
+    private const val MAX_PARALLEL_REQUESTS = 8
+    private const val MAX_PARALLEL_REQUESTS_PER_HOST = 4
 }

@@ -12,6 +12,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
@@ -91,6 +92,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
+    private val personIndexDaoProvider: Provider<PersonIndexDao>,
     private val voiceApiProvider: Provider<VoiceApi>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
@@ -108,6 +110,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         workerParams: WorkerParameters,
         rawIngestionEventDao: RawIngestionEventDao,
         commitmentDao: CommitmentDao,
+        personIndexDao: PersonIndexDao,
         voiceApi: VoiceApi,
         userPrefsStore: UserPrefsStore,
         sourceStatusRepository: SourceStatusRepository,
@@ -123,6 +126,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         workerParams = workerParams,
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
+        personIndexDaoProvider = Provider { personIndexDao },
         voiceApiProvider = Provider { voiceApi },
         userPrefsStore = userPrefsStore,
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
@@ -140,6 +144,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     private val commitmentDao: CommitmentDao
         get() = commitmentDaoProvider.get()
+
+    private val personIndexDao: PersonIndexDao
+        get() = personIndexDaoProvider.get()
 
     private val voiceApi: VoiceApi
         get() = voiceApiProvider.get()
@@ -269,6 +276,18 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 if (commitmentEntities.isNotEmpty()) {
                     commitmentDao.insertAll(commitmentEntities)
                 }
+                val candidateEntities = body.personCandidates.mapIndexed { index, dto ->
+                    dto.toSourcePersonCandidateEntity(
+                        userId = userId,
+                        sourceType = entity.sourceType,
+                        sourceRef = "raw:$rawEventId",
+                        index = index,
+                        now = now,
+                    )
+                }
+                if (candidateEntities.isNotEmpty()) {
+                    personIndexDao.upsertCandidates(candidateEntities)
+                }
 
                 // Update raw event metadata:
                 // - commitmentsExtractedCount now mirrors the persisted trackable-item count.
@@ -283,6 +302,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
                 sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
                 processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
+                workScheduler.enqueuePersonInteractionIndex()
                 logger.d(
                     TAG,
                     "upload success id=${redact(rawEventId)} items=${body.items.size}",

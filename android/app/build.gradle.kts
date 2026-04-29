@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // Load local.properties for BuildConfig secrets.
@@ -70,11 +71,16 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -117,6 +123,18 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    lint {
+        // AGP 8.7.3 + Kotlin 2.1.x crashes this detector in lintVitalRelease with:
+        // "Found class KaCallableMemberCall, but interface was expected".
+        // BeCalm does not use MutableLiveData in production UI state, so disabling this
+        // single detector keeps release validation unblocked without weakening ANR checks.
+        disable += "NullSafeMutableLiveData"
+    }
+}
+
+baselineProfile {
+    automaticGenerationDuringBuild = false
 }
 
 ksp {
@@ -208,6 +226,10 @@ dependencies {
 
     // ─── Timber ──────────────────────────────────────────────────────────────
     implementation(libs.timber)
+    implementation(libs.androidx.profileinstaller)
+
+    // ─── Baseline Profile ───────────────────────────────────────────────────
+    baselineProfile(project(":baselineprofile"))
 
     // ─── Compose tooling (debug only) ────────────────────────────────────────
     debugImplementation(libs.androidx.compose.ui.tooling)

@@ -64,6 +64,9 @@ public data class TranscribeExtractResponse(
     /** Extracted structured items from the audio by the LLM. Empty list when none detected. */
     @field:Json(name = "items") val items: List<VoiceExtractItemDto>,
 
+    /** People or organizations mentioned in the audio, emitted by Vertex Gemini. */
+    @field:Json(name = "person_candidates") val personCandidates: List<PersonCandidateDto> = emptyList(),
+
     /** Model identifier used for extraction, e.g. "gemini-2.5-flash". */
     @field:Json(name = "model") val model: String,
 
@@ -146,6 +149,17 @@ public data class VoiceExtractItemDto(
         )
     }
 }
+
+@JsonClass(generateAdapter = true)
+public data class PersonCandidateDto(
+    @field:Json(name = "role") val role: String,
+    @field:Json(name = "name") val name: String? = null,
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "phone") val phone: String? = null,
+    @field:Json(name = "organization") val organization: String? = null,
+    @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
+)
 
 /**
  * Legacy action-projection DTO shared by the current voice compatibility layer and

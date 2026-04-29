@@ -3,6 +3,7 @@ package com.becalm.android.unit.ui.persons
 import androidx.lifecycle.SavedStateHandle
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
@@ -45,6 +46,7 @@ class PersonDetailViewModelSpecTest {
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val commitmentRepository: CommitmentRepository = mockk()
     private val calendarEventRepository: CalendarEventRepository = mockk()
+    private val personIndexDao: PersonIndexDao = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
 
@@ -52,6 +54,9 @@ class PersonDetailViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personIndexDao.observeIdentitiesForPerson(any(), any()) } returns flowOf(emptyList())
+        every { personIndexDao.observeInteractionsForPerson(any(), any(), any()) } returns flowOf(emptyList())
     }
 
     @After
@@ -264,6 +269,9 @@ class PersonDetailViewModelSpecTest {
         every { personEnrichmentRepository.observeByPersonRef(personRef) } returns flow {
             throw IllegalStateException("observe failed")
         }
+        every { personEnrichmentRepository.observeAll() } returns flowOf(emptyList())
+        every { personIndexDao.observeIdentitiesForPerson("user-1", personRef) } returns flowOf(emptyList())
+        every { personIndexDao.observeInteractionsForPerson("user-1", personRef, 150) } returns flowOf(emptyList())
         every { rawIngestionRepository.observeForPerson("user-1", personRef, 100) } returns flowOf(emptyList())
         every { commitmentRepository.observeAllForPerson("user-1", personRef) } returns flowOf(emptyList())
         every { calendarEventRepository.observeForPerson("user-1", personRef, 50) } returns flowOf(emptyList())
@@ -281,6 +289,7 @@ class PersonDetailViewModelSpecTest {
         rawIngestionRepository = rawIngestionRepository,
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
+        personIndexDao = personIndexDao,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_REF to personRef)),
         logger = logger,

@@ -67,6 +67,7 @@ public class UploadWorker @AssistedInject constructor(
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
+    private val workSchedulerProvider: Provider<WorkScheduler>,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -78,6 +79,7 @@ public class UploadWorker @AssistedInject constructor(
         rawIngestionRepository: RawIngestionRepository,
         commitmentRepository: CommitmentRepository,
         sourceStatusRepository: SourceStatusRepository,
+        workScheduler: WorkScheduler,
         processingPauseGate: ProcessingPauseGate,
         logger: Logger,
     ) : this(
@@ -87,6 +89,7 @@ public class UploadWorker @AssistedInject constructor(
         rawIngestionRepositoryProvider = Provider { rawIngestionRepository },
         commitmentRepositoryProvider = Provider { commitmentRepository },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
+        workSchedulerProvider = Provider { workScheduler },
         processingPauseGate = processingPauseGate,
         logger = logger,
     )
@@ -114,6 +117,7 @@ public class UploadWorker @AssistedInject constructor(
                 logger = logger,
             ),
             sourceStatusRepository = sourceStatusRepositoryProvider.get(),
+            workScheduler = workSchedulerProvider.get(),
             logger = logger,
         )
 

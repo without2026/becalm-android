@@ -189,6 +189,7 @@ class ColdSyncLocalIntegrationTest {
         override fun scheduleUploadRedundancy() = Unit
         override fun scheduleBackendMailSync() = Unit
         override fun enqueueEnrichment() = Unit
+        override fun enqueuePersonInteractionIndex(initialDelaySeconds: Long) = Unit
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit

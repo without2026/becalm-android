@@ -12,6 +12,7 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
+import com.becalm.android.worker.WorkScheduler
 import kotlinx.datetime.Instant
 
 internal suspend fun runServerBackedCalendarSync(
@@ -23,6 +24,7 @@ internal suspend fun runServerBackedCalendarSync(
     calendarEventRepository: CalendarEventRepository,
     commitmentRepository: CommitmentRepository,
     sourceStatusRepository: SourceStatusRepository,
+    workScheduler: WorkScheduler,
     processingPauseGate: ProcessingPauseGate,
     clock: Clock,
     logger: Logger,
@@ -161,6 +163,7 @@ internal suspend fun runServerBackedCalendarSync(
     )
 
     sourceStatusRepository.recordSyncSuccess(sourceType, clock.nowInstant())
+    workScheduler.enqueuePersonInteractionIndex()
 
     logger.d(
         tag,

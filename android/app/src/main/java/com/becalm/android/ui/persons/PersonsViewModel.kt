@@ -2,13 +2,20 @@ package com.becalm.android.ui.persons
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.result.safeMessage
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.repository.PersonManualMatchRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -118,9 +125,11 @@ private const val QUERY_DEBOUNCE_MS = 300L
  */
 @HiltViewModel
 public class PersonsViewModel @Inject constructor(
-    userPrefsStore: UserPrefsStore,
+    private val userPrefsStore: UserPrefsStore,
     projectionPort: PersonsScreenProjectionPort,
     private val refreshCoordinator: PersonsRefreshCoordinator,
+    private val manualMatchRepository: PersonManualMatchRepository,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val stateSource = PersonsScreenStateSource(
         userPrefsStore = userPrefsStore,
@@ -164,8 +173,35 @@ public class PersonsViewModel @Inject constructor(
      */
     public fun onPullRefresh() {
         _uiState.update { it.copy(refreshing = true) }
-        val snapshot = refreshCoordinator.refresh()
-        _uiState.update { it.copy(refreshing = false, lastRefreshSnapshot = snapshot) }
+        viewModelScope.launch(ioDispatcher) {
+            val snapshot = refreshCoordinator.refresh()
+            _uiState.update { it.copy(refreshing = false, lastRefreshSnapshot = snapshot) }
+        }
+    }
+
+    public fun onManualMatch(
+        event: UnassignedEventSummary,
+        personAnchor: String,
+        nickname: String,
+    ) {
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = "Sign in required") }
+                return@launch
+            }
+            val result = manualMatchRepository.matchInteraction(
+                userId = userId,
+                sourceType = event.sourceType,
+                sourceRef = event.sourceRef,
+                interactionKind = event.interactionKind,
+                personAnchor = personAnchor,
+                nickname = nickname,
+            )
+            if (result is BecalmResult.Failure) {
+                _uiState.update { it.copy(error = result.error.safeMessage) }
+            }
+        }
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────

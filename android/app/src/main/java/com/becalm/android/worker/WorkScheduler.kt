@@ -56,6 +56,15 @@ public interface WorkScheduler {
      */
     public fun enqueueEnrichment()
 
+    /**
+     * Rebuilds the local person identity/interaction index from current source rows.
+     *
+     * This is coalesced under one stable unique work key. Source sync callers should use the
+     * default debounce so Gmail/calendar/upload bursts collapse into one pass; user-driven
+     * repair flows can pass `0` for immediate feedback.
+     */
+    public fun enqueuePersonInteractionIndex(initialDelaySeconds: Long = PERSON_INDEX_DEBOUNCE_SECONDS)
+
     /** Enrolls the daily periodic contacts enrichment sweep. */
     public fun scheduleEnrichmentSweep()
 
@@ -176,4 +185,8 @@ public interface WorkScheduler {
      * TODO: Remove after Wave N+2 once the upgrade base has drained.
      */
     public fun cleanupLegacyWorkNames()
+
+    public companion object {
+        public const val PERSON_INDEX_DEBOUNCE_SECONDS: Long = 10L
+    }
 }

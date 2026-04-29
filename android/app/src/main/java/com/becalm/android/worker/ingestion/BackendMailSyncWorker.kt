@@ -15,8 +15,11 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourcePersonCandidateRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
+import com.becalm.android.worker.WorkScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
@@ -40,10 +43,13 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val apiProvider: Provider<RailwayApi>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
+    private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
+    private val sourcePersonCandidateRepositoryProvider: Provider<SourcePersonCandidateRepository>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val processingPauseGate: ProcessingPauseGate,
+    private val workScheduler: WorkScheduler,
     private val clock: Clock,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -106,7 +112,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             )
             sourceStatusRepository.recordSyncSuccess(provider.sourceType, clock.nowInstant())
             logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=$synced")
-            refreshCommitments(provider, userId)
+            refreshRawEventsAndCommitments(provider, userId)
         } catch (error: Exception) {
             when (error) {
                 is HttpException -> error.code().toProviderFailure(provider)
@@ -120,7 +126,44 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         }
     }
 
-    private suspend fun refreshCommitments(provider: MailProviderSpec, userId: String): ProviderSyncResult {
+    private suspend fun refreshRawEventsAndCommitments(provider: MailProviderSpec, userId: String): ProviderSyncResult {
+        when (val result = rawIngestionRepositoryProvider.get().refreshSince(userId = userId, sourceType = provider.sourceType, since = null)) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "raw event refresh after mail sync source=${provider.sourceType} " +
+                    "fetched=${result.value.fetched} upserted=${result.value.upserted}",
+            )
+            is BecalmResult.Failure -> {
+                sourceStatusRepository.recordSyncError(
+                    provider.sourceType,
+                    "Raw mail refresh failed",
+                    clock.nowInstant(),
+                )
+                processingStatusRepository.recordError(provider.sourceType, "Raw mail refresh failed")
+                return ProviderSyncResult.RETRY
+            }
+        }
+
+        when (
+            val result = sourcePersonCandidateRepositoryProvider.get()
+                .refreshSince(userId = userId, sourceType = provider.sourceType, since = null)
+        ) {
+            is BecalmResult.Success -> logger.d(
+                TAG,
+                "person candidate refresh after mail sync source=${provider.sourceType} " +
+                    "fetched=${result.value.fetched} upserted=${result.value.upserted}",
+            )
+            is BecalmResult.Failure -> {
+                sourceStatusRepository.recordSyncError(
+                    provider.sourceType,
+                    "Person candidate refresh failed",
+                    clock.nowInstant(),
+                )
+                processingStatusRepository.recordError(provider.sourceType, "Person candidate refresh failed")
+                return ProviderSyncResult.RETRY
+            }
+        }
+
         return when (val result = commitmentRepositoryProvider.get().refreshSince(userId = userId, since = null)) {
             is BecalmResult.Success -> {
                 logger.d(
@@ -128,6 +171,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
                     "commitment refresh after mail sync source=${provider.sourceType} " +
                         "fetched=${result.value.fetched} upserted=${result.value.upserted}",
                 )
+                workScheduler.enqueuePersonInteractionIndex()
                 ProviderSyncResult.SUCCESS
             }
             is BecalmResult.Failure -> {

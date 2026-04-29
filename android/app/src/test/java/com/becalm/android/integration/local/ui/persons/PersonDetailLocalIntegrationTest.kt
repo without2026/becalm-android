@@ -166,6 +166,7 @@ class PersonDetailLocalIntegrationTest {
             rawIngestionRepository = rawIngestionRepository,
             commitmentRepository = commitmentRepository,
             calendarEventRepository = calendarRepository,
+            personIndexDao = db.personIndexDao(),
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_REF to PERSON_REF)),
             logger = logger,

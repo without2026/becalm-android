@@ -59,6 +59,13 @@ public interface RawIngestionEventDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     public suspend fun insertAll(entities: List<RawIngestionEventEntity>): List<Long>
 
+    /**
+     * Replaces backend-owned rows mirrored from Railway. Intended for server-originated
+     * sources such as Gmail / Outlook Mail where the remote row is authoritative.
+     */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertSyncedFromServer(entities: List<RawIngestionEventEntity>): List<Long>
+
     /** Replaces all columns of an existing row matched by primary key. Returns rows updated (0 or 1). */
     @Update
     public suspend fun update(entity: RawIngestionEventEntity): Int

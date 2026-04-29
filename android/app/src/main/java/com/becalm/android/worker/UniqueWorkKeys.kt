@@ -44,6 +44,9 @@ public object UniqueWorkKeys {
     /** Contact enrichment via [com.becalm.android.worker.EnrichmentWorker]. */
     public const val ENRICHMENT: String = "enrichment"
 
+    /** Local person identity/interaction index rebuild. */
+    public const val PERSON_INDEX: String = "person.index"
+
     /** Daily periodic enrichment sweep. */
     public const val ENRICHMENT_PERIODIC: String = "enrichment.periodic"
 
