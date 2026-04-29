@@ -1,6 +1,8 @@
 package com.becalm.android.ui.today
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,11 +30,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -55,6 +61,9 @@ import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Today screen — unified calendar events + due commitments timeline.
@@ -92,6 +101,12 @@ public fun TodayTimelineScreen(
         state = state,
         onOpenSettings = viewModel::onOpenSettings,
         onPullRefresh = viewModel::onPullRefresh,
+        onOpenCommitmentDetail = { commitmentId ->
+            navController.navigate(BecalmRoute.CommitmentDetail(commitmentId).path)
+        },
+        onAddDueTime = { commitmentId ->
+            navController.navigate(BecalmRoute.CommitmentEdit(commitmentId).path)
+        },
     )
 }
 
@@ -107,6 +122,8 @@ public fun TodayTimelineContent(
     state: TodayUiState,
     onOpenSettings: () -> Unit,
     onPullRefresh: () -> Unit,
+    onOpenCommitmentDetail: (String) -> Unit = {},
+    onAddDueTime: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val pullState = rememberPullRefreshState(
@@ -186,6 +203,8 @@ public fun TodayTimelineContent(
                         TimelineList(
                             items = state.timeline,
                             personFocus = state.personFocus,
+                            onOpenCommitmentDetail = onOpenCommitmentDetail,
+                            onAddDueTime = onAddDueTime,
                             contentPadding = PaddingValues(vertical = 4.dp),
                         )
                     }
@@ -234,8 +253,11 @@ private fun SourceStatusAttentionBanner(
 private fun TimelineList(
     items: List<TimelineItem>,
     personFocus: List<TodayPersonFocus>,
+    onOpenCommitmentDetail: (String) -> Unit,
+    onAddDueTime: (String) -> Unit,
     contentPadding: PaddingValues,
 ) {
+    val (timedItems, untimedItems) = remember(items) { items.partition { it.isTimed } }
     LazyColumn(
         contentPadding = contentPadding,
         modifier = Modifier.fillMaxSize(),
@@ -250,8 +272,16 @@ private fun TimelineList(
                 )
             }
         }
+        if (timedItems.isNotEmpty()) {
+            item(key = "today-timed-header") {
+                TimelineSectionHeader(
+                    text = stringResource(R.string.today_timed_section),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
         items(
-            items = items,
+            items = timedItems,
             key = { item ->
                 when (item) {
                     is TimelineItem.Commitment -> "commitment-${item.id}"
@@ -262,12 +292,54 @@ private fun TimelineList(
         ) { item ->
             TimelineItemRow(
                 item = item,
+                onOpenCommitmentDetail = onOpenCommitmentDetail,
+                onAddDueTime = onAddDueTime,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        if (untimedItems.isNotEmpty()) {
+            item(key = "today-untimed-header") {
+                TimelineSectionHeader(
+                    text = stringResource(R.string.today_untimed_section),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+            items(
+                items = untimedItems,
+                key = { item ->
+                    when (item) {
+                        is TimelineItem.Commitment -> "untimed-commitment-${item.id}"
+                        is TimelineItem.CalendarEvent -> "untimed-event-${item.id}"
+                        is TimelineItem.Meeting -> "untimed-meeting-${item.id}"
+                    }
+                },
+            ) { item ->
+                TimelineItemRow(
+                    item = item,
+                    onOpenCommitmentDetail = onOpenCommitmentDetail,
+                    onAddDueTime = onAddDueTime,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun TimelineSectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -341,15 +413,89 @@ private fun TodayPersonFocusRow(person: TodayPersonFocus) {
 @Composable
 private fun TimelineItemRow(
     item: TimelineItem,
+    onOpenCommitmentDetail: (String) -> Unit,
+    onAddDueTime: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    Row(
+        modifier = modifier.heightIn(min = 84.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        TimelineCard(
+            item = item,
+            onOpenCommitmentDetail = onOpenCommitmentDetail,
+            onAddDueTime = onAddDueTime,
+            modifier = Modifier.weight(1f),
+        )
+        TimelineRail()
+        TimelineTimeColumn(item = item)
+    }
+}
+
+@Composable
+private fun TimelineTimeColumn(
+    item: TimelineItem,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = item.timelineAt?.let(::formatKstTime) ?: stringResource(R.string.today_no_due_time),
+        modifier = modifier
+            .width(54.dp)
+            .padding(top = 12.dp, start = 8.dp),
+        style = MaterialTheme.typography.labelMedium,
+        color = if (item.isTimed) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}
+
+@Composable
+private fun TimelineRail(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .glassPanel(MaterialTheme.shapes.medium)
+            .width(18.dp)
+            .heightIn(min = 84.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Box(
+            modifier = Modifier
+                .width(2.dp)
+                .weight(1f)
+                .background(MaterialTheme.colorScheme.outlineVariant),
+        )
+    }
+}
+
+@Composable
+private fun TimelineCard(
+    item: TimelineItem,
+    onOpenCommitmentDetail: (String) -> Unit,
+    onAddDueTime: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cardColor = timelineCardColor(item)
+    val clickModifier = if (item is TimelineItem.Commitment) {
+        Modifier.clickable { onOpenCommitmentDetail(item.id) }
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = modifier
+            .then(clickModifier)
+            .background(cardColor, MaterialTheme.shapes.medium)
+            .border(1.dp, cardColor.copy(alpha = 0.72f), MaterialTheme.shapes.medium)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Text(
-            text = sectionLabelFor(item),
+            text = typeLabelFor(item),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -378,19 +524,68 @@ private fun TimelineItemRow(
                 }
                 CounterpartyText(name = item.counterpartyDisplayName)
             }
+            if (!item.isTimed) {
+                item.dueHint?.takeIf { it.isNotBlank() }?.let { hint ->
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { onAddDueTime(item.id) },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(text = stringResource(R.string.today_add_due_time))
+                }
+            }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        TimestampText(sortKey = item.sortKey)
+        item.timelineAt?.let { TimestampText(sortKey = it) }
     }
 }
 
-/** Returns the localized section header label for [item]. */
 @Composable
-private fun sectionLabelFor(item: TimelineItem): String = when (item) {
-    is TimelineItem.Commitment -> stringResource(R.string.today_section_commitments)
-    is TimelineItem.CalendarEvent -> stringResource(R.string.today_section_events)
-    is TimelineItem.Meeting -> stringResource(R.string.today_section_meetings)
+private fun typeLabelFor(item: TimelineItem): String = when (item) {
+    is TimelineItem.Commitment -> when (item.itemType) {
+        CommitmentItemType.ACTION -> when (item.direction) {
+            "give" -> stringResource(R.string.today_type_action_give)
+            "take" -> stringResource(R.string.today_type_action_take)
+            else -> stringResource(R.string.today_type_action)
+        }
+        CommitmentItemType.SCHEDULE -> stringResource(R.string.today_type_schedule)
+        else -> stringResource(R.string.today_section_commitments)
+    }
+    is TimelineItem.CalendarEvent -> stringResource(R.string.today_type_event)
+    is TimelineItem.Meeting -> stringResource(R.string.today_type_meeting)
 }
+
+@Composable
+private fun timelineCardColor(item: TimelineItem): Color = when (item) {
+    is TimelineItem.Commitment -> when (item.itemType) {
+        CommitmentItemType.SCHEDULE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+        CommitmentItemType.ACTION -> when (item.direction) {
+            "take" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.46f)
+            else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
+        }
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
+    }
+    is TimelineItem.Meeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.32f)
+    is TimelineItem.CalendarEvent -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
+}
+
+private fun formatKstTime(instant: Instant): String {
+    val ldt = instant.toLocalDateTime(KST_ZONE)
+    val hour = ldt.hour.toString().padStart(2, '0')
+    val minute = ldt.minute.toString().padStart(2, '0')
+    return "$hour:$minute"
+}
+
+private val KST_ZONE: TimeZone = TimeZone.of("Asia/Seoul")
 
 @Composable
 private fun scheduleLabel(scheduleStatus: String?): String {

@@ -33,7 +33,9 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
 ) {
     private var lifecycleRegistered: Boolean = false
     private var startupRefreshJob: Job? = null
-    private var recurringWorkScheduled: Boolean = false
+    private var scheduledPeriodicSources: Set<String> = emptySet()
+    private var backendMailScheduled: Boolean = false
+    private var commonRecurringWorkScheduled: Boolean = false
 
     public fun start() {
         registerForegroundCatchUp()
@@ -82,25 +84,36 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         if (hasSignedInUser()) {
             scheduleAuthenticatedRecurringWork()
         } else {
-            recurringWorkScheduled = false
+            scheduledPeriodicSources = emptySet()
+            backendMailScheduled = false
+            commonRecurringWorkScheduled = false
         }
         refreshPermissionManagedRegistrations()
     }
 
     private suspend fun scheduleAuthenticatedRecurringWork() {
-        if (recurringWorkScheduled) {
-            logger.d(TAG, "recurring work already scheduled for this process")
-            return
-        }
         val periodicSources = runtimeSyncSourceResolver.periodicSources()
-        periodicSources.forEach(workScheduler::enqueuePeriodic)
-        if (runtimeSyncSourceResolver.hasBackendMailSource()) {
-            workScheduler.scheduleBackendMailSync()
+        val newlyEnabledPeriodicSources = periodicSources - scheduledPeriodicSources
+        newlyEnabledPeriodicSources.forEach(workScheduler::enqueuePeriodic)
+        if (newlyEnabledPeriodicSources.isEmpty() && scheduledPeriodicSources.isNotEmpty()) {
+            logger.d(TAG, "periodic source work already scheduled for this process")
         }
-        workScheduler.scheduleUploadRedundancy()
-        workScheduler.scheduleRetentionSweep()
-        workScheduler.scheduleOverdueSweep()
-        recurringWorkScheduled = true
+        scheduledPeriodicSources = scheduledPeriodicSources + periodicSources
+
+        val hasBackendMailSource = runtimeSyncSourceResolver.hasBackendMailSource()
+        if (hasBackendMailSource && !backendMailScheduled) {
+            workScheduler.scheduleBackendMailSync()
+            backendMailScheduled = true
+        } else if (hasBackendMailSource) {
+            logger.d(TAG, "backend mail sync already scheduled for this process")
+        }
+
+        if (!commonRecurringWorkScheduled) {
+            workScheduler.scheduleUploadRedundancy()
+            workScheduler.scheduleRetentionSweep()
+            workScheduler.scheduleOverdueSweep()
+            commonRecurringWorkScheduled = true
+        }
     }
 
     private suspend fun refreshPermissionManagedRegistrations() {

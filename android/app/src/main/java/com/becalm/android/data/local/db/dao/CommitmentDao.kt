@@ -18,6 +18,9 @@ public data class TodayCommitmentRow(
     val counterpartyDisplayName: String?,
     val sourceType: String?,
     val sourceRef: String?,
+    val dueAt: Instant?,
+    val dueIsApproximate: Boolean,
+    val dueHint: String?,
     val sortKey: Instant,
 )
 
@@ -518,6 +521,9 @@ public interface CommitmentDao {
                END AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_ref AS sourceRef,
+               c.due_at AS dueAt,
+               c.due_is_approximate AS dueIsApproximate,
+               c.due_hint AS dueHint,
                c.source_event_occurred_at AS sortKey
         FROM commitments AS c
         LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref

@@ -232,6 +232,16 @@
     <string name="today_direction_badge_take">상대가 약속</string>
     <string name="today_direction_badge_unknown">—</string>
     <string name="today_counterparty_unknown">미매칭</string>
+    <string name="today_timed_section">시간순 일정</string>
+    <string name="today_untimed_section">시간 미정</string>
+    <string name="today_no_due_time">시간 없음</string>
+    <string name="today_add_due_time">시간 추가</string>
+    <string name="today_type_action_give">액션 · 내가 할 일</string>
+    <string name="today_type_action_take">액션 · 받을 일</string>
+    <string name="today_type_action">액션</string>
+    <string name="today_type_schedule">일정</string>
+    <string name="today_type_meeting">회의</string>
+    <string name="today_type_event">이벤트</string>
     <string name="today_since_just_now">방금 전</string>
     <string name="today_since_minutes">%1$d분 전</string>
     <string name="today_since_hours">%1$d시간 전</string>

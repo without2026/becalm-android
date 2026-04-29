@@ -56,7 +56,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
     }
 
     @Test
-    fun `backend mail AI candidates are pulled and indexed with commitments for same person`() = runTest {
+    fun `backend mail AI candidates are pulled as references and index source commitments for same person`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.commitmentDao().insertAll(listOf(scheduleCommitment()))
         server.enqueue(
@@ -111,7 +111,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
         val interactions = db.personIndexDao()
             .observeInteractionsForPerson(USER_ID, personId, limit = 10)
             .first()
-        assertTrue(interactions.any { it.interactionKind == "email" && it.sourceRef == "raw:gmail-message-1" })
+        assertTrue(interactions.none { it.interactionKind == "email" && it.sourceRef == "raw:gmail-message-1" })
         assertTrue(
             interactions.any {
                 it.interactionKind == "commitment" &&
@@ -143,8 +143,8 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
             direction = null,
             scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
             decisionStatus = null,
-            counterpartyRaw = CUSTOMER_EMAIL,
-            personRef = CUSTOMER_EMAIL,
+            counterpartyRaw = null,
+            personRef = null,
             title = "데모 미팅 확정",
             description = null,
             quote = "2026년 5월 1일 오전 10시에 데모 미팅을 확정하겠습니다.",

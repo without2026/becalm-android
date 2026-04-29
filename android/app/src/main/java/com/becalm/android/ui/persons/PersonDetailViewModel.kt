@@ -54,6 +54,7 @@ public sealed class InteractionRow {
      */
     public data class Event(
         val id: String,
+        val rawEventId: String? = id,
         val timestamp: Instant,
         val source: String,
         val summary: String?,
@@ -214,6 +215,7 @@ public class PersonDetailViewModel @Inject constructor(
                                         identities = identities,
                                         enrichmentRows = enrichmentRows,
                                         interactions = interactions,
+                                        rawEvents = legacy.rawEvents,
                                         completedExpanded = completedExpanded,
                                     )
                                 } else {

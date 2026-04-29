@@ -4,12 +4,14 @@ import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.observability.ObservabilityClient
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +210,7 @@ public class OnboardingViewModel @Inject constructor(
     private val emailOAuthConnector: EmailOAuthConnector,
     private val calendarOAuthConnector: CalendarOAuthConnector,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
+    private val sourceStatusRepository: SourceStatusRepository,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
@@ -450,6 +454,7 @@ public class OnboardingViewModel @Inject constructor(
         userPrefsStore.setSourceEnabled(provider.sourceType, true)
         onMarkStepStatus(provider.step, StepStatus.COMPLETE)
         appRuntimeSyncCoordinator.refresh()
+        refreshSourceStatusAfterBackendSync(provider.sourceType)
         _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
     }
 
@@ -618,11 +623,22 @@ public class OnboardingViewModel @Inject constructor(
         userPrefsStore.setEmailSourceManagedByBackend(provider, true)
         onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
         appRuntimeSyncCoordinator.refresh()
+        refreshSourceStatusAfterBackendSync(oauthProvider.sourceType)
         observability.captureMessage(
             message = "onboarding_email_connected",
             tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
         )
         _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
+    }
+
+    private suspend fun refreshSourceStatusAfterBackendSync(sourceType: String) {
+        when (sourceStatusRepository.refreshFromServer()) {
+            is BecalmResult.Success -> Unit
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "source_status refresh failed after OAuth connect sourceType=$sourceType")
+                sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
+            }
+        }
     }
 
     // spec: ONB-004 + ING-011 (S6-H)

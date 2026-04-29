@@ -43,9 +43,16 @@ internal fun InteractionHistoryRow(
     modifier: Modifier = Modifier,
 ) {
     val rowModifier = when (row) {
-        is InteractionRow.Event -> modifier
-            .testTag("person-detail-event-${row.id}")
-            .clickable { onEventTap(row.id) }
+        is InteractionRow.Event -> {
+            val rawEventId = row.rawEventId
+            if (rawEventId != null) {
+                modifier
+                    .testTag("person-detail-event-${row.id}")
+                    .clickable { onEventTap(rawEventId) }
+            } else {
+                modifier.testTag("person-detail-event-${row.id}")
+            }
+        }
         else -> modifier
     }
     Column(

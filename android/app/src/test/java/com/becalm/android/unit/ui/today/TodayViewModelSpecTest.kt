@@ -182,6 +182,50 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `today timeline places commitments without exact due time after timed items`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "untimed",
+                    occurredAt = Instant.parse("2026-04-18T00:30:00Z"),
+                    personRef = "lee@corp.com",
+                    dueAt = null,
+                ),
+                commitment(
+                    id = "timed",
+                    occurredAt = Instant.parse("2026-04-18T00:00:00Z"),
+                    personRef = "lee@corp.com",
+                    dueAt = Instant.parse("2026-04-18T02:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(
+                calendarEvent(
+                    id = "meeting",
+                    startAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    attendeesRaw = "lee@corp.com",
+                ),
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertTrue(emission.timeline[0] is TimelineItem.Meeting)
+            assertEquals("timed", (emission.timeline[1] as TimelineItem.Commitment).id)
+            val untimed = emission.timeline[2] as TimelineItem.Commitment
+            assertEquals("untimed", untimed.id)
+            assertEquals(false, untimed.isTimed)
+            assertEquals(null, untimed.timelineAt)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `TDY-002 authenticated empty today state stays crash free and renders no items`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observePendingForToday(any(), any()) } returns flowOf(emptyList())
@@ -583,6 +627,8 @@ class TodayViewModelSpecTest {
         scheduleStatus: String? = null,
         sourceType: String = "voice",
         sourceRef: String? = null,
+        dueAt: Instant? = occurredAt,
+        dueIsApproximate: Boolean = false,
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
@@ -596,9 +642,9 @@ class TodayViewModelSpecTest {
         quote = "quote",
         sourceEventTitle = null,
         sourceEventOccurredAt = occurredAt,
-        dueAt = null,
+        dueAt = dueAt,
         dueHint = null,
-        dueIsApproximate = false,
+        dueIsApproximate = dueIsApproximate,
         actionState = "pending",
         sourceType = sourceType,
         sourceRef = sourceRef,
@@ -625,6 +671,9 @@ class TodayViewModelSpecTest {
                 } ?: commitment.counterpartyRaw?.take(30),
                 sourceType = commitment.sourceType,
                 sourceRef = commitment.sourceRef,
+                dueAt = commitment.dueAt,
+                dueIsApproximate = commitment.dueIsApproximate,
+                dueHint = commitment.dueHint,
                 sortKey = commitment.sourceEventOccurredAt,
             )
         }

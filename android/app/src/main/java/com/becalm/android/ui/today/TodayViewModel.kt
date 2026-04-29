@@ -32,6 +32,8 @@ import javax.inject.Inject
  */
 public sealed class TimelineItem {
     public abstract val sortKey: Instant
+    public abstract val timelineAt: Instant?
+    public abstract val isTimed: Boolean
 
     /** Display title rendered as the row headline by the Today timeline. */
     public abstract val title: String
@@ -50,7 +52,12 @@ public sealed class TimelineItem {
         val direction: String?,
         val scheduleStatus: String?,
         val counterpartyDisplayName: String?,
+        val dueAt: Instant?,
+        val dueIsApproximate: Boolean,
+        val dueHint: String?,
         override val sortKey: Instant,
+        override val timelineAt: Instant?,
+        override val isTimed: Boolean,
     ) : TimelineItem()
 
     /**
@@ -62,6 +69,8 @@ public sealed class TimelineItem {
         val id: String,
         override val title: String,
         override val sortKey: Instant,
+        override val timelineAt: Instant = sortKey,
+        override val isTimed: Boolean = true,
     ) : TimelineItem()
 
     /**
@@ -74,6 +83,8 @@ public sealed class TimelineItem {
         override val title: String,
         val attendeesRaw: String?,
         override val sortKey: Instant,
+        override val timelineAt: Instant = sortKey,
+        override val isTimed: Boolean = true,
     ) : TimelineItem()
 }
 

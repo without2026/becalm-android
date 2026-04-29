@@ -26,8 +26,10 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,8 +46,10 @@ import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.datetime.toInstant
 
 // ─── CommitmentEditSheet ──────────────────────────────────────────────────────
 
@@ -196,6 +200,8 @@ internal fun EditSheetContent(
 ) {
     val scrollState = rememberScrollState()
     var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(
@@ -429,7 +435,10 @@ internal fun EditSheetContent(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onDueAtMillisChange(dateState.selectedDateMillis)
+                        dateState.selectedDateMillis?.let { selectedDateMillis ->
+                            pendingDateMillis = selectedDateMillis
+                            showTimePicker = true
+                        }
                         showDatePicker = false
                     },
                 ) { Text(text = stringResource(R.string.commitment_edit_save)) }
@@ -442,6 +451,53 @@ internal fun EditSheetContent(
         ) {
             DatePicker(state = dateState)
         }
+    }
+
+    // ── Time picker dialog ──
+    if (showTimePicker) {
+        val initialTimeMillis = state.dueAtMillis ?: pendingDateMillis
+        val initialTime = initialTimeMillis?.let {
+            Instant.fromEpochMilliseconds(it).toLocalDateTime(KST_ZONE)
+        }
+        val timeState = rememberTimePickerState(
+            initialHour = initialTime?.hour ?: 9,
+            initialMinute = initialTime?.minute ?: 0,
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = {
+                showTimePicker = false
+                pendingDateMillis = null
+            },
+            title = { Text(text = stringResource(R.string.commitment_edit_field_due_pick)) },
+            text = { TimePicker(state = timeState) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val dateMillis = pendingDateMillis ?: state.dueAtMillis
+                        if (dateMillis != null) {
+                            onDueAtMillisChange(
+                                combinePickerDateAndKstTime(
+                                    dateMillis = dateMillis,
+                                    hour = timeState.hour,
+                                    minute = timeState.minute,
+                                ),
+                            )
+                        }
+                        showTimePicker = false
+                        pendingDateMillis = null
+                    },
+                ) { Text(text = stringResource(R.string.commitment_edit_save)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showTimePicker = false
+                        pendingDateMillis = null
+                    },
+                ) { Text(text = stringResource(R.string.commitment_edit_cancel)) }
+            },
+        )
     }
 
     // ── Soft-delete confirmation ──
@@ -549,6 +605,23 @@ private fun formatKstFromMillis(epochMillis: Long): String {
     val hour = ldt.hour.toString().padStart(2, '0')
     val minute = ldt.minute.toString().padStart(2, '0')
     return "${ldt.year}-$month-$day $hour:$minute KST"
+}
+
+private fun combinePickerDateAndKstTime(
+    dateMillis: Long,
+    hour: Int,
+    minute: Int,
+): Long {
+    val date = Instant.fromEpochMilliseconds(dateMillis)
+        .toLocalDateTime(TimeZone.UTC)
+        .date
+    return LocalDateTime(
+        year = date.year,
+        monthNumber = date.monthNumber,
+        dayOfMonth = date.dayOfMonth,
+        hour = hour,
+        minute = minute,
+    ).toInstant(KST_ZONE).toEpochMilliseconds()
 }
 
 private val KST_ZONE: TimeZone = TimeZone.of("Asia/Seoul")
