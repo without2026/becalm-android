@@ -31,7 +31,12 @@ public class EmailOAuthConnector @Inject constructor(
         provider: EmailOAuthProvider,
         activity: Activity,
     ): EmailOAuthResult {
+        logger.i(TAG, "mail OAuth start request provider=${provider.sourceType}")
         val startResponse = railwayApi.startMailOAuth(provider.sourceType)
+        logger.i(
+            TAG,
+            "mail OAuth start response provider=${provider.sourceType} code=${startResponse.code()} success=${startResponse.isSuccessful}",
+        )
         if (!startResponse.isSuccessful) {
             return EmailOAuthResult.Failed(errorCode = parseErrorCode(startResponse.errorBody()?.string()))
         }
@@ -44,6 +49,7 @@ public class EmailOAuthConnector @Inject constructor(
             return EmailOAuthResult.Failed(errorCode = "browser_unavailable")
         }
 
+        logger.i(TAG, "mail OAuth browser launched provider=${provider.sourceType}")
         return EmailOAuthResult.NotConnected
     }
 
@@ -55,14 +61,25 @@ public class EmailOAuthConnector @Inject constructor(
      * background, so foreground resume must be able to recover a successful connection.
      */
     public suspend fun refreshConnectionStatus(provider: EmailOAuthProvider): EmailOAuthResult {
+        logger.i(TAG, "mail OAuth status request provider=${provider.sourceType}")
         val statusResponse = railwayApi.getMailOAuthStatus(provider.sourceType)
+        logger.i(
+            TAG,
+            "mail OAuth status response provider=${provider.sourceType} code=${statusResponse.code()} success=${statusResponse.isSuccessful}",
+        )
         if (!statusResponse.isSuccessful) {
             return EmailOAuthResult.Failed(errorCode = parseErrorCode(statusResponse.errorBody()?.string()))
         }
         val statusBody = statusResponse.body() ?: return EmailOAuthResult.Failed(errorCode = "oauth_status_empty")
+        logger.i(TAG, "mail OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
         if (!statusBody.connected) return EmailOAuthResult.NotConnected
 
+        logger.i(TAG, "mail OAuth sync request provider=${provider.sourceType}")
         val syncResponse = railwayApi.syncMailSource(provider.sourceType)
+        logger.i(
+            TAG,
+            "mail OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
+        )
         if (!syncResponse.isSuccessful) {
             logger.w(TAG, "mail sync after connect failed code=${syncResponse.code()}")
         }

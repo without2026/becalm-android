@@ -439,9 +439,16 @@ public class OnboardingViewModel @Inject constructor(
      */
     public fun refreshCalendarProviderConnection(provider: CalendarOAuthProvider) {
         viewModelScope.launch {
+            logger.i(TAG, "calendar OAuth resume refresh start provider=${provider.sourceType}")
             when (val result = calendarOAuthConnector.refreshConnectionStatus(provider)) {
-                CalendarOAuthResult.Connected -> markCalendarProviderConnected(provider)
-                CalendarOAuthResult.NotConnected -> Unit
+                CalendarOAuthResult.Connected -> {
+                    logger.i(TAG, "calendar OAuth resume refresh connected provider=${provider.sourceType}")
+                    markCalendarProviderConnected(provider)
+                }
+                CalendarOAuthResult.NotConnected -> logger.i(
+                    TAG,
+                    "calendar OAuth resume refresh not connected provider=${provider.sourceType}",
+                )
                 is CalendarOAuthResult.Failed -> logger.w(
                     TAG,
                     "calendar OAuth status refresh failed provider=${provider.sourceType} error=${result.errorCode}",
@@ -604,9 +611,16 @@ public class OnboardingViewModel @Inject constructor(
             if (!userPrefsStore.observeEmailPipaConsent(provider).first()) {
                 return@launch
             }
+            logger.i(TAG, "email OAuth resume refresh start provider=${provider.storageKey}")
             when (val result = emailOAuthConnector.refreshConnectionStatus(oauthProvider)) {
-                EmailOAuthResult.Connected -> markEmailProviderConnected(provider, oauthProvider)
-                EmailOAuthResult.NotConnected -> Unit
+                EmailOAuthResult.Connected -> {
+                    logger.i(TAG, "email OAuth resume refresh connected provider=${provider.storageKey}")
+                    markEmailProviderConnected(provider, oauthProvider)
+                }
+                EmailOAuthResult.NotConnected -> logger.i(
+                    TAG,
+                    "email OAuth resume refresh not connected provider=${provider.storageKey}",
+                )
                 is EmailOAuthResult.Failed -> logger.w(
                     TAG,
                     "email OAuth status refresh failed provider=${provider.storageKey} error=${result.errorCode}",

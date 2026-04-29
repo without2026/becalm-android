@@ -33,7 +33,12 @@ public class CalendarOAuthConnector @Inject constructor(
         provider: CalendarOAuthProvider,
         activity: Activity,
     ): CalendarOAuthResult {
+        logger.i(TAG, "calendar OAuth start request provider=${provider.sourceType}")
         val startResponse = railwayApi.startCalendarOAuth(provider.sourceType)
+        logger.i(
+            TAG,
+            "calendar OAuth start response provider=${provider.sourceType} code=${startResponse.code()} success=${startResponse.isSuccessful}",
+        )
         if (!startResponse.isSuccessful) {
             return CalendarOAuthResult.Failed(errorCode = parseErrorCode(startResponse.errorBody()?.string()))
         }
@@ -48,6 +53,7 @@ public class CalendarOAuthConnector @Inject constructor(
             return CalendarOAuthResult.Failed(errorCode = "browser_unavailable")
         }
 
+        logger.i(TAG, "calendar OAuth browser launched provider=${provider.sourceType}")
         return CalendarOAuthResult.NotConnected
     }
 
@@ -58,14 +64,25 @@ public class CalendarOAuthConnector @Inject constructor(
      * advance onboarding/settings even if the original polling coroutine was interrupted.
      */
     public suspend fun refreshConnectionStatus(provider: CalendarOAuthProvider): CalendarOAuthResult {
+        logger.i(TAG, "calendar OAuth status request provider=${provider.sourceType}")
         val statusResponse = railwayApi.getCalendarOAuthStatus(provider.sourceType)
+        logger.i(
+            TAG,
+            "calendar OAuth status response provider=${provider.sourceType} code=${statusResponse.code()} success=${statusResponse.isSuccessful}",
+        )
         if (!statusResponse.isSuccessful) {
             return CalendarOAuthResult.Failed(errorCode = parseErrorCode(statusResponse.errorBody()?.string()))
         }
         val statusBody = statusResponse.body() ?: return CalendarOAuthResult.Failed(errorCode = "oauth_status_empty")
+        logger.i(TAG, "calendar OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
         if (!statusBody.connected) return CalendarOAuthResult.NotConnected
 
+        logger.i(TAG, "calendar OAuth sync request provider=${provider.sourceType}")
         val syncResponse = railwayApi.syncCalendarEvents()
+        logger.i(
+            TAG,
+            "calendar OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
+        )
         if (!syncResponse.isSuccessful) {
             logger.w(TAG, "calendar sync after connect failed code=${syncResponse.code()}")
         }
