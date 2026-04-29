@@ -383,6 +383,28 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
+    fun `ONB gmail status refresh success emits connected event for browser callback return`() = runTest {
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
+        coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns EmailOAuthResult.Connected
+        val viewModel = buildViewModel()
+
+        viewModel.emailConnectEvents.test {
+            viewModel.refreshEmailProviderConnection(EmailPipaProvider.GMAIL)
+            advanceUntilIdle()
+
+            assertEquals(EmailPipaProvider.GMAIL, awaitItem().provider)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true) }
+        coVerify(exactly = 1) { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true) }
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
+        )
+    }
+
+    @Test
     fun `ONB outlook oauth failure marks skipped and reports network failure`() = runTest {
         val activity = mockk<android.app.Activity>(relaxed = true)
         coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.OUTLOOK_MAIL) } returns flowOf(true)
@@ -407,6 +429,30 @@ class OnboardingViewModelSpecTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun `calendar status refresh success emits connected event for browser callback return`() = runTest {
+        coEvery {
+            calendarOAuthConnector.refreshConnectionStatus(CalendarOAuthProvider.GOOGLE_CALENDAR)
+        } returns CalendarOAuthResult.Connected
+        val viewModel = buildViewModel()
+
+        viewModel.calendarConnectEvents.test {
+            viewModel.refreshCalendarProviderConnection(CalendarOAuthProvider.GOOGLE_CALENDAR)
+            advanceUntilIdle()
+
+            assertEquals(CalendarOAuthProvider.GOOGLE_CALENDAR, awaitItem().provider)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) {
+            userPrefsStore.setSourceEnabled(CalendarOAuthProvider.GOOGLE_CALENDAR.sourceType, true)
+        }
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GOOGLE_CALENDAR),
+        )
     }
 
     @Test

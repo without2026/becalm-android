@@ -47,22 +47,39 @@ public class EmailOAuthConnector @Inject constructor(
 
         repeat(POLL_ATTEMPTS) {
             delay(POLL_INTERVAL_MILLIS)
-            val statusResponse = railwayApi.getMailOAuthStatus(provider.sourceType)
-            if (!statusResponse.isSuccessful) {
-                logger.w(TAG, "mail OAuth status poll failed code=${statusResponse.code()}")
-                return@repeat
+            when (val status = refreshConnectionStatus(provider)) {
+                EmailOAuthResult.Connected -> return EmailOAuthResult.Connected
+                EmailOAuthResult.NotConnected -> return@repeat
+                is EmailOAuthResult.Failed -> {
+                    logger.w(TAG, "mail OAuth status poll failed error=${status.errorCode}")
+                    return@repeat
+                }
             }
-            val statusBody = statusResponse.body() ?: return@repeat
-            if (!statusBody.connected) return@repeat
-
-            val syncResponse = railwayApi.syncMailSource(provider.sourceType)
-            if (!syncResponse.isSuccessful) {
-                logger.w(TAG, "mail sync after connect failed code=${syncResponse.code()}")
-            }
-            return EmailOAuthResult.Connected
         }
 
         return EmailOAuthResult.Failed(errorCode = "oauth_timeout")
+    }
+
+    /**
+     * Re-checks backend OAuth state without opening the browser.
+     *
+     * This is used when the user returns from the external browser callback. The original
+     * polling coroutine may have been paused, cancelled, or timed out while the app was in
+     * background, so foreground resume must be able to recover a successful connection.
+     */
+    public suspend fun refreshConnectionStatus(provider: EmailOAuthProvider): EmailOAuthResult {
+        val statusResponse = railwayApi.getMailOAuthStatus(provider.sourceType)
+        if (!statusResponse.isSuccessful) {
+            return EmailOAuthResult.Failed(errorCode = parseErrorCode(statusResponse.errorBody()?.string()))
+        }
+        val statusBody = statusResponse.body() ?: return EmailOAuthResult.Failed(errorCode = "oauth_status_empty")
+        if (!statusBody.connected) return EmailOAuthResult.NotConnected
+
+        val syncResponse = railwayApi.syncMailSource(provider.sourceType)
+        if (!syncResponse.isSuccessful) {
+            logger.w(TAG, "mail sync after connect failed code=${syncResponse.code()}")
+        }
+        return EmailOAuthResult.Connected
     }
 
     private fun parseErrorCode(rawBody: String?): String {
@@ -98,6 +115,8 @@ public enum class EmailOAuthProvider(
 
 public sealed interface EmailOAuthResult {
     public data object Connected : EmailOAuthResult
+
+    public data object NotConnected : EmailOAuthResult
 
     public data class Failed(
         val errorCode: String,

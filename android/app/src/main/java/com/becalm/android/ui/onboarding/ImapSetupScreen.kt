@@ -2,6 +2,7 @@ package com.becalm.android.ui.onboarding
 
 import android.view.WindowManager
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -153,6 +154,7 @@ internal fun ImapForm(
     modifier: Modifier = Modifier,
     onSave: (ImapProvider, username: String, appPassword: String) -> Unit,
     onSkip: () -> Unit,
+    header: @Composable ColumnScope.() -> Unit = { ImapFormHeader() },
 ) {
     var selectedProvider: ImapProvider by remember { mutableStateOf(ImapProvider.Naver) }
     var username by remember { mutableStateOf("") }
@@ -167,19 +169,7 @@ internal fun ImapForm(
             .padding(horizontal = 16.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = stringResource(R.string.onb_imap_headline),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.onb_imap_body),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        header()
         Spacer(modifier = Modifier.height(16.dp))
 
         val providers = listOf(ImapProvider.Naver, ImapProvider.Daum)
@@ -245,6 +235,23 @@ internal fun ImapForm(
             modifier = Modifier.testTag("imap-skip"),
         )
     }
+}
+
+@Composable
+internal fun ImapFormHeader() {
+    Text(
+        text = stringResource(R.string.onb_imap_headline),
+        style = MaterialTheme.typography.headlineSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.onb_imap_body),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**

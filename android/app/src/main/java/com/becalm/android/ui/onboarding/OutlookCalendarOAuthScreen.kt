@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -11,6 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
@@ -40,6 +44,7 @@ public fun OutlookCalendarOAuthScreen(
     onNavigateDownstream: (() -> Unit)? = null,
 ) {
     val activity = LocalContext.current as? android.app.Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val downstream = BecalmRoute.OnboardingNotificationPerm.path
@@ -57,6 +62,20 @@ public fun OutlookCalendarOAuthScreen(
         "oauth_timeout" to stringResource(R.string.onb_outlook_cal_error_unknown),
         "unknown" to stringResource(R.string.onb_outlook_cal_error_unknown),
     )
+
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
+        if (eventsOverride != null || onboardingViewModel == null) {
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    onboardingViewModel.refreshCalendarProviderConnection(CalendarOAuthProvider.OUTLOOK_CALENDAR)
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+    }
 
     LaunchedEffect(eventsOverride, onboardingViewModel) {
         (eventsOverride ?: requireNotNull(onboardingViewModel).calendarConnectEvents)
