@@ -92,6 +92,7 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourcePersonCandidateRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
     @Test
@@ -127,6 +128,7 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { calendarEventRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
     private fun session(): SupabaseSession = SupabaseSession(
