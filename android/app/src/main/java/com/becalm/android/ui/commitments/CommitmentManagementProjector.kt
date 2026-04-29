@@ -47,8 +47,17 @@ internal object CommitmentManagementProjector {
             CommitmentFilter.SCHEDULE -> rows.filter { it.itemType == CommitmentItemType.SCHEDULE }
             CommitmentFilter.DECISION -> rows.filter { it.itemType == CommitmentItemType.DECISION }
         }
-        return filtered.map { row -> row.toUiRow() }
+        return filtered
+            .sortedForDisplay()
+            .map { row -> row.toUiRow() }
     }
+
+    private fun List<CommitmentManagementRow>.sortedForDisplay(): List<CommitmentManagementRow> =
+        sortedWith(
+            compareBy<CommitmentManagementRow> { it.dueAt == null || it.dueIsApproximate }
+                .thenBy { it.dueAt }
+                .thenByDescending { it.sourceOccurredAt },
+        )
 
     private fun CommitmentManagementRow.toUiRow(): CommitmentRow {
         val state = CommitmentState.fromWire(actionState)

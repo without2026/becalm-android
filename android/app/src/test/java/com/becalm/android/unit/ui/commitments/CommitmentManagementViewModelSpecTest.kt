@@ -223,6 +223,47 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `commitment rows render nearest exact due date first`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(
+                    id = "no-due",
+                    dueAt = null,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T04:00:00Z"),
+                ),
+                entity(
+                    id = "late-exact",
+                    dueAt = Instant.parse("2026-04-25T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T03:00:00Z"),
+                ),
+                entity(
+                    id = "approx",
+                    dueAt = Instant.parse("2026-04-23T01:00:00Z"),
+                    dueIsApproximate = true,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T02:00:00Z"),
+                ),
+                entity(
+                    id = "early-exact",
+                    dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+            assertEquals(
+                listOf("early-exact", "late-exact", "no-due", "approx"),
+                settled.items.map { it.id },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-003 card selection emits detail navigation with tapped commitment id`() = runTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
