@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -15,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -51,6 +55,7 @@ public fun OutlookMailOAuthScreen(
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
     val activity = LocalContext.current as? Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val downstream = BecalmRoute.OnboardingEmailPipa("imap").path
@@ -73,6 +78,20 @@ public fun OutlookMailOAuthScreen(
         activity?.let { requireNotNull(onboardingViewModel).onConnectEmailProvider(EmailPipaProvider.OUTLOOK_MAIL, it) }
     }
     val launchPendingIntent = onLaunchPendingIntent ?: { request -> pendingIntentLauncher.launch(request) }
+
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
+        if (eventsOverride != null || onboardingViewModel == null) {
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    onboardingViewModel.refreshEmailProviderConnection(EmailPipaProvider.OUTLOOK_MAIL)
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+    }
 
     LaunchedEffect(eventsOverride, onboardingViewModel) {
         (eventsOverride ?: requireNotNull(onboardingViewModel).emailConnectEvents)

@@ -50,7 +50,7 @@ internal object OnboardingProgressResolver {
 
     fun resumeRoute(
         stepStates: Map<OnboardingStep, StepStatus>,
-        emailConsents: Map<EmailPipaProvider, Boolean>,
+        @Suppress("UNUSED_PARAMETER") emailConsents: Map<EmailPipaProvider, Boolean>,
     ): String = when (firstIncompleteStep(stepStates)) {
         OnboardingStep.TERMS -> BecalmRoute.Terms.path
         OnboardingStep.LOGIN -> BecalmRoute.Login.path
@@ -58,24 +58,11 @@ internal object OnboardingProgressResolver {
         OnboardingStep.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
         OnboardingStep.CALL_LOG_MATCHING -> BecalmRoute.OnboardingCallLogMatching.path
         OnboardingStep.CONTACTS_PERM -> BecalmRoute.OnboardingContacts.path
-        OnboardingStep.LINK_GMAIL ->
-            if (emailConsents[EmailPipaProvider.GMAIL] == true) {
-                BecalmRoute.OnboardingGmail.path
-            } else {
-                BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path
-            }
-        OnboardingStep.LINK_OUTLOOK_MAIL ->
-            if (emailConsents[EmailPipaProvider.OUTLOOK_MAIL] == true) {
-                BecalmRoute.OnboardingOutlookMail.path
-            } else {
-                BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.OUTLOOK_MAIL.storageKey).path
-            }
-        OnboardingStep.LINK_IMAP ->
-            if (EmailPipaProvider.IMAP_GROUP.all { emailConsents[it] == true }) {
-                BecalmRoute.OnboardingImap.path
-            } else {
-                BecalmRoute.OnboardingEmailPipa("imap").path
-            }
+        OnboardingStep.LINK_GMAIL -> BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path
+        OnboardingStep.LINK_OUTLOOK_MAIL -> BecalmRoute.OnboardingEmailPipa(
+            EmailPipaProvider.OUTLOOK_MAIL.storageKey,
+        ).path
+        OnboardingStep.LINK_IMAP -> BecalmRoute.OnboardingEmailPipa("imap").path
         OnboardingStep.LINK_GOOGLE_CALENDAR -> BecalmRoute.OnboardingGoogleCalendar.path
         OnboardingStep.LINK_OUTLOOK_CALENDAR -> BecalmRoute.OnboardingOutlookCalendar.path
         OnboardingStep.NOTIFICATION_PERM -> BecalmRoute.OnboardingNotificationPerm.path

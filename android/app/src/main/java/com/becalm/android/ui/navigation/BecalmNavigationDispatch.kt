@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.navigation.NavHostController
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.commitments.CommitmentManagementNavigation
 import com.becalm.android.ui.sources.ContactsSourceDetailEffect
 import com.becalm.android.ui.sources.SourceDetailEffect
@@ -35,9 +36,11 @@ internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEf
             navigate(
                 when (effect.destination) {
                 SourceReconnectDestination.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
-                SourceReconnectDestination.GMAIL -> BecalmRoute.OnboardingGmail.path
-                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.OnboardingOutlookMail.path
-                SourceReconnectDestination.IMAP -> BecalmRoute.OnboardingImap.path
+                SourceReconnectDestination.GMAIL -> BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path
+                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.OnboardingEmailPipa(
+                    EmailPipaProvider.OUTLOOK_MAIL.storageKey,
+                ).path
+                SourceReconnectDestination.IMAP -> BecalmRoute.OnboardingEmailPipa("imap").path
                 SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.OnboardingGoogleCalendar.path
                 SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.OnboardingOutlookCalendar.path
                 },

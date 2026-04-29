@@ -244,6 +244,7 @@ class AuthViewModelSpecTest {
                 "LOGIN" to "GRANTED",
                 "PIPA_CONSENT" to "GRANTED",
                 "RECORDING_FOLDER" to "GRANTED",
+                "CALL_LOG_MATCHING" to "GRANTED",
                 "CONTACTS_PERM" to "DENIED",
             ),
         )
@@ -256,7 +257,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(
                 userId = "user-123",
                 onboardingCompleted = false,
-                onboardingResumeRoute = BecalmRoute.OnboardingGmail.path,
+                onboardingResumeRoute = BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path,
             ),
             viewModel.uiState.value,
         )

@@ -414,11 +414,8 @@ public class OnboardingViewModel @Inject constructor(
     public fun onConnectCalendarProvider(provider: CalendarOAuthProvider, activity: Activity) {
         viewModelScope.launch {
             when (val result = calendarOAuthConnector.startSignIn(provider, activity)) {
-                CalendarOAuthResult.Connected -> {
-                    userPrefsStore.setSourceEnabled(provider.sourceType, true)
-                    onMarkStepStatus(provider.step, StepStatus.COMPLETE)
-                    _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
-                }
+                CalendarOAuthResult.Connected -> markCalendarProviderConnected(provider)
+                CalendarOAuthResult.NotConnected -> Unit
                 is CalendarOAuthResult.Failed -> {
                     reportOnboardingStepFailed(provider.step, result.errorCode)
                     _calendarConnectEvents.emit(
@@ -430,6 +427,30 @@ public class OnboardingViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Recovers backend-managed calendar OAuth completion after returning from the external
+     * browser callback. "Not connected" is ignored because screens call this on every resume.
+     */
+    public fun refreshCalendarProviderConnection(provider: CalendarOAuthProvider) {
+        viewModelScope.launch {
+            when (val result = calendarOAuthConnector.refreshConnectionStatus(provider)) {
+                CalendarOAuthResult.Connected -> markCalendarProviderConnected(provider)
+                CalendarOAuthResult.NotConnected -> Unit
+                is CalendarOAuthResult.Failed -> logger.w(
+                    TAG,
+                    "calendar OAuth status refresh failed provider=${provider.sourceType} error=${result.errorCode}",
+                )
+            }
+        }
+    }
+
+    private suspend fun markCalendarProviderConnected(provider: CalendarOAuthProvider) {
+        userPrefsStore.setSourceEnabled(provider.sourceType, true)
+        onMarkStepStatus(provider.step, StepStatus.COMPLETE)
+        appRuntimeSyncCoordinator.refresh()
+        _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
     }
 
     // spec: ONB-003, ENR-001, ENR-002
@@ -544,16 +565,8 @@ public class OnboardingViewModel @Inject constructor(
                 return@launch
             }
             when (val result = emailOAuthConnector.startSignIn(oauthProvider, activity)) {
-                EmailOAuthResult.Connected -> {
-                    userPrefsStore.setEmailSourceConnected(provider, true)
-                    userPrefsStore.setEmailSourceManagedByBackend(provider, true)
-                    onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
-                    observability.captureMessage(
-                        message = "onboarding_email_connected",
-                        tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
-                    )
-                    _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
-                }
+                EmailOAuthResult.Connected -> markEmailProviderConnected(provider, oauthProvider)
+                EmailOAuthResult.NotConnected -> Unit
                 is EmailOAuthResult.Failed -> {
                     reportOnboardingStepFailed(oauthProvider.step, result.errorCode)
                     _uiState.update {
@@ -564,6 +577,52 @@ public class OnboardingViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Recovers backend-managed email OAuth completion after returning from the external
+     * browser callback. This intentionally does not emit failure events for "not connected"
+     * because screens call it on every resume.
+     */
+    public fun refreshEmailProviderConnection(provider: EmailPipaProvider) {
+        require(provider == EmailPipaProvider.GMAIL || provider == EmailPipaProvider.OUTLOOK_MAIL) {
+            "${provider.storageKey} uses saveImapCredentials(), not refreshEmailProviderConnection()"
+        }
+        viewModelScope.launch {
+            val oauthProvider = when (provider) {
+                EmailPipaProvider.GMAIL -> EmailOAuthProvider.GMAIL
+                EmailPipaProvider.OUTLOOK_MAIL -> EmailOAuthProvider.OUTLOOK_MAIL
+                EmailPipaProvider.NAVER_IMAP,
+                EmailPipaProvider.DAUM_IMAP,
+                -> error("unreachable")
+            }
+            if (!userPrefsStore.observeEmailPipaConsent(provider).first()) {
+                return@launch
+            }
+            when (val result = emailOAuthConnector.refreshConnectionStatus(oauthProvider)) {
+                EmailOAuthResult.Connected -> markEmailProviderConnected(provider, oauthProvider)
+                EmailOAuthResult.NotConnected -> Unit
+                is EmailOAuthResult.Failed -> logger.w(
+                    TAG,
+                    "email OAuth status refresh failed provider=${provider.storageKey} error=${result.errorCode}",
+                )
+            }
+        }
+    }
+
+    private suspend fun markEmailProviderConnected(
+        provider: EmailPipaProvider,
+        oauthProvider: EmailOAuthProvider,
+    ) {
+        userPrefsStore.setEmailSourceConnected(provider, true)
+        userPrefsStore.setEmailSourceManagedByBackend(provider, true)
+        onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
+        appRuntimeSyncCoordinator.refresh()
+        observability.captureMessage(
+            message = "onboarding_email_connected",
+            tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
+        )
+        _emailConnectEvents.emit(EmailConnectEvent.Connected(provider))
     }
 
     // spec: ONB-004 + ING-011 (S6-H)
