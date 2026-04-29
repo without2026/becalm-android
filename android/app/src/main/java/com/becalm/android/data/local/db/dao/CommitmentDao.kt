@@ -486,8 +486,12 @@ public interface CommitmentDao {
     public suspend fun countForUser(userId: String): Int
 
     /**
-     * Emits live action/schedule commitment items for [userId] that are either undated
-     * or due on/before end-of-today in Asia/Seoul.
+     * Emits live action/schedule commitment items for [userId] in the Today timeline.
+     *
+     * Action commitments are included when undated or due on/before end-of-today so
+     * overdue follow-ups remain visible. Schedule commitments are included only when
+     * their due time falls within today's KST day window; older calendar-backed
+     * schedules should not behave like overdue actions.
      *
      * `endOfTodayEpochMs` is an inclusive UTC epoch-millisecond upper bound. The caller
      * must compute it as `Asia/Seoul` 23:59:59.999 converted to UTC epoch ms so that the
@@ -502,6 +506,7 @@ public interface CommitmentDao {
      *
      * @param userId Supabase auth.users UUID of the owning user.
      * @param endOfTodayEpochMs Inclusive upper bound as UTC epoch ms (Asia/Seoul 23:59:59.999).
+     * @param startOfTodayEpochMs Inclusive lower bound as UTC epoch ms (Asia/Seoul 00:00:00.000).
      * @return A [Flow] that emits a list and re-emits on every qualifying table write.
      */
     @Query(
@@ -510,12 +515,20 @@ public interface CommitmentDao {
         WHERE user_id      = :userId
           AND item_type    IN ('action', 'schedule')
           AND action_state = 'pending'
-          AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs)
+          AND (
+              (item_type = 'action' AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs))
+              OR
+              (item_type = 'schedule' AND due_at >= :startOfTodayEpochMs AND due_at <= :endOfTodayEpochMs)
+          )
           AND deleted_at IS NULL
         ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
         """
     )
-    public fun observePendingForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<CommitmentEntity>>
+    public fun observePendingForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long,
+    ): Flow<List<CommitmentEntity>>
 
     @Query(
         """
@@ -539,12 +552,20 @@ public interface CommitmentDao {
         WHERE c.user_id      = :userId
           AND c.item_type    IN ('action', 'schedule')
           AND c.action_state = 'pending'
-          AND (c.due_at IS NULL OR c.due_at <= :endOfTodayEpochMs)
+          AND (
+              (c.item_type = 'action' AND (c.due_at IS NULL OR c.due_at <= :endOfTodayEpochMs))
+              OR
+              (c.item_type = 'schedule' AND c.due_at >= :startOfTodayEpochMs AND c.due_at <= :endOfTodayEpochMs)
+          )
           AND c.deleted_at IS NULL
         ORDER BY c.due_at IS NULL ASC, c.due_at ASC, c.created_at DESC
         """
     )
-    public fun observeTimelineForToday(userId: String, endOfTodayEpochMs: Long): Flow<List<TodayCommitmentRow>>
+    public fun observeTimelineForToday(
+        userId: String,
+        endOfTodayEpochMs: Long,
+        startOfTodayEpochMs: Long,
+    ): Flow<List<TodayCommitmentRow>>
 
     /**
      * Emits all live commitments for [userId] linked to [personRef], ordered by due date

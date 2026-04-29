@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.person.PersonIdentityResolver
 import kotlinx.datetime.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -84,6 +85,17 @@ public interface UserPrefsStore {
 
     /** Persists multiple onboarding step statuses atomically for multi-step branches. */
     public suspend fun setOnboardingStepStatuses(statuses: Map<String, String>)
+
+    /**
+     * Emits user-hidden person refs normalized with [PersonIdentityResolver.normalizeBlockKey].
+     *
+     * Used as a user-scoped safety override for backend filter misses such as no-reply,
+     * notification, merchant, or system sender rows that should not render as people.
+     */
+    public fun observeBlockedPersonRefs(): Flow<Set<String>>
+
+    /** Adds [personRef] to the user-scoped hidden-person set. Repeated calls are idempotent. */
+    public suspend fun blockPersonRef(personRef: String)
 
     /** Emits the epoch-millisecond timestamp when Stage 1 first completed, or null. */
     public fun observeColdSyncStage1CompletedAt(): Flow<Long?>
@@ -545,6 +557,21 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
     }
 
+    override fun observeBlockedPersonRefs(): Flow<Set<String>> =
+        dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map emptySet()
+            decodeStringSet(prefs[userScoped(userId).blockedPersonRefsKey])
+        }
+
+    override suspend fun blockPersonRef(personRef: String) {
+        val normalized = PersonIdentityResolver.normalizeBlockKey(personRef) ?: return
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).blockedPersonRefsKey
+            prefs[key] = encodeStringSet(decodeStringSet(prefs[key]) + normalized)
+        }
+    }
+
     override fun observeColdSyncStage1CompletedAt(): Flow<Long?> =
         observeUserLong { coldSyncStage1CompletedAtKey }
 
@@ -791,6 +818,8 @@ public class UserPrefsStoreImpl @Inject constructor(
             booleanKey("onboarding_completed")
         val onboardingStepStatusesKey: Preferences.Key<String> =
             stringPreferencesKey(namespaced(scopedUserId, "onboarding_step_statuses_v1"))
+        val blockedPersonRefsKey: Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "blocked_person_refs_v1"))
         val coldSyncStage1CompletedAtKey: Preferences.Key<Long> =
             longKey("cold_sync_stage1_completed_at")
         val coldSyncStage1DeferredKey: Preferences.Key<Boolean> =
@@ -867,6 +896,24 @@ public class UserPrefsStoreImpl @Inject constructor(
     private fun encodeStringMap(values: Map<String, String>): String =
         JSONObject().apply {
             values.forEach { (key, value) -> put(key, value) }
+        }.toString()
+
+    private fun decodeStringSet(raw: String?): Set<String> {
+        if (raw.isNullOrBlank()) return emptySet()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildSet {
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index).trim()
+                    if (value.isNotEmpty()) add(value)
+                }
+            }
+        }.getOrDefault(emptySet())
+    }
+
+    private fun encodeStringSet(values: Set<String>): String =
+        JSONArray().apply {
+            values.sorted().forEach(::put)
         }.toString()
 
     private fun decodePipaActionLog(raw: String?): List<PipaActionLogEntry> {

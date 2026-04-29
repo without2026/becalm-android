@@ -17,9 +17,9 @@ import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.SystemClock
+import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
-import com.becalm.android.ui.today.OverallSyncState
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime

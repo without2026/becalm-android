@@ -10,6 +10,8 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
@@ -113,23 +115,6 @@ public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPerson
                 .thenBy { it.displayName ?: "~" },
         )
 }
-
-/**
- * Per-source summary projected into UI-layer values.
- *
- * @param syncing True when the source is in [SourceConnectionStatus.SYNCING].
- * @param statusLabel Human-readable status string for display.
- * @param errorMessage Non-null only when the source is in [SourceConnectionStatus.ERROR].
- * @param lastSyncedAt Wall-clock instant of the most-recently completed successful sync,
- *                     or `null` when no sync has ever finished successfully. Drives the
- *                     TDY-003 synced chip HH:mm label.
- */
-public data class SourceStatusUi(
-    val syncing: Boolean,
-    val statusLabel: String,
-    val errorMessage: String?,
-    val lastSyncedAt: Instant?,
-)
 
 /**
  * Full UI state for the Today screen.

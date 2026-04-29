@@ -4,6 +4,13 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.ui.components.ChipState
+import com.becalm.android.ui.main.CHIP_ORDER
+import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.main.SourceStatusAttention
+import com.becalm.android.ui.main.SourceStatusUi
+import com.becalm.android.ui.main.buildChips
+import com.becalm.android.ui.main.buildSourceStatusAttention
+import com.becalm.android.ui.main.deriveOverallState
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals

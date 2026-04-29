@@ -33,4 +33,31 @@ class PersonIdentityResolverSpecTest {
         assertEquals("name", result.identityType)
         assertFalse(result.verified)
     }
+
+    @Test
+    fun `automated and role mailboxes are not treated as people`() {
+        val blocked = listOf(
+            "noreply@example.com",
+            "no-reply@service.com",
+            "webmaster@example.com",
+            "return@mailer.example",
+            "naverpay@naver.com",
+            "billing@example.com",
+            "support@example.com",
+        )
+
+        blocked.forEach { value ->
+            assertTrue("$value should be automated", PersonIdentityResolver.isLikelyAutomated(value))
+        }
+        assertFalse(PersonIdentityResolver.isLikelyAutomated("alice@example.com"))
+    }
+
+    @Test
+    fun `blocked refs normalize email anchors idempotently`() {
+        val blocked = setOf("noreply@example.com", "강지훈")
+
+        assertTrue(PersonIdentityResolver.isBlocked("No Reply <NOREPLY@example.com>", blocked))
+        assertTrue(PersonIdentityResolver.isBlocked("강지훈", blocked))
+        assertFalse(PersonIdentityResolver.isBlocked("jihun@example.com", blocked))
+    }
 }

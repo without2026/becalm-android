@@ -53,6 +53,10 @@ import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.MainTabHeaderActions
+import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.main.MainTabHeaderState
+import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.launch
@@ -79,10 +83,13 @@ import kotlinx.datetime.toLocalDateTime
 @Composable
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
+    headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
     onOpenCreate: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val pullState = rememberPullRefreshState(
@@ -131,8 +138,10 @@ public fun CommitmentManagementScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         pullState = pullState,
+        headerState = headerState,
         onFilterChange = viewModel::onFilterChange,
         onOpenCreate = onOpenCreate,
+        onOpenSettings = onOpenSettings,
         onOpenDetail = viewModel::onCommitmentSelected,
         onToggleCompletedSection = viewModel::onToggleCompletedSection,
         onToggleCancelledSection = viewModel::onToggleCancelledSection,
@@ -145,8 +154,10 @@ public fun CommitmentManagementScreenContent(
     state: CommitmentUiState,
     snackbarHostState: SnackbarHostState,
     pullState: androidx.compose.material.pullrefresh.PullRefreshState,
+    headerState: MainTabHeaderState = MainTabHeaderState(),
     onFilterChange: (CommitmentFilter) -> Unit,
     onOpenCreate: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     onOpenDetail: (String) -> Unit,
     onToggleCompletedSection: () -> Unit,
     onToggleCancelledSection: () -> Unit,
@@ -155,6 +166,12 @@ public fun CommitmentManagementScreenContent(
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.commitments_title),
+        actions = {
+            MainTabHeaderActions(
+                state = headerState,
+                onOpenSettings = onOpenSettings,
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             // C9 / MAN-001 — Manual add FAB. Navigates to the create sheet with
@@ -178,6 +195,7 @@ public fun CommitmentManagementScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            MainTabStatusHeader(state = headerState)
             FilterChipRow(
                 selectedFilter = state.filter,
                 onFilterSelect = onFilterChange,
@@ -213,7 +231,9 @@ public fun CommitmentManagementScreenContent(
                         )
                         LazyColumn(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("commitment-list"),
                         ) {
                             state.activePersonGroups.forEach { group ->
                                 item(key = "active-group-${group.stableKey}") {

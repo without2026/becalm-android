@@ -191,6 +191,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             TAG,
             "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted",
         )
+        workSchedulerProvider.get().enqueuePersonInteractionIndex()
         Result.success()
     }
 

@@ -19,12 +19,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -47,6 +49,10 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.MainTabHeaderActions
+import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.main.MainTabHeaderState
+import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
@@ -67,8 +73,10 @@ import kotlinx.datetime.toLocalDateTime
 public fun PersonsScreen(
     navController: NavHostController,
     viewModel: PersonsViewModel = hiltViewModel(),
+    headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
 
@@ -79,6 +87,12 @@ public fun PersonsScreen(
         onPersonClick = { personRef ->
             navController.navigate(BecalmRoute.PersonDetail(personRef).path)
         },
+        onBlockPerson = viewModel::onBlockPerson,
+        onOpenUnassigned = {
+            navController.navigate(BecalmRoute.PersonsUnassigned.path)
+        },
+        headerState = headerState,
+        onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
     )
 }
 
@@ -88,11 +102,22 @@ public fun PersonsScreenContent(
     snackbarHostState: SnackbarHostState,
     onQueryChange: (String) -> Unit,
     onPersonClick: (String) -> Unit,
+    onBlockPerson: (PersonRow) -> Unit = {},
+    onOpenUnassigned: () -> Unit = {},
+    headerState: MainTabHeaderState = MainTabHeaderState(),
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val hasUnassignedEvents = state.unassignedEvents.isNotEmpty()
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.persons_title),
+        actions = {
+            MainTabHeaderActions(
+                state = headerState,
+                onOpenSettings = onOpenSettings,
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
@@ -100,8 +125,15 @@ public fun PersonsScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            MainTabStatusHeader(state = headerState)
             if (state.showOfflineBadge) {
                 OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
+            }
+            if (hasUnassignedEvents) {
+                MatchingRequiredBanner(
+                    count = state.unassignedEvents.size,
+                    onClick = onOpenUnassigned,
+                )
             }
             BecalmTextField(
                 value = state.query,
@@ -118,16 +150,25 @@ public fun PersonsScreenContent(
                     }
                 }
                 state.people.isEmpty() -> {
-                    EmptyState(
-                        title = stringResource(R.string.persons_empty_title),
-                        message = stringResource(R.string.persons_empty_message),
-                        icon = Icons.Filled.Person,
-                    )
+                    if (hasUnassignedEvents) {
+                        PersonList(
+                            state = state,
+                            onPersonClick = onPersonClick,
+                            onBlockPerson = onBlockPerson,
+                        )
+                    } else {
+                        EmptyState(
+                            title = stringResource(R.string.persons_empty_title),
+                            message = stringResource(R.string.persons_empty_message),
+                            icon = Icons.Filled.Person,
+                        )
+                    }
                 }
                 else -> {
                     PersonList(
                         state = state,
                         onPersonClick = onPersonClick,
+                        onBlockPerson = onBlockPerson,
                     )
                 }
             }
@@ -136,9 +177,50 @@ public fun PersonsScreenContent(
 }
 
 @Composable
+private fun MatchingRequiredBanner(
+    count: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .glassPanel(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.person_matching_required_banner_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.person_matching_required_banner_body, count),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onClick) {
+            Text(text = stringResource(R.string.person_matching_required_banner_action))
+        }
+    }
+}
+
+@Composable
 private fun PersonList(
     state: PersonsUiState,
     onPersonClick: (String) -> Unit,
+    onBlockPerson: (PersonRow) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -153,6 +235,7 @@ private fun PersonList(
                 titleRes = section.kind.titleRes,
                 people = section.people,
                 onPersonClick = onPersonClick,
+                onBlockPerson = onBlockPerson,
             )
         }
         if (state.unassignedEvents.isNotEmpty()) {
@@ -193,6 +276,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
     titleRes: Int,
     people: List<PersonRow>,
     onPersonClick: (String) -> Unit,
+    onBlockPerson: (PersonRow) -> Unit,
 ) {
     if (people.isEmpty()) return
     item(key = "$key-header") {
@@ -202,6 +286,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
         PersonRowItem(
             person = person,
             onClick = { onPersonClick(person.personRef) },
+            onBlockClick = { onBlockPerson(person) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
@@ -223,6 +308,7 @@ private fun PersonListSectionHeader(text: String) {
 private fun PersonRowItem(
     person: PersonRow,
     onClick: () -> Unit,
+    onBlockClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -262,6 +348,9 @@ private fun PersonRowItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+        TextButton(onClick = onBlockClick) {
+            Text(text = stringResource(R.string.persons_block_person_action))
         }
     }
 }
@@ -420,6 +509,7 @@ private fun PreviewPersonsScreenPopulated() {
                         PersonRowItem(
                             person = person,
                             onClick = {},
+                            onBlockClick = {},
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),

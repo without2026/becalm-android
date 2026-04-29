@@ -1,7 +1,6 @@
 package com.becalm.android
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.becalm.android.ui.navigation.AppDeepLinks
 import com.becalm.android.ui.theme.BecalmTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -25,11 +25,11 @@ import dagger.hilt.android.AndroidEntryPoint
 public class MainActivity : ComponentActivity() {
 
     /**
-     * Holds the most recent incoming commitment deep-link id so the Compose root can
+     * Holds the most recent incoming deep-link route so the Compose root can
      * navigate once the nav graph is initialized. Cleared by the composable after
      * consumption.
      */
-    private val pendingDeepLinkId = androidx.compose.runtime.mutableStateOf<String?>(null)
+    private val pendingDeepLinkRoute = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Swap the launch-time splash theme for the real app theme BEFORE super.onCreate
@@ -38,14 +38,14 @@ public class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        pendingDeepLinkId.value = intent?.let(::parseCommitmentDeepLink)
+        pendingDeepLinkRoute.value = intent?.let(AppDeepLinks::routeFrom)
 
         setContent {
             BecalmTheme {
-                var deepLinkId by remember { pendingDeepLinkId }
+                var deepLinkRoute by remember { pendingDeepLinkRoute }
                 BecalmApp(
-                    pendingCommitmentDeepLinkId = deepLinkId,
-                    onDeepLinkConsumed = { deepLinkId = null },
+                    pendingDeepLinkRoute = deepLinkRoute,
+                    onDeepLinkConsumed = { deepLinkRoute = null },
                 )
             }
         }
@@ -54,18 +54,6 @@ public class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        parseCommitmentDeepLink(intent)?.let { pendingDeepLinkId.value = it }
-    }
-
-    /**
-     * Returns the commitment id embedded in `becalm://commitments/{id}`, or `null` for
-     * any other intent. The last non-blank path segment is treated as the id so a
-     * trailing slash is tolerated.
-     */
-    private fun parseCommitmentDeepLink(intent: Intent): String? {
-        if (intent.action != Intent.ACTION_VIEW) return null
-        val data: Uri = intent.data ?: return null
-        if (data.scheme != "becalm" || data.host != "commitments") return null
-        return data.pathSegments?.lastOrNull { it.isNotBlank() }
+        AppDeepLinks.routeFrom(intent)?.let { pendingDeepLinkRoute.value = it }
     }
 }

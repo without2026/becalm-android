@@ -63,6 +63,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         personIndexDao = db.personIndexDao(),
         rawIngestionRepository = rawIngestionRepository,
         sourceStatusRepository = sourceStatusRepository,
+        userPrefsStore = userPrefsStore,
     )
 
     @Before

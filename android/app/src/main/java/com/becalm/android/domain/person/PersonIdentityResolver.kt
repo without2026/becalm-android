@@ -19,15 +19,77 @@ public object PersonIdentityResolver {
     private val AUTOMATED_EMAIL_LOCALS = setOf(
         "noreply",
         "no-reply",
+        "no_reply",
+        "not-reply",
+        "noresponse",
+        "no-response",
         "do-not-reply",
+        "do_not_reply",
         "donotreply",
         "mailer-daemon",
+        "daemon",
         "postmaster",
+        "hostmaster",
         "notification",
         "notifications",
         "calendar-notification",
+        "alert",
+        "alerts",
+        "newsletter",
+        "news",
+        "digest",
+        "reminder",
+        "invite",
+        "invitation",
+        "bounce",
+        "bounces",
+        "return",
+        "returns",
+        "receipt",
+        "receipts",
+        "order",
+        "orders",
+        "payment",
+        "payments",
+        "invoice",
+        "invoices",
+        "shipping",
+        "tracking",
         "automated",
+        "auto",
         "bot",
+        "robot",
+        "system",
+        "service",
+        "services",
+        "webmaster",
+        "abuse",
+        "security",
+        "support",
+        "help",
+        "info",
+        "sales",
+        "marketing",
+        "billing",
+        "admin",
+        "administrator",
+        "root",
+        "naverpay",
+    )
+    private val AUTOMATED_LOCAL_MARKERS = setOf(
+        "noreply",
+        "no-reply",
+        "no_reply",
+        "donotreply",
+        "do-not-reply",
+        "do_not_reply",
+        "notification",
+        "newsletter",
+        "mailer-daemon",
+        "bounce",
+        "return",
+        "automated",
+        "naverpay",
     )
 
     public fun resolve(userId: String, raw: String?): PersonIdentityResolution? {
@@ -91,13 +153,29 @@ public object PersonIdentityResolver {
             ?.trim()
             ?.takeIf { it.length >= 2 }
 
+    public fun normalizeBlockKey(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+        if (email != null) return email
+        val phone = value.replace(PHONE_CHARS, "")
+            .takeIf { it.length >= 7 && it.any(Char::isDigit) }
+        if (phone != null) return phone
+        return normalizeAlias(value)
+    }
+
+    public fun isBlocked(raw: String?, blockedRefs: Set<String>): Boolean {
+        if (blockedRefs.isEmpty()) return false
+        val key = normalizeBlockKey(raw) ?: return false
+        return key in blockedRefs
+    }
+
     public fun isLikelyAutomated(raw: String?): Boolean {
         val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return false
         val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
         val local = email?.substringBefore('@')
             ?.replace(".", "-")
             ?.replace("_", "-")
-        return local in AUTOMATED_EMAIL_LOCALS || AUTOMATED_EMAIL_LOCALS.any { marker ->
+        return local in AUTOMATED_EMAIL_LOCALS || AUTOMATED_LOCAL_MARKERS.any { marker ->
             local?.contains(marker) == true
         }
     }

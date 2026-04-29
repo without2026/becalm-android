@@ -27,17 +27,14 @@ private val TAB_ROUTES = setOf(
  * Navigation always starts at [BecalmRoute.Splash]; the Splash screen itself
  * handles the onboarding-completed / auth-state routing decision.
  *
- * @param pendingCommitmentDeepLinkId Commitment id parsed from an incoming
- *   `becalm://commitments/{id}` deep link (CMT-008). When non-null, triggers a
- *   navigate to [BecalmRoute.CommitmentDetail] as soon as the nav graph is ready,
- *   then calls [onDeepLinkConsumed] so the parent activity can clear the pending
- *   state and avoid re-navigating on recomposition.
+ * @param pendingDeepLinkRoute Pre-resolved nav route from app-owned deep links such as
+ *   `becalm://commitments/{id}` or `becalm://persons/unassigned`.
  * @param onDeepLinkConsumed Callback invoked once the deep-link navigation has been
- *   dispatched. No-op when [pendingCommitmentDeepLinkId] is null.
+ *   dispatched. No-op when no pending route is present.
  */
 @Composable
 public fun BecalmApp(
-    pendingCommitmentDeepLinkId: String? = null,
+    pendingDeepLinkRoute: String? = null,
     onDeepLinkConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
@@ -54,10 +51,9 @@ public fun BecalmApp(
         }
     }
 
-    LaunchedEffect(pendingCommitmentDeepLinkId) {
-        val id = pendingCommitmentDeepLinkId
-        if (!id.isNullOrBlank()) {
-            navController.navigate(BecalmRoute.CommitmentDetail(id).path)
+    LaunchedEffect(pendingDeepLinkRoute) {
+        if (!pendingDeepLinkRoute.isNullOrBlank()) {
+            navController.navigate(pendingDeepLinkRoute)
             onDeepLinkConsumed()
         }
     }

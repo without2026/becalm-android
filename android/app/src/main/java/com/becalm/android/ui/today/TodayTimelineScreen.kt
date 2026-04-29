@@ -23,11 +23,7 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,8 +50,9 @@ import com.becalm.android.ui.components.CounterpartyText
 import com.becalm.android.ui.components.DirectionBadge
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
-import com.becalm.android.ui.components.OverallSyncIndicator
-import com.becalm.android.ui.components.SourceStatusStrip
+import com.becalm.android.ui.components.MainTabHeaderActions
+import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
@@ -130,27 +127,20 @@ public fun TodayTimelineContent(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
     )
-    val sourceChips = buildChips(state.sourceStatus)
-    val sourceAttention = buildSourceStatusAttention(state.sourceStatus)
+    val headerState = MainTabHeaderState(
+        sourceStatus = state.sourceStatus,
+        overallSyncing = state.overallSyncing,
+        overall = state.overall,
+    )
 
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.today_title),
         actions = {
-            if (state.overallSyncing) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .padding(end = 4.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            IconButton(onClick = onOpenSettings) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = stringResource(R.string.label_settings),
-                )
-            }
+            MainTabHeaderActions(
+                state = headerState,
+                onOpenSettings = onOpenSettings,
+            )
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
@@ -166,13 +156,7 @@ public fun TodayTimelineContent(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            OverallSyncIndicator(state = state.overall)
-            if (sourceAttention.hasWarning) {
-                SourceStatusAttentionBanner(attention = sourceAttention)
-            }
-            if (sourceChips.isNotEmpty()) {
-                SourceStatusStrip(sources = sourceChips)
-            }
+            MainTabStatusHeader(state = headerState)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -218,35 +202,6 @@ public fun TodayTimelineContent(
             }
         }
     }
-}
-
-@Composable
-private fun SourceStatusAttentionBanner(
-    attention: SourceStatusAttention,
-    modifier: Modifier = Modifier,
-) {
-    val text = when {
-        attention.disconnectedCount > 0 && attention.failedCount > 0 ->
-            stringResource(
-                R.string.today_source_attention_mixed_fmt,
-                attention.disconnectedCount,
-                attention.failedCount,
-            )
-        attention.failedCount > 0 ->
-            stringResource(R.string.today_source_attention_failed_fmt, attention.failedCount)
-        else ->
-            stringResource(R.string.today_source_attention_disconnected_fmt, attention.disconnectedCount)
-    }
-    Text(
-        text = text,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.error,
-    )
 }
 
 @Composable

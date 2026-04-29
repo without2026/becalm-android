@@ -5,11 +5,15 @@ package com.becalm.android.integration.local.ui.commitments
 import android.content.Context
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.ui.commitments.CommitmentFilter
@@ -103,8 +107,10 @@ class CommitmentManagementUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
-        composeRule.onNodeWithText("김철수").assertIsDisplayed()
+        composeRule.onAllNodesWithText("김철수").assertCountEquals(2)
+        composeRule.onNodeWithTag("commitment-list").performScrollToNode(hasText("일정 변경"))
         composeRule.onNodeWithText("일정 변경").assertIsDisplayed()
+        composeRule.onNodeWithTag("commitment-list").performScrollToNode(hasText("활성 약속"))
         composeRule.onNodeWithText("활성 약속").performClick()
         composeRule.onNodeWithTag("commitment-fab-add").performClick()
         composeRule.onNodeWithTag("commitment-filter-schedule").performClick()

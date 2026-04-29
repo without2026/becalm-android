@@ -167,6 +167,14 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT COUNT(*) FROM unmatched_person_interactions
+        WHERE user_id = :userId
+        """,
+    )
+    public suspend fun countUnmatchedInteractions(userId: String): Int
+
+    @Query(
+        """
         SELECT
             i.person_id AS personId,
             MAX(idn.display_name_hint) AS displayNameHint,

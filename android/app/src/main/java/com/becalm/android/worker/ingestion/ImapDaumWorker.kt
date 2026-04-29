@@ -212,6 +212,7 @@ public class ImapDaumWorker @AssistedInject constructor(
             sourceType = SourceType.DAUM_IMAP,
             at = Clock.System.now(),
         )
+        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "doWork complete")
         return Result.success()
     }

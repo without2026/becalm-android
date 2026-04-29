@@ -71,18 +71,22 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = {},
                     onPersonClick = {},
+                    onBlockPerson = {},
                 )
             }
         }
 
-        composeRule.onNodeWithTag("persons-list")
-            .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
-        composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
-        composeRule.onNodeWithText("미분류 이벤트").assertExists()
+        composeRule.onNodeWithText(string(R.string.person_matching_required_banner_title)).assertExists()
         composeRule.onNodeWithText(string(R.string.persons_offline_badge_no_sync)).assertIsDisplayed()
         composeRule.onNodeWithText("김철수 · ABC Corp · 팀장").assertExists()
         composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2)).assertExists()
         composeRule.onNodeWithText("계약서 검토 요청").assertExists()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
+        composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
+        composeRule.onNodeWithTag("persons-list")
+            .performScrollToNode(hasText("미분류 이벤트"))
+        composeRule.onNodeWithText("미분류 이벤트").assertExists()
     }
 
     @Test
