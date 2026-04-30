@@ -25,9 +25,11 @@ import androidx.compose.runtime.Stable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.becalm.android.R
 import com.becalm.android.ui.theme.BecalmTheme
 
 // ─── EmptyStateAction ─────────────────────────────────────────────────────────
@@ -131,7 +133,7 @@ public fun ErrorState(
     title: String,
     message: String? = null,
     onRetry: (() -> Unit)? = null,
-    retryLabel: String = "Retry",
+    retryLabel: String = stringResource(R.string.error_state_retry),
     modifier: Modifier = Modifier,
 ) {
     Column(

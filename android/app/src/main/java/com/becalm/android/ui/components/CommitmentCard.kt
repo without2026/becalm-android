@@ -323,7 +323,7 @@ public fun CommitmentCard(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Check,
-                                contentDescription = "Mark done",
+                                contentDescription = stringResource(R.string.commitment_mark_done_action),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
