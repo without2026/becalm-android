@@ -1,5 +1,6 @@
 package com.becalm.android.ui.components
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Group
@@ -11,12 +12,15 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.becalm.android.R
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.becalmColors
+import com.becalm.android.ui.theme.becalmFocusRing
 
 /**
  * Bottom navigation bar for the three main tabs: Today, Persons, Commitments.
@@ -45,9 +49,15 @@ public fun BecalmBottomNavigation(
             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        val todaySource = remember { MutableInteractionSource() }
+        val personsSource = remember { MutableInteractionSource() }
+        val commitmentsSource = remember { MutableInteractionSource() }
+
         NavigationBarItem(
             selected = currentRoute == BecalmRoute.Today.path,
             onClick = { navController.navigateToTab(BecalmRoute.Today.path) },
+            modifier = Modifier.becalmFocusRing(MaterialTheme.shapes.medium, todaySource),
+            interactionSource = todaySource,
             icon = {
                 Icon(
                     imageVector = Icons.Filled.Today,
@@ -61,6 +71,8 @@ public fun BecalmBottomNavigation(
         NavigationBarItem(
             selected = currentRoute == BecalmRoute.Persons.path,
             onClick = { navController.navigateToTab(BecalmRoute.Persons.path) },
+            modifier = Modifier.becalmFocusRing(MaterialTheme.shapes.medium, personsSource),
+            interactionSource = personsSource,
             icon = {
                 Icon(
                     imageVector = Icons.Filled.Group,
@@ -74,6 +86,8 @@ public fun BecalmBottomNavigation(
         NavigationBarItem(
             selected = currentRoute == BecalmRoute.Commitments.path,
             onClick = { navController.navigateToTab(BecalmRoute.Commitments.path) },
+            modifier = Modifier.becalmFocusRing(MaterialTheme.shapes.medium, commitmentsSource),
+            interactionSource = commitmentsSource,
             icon = {
                 Icon(
                     imageVector = Icons.Filled.Checklist,

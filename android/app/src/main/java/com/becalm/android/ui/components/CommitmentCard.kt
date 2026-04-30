@@ -11,9 +11,11 @@ package com.becalm.android.ui.components
 import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,6 +59,7 @@ import com.becalm.android.core.util.KST
 import com.becalm.android.ui.theme.BecalmStateColors
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
+import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Clock
@@ -239,6 +242,8 @@ public fun CommitmentCard(
     val daysUntil: Int? = remember(exactDueAt, kstDayTick) {
         daysUntilInKst(dueAt = exactDueAt, now = Clock.System.now(), zone = KST)
     }
+    val cardInteractionSource = remember { MutableInteractionSource() }
+    val markDoneInteractionSource = remember { MutableInteractionSource() }
     val badge: Pair<String, BecalmStateColors>? = daysUntil?.let { days ->
         val stateColors = when {
             days == 0 -> colors.dayBadgeToday
@@ -263,7 +268,12 @@ public fun CommitmentCard(
                 if (onClick != null) {
                     Modifier
                         .clip(MaterialTheme.shapes.medium)
-                        .clickable(onClick = onClick)
+                        .clickable(
+                            interactionSource = cardInteractionSource,
+                            indication = LocalIndication.current,
+                            onClick = onClick,
+                        )
+                        .becalmFocusRing(MaterialTheme.shapes.medium, cardInteractionSource)
                 } else Modifier
             )
             .semantics(mergeDescendants = true) {
@@ -319,7 +329,10 @@ public fun CommitmentCard(
                         Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
                             onClick = requireNotNull(onMarkDone),
-                            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .becalmFocusRing(MaterialTheme.shapes.small, markDoneInteractionSource),
+                            interactionSource = markDoneInteractionSource,
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Check,

@@ -1,6 +1,7 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,11 +16,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.R
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.buildChips
@@ -35,7 +38,12 @@ public fun MainTabHeaderActions(
     // the app bar) and by [SourceStatusStrip] dots. The action slot stays
     // quiet so the app bar never shows ambient process motion. See DESIGN.md
     // Process-Hidden Rule.
-    IconButton(onClick = onOpenSettings, modifier = modifier) {
+    val source = remember { MutableInteractionSource() }
+    IconButton(
+        onClick = onOpenSettings,
+        modifier = modifier.becalmFocusRing(MaterialTheme.shapes.small, source),
+        interactionSource = source,
+    ) {
         Icon(
             imageVector = Icons.Filled.Settings,
             contentDescription = stringResource(R.string.label_settings),
