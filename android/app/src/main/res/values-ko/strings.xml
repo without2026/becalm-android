@@ -28,6 +28,7 @@
     <string name="error_state_retry">다시 시도</string>
     <string name="commitment_mark_done_action">완료 처리</string>
     <string name="today_source_strip_a11y_label">데이터 소스 상태 표시</string>
+    <string name="action_close">닫기</string>
 
     <!-- Splash -->
     <string name="splash_title">비캄</string>
