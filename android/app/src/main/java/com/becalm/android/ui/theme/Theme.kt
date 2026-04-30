@@ -52,10 +52,15 @@ public fun BecalmTheme(
             typography = BecalmTypography,
             shapes = BecalmShapes,
         ) {
-            // Single shared KST midnight tick for the whole content tree.
-            // See KstClock.kt for why this is hoisted instead of per-card.
+            // Two shared time-tick providers for the whole content tree.
+            // ProvideKstDayTick fires on each KST midnight (CommitmentCard
+            // D-N badge); ProvideMinuteTick fires on each minute boundary
+            // (TimestampText "X분 전" labels). Both are hoisted to one
+            // coroutine each instead of per-consumer LaunchedEffects.
             ProvideKstDayTick {
-                content()
+                ProvideMinuteTick {
+                    content()
+                }
             }
         }
     }

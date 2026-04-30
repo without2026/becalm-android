@@ -9,6 +9,7 @@ import androidx.compose.ui.res.stringResource
 import com.becalm.android.R
 import com.becalm.android.core.util.RelativeSince
 import com.becalm.android.core.util.relativeSinceKst
+import com.becalm.android.ui.theme.LocalMinuteTick
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -38,7 +39,14 @@ public fun TimestampText(
     modifier: Modifier = Modifier,
     clock: Clock = Clock.System,
 ) {
-    val bucket = remember(sortKey) { relativeSinceKst(now = clock.now(), past = sortKey) }
+    // Re-key the bucket on the shared minute tick so "5분 전" rolls forward
+    // to "6분 전" while the row stays on screen across the boundary. One
+    // producer for the whole content tree (BecalmTheme owns it); see
+    // ui/theme/MinuteTick.kt.
+    val minuteTick = LocalMinuteTick.current
+    val bucket = remember(sortKey, minuteTick) {
+        relativeSinceKst(now = clock.now(), past = sortKey)
+    }
     val text = when (bucket) {
         RelativeSince.JustNow -> stringResource(R.string.today_since_just_now)
         is RelativeSince.Minutes -> stringResource(R.string.today_since_minutes, bucket.n)
