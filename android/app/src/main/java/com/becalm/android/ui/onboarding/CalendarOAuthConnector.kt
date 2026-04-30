@@ -8,6 +8,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
 import com.squareup.moshi.Moshi
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -34,7 +35,14 @@ public class CalendarOAuthConnector @Inject constructor(
         activity: Activity,
     ): CalendarOAuthResult {
         logger.i(TAG, "calendar OAuth start request provider=${provider.sourceType}")
-        val startResponse = railwayApi.startCalendarOAuth(provider.sourceType)
+        val startResponse = try {
+            railwayApi.startCalendarOAuth(provider.sourceType)
+        } catch (e: IOException) {
+            // Mirror EmailOAuthConnector — network errors must convert to a Failed
+            // result, never propagate as uncaught exceptions to viewModelScope.
+            logger.w(TAG, "calendar OAuth start network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
+            return CalendarOAuthResult.Failed(errorCode = "network_error")
+        }
         logger.i(
             TAG,
             "calendar OAuth start response provider=${provider.sourceType} code=${startResponse.code()} success=${startResponse.isSuccessful}",
@@ -65,7 +73,12 @@ public class CalendarOAuthConnector @Inject constructor(
      */
     public suspend fun refreshConnectionStatus(provider: CalendarOAuthProvider): CalendarOAuthResult {
         logger.i(TAG, "calendar OAuth status request provider=${provider.sourceType}")
-        val statusResponse = railwayApi.getCalendarOAuthStatus(provider.sourceType)
+        val statusResponse = try {
+            railwayApi.getCalendarOAuthStatus(provider.sourceType)
+        } catch (e: IOException) {
+            logger.w(TAG, "calendar OAuth status network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
+            return CalendarOAuthResult.Failed(errorCode = "network_error")
+        }
         logger.i(
             TAG,
             "calendar OAuth status response provider=${provider.sourceType} code=${statusResponse.code()} success=${statusResponse.isSuccessful}",
@@ -77,14 +90,23 @@ public class CalendarOAuthConnector @Inject constructor(
         logger.i(TAG, "calendar OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
         if (!statusBody.connected) return CalendarOAuthResult.NotConnected
 
+        // Sync is best-effort follow-up data fetch. Network failure here must not
+        // flip the Connected result — the OAuth session itself succeeded.
+        // SocketTimeoutException previously crashed the app on background-resume
+        // because the suspended HTTP/2 stream eventually timed out and the
+        // exception propagated unhandled into viewModelScope.launch.
         logger.i(TAG, "calendar OAuth sync request provider=${provider.sourceType}")
-        val syncResponse = railwayApi.syncCalendarEvents()
-        logger.i(
-            TAG,
-            "calendar OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
-        )
-        if (!syncResponse.isSuccessful) {
-            logger.w(TAG, "calendar sync after connect failed code=${syncResponse.code()}")
+        try {
+            val syncResponse = railwayApi.syncCalendarEvents()
+            logger.i(
+                TAG,
+                "calendar OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
+            )
+            if (!syncResponse.isSuccessful) {
+                logger.w(TAG, "calendar sync after connect failed code=${syncResponse.code()}")
+            }
+        } catch (e: IOException) {
+            logger.w(TAG, "calendar sync after connect network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
         }
         return CalendarOAuthResult.Connected
     }

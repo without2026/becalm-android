@@ -106,16 +106,23 @@ public fun GoogleCalendarOAuthScreen(
     ) { padding ->
         GoogleCalendarOAuthContent(
             modifier = Modifier.padding(padding),
+            connectLoading = pendingOAuthResumeRefresh,
             onConnect = onConnect ?: {
-                val hostActivity = activity
-                if (hostActivity == null) {
-                    scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
-                } else {
-                    pendingOAuthResumeRefresh = true
-                    requireNotNull(onboardingViewModel).onConnectCalendarProvider(
-                        provider = CalendarOAuthProvider.GOOGLE_CALENDAR,
-                        activity = hostActivity,
-                    )
+                // Debounce: ignore taps while OAuth is already in flight (button
+                // also visually disabled via connectLoading). Prevents the same
+                // duplicate-OAuth-call pattern that triggered the Gmail crash on
+                // the email path.
+                if (!pendingOAuthResumeRefresh) {
+                    val hostActivity = activity
+                    if (hostActivity == null) {
+                        scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
+                    } else {
+                        pendingOAuthResumeRefresh = true
+                        requireNotNull(onboardingViewModel).onConnectCalendarProvider(
+                            provider = CalendarOAuthProvider.GOOGLE_CALENDAR,
+                            activity = hostActivity,
+                        )
+                    }
                 }
                 Unit
             },
@@ -133,6 +140,7 @@ internal fun GoogleCalendarOAuthContent(
     onConnect: () -> Unit,
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    connectLoading: Boolean = false,
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
@@ -141,6 +149,7 @@ internal fun GoogleCalendarOAuthContent(
         connectLabel = stringResource(R.string.action_connect),
         onConnect = onConnect,
         onSkip = onSkip,
+        connectLoading = connectLoading,
     )
 }
 

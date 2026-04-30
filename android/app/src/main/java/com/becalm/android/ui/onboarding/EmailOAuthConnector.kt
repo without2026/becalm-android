@@ -10,6 +10,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.squareup.moshi.Moshi
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -32,7 +33,16 @@ public class EmailOAuthConnector @Inject constructor(
         activity: Activity,
     ): EmailOAuthResult {
         logger.i(TAG, "mail OAuth start request provider=${provider.sourceType}")
-        val startResponse = railwayApi.startMailOAuth(provider.sourceType)
+        val startResponse = try {
+            railwayApi.startMailOAuth(provider.sourceType)
+        } catch (e: IOException) {
+            // Network failure (SocketTimeoutException, UnknownHostException, etc.)
+            // must not propagate to the caller's coroutine — viewModelScope.launch
+            // does not catch and the app crashes on the main thread. Convert to
+            // a Failed result so the calling ViewModel can surface a Snackbar.
+            logger.w(TAG, "mail OAuth start network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
+            return EmailOAuthResult.Failed(errorCode = "network_error")
+        }
         logger.i(
             TAG,
             "mail OAuth start response provider=${provider.sourceType} code=${startResponse.code()} success=${startResponse.isSuccessful}",
@@ -62,7 +72,12 @@ public class EmailOAuthConnector @Inject constructor(
      */
     public suspend fun refreshConnectionStatus(provider: EmailOAuthProvider): EmailOAuthResult {
         logger.i(TAG, "mail OAuth status request provider=${provider.sourceType}")
-        val statusResponse = railwayApi.getMailOAuthStatus(provider.sourceType)
+        val statusResponse = try {
+            railwayApi.getMailOAuthStatus(provider.sourceType)
+        } catch (e: IOException) {
+            logger.w(TAG, "mail OAuth status network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
+            return EmailOAuthResult.Failed(errorCode = "network_error")
+        }
         logger.i(
             TAG,
             "mail OAuth status response provider=${provider.sourceType} code=${statusResponse.code()} success=${statusResponse.isSuccessful}",
@@ -74,14 +89,25 @@ public class EmailOAuthConnector @Inject constructor(
         logger.i(TAG, "mail OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
         if (!statusBody.connected) return EmailOAuthResult.NotConnected
 
+        // Sync is a best-effort follow-up to fetch initial mail history. A network
+        // error here must not flip the result to Failed because the connection
+        // itself is already established (statusBody.connected == true).
+        // SocketTimeoutException previously crashed the app on background-resume:
+        // the original sync POST sat in a paused HTTP/2 stream while the user was
+        // in the OAuth browser, then the read timed out 90s later and the
+        // exception propagated unhandled into viewModelScope.launch.
         logger.i(TAG, "mail OAuth sync request provider=${provider.sourceType}")
-        val syncResponse = railwayApi.syncMailSource(provider.sourceType)
-        logger.i(
-            TAG,
-            "mail OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
-        )
-        if (!syncResponse.isSuccessful) {
-            logger.w(TAG, "mail sync after connect failed code=${syncResponse.code()}")
+        try {
+            val syncResponse = railwayApi.syncMailSource(provider.sourceType)
+            logger.i(
+                TAG,
+                "mail OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
+            )
+            if (!syncResponse.isSuccessful) {
+                logger.w(TAG, "mail sync after connect failed code=${syncResponse.code()}")
+            }
+        } catch (e: IOException) {
+            logger.w(TAG, "mail sync after connect network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
         }
         return EmailOAuthResult.Connected
     }

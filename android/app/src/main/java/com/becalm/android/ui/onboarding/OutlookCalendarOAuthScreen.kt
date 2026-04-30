@@ -106,16 +106,19 @@ public fun OutlookCalendarOAuthScreen(
     ) { padding ->
         OutlookCalendarOAuthContent(
             modifier = Modifier.padding(padding),
+            connectLoading = pendingOAuthResumeRefresh,
             onConnect = onConnect ?: {
-                val hostActivity = activity
-                if (hostActivity == null) {
-                    scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
-                } else {
-                    pendingOAuthResumeRefresh = true
-                    requireNotNull(onboardingViewModel).onConnectCalendarProvider(
-                        provider = CalendarOAuthProvider.OUTLOOK_CALENDAR,
-                        activity = hostActivity,
-                    )
+                if (!pendingOAuthResumeRefresh) {
+                    val hostActivity = activity
+                    if (hostActivity == null) {
+                        scope.launch { snackbarHostState.showSnackbar(errorCopyByCode.getValue("unknown")) }
+                    } else {
+                        pendingOAuthResumeRefresh = true
+                        requireNotNull(onboardingViewModel).onConnectCalendarProvider(
+                            provider = CalendarOAuthProvider.OUTLOOK_CALENDAR,
+                            activity = hostActivity,
+                        )
+                    }
                 }
                 Unit
             },
@@ -133,6 +136,7 @@ internal fun OutlookCalendarOAuthContent(
     onConnect: () -> Unit,
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    connectLoading: Boolean = false,
 ) {
     OAuthPlaceholderContent(
         modifier = modifier,
@@ -141,6 +145,7 @@ internal fun OutlookCalendarOAuthContent(
         connectLabel = stringResource(R.string.action_connect),
         onConnect = onConnect,
         onSkip = onSkip,
+        connectLoading = connectLoading,
     )
 }
 
