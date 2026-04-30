@@ -10,7 +10,14 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -49,4 +56,32 @@ public fun SkeletonBlock(
         modifier = modifier
             .background(becalmSkeletonColor(), RoundedCornerShape(cornerRadius)),
     )
+}
+
+/**
+ * Generic detail / sheet skeleton used by cold-start of bottom sheets,
+ * detail screens, and settings panes. Renders a title block and three body
+ * lines stacked at 16dp gutter — a neutral "the content is on its way"
+ * shape that fits any title-plus-body destination without coupling to a
+ * specific row geometry.
+ *
+ * For first-line list surfaces (Today / Persons / Commitments) compose
+ * row-shaped skeletons inline using [SkeletonBlock] instead — this pane
+ * is for non-list destinations.
+ */
+@Composable
+public fun BecalmSheetSkeleton(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.65f).height(20.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        SkeletonBlock(modifier = Modifier.fillMaxWidth().height(14.dp))
+        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.92f).height(14.dp))
+        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.45f).height(14.dp))
+    }
 }

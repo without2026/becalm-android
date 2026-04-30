@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.ExpandableSectionHeader
@@ -112,14 +112,7 @@ public fun PersonDetailScreenContent(
             state.interactionHistory.isNotEmpty()
         when {
             state.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
+                BecalmSheetSkeleton(modifier = Modifier.padding(padding))
             }
             state.error != null && !hasAnyInteractions -> {
                 ErrorState(
