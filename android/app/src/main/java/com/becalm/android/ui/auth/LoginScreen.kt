@@ -1,11 +1,14 @@
 package com.becalm.android.ui.auth
 
 import android.view.WindowManager
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -224,9 +227,18 @@ internal fun LoginForm(
     var password by remember { mutableStateOf("") }
     var showEmptyError by remember { mutableStateOf(false) }
 
+    // Box centres the form on tablets / foldables; the inner Column caps at
+    // 480dp so email + password fields stay at a comfortable reading width
+    // and never stretch edge-to-edge on wide viewports. Phones (<480dp) pass
+    // through unchanged.
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
+            .widthIn(max = LoginFormMaxContentWidth)
             .padding(horizontal = 16.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -295,7 +307,13 @@ internal fun LoginForm(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+    }
 }
+
+/** Reading-width cap for the login form on tablets / foldables. Matches the
+ *  spirit of the 600dp Today timeline cap and 480dp state-view cap; sized
+ *  smaller because login fields are denser than reading content. */
+private val LoginFormMaxContentWidth: androidx.compose.ui.unit.Dp = 480.dp
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
 
