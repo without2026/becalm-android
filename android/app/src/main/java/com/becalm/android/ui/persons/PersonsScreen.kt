@@ -114,7 +114,6 @@ public fun PersonsScreenContent(
         title = stringResource(R.string.persons_title),
         actions = {
             MainTabHeaderActions(
-                state = headerState,
                 onOpenSettings = onOpenSettings,
             )
         },

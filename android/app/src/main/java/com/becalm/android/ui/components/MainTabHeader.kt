@@ -2,10 +2,8 @@ package com.becalm.android.ui.components
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,19 +20,14 @@ import com.becalm.android.ui.theme.glassPanel
 
 @Composable
 public fun MainTabHeaderActions(
-    state: MainTabHeaderState,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (state.overallSyncing) {
-        CircularProgressIndicator(
-            modifier = modifier
-                .size(20.dp)
-                .padding(end = 4.dp),
-            strokeWidth = 2.dp,
-        )
-    }
-    IconButton(onClick = onOpenSettings) {
+    // Sync state is communicated by [OverallSyncIndicator] (text banner under
+    // the app bar) and by [SourceStatusStrip] dots. The action slot stays
+    // quiet so the app bar never shows ambient process motion. See DESIGN.md
+    // Process-Hidden Rule.
+    IconButton(onClick = onOpenSettings, modifier = modifier) {
         Icon(
             imageVector = Icons.Filled.Settings,
             contentDescription = stringResource(R.string.label_settings),

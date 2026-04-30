@@ -139,7 +139,6 @@ public fun TodayTimelineContent(
         title = stringResource(R.string.today_title),
         actions = {
             MainTabHeaderActions(
-                state = headerState,
                 onOpenSettings = onOpenSettings,
             )
         },
