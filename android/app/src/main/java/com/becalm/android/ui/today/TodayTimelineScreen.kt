@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -141,61 +143,80 @@ public fun TodayTimelineContent(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            if (state.processingPaused) {
-                Text(
-                    text = stringResource(R.string.processing_paused_banner),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .glassPanel(MaterialTheme.shapes.medium)
-                        .padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            MainTabStatusHeader(state = headerState)
-            Box(
+        // Single-column calm on every viewport: cap content at the timeline
+        // reading width and centre on tablets / foldables. Below the cap,
+        // fills available width on phone.
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pullRefresh(pullState),
+                    .widthIn(max = TimelineMaxContentWidth),
             ) {
-                when {
-                    state.loading -> {
-                        TimelineSkeleton()
-                    }
-                    state.error != null -> {
-                        ErrorState(
-                            title = stringResource(R.string.error_generic_title),
-                            message = state.error,
-                        )
-                    }
-                    state.timeline.isEmpty() -> {
-                        EmptyState(
-                            title = stringResource(R.string.today_empty_title),
-                            message = stringResource(R.string.today_empty_message),
-                        )
-                    }
-                    else -> {
-                        TimelineList(
-                            items = state.timeline,
-                            personFocus = state.personFocus,
-                            onOpenCommitmentDetail = onOpenCommitmentDetail,
-                            onAddDueTime = onAddDueTime,
-                            contentPadding = PaddingValues(vertical = 4.dp),
-                        )
-                    }
+                if (state.processingPaused) {
+                    Text(
+                        text = stringResource(R.string.processing_paused_banner),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .glassPanel(MaterialTheme.shapes.medium)
+                            .padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
+                MainTabStatusHeader(state = headerState)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pullRefresh(pullState),
+                ) {
+                    when {
+                        state.loading -> {
+                            TimelineSkeleton()
+                        }
+                        state.error != null -> {
+                            ErrorState(
+                                title = stringResource(R.string.error_generic_title),
+                                message = state.error,
+                            )
+                        }
+                        state.timeline.isEmpty() -> {
+                            EmptyState(
+                                title = stringResource(R.string.today_empty_title),
+                                message = stringResource(R.string.today_empty_message),
+                            )
+                        }
+                        else -> {
+                            TimelineList(
+                                items = state.timeline,
+                                personFocus = state.personFocus,
+                                onOpenCommitmentDetail = onOpenCommitmentDetail,
+                                onAddDueTime = onAddDueTime,
+                                contentPadding = PaddingValues(vertical = 4.dp),
+                            )
+                        }
+                    }
 
-                PullRefreshIndicator(
-                    refreshing = state.refreshing,
-                    state = pullState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                    PullRefreshIndicator(
+                        refreshing = state.refreshing,
+                        state = pullState,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
             }
         }
     }
 }
+
+/** Reading-width cap for the Today timeline. Below this, content fills the
+ *  available width on phones; at or above (tablet, foldable open), the column
+ *  centres in the viewport so the single-column calm holds on every device. */
+private val TimelineMaxContentWidth: Dp = 600.dp
 
 /**
  * Static skeleton placeholder rows shown during the cold-start no-data window.
