@@ -67,8 +67,10 @@ public fun OutlookCalendarOAuthScreen(
         "unknown" to stringResource(R.string.onb_outlook_cal_error_unknown),
     )
 
-    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride, pendingOAuthResumeRefresh) {
-        if (!pendingOAuthResumeRefresh || eventsOverride != null || onboardingViewModel == null) {
+    // Always observe ON_RESUME for status refresh — same rationale as the
+    // OnboardingEmailPipaConsentScreen fix.
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
+        if (eventsOverride != null || onboardingViewModel == null) {
             onDispose { }
         } else {
             val observer = LifecycleEventObserver { _, event ->
@@ -79,6 +81,10 @@ public fun OutlookCalendarOAuthScreen(
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
+    }
+    // Immediate refresh on first composition.
+    LaunchedEffect(onboardingViewModel) {
+        onboardingViewModel?.refreshCalendarProviderConnection(CalendarOAuthProvider.OUTLOOK_CALENDAR)
     }
 
     LaunchedEffect(eventsOverride, onboardingViewModel) {

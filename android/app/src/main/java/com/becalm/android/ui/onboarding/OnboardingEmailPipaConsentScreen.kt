@@ -148,8 +148,30 @@ public fun OnboardingEmailPipaConsentScreen(
         lifecycleOwner = lifecycleOwner,
         viewModel = resolvedViewModel,
         provider = oauthProvider,
-        enabled = pendingResumeRefreshProvider == oauthProvider?.storageKey,
+        // Always enabled when an OAuth target is present. The previous gate on
+        // `pendingResumeRefreshProvider` only registered the observer after the
+        // user tapped "동의하고 연결" — but if the app process restarted after
+        // a crash (or the screen disposed and re-entered), that in-memory flag
+        // reset and the observer never re-registered. The user returned from
+        // the OAuth browser, ON_RESUME fired with no listener, status was
+        // never refreshed, and the screen sat stuck on the consent page.
+        // refreshEmailProviderConnection inside the ViewModel already
+        // short-circuits when consent is not stored, so this is safe to call
+        // unconditionally on every resume of an OAuth-target screen.
+        enabled = oauthProvider != null,
     )
+    // Run an immediate status refresh on first composition too — ON_RESUME may
+    // have fired before the observer was registered (process restart path).
+    // No-op for first-time visitors (no PIPA consent → ViewModel returns
+    // early); navigates the screen for returning users whose OAuth completed
+    // off-screen.
+    LaunchedEffect(resolvedViewModel, oauthProvider) {
+        val vm = resolvedViewModel
+        val provider = oauthProvider
+        if (vm != null && provider != null) {
+            vm.refreshEmailProviderConnection(provider)
+        }
+    }
     SecureImapWindowEffect(activity = activity, enabled = copy.connectionTarget == EmailPipaConnectionTarget.Imap)
 
     BecalmScaffold(

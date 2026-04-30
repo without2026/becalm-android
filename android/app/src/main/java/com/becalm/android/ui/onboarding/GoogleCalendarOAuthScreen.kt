@@ -67,8 +67,12 @@ public fun GoogleCalendarOAuthScreen(
         "unknown" to stringResource(R.string.onb_gcal_error_unknown),
     )
 
-    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride, pendingOAuthResumeRefresh) {
-        if (!pendingOAuthResumeRefresh || eventsOverride != null || onboardingViewModel == null) {
+    // Always observe ON_RESUME for status refresh — same rationale as the
+    // OnboardingEmailPipaConsentScreen fix: process restart / dispose-reentry
+    // would otherwise leave the observer un-registered and the screen stuck
+    // on the connect page even though the OAuth session completed.
+    DisposableEffect(lifecycleOwner, onboardingViewModel, eventsOverride) {
+        if (eventsOverride != null || onboardingViewModel == null) {
             onDispose { }
         } else {
             val observer = LifecycleEventObserver { _, event ->
@@ -79,6 +83,11 @@ public fun GoogleCalendarOAuthScreen(
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
+    }
+    // Immediate refresh on first composition for the same reason — ON_RESUME
+    // may already have fired before the observer was registered.
+    LaunchedEffect(onboardingViewModel) {
+        onboardingViewModel?.refreshCalendarProviderConnection(CalendarOAuthProvider.GOOGLE_CALENDAR)
     }
 
     LaunchedEffect(eventsOverride, onboardingViewModel) {
