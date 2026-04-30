@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -34,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -54,6 +52,8 @@ import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.components.SkeletonBlock
+import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -231,17 +231,12 @@ private val TimelineMaxContentWidth: Dp = 600.dp
  */
 @Composable
 private fun TimelineSkeleton(modifier: Modifier = Modifier) {
-    // onSurfaceVariant (muted-silver #B2B2B2 on dark) at α=0.14 reads as a
-    // subtle visible placeholder over the cosmic-near-black ground.
-    // outlineVariant (#1E1E1E on dark) was effectively invisible against #111111.
-    val skeletonColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.14f)
     LazyColumn(
         contentPadding = PaddingValues(vertical = 4.dp),
         modifier = modifier.fillMaxSize(),
     ) {
         items(count = 3, key = { index -> "timeline-skeleton-$index" }) {
             TimelineSkeletonRow(
-                skeletonColor = skeletonColor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -251,10 +246,8 @@ private fun TimelineSkeleton(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TimelineSkeletonRow(
-    skeletonColor: Color,
-    modifier: Modifier = Modifier,
-) {
+private fun TimelineSkeletonRow(modifier: Modifier = Modifier) {
+    val railColor = becalmSkeletonColor()
     Row(
         modifier = modifier.heightIn(min = 84.dp),
         verticalAlignment = Alignment.Top,
@@ -266,24 +259,9 @@ private fun TimelineSkeletonRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.4f)
-                    .height(10.dp)
-                    .background(skeletonColor, RoundedCornerShape(4.dp)),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(14.dp)
-                    .background(skeletonColor, RoundedCornerShape(4.dp)),
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.55f)
-                    .height(10.dp)
-                    .background(skeletonColor, RoundedCornerShape(4.dp)),
-            )
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(10.dp))
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
+            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.55f).height(10.dp))
         }
         Column(
             modifier = Modifier
@@ -295,21 +273,20 @@ private fun TimelineSkeletonRow(
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(skeletonColor),
+                    .background(railColor),
             )
             Box(
                 modifier = Modifier
                     .width(2.dp)
                     .weight(1f)
-                    .background(skeletonColor),
+                    .background(railColor),
             )
         }
-        Box(
+        SkeletonBlock(
             modifier = Modifier
                 .width(54.dp)
                 .padding(top = 12.dp, start = 8.dp)
-                .height(12.dp)
-                .background(skeletonColor, RoundedCornerShape(4.dp)),
+                .height(12.dp),
         )
     }
 }

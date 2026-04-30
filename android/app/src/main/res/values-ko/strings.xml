@@ -27,6 +27,8 @@
     <string name="error_generic_title">오류가 발생했습니다</string>
     <string name="error_state_retry">다시 시도</string>
     <string name="commitment_mark_done_action">완료 처리</string>
+    <string name="today_source_strip_a11y_label">데이터 소스 상태 표시</string>
+    <string name="action_close">닫기</string>
 
     <!-- Splash -->
     <string name="splash_title">비캄</string>
@@ -336,4 +338,70 @@
     <string name="source_detail_recent_events_section">최근 이벤트</string>
     <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
     <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+
+    <!-- ─── Korean overrides for English defaults (i18n cleanup) ─── -->
+
+    <!-- Common actions -->
+    <string name="action_delete_account">계정 삭제</string>
+    <string name="action_sync_now">지금 동기화</string>
+    <string name="action_revoke_permission">권한 회수</string>
+
+    <!-- Voice processing notification channel + alerts -->
+    <string name="voice_failure_channel_name">음성 처리 알림</string>
+    <string name="voice_failure_channel_desc">비캄이 음성 녹음을 처리하지 못할 때 알립니다.</string>
+    <string name="voice_failure_notification_title">음성 처리 실패</string>
+    <string name="voice_failure_notification_body_generic">%1$s을(를) 처리하지 못했습니다. 비캄에서 확인하거나 다시 시도해 주세요.</string>
+    <string name="voice_failure_notification_body_output_truncated">%1$s이(가) 너무 길어 처리하지 못했습니다. 더 짧은 녹음으로 다시 시도해 주세요.</string>
+
+    <!-- Splash -->
+    <string name="splash_loading">비캄을 시작하는 중…</string>
+
+    <!-- Onboarding: Calendar OAuth errors -->
+    <string name="onb_gcal_error_unavailable">Google 캘린더 연결을 시작할 수 없습니다. 백엔드 OAuth 설정을 확인하거나 일단 건너뛰세요.</string>
+    <string name="onb_gcal_error_unknown">Google 캘린더 연결에 실패했습니다. 다시 시도하거나 일단 건너뛰세요.</string>
+    <string name="onb_outlook_cal_error_unavailable">Outlook 캘린더 연결을 시작할 수 없습니다. 백엔드 OAuth 설정을 확인하거나 일단 건너뛰세요.</string>
+    <string name="onb_outlook_cal_error_unknown">Outlook 캘린더 연결에 실패했습니다. 다시 시도하거나 일단 건너뛰세요.</string>
+
+    <!-- Onboarding: PIPA + cold sync -->
+    <string name="onb_pipa_email_cta_agree_connect">동의하고 연결</string>
+    <string name="onb_cold_sync_skip_cta">일단 건너뛰기</string>
+    <!-- onb_pipa_bullet_1_value stays "Google LLC" — proper noun -->
+
+    <!-- Persons: manual match + add -->
+    <string name="persons_manual_match_anchor_hint">이메일, 전화번호, 또는 이름</string>
+    <string name="persons_manual_match_nickname_hint">다음에 기억할 별명</string>
+    <string name="persons_manual_add_person_action">새 사람 추가</string>
+    <string name="persons_manual_match_action">사람 매칭</string>
+
+    <!-- Sources: contacts + detail -->
+    <string name="contacts_source_connection_state_fmt">상태: %1$s</string>
+    <string name="contacts_source_enriched_count_fmt">보강된 연락처: %1$d개</string>
+    <string name="source_detail_disconnect_confirm_title">소스 연결을 해제하시겠습니까?</string>
+    <string name="source_detail_disconnect_confirm_body">현재 소스 연결을 제거합니다. 가져온 데이터는 기기에 그대로 남습니다.</string>
+
+    <!-- Commitment detail source format — KST kept (한국에서 흔히 쓰는 표기) -->
+    <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
+
+    <!-- Settings + Privacy -->
+    <string name="settings_processing_status_label">처리 현황</string>
+    <string name="settings_privacy_label">개인정보 관리</string>
+    <string name="settings_sign_out_pipa_note">로그아웃해도 로컬 데이터는 삭제되지 않습니다. 영구 삭제는 개인정보 관리 → 계정 삭제를 이용하세요.</string>
+    <string name="processing_status_title">처리 현황</string>
+
+    <!-- Privacy management screen -->
+    <string name="privacy_management_title">개인정보 관리</string>
+    <string name="privacy_export_subtitle">기기에 저장된 비캄 데이터를 ZIP 파일로 저장합니다.</string>
+    <string name="privacy_withdraw_subtitle">소스별로 동의를 철회하고 향후 자동 처리를 중단합니다.</string>
+    <string name="privacy_pause_subtitle">백그라운드 처리를 일시 중단하고, 나중에 다시 동기화하여 재개합니다.</string>
+    <string name="privacy_delete_subtitle_fmt">로컬 계정 데이터를 삭제합니다. 현재 로컬 요약: 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개.</string>
+    <string name="privacy_activity_log_subtitle">로컬에 저장된 PIPA 권리 활동 이력을 확인합니다.</string>
+    <string name="privacy_export_cancelled">내보내기가 취소되었습니다.</string>
+    <string name="privacy_export_failed">내보내기 ZIP 파일을 만들지 못했습니다.</string>
+    <string name="privacy_pause_description">처리를 일시 중단하면 로컬 데이터는 유지되지만, 재개 전까지 모든 백그라운드 수집·업로드 작업이 건너뛰어집니다.</string>
+    <string name="privacy_pause_switch_label">모든 처리 일시 중단</string>
+    <string name="privacy_pause_started_fmt">일시 중단 시작: %1$s</string>
+    <string name="privacy_delete_warning_fmt">이 작업은 되돌릴 수 없습니다. 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개가 이 기기에서 삭제됩니다.</string>
+    <string name="privacy_delete_email_label">계정 이메일을 다시 입력하세요</string>
+    <string name="privacy_delete_confirm">로컬 계정 삭제</string>
+    <string name="privacy_activity_log_empty">아직 기록된 PIPA 권리 활동이 없습니다.</string>
 </resources>

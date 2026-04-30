@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -36,7 +35,9 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.SheetCloseRow
 import com.becalm.android.ui.navigation.BecalmRoute
 import kotlinx.coroutines.flow.Flow
 
@@ -124,16 +125,10 @@ public fun CommitmentDetailSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        SheetCloseRow(onClose = onDismiss)
         when {
             state.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 160.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
+                BecalmSheetSkeleton(modifier = Modifier.heightIn(min = 160.dp))
             }
             state.error != null || entity == null -> {
                 val errorLabel = if (state.error == CommitmentDetailViewModel.EMPTY_ERROR_KEY) {

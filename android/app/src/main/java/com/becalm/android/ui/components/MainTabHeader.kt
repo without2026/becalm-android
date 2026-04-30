@@ -89,6 +89,10 @@ private fun MainTabSourceAttentionBanner(
     // Color is not the only carrier of information: a leading 8dp error dot
     // signals the alert state, body text reads in onSurface (higher contrast
     // than error-red on glass-panel α=0.10 over cosmic dark).
+    //
+    // The Text takes Modifier.weight(1f) so long messages wrap inside the Row
+    // instead of being clipped — preserving the original Text(fillMaxWidth)
+    // wrapping semantics from the pre-refactor single-Text banner.
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -106,6 +110,7 @@ private fun MainTabSourceAttentionBanner(
         )
         Text(
             text = text,
+            modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )

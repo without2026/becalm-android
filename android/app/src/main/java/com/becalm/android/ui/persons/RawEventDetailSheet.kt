@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EventSourceBadge
@@ -76,14 +76,7 @@ public fun RawEventDetailSheet(
     ) { padding ->
         when {
             state.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
+                BecalmSheetSkeleton(modifier = Modifier.padding(padding))
             }
             state.error != null -> {
                 ErrorState(
@@ -177,14 +170,7 @@ private fun PreviewRawEventDetailSheetLoading() {
                 }
             },
         ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+            BecalmSheetSkeleton(modifier = Modifier.padding(padding))
         }
     }
 }

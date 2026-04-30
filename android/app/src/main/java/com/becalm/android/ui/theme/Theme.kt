@@ -51,7 +51,17 @@ public fun BecalmTheme(
             colorScheme = colorScheme,
             typography = BecalmTypography,
             shapes = BecalmShapes,
-            content = content,
-        )
+        ) {
+            // Two shared time-tick providers for the whole content tree.
+            // ProvideKstDayTick fires on each KST midnight (CommitmentCard
+            // D-N badge); ProvideMinuteTick fires on each minute boundary
+            // (TimestampText "X분 전" labels). Both are hoisted to one
+            // coroutine each instead of per-consumer LaunchedEffects.
+            ProvideKstDayTick {
+                ProvideMinuteTick {
+                    content()
+                }
+            }
+        }
     }
 }

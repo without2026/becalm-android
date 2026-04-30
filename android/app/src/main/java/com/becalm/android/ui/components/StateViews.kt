@@ -6,7 +6,6 @@
  */
 package com.becalm.android.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -77,45 +76,52 @@ public fun EmptyState(
     action: EmptyStateAction? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .widthIn(max = StateViewMaxContentWidth)
-            .padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    // Box wraps the Column so [StateViewMaxContentWidth] can self-centre on
+    // any parent context (phone, 600dp timeline column on tablet, full
+    // tablet width). Without the Box, the Column with widthIn(max=480) would
+    // pin to its parent's start edge on wide viewports.
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(48.dp),
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-        }
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-        )
-        if (message != null) {
-            Spacer(modifier = Modifier.height(24.dp))
+        Column(
+            modifier = Modifier
+                .widthIn(max = StateViewMaxContentWidth)
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
             Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
-        }
-        if (action != null) {
-            Spacer(modifier = Modifier.height(24.dp))
-            BecalmButton(
-                text = action.label,
-                onClick = action.onClick,
-                variant = BecalmButtonVariant.Secondary,
-            )
+            if (message != null) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (action != null) {
+                Spacer(modifier = Modifier.height(24.dp))
+                BecalmButton(
+                    text = action.label,
+                    onClick = action.onClick,
+                    variant = BecalmButtonVariant.Secondary,
+                )
+            }
         }
     }
 }
@@ -144,43 +150,47 @@ public fun ErrorState(
     retryLabel: String = stringResource(R.string.error_state_retry),
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .widthIn(max = StateViewMaxContentWidth)
-            .padding(horizontal = 32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    // Same self-centering wrapper as EmptyState — see note there.
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = Icons.Filled.Warning,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(48.dp),
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center,
-        )
-        if (message != null) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = StateViewMaxContentWidth)
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(48.dp),
+            )
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center,
             )
-        }
-        if (onRetry != null) {
-            Spacer(modifier = Modifier.height(24.dp))
-            BecalmButton(
-                text = retryLabel,
-                onClick = onRetry,
-                variant = BecalmButtonVariant.Secondary,
-            )
+            if (message != null) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (onRetry != null) {
+                Spacer(modifier = Modifier.height(24.dp))
+                BecalmButton(
+                    text = retryLabel,
+                    onClick = onRetry,
+                    variant = BecalmButtonVariant.Secondary,
+                )
+            }
         }
     }
 }

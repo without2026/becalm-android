@@ -1,6 +1,7 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.rememberReducedMotion
 
 /**
  * Expandable section header used by [com.becalm.android.ui.commitments.CommitmentManagementScreen]
@@ -53,8 +55,13 @@ public fun ExpandableSectionHeader(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Respect system-level reduced-motion: with animations disabled the
+    // chevron snaps to the target rotation instead of tweening 180° over
+    // ~300ms. DESIGN.md §Accessibility — motion is intentional only.
+    val reducedMotion = rememberReducedMotion()
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(durationMillis = if (reducedMotion) 0 else 300),
         label = "SectionHeaderChevronRotation",
     )
     Row(

@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,10 +25,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import com.becalm.android.R
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
@@ -91,10 +92,11 @@ public fun SourceStatusStrip(
     sources: List<SourceStatusChip>,
     modifier: Modifier = Modifier,
 ) {
+    val a11yLabel = stringResource(R.string.today_source_strip_a11y_label)
     LazyRow(
         modifier = modifier
             .testTag("source-status-strip")
-            .semantics { contentDescription = STRIP_A11Y_LABEL },
+            .semantics { contentDescription = a11yLabel },
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     ) {
@@ -124,7 +126,7 @@ private fun SourceStatusChipView(
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = sourceDisplayName(chip.sourceType),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = colorScheme.onSurface,
         )
         val timeLabel = (chip.state as? ChipState.Synced)?.let { formatTimeHHmm(it.at) }
@@ -132,7 +134,7 @@ private fun SourceStatusChipView(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = timeLabel,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = colorScheme.onSurfaceVariant,
             )
         }
@@ -153,9 +155,18 @@ private fun ChipStateIndicator(state: ChipState) {
             )
         }
         ChipState.Syncing -> {
-            CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
-                strokeWidth = 2.dp,
+            // Static halo dot — fill α=0.40 of sourceStatusOk + 1dp ring at full
+            // alpha. Communicates "active + healthy" distinct from Idle (solid
+            // outline dot) and Synced (Check icon) without ambient motion. See
+            // DESIGN.md Process-Hidden Rule — first-line surfaces never spin.
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .border(width = 1.dp, color = becalmColors.sourceStatusOk, shape = CircleShape)
+                    .background(
+                        color = becalmColors.sourceStatusOk.copy(alpha = 0.4f),
+                        shape = CircleShape,
+                    ),
             )
         }
         is ChipState.Synced -> {
@@ -177,22 +188,27 @@ private fun ChipStateIndicator(state: ChipState) {
 }
 
 /**
- * Display name for the seven user-facing ingestion sources shown on the Today strip.
+ * Display name for the seven user-facing ingestion sources shown on the Today
+ * strip. Resolves to localized resources so KO devices see the Korean labels
+ * already shared with [EventSourceBadge]; previously hardcoded English.
  *
- * Any source type not in the seven is routed to a defensive default so the UI stays
- * renderable even if the server adds a new wire type before the Android client
- * ships an update.
+ * Any source type not in the seven falls through to the unknown resource so
+ * the UI stays renderable when the server ships a new wire type.
  */
-private fun sourceDisplayName(sourceType: String): String = when (sourceType) {
-    SourceType.VOICE -> "Voice"
-    SourceType.GMAIL -> "Gmail"
-    SourceType.OUTLOOK_MAIL -> "Outlook Mail"
-    SourceType.NAVER_IMAP -> "Naver Email"
-    SourceType.DAUM_IMAP -> "Daum Email"
-    SourceType.GOOGLE_CALENDAR -> "Google Calendar"
-    SourceType.OUTLOOK_CALENDAR -> "Outlook Calendar"
-    else -> sourceType
-}
+@Composable
+private fun sourceDisplayName(sourceType: String): String = stringResource(
+    when (sourceType) {
+        SourceType.VOICE -> R.string.raw_event_source_badge_voice
+        SourceType.GMAIL -> R.string.raw_event_source_badge_gmail
+        SourceType.OUTLOOK_MAIL -> R.string.raw_event_source_badge_outlook_mail
+        SourceType.NAVER_IMAP -> R.string.raw_event_source_badge_naver_imap
+        SourceType.DAUM_IMAP -> R.string.raw_event_source_badge_daum_imap
+        SourceType.GOOGLE_CALENDAR -> R.string.raw_event_source_badge_google_calendar
+        SourceType.OUTLOOK_CALENDAR -> R.string.raw_event_source_badge_outlook_calendar
+        SourceType.CALL_RECORDING -> R.string.raw_event_source_badge_call_recording
+        else -> R.string.raw_event_source_badge_unknown
+    },
+)
 
 private fun formatTimeHHmm(at: Instant): String {
     val local = at.toLocalDateTime(TimeZone.currentSystemDefault())
@@ -200,8 +216,6 @@ private fun formatTimeHHmm(at: Instant): String {
     val mm = local.minute.toString().padStart(2, '0')
     return "$hh:$mm"
 }
-
-private const val STRIP_A11Y_LABEL = "데이터 소스 상태 표시"
 
 // ─── Previews ────────────────────────────────────────────────────────────────
 
