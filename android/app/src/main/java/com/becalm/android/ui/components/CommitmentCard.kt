@@ -36,11 +36,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -58,18 +54,14 @@ import com.becalm.android.R
 import com.becalm.android.core.util.KST
 import com.becalm.android.ui.theme.BecalmStateColors
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.LocalKstDayTick
 import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.glassPanel
-import kotlinx.coroutines.delay
 import kotlinx.datetime.Clock
-import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atTime
 import kotlinx.datetime.daysUntil
-import kotlinx.datetime.plus
-import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
 // ─── CommitmentCard ───────────────────────────────────────────────────────────
@@ -222,23 +214,11 @@ public fun CommitmentCard(
     // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
     // here.
     val exactDueAt = dueAt?.takeUnless { dueIsApproximate }
-    // [kstDayTick] increments at each KST midnight so the D-N badge re-rolls
-    // automatically when a card is on screen across the boundary (e.g. user
-    // leaves Today open overnight). Per-card LaunchedEffect because the card
-    // is the only consumer; if a future surface adds many simultaneous cards
-    // a hoisted LocalKstClockTick CompositionLocal would be cheaper.
-    var kstDayTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(kstDayTick) {
-        val now = Clock.System.now()
-        val nextMidnight = now.toLocalDateTime(KST).date
-            .plus(1, DateTimeUnit.DAY)
-            .atTime(0, 0, 0)
-            .toInstant(KST)
-        val delayMs = (nextMidnight.toEpochMilliseconds() - now.toEpochMilliseconds())
-            .coerceAtLeast(0L) + 1_000L
-        delay(delayMs)
-        kstDayTick++
-    }
+    // Re-key daysUntil on the single shared KST midnight tick owned by
+    // BecalmTheme so the D-N badge rolls forward when the user keeps a card
+    // on screen across the calendar boundary. One coroutine for the whole
+    // content tree instead of one per card. See ui/theme/KstClock.kt.
+    val kstDayTick = LocalKstDayTick.current
     val daysUntil: Int? = remember(exactDueAt, kstDayTick) {
         daysUntilInKst(dueAt = exactDueAt, now = Clock.System.now(), zone = KST)
     }
