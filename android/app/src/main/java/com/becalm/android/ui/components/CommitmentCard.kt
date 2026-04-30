@@ -499,8 +499,12 @@ internal fun daysUntilInKst(dueAt: Instant?, now: Instant, zone: TimeZone): Int?
 
 /**
  * D-N 배지와 상태 칩이 padding만 달랐던 중복을 제거하기 위해 추출한 공용 pill.
- * 보존 포인트: fill/border 색, extraSmall corner, labelSmall typography, text color
- * 는 기존 DayBadge/StatusChip과 완전히 동일해야 한다 (spec §5 state color 계약).
+ * 보존 포인트: fill/border 색, extraSmall corner, text color는 기존 DayBadge /
+ * StatusChip과 완전히 동일해야 한다 (spec §5 state color 계약). Typography는
+ * impeccable critique R4의 50대 가독성 권고에 따라 labelSmall(11sp) → labelMedium
+ * (12sp / SemiBold)로 상향 — 핍 정보(D-N, 상태, give/take, 수동 추가)는 글랜스에서
+ * 의미를 운반하므로 Hangul-floor 12sp 규정에 맞춰 정보-운반 라벨은 모두 12sp 이상이
+ * 되어야 한다 (Type.kt §Hangul Floor Rule).
  */
 @Composable
 private fun PillBadge(
@@ -524,7 +528,7 @@ private fun PillBadge(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = stateColors.text,
         )
     }

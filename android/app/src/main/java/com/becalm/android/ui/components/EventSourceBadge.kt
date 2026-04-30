@@ -63,7 +63,7 @@ public fun EventSourceBadge(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = stringResource(style.labelRes),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
             )
         }
     }

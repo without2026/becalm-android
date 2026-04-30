@@ -39,7 +39,7 @@ public fun EmailAttachmentCountPill(
         Text(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             text = stringResource(R.string.raw_event_attachments_count, count),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
         )
     }
 }

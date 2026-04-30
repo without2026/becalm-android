@@ -126,7 +126,7 @@ private fun SourceStatusChipView(
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = sourceDisplayName(chip.sourceType),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = colorScheme.onSurface,
         )
         val timeLabel = (chip.state as? ChipState.Synced)?.let { formatTimeHHmm(it.at) }
@@ -134,7 +134,7 @@ private fun SourceStatusChipView(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = timeLabel,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = colorScheme.onSurfaceVariant,
             )
         }
