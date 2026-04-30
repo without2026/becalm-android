@@ -1,5 +1,6 @@
 package com.becalm.android.ui.components
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -13,6 +14,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.becalmColors
 
 /**
  * Give/take pill rendering the direction of a commitment relationship for Today
@@ -30,27 +32,29 @@ public fun DirectionBadge(
     direction: String,
     modifier: Modifier = Modifier,
 ) {
-    val (labelRes, containerColor, contentColor) = when (direction) {
+    val becalmColors = MaterialTheme.becalmColors
+    val colorScheme = MaterialTheme.colorScheme
+    val (labelRes, fill, border) = when (direction) {
         DIRECTION_GIVE -> Triple(
             R.string.today_direction_badge_give,
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
+            becalmColors.directionGive.fill,
+            becalmColors.directionGive.border,
         )
         DIRECTION_TAKE -> Triple(
             R.string.today_direction_badge_take,
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer,
+            becalmColors.directionTake.fill,
+            becalmColors.directionTake.border,
         )
         else -> Triple(
             R.string.today_direction_badge_unknown,
-            MaterialTheme.colorScheme.surfaceVariant,
-            MaterialTheme.colorScheme.onSurfaceVariant,
+            colorScheme.surfaceVariant,
+            colorScheme.outline,
         )
     }
     DirectionBadgePill(
         labelRes = labelRes,
-        container = containerColor,
-        content = contentColor,
+        fill = fill,
+        border = border,
         modifier = modifier,
     )
 }
@@ -58,15 +62,16 @@ public fun DirectionBadge(
 @Composable
 private fun DirectionBadgePill(
     labelRes: Int,
-    container: Color,
-    content: Color,
+    fill: Color,
+    border: Color,
     modifier: Modifier = Modifier,
 ) {
+    val pillShape = RoundedCornerShape(percent = 50)
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(percent = 50),
-        color = container,
-        contentColor = content,
+        modifier = modifier.border(width = 1.dp, color = border, shape = pillShape),
+        shape = pillShape,
+        color = fill,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Text(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
