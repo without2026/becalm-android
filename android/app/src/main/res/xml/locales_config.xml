@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Per-app language configuration (Android 13+ / API 33+).
+
+    Declares the locales BeCalm officially ships translations for, so the system
+    Settings → Apps → BeCalm → Language picker offers them.
+
+    Order matters for the picker UI but does not change runtime resolution.
+    PRODUCT.md positions Korean as the primary locale ("한국어 1차") and English
+    as an equal fallback ("EN 동등"); the picker mirrors that ordering.
+
+    Resource resolution stays governed by the system / per-app locale:
+      - KO device or KO app-locale → values-ko/strings.xml
+      - EN device or EN app-locale → values/strings.xml (English defaults)
+      - Brand strings (app_name, "BeCalm" in copy, "Google LLC", "Gmail" …)
+        are intentionally locale-stable proper nouns and remain consistent.
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="ko-KR" />
+    <locale android:name="en" />
+</locale-config>
