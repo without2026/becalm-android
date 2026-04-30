@@ -450,7 +450,9 @@ private fun TodayPersonFocusRow(person: TodayPersonFocus) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = label.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                // Match CommitmentCard's avatar fallback: first letter only,
+                // so emoji- / symbol-prefixed names render a legible initial.
+                text = label.firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )

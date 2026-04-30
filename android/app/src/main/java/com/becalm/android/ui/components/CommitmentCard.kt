@@ -410,7 +410,11 @@ private fun PersonContext(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                // Prefer the first letter character so emoji- or symbol-
+                // prefixed names ("- John", "😀 Park") still render a
+                // legible initial. Hangul, Latin, and CJK ideographs are all
+                // Char.isLetter() == true.
+                text = name.firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
