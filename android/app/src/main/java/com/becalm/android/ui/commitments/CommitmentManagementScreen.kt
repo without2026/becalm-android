@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,7 +23,6 @@ import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -55,10 +56,13 @@ import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.components.SkeletonBlock
+import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Instant
@@ -209,9 +213,7 @@ public fun CommitmentManagementScreenContent(
             ) {
                 when {
                     state.loading -> {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
+                        CommitmentListSkeleton()
                     }
                     state.items.isEmpty() -> {
                         EmptyState(
@@ -314,6 +316,59 @@ public fun CommitmentManagementScreenContent(
  * is the closest built-in (~10 s), so the call-site races it against this timeout.
  */
 private const val UNDO_WINDOW_MS: Long = 5_000L
+
+/**
+ * Static placeholder rows shown during the cold-start no-data window.
+ * Mirrors the [CommitmentCard] geometry (glass panel + avatar circle + title
+ * row + footer pill row) so real cards land in place without layout pop.
+ * No motion — DESIGN.md Process-Hidden Rule (first-line surface).
+ */
+@Composable
+private fun CommitmentListSkeleton(modifier: Modifier = Modifier) {
+    val avatarColor = becalmSkeletonColor()
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(count = 3, key = { index -> "commitments-skeleton-$index" }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glassPanel(MaterialTheme.shapes.medium)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(avatarColor),
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.45f).height(10.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(8.dp))
+                    }
+                    SkeletonBlock(
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .width(36.dp)
+                            .height(18.dp),
+                    )
+                }
+                SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SkeletonBlock(modifier = Modifier.width(48.dp).height(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    SkeletonBlock(modifier = Modifier.width(56.dp).height(16.dp))
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun CommitmentPersonGroupHeader(

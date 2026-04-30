@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
@@ -51,6 +50,8 @@ import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.components.SkeletonBlock
+import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -144,9 +145,7 @@ public fun PersonsScreenContent(
             )
             when {
                 state.loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    PersonListSkeleton()
                 }
                 state.people.isEmpty() -> {
                     if (hasUnassignedEvents) {
@@ -211,6 +210,43 @@ private fun MatchingRequiredBanner(
         }
         TextButton(onClick = onClick) {
             Text(text = stringResource(R.string.person_matching_required_banner_action))
+        }
+    }
+}
+
+/**
+ * Static placeholder rows shown during the cold-start no-data window. Matches
+ * the [PersonRowItem] geometry (avatar circle + name + secondary metadata)
+ * so real rows land in place without layout pop. No motion — DESIGN.md
+ * Process-Hidden Rule (first-line surface).
+ */
+@Composable
+private fun PersonListSkeleton(modifier: Modifier = Modifier) {
+    val avatarColor = becalmSkeletonColor()
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        items(count = 3, key = { index -> "persons-skeleton-$index" }) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(avatarColor),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.5f).height(14.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(10.dp))
+                }
+            }
         }
     }
 }
