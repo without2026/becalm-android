@@ -8,9 +8,8 @@
  */
 package com.becalm.android.ui.components
 
-import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
-import com.becalm.android.data.local.db.entity.CommitmentItemType
-import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,11 +19,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,12 +38,13 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -80,6 +80,19 @@ import kotlinx.datetime.toLocalDateTime
  * Renders a single commitment as a glass card with a direction-cast left stripe,
  * a compact D-N urgency badge, an action status chip, and an optional mark-done
  * icon button.
+ *
+ * Mark-done UX has two paths (impeccable critique R4):
+ *   1. Inline 48×48dp [IconButton] — the explicit-target affordance for the
+ *      50s persona who needs a discoverable, clearly-tappable control.
+ *   2. End-to-start swipe gesture wrapping the card via [SwipeToDismissBox] —
+ *      the hidden-power affordance for the 30s persona who clears 30+
+ *      commitments / week and expects Things 3 / Granola muscle memory.
+ *
+ * Both paths invoke the same [onMarkDone] callback and share gating
+ * (`onMarkDone != null && !isTerminal`). When the row transitions into
+ * a terminal state from either path, the card pulses 1.0 → 1.04 → 1.0 over
+ * 300ms (skipped under reduced-motion) so the user sees a tangible
+ * confirmation alongside the existing alpha-drop and UNDO snackbar.
  *
  * Accessibility: the card merges descendants into one semantic node. When [onClick]
  * is provided the node carries [Role.Button] and a [contentDescription] composed
