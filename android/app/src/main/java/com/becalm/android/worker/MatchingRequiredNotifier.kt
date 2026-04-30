@@ -55,6 +55,8 @@ public object MatchingRequiredNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(openAppIntent(context))
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
             .build()
 
         runCatching {

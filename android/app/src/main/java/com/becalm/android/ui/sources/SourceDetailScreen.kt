@@ -270,7 +270,7 @@ public fun SourceDetailScreenContent(
                 ) {
                     Text(
                         text = event.timestamp.toString(),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (event.title != null) {

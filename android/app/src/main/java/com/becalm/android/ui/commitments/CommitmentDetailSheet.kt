@@ -237,7 +237,7 @@ internal fun DetailSheetContent(
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = history.disputedLabel.orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
         }
@@ -298,7 +298,7 @@ internal fun DetailSheetContent(
         if (history.lastEditedAt != null) {
             Text(
                 text = history.lastEditedLabel.orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -390,7 +390,7 @@ private fun ActionButtonRow(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
@@ -399,7 +399,7 @@ private fun SectionLabel(text: String) {
 private fun SimpleChip(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .padding(horizontal = 8.dp, vertical = 4.dp),

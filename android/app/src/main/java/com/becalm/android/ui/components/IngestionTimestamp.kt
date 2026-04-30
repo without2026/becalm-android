@@ -31,7 +31,7 @@ public fun IngestionTimestamp(
     val text = remember(timestamp) { formatKoreanDateTime(timestamp, tz = KST) }
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier,
     )

@@ -404,7 +404,7 @@ private fun CommitmentPersonGroupHeader(
             )
             Text(
                 text = stringResource(R.string.commitments_person_group_count_fmt, group.count),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

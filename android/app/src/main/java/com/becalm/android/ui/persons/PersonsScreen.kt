@@ -141,6 +141,7 @@ public fun PersonsScreenContent(
                 placeholder = stringResource(R.string.persons_search_placeholder),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("persons-search-input")
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
             when {
@@ -419,7 +420,7 @@ private fun PersonAvatar(person: PersonRow) {
 private fun PendingCommitmentBadge(count: Int) {
     Text(
         text = stringResource(R.string.persons_pending_commitments_fmt, count),
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .padding(top = 4.dp)

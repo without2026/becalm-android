@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -67,6 +69,127 @@ class PersonDetailSupplementScreenTest {
     }
 
     @Test
+    fun unassigned_events_recommended_candidate_confirms_match() {
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-candidate",
+                            sourceType = SourceType.VOICE,
+                            title = "통화 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "+821012345678",
+                                    displayName = "김지훈",
+                                    detail = "+821012345678",
+                                    role = "counterparty",
+                                    evidence = "통화기록 번호와 파일명이 일치",
+                                    confidence = 0.91,
+                                ),
+                            ),
+                        ),
+                    ),
+                    onManualMatch = { _, anchor, nickname ->
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("김지훈 · 91%").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("unassigned-match-confirm-event-candidate")
+            .performScrollTo()
+            .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("+821012345678", matchedAnchor)
+            assertEquals("김지훈", matchedNickname)
+        }
+    }
+
+    @Test
+    fun unassigned_events_manual_match_inputs_route_anchor_and_nickname() {
+        var matchedEventId: String? = null
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-1",
+                            sourceType = SourceType.GMAIL,
+                            title = "예약 알림",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onManualMatch = { event, anchor, nickname ->
+                        matchedEventId = event.id
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("unassigned-match-anchor-event-1")
+            .performTextInput("noreply@navercorp.com")
+        composeTestRule.onNodeWithTag("unassigned-match-nickname-event-1")
+            .performTextInput("네이버 예약팀")
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("event-1", matchedEventId)
+            assertEquals("noreply@navercorp.com", matchedAnchor)
+            assertEquals("네이버 예약팀", matchedNickname)
+        }
+    }
+
+    @Test
+    fun unassigned_events_add_person_defaults_blank_nickname_to_anchor() {
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-2",
+                            sourceType = SourceType.VOICE,
+                            title = "부재중 통화",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onManualMatch = { _, anchor, nickname ->
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("unassigned-match-anchor-event-2")
+            .performTextInput("+821012345678")
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("+821012345678", matchedAnchor)
+            assertEquals("+821012345678", matchedNickname)
+        }
+    }
+
+    @Test
     fun raw_event_detail_content_shows_email_sections_badges_and_expandable_body() {
         val longBody = buildString {
             append("A".repeat(520))
@@ -90,7 +213,6 @@ class PersonDetailSupplementScreenTest {
                         commitmentsExtractedCount = 3,
                         loading = false,
                     ),
-                    onViewOriginalRequested = {},
                 )
             }
         }
@@ -108,9 +230,7 @@ class PersonDetailSupplementScreenTest {
     }
 
     @Test
-    fun raw_event_detail_content_shows_html_only_degrade_action() {
-        var originalClicks = 0
-
+    fun raw_event_detail_content_shows_html_only_degrade_notice_without_fake_action() {
         composeTestRule.setContent {
             BecalmTheme {
                 RawEventDetailContent(
@@ -125,18 +245,12 @@ class PersonDetailSupplementScreenTest {
                         ),
                         loading = false,
                     ),
-                    onViewOriginalRequested = { originalClicks += 1 },
                 )
             }
         }
 
         composeTestRule.onNodeWithText(string(R.string.raw_event_body_html_only_notice))
             .assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.raw_event_view_html_original)).performClick()
-
-        composeTestRule.runOnIdle {
-            assertEquals(1, originalClicks)
-        }
     }
 
     private fun string(resId: Int, vararg args: Any): String =

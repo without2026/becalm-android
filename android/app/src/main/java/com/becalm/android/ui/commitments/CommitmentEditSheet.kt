@@ -204,6 +204,7 @@ internal fun EditSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp)
+            .testTag("commitment-edit-form")
             .verticalScroll(scrollState),
     ) {
         // ── Header ──
@@ -266,7 +267,9 @@ internal fun EditSheetContent(
             },
             singleLine = true,
             enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("commitment-edit-title"),
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -323,7 +326,9 @@ internal fun EditSheetContent(
             label = { Text(text = stringResource(R.string.commitment_edit_field_due_hint)) },
             singleLine = true,
             enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("commitment-edit-due-hint"),
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -339,7 +344,9 @@ internal fun EditSheetContent(
             },
             singleLine = true,
             enabled = !state.saving,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("commitment-edit-person-ref"),
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -355,7 +362,7 @@ internal fun EditSheetContent(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = it,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
         }
@@ -365,7 +372,7 @@ internal fun EditSheetContent(
         state.saveError?.let {
             Text(
                 text = it,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -583,7 +590,7 @@ private fun DirectionOption(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

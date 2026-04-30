@@ -448,7 +448,7 @@ private fun TodayPersonFocusRow(person: TodayPersonFocus) {
                 R.string.today_person_focus_commitments_fmt,
                 person.commitmentCount,
             ),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -542,7 +542,7 @@ private fun TimelineCard(
     ) {
         Text(
             text = typeLabelFor(item),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -562,7 +562,7 @@ private fun TimelineCard(
                     CommitmentItemType.SCHEDULE -> {
                         Text(
                             text = scheduleLabel(item.scheduleStatus),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Spacer(modifier = Modifier.size(size = 8.dp))
