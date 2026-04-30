@@ -166,7 +166,7 @@ public fun TodayTimelineContent(
                             .glassPanel(MaterialTheme.shapes.medium)
                             .padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 MainTabStatusHeader(state = headerState)

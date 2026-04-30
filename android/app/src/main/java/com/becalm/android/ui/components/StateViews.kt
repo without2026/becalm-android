@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Star
@@ -28,9 +29,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.theme.BecalmTheme
+
+/** Reading-width cap for empty / error placeholders so the centred message
+ *  does not span edge-to-edge on tablets and foldables. Matches the spirit
+ *  of the timeline cap on Today. */
+private val StateViewMaxContentWidth: Dp = 480.dp
 
 // ─── EmptyStateAction ─────────────────────────────────────────────────────────
 
@@ -73,6 +80,7 @@ public fun EmptyState(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .widthIn(max = StateViewMaxContentWidth)
             .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -139,6 +147,7 @@ public fun ErrorState(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .widthIn(max = StateViewMaxContentWidth)
             .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
