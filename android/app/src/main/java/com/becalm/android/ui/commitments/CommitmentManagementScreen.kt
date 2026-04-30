@@ -168,7 +168,6 @@ public fun CommitmentManagementScreenContent(
         title = stringResource(R.string.commitments_title),
         actions = {
             MainTabHeaderActions(
-                state = headerState,
                 onOpenSettings = onOpenSettings,
             )
         },

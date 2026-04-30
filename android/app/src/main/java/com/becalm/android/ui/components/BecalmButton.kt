@@ -6,6 +6,7 @@
  */
 package com.becalm.android.ui.components
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -34,6 +36,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.dimens
 import com.becalm.android.ui.theme.glassPanel
 import com.becalm.android.ui.theme.glassPanelElevated
@@ -79,6 +82,7 @@ public fun BecalmButton(
     leadingIcon: ImageVector? = null,
 ) {
     val isInteractive = enabled && !loading
+    val interactionSource = remember { MutableInteractionSource() }
     val effectiveModifier = modifier
         .defaultMinSize(minHeight = MaterialTheme.dimens.buttonHeight)
         .then(if (!enabled) Modifier.alpha(0.38f) else Modifier)
@@ -88,8 +92,11 @@ public fun BecalmButton(
         BecalmButtonVariant.Primary -> {
             Button(
                 onClick = { if (isInteractive) onClick() },
-                modifier = effectiveModifier.glassPanelElevated(MaterialTheme.shapes.medium),
+                modifier = effectiveModifier
+                    .glassPanelElevated(MaterialTheme.shapes.medium)
+                    .becalmFocusRing(MaterialTheme.shapes.medium, interactionSource),
                 enabled = isInteractive,
+                interactionSource = interactionSource,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -105,8 +112,11 @@ public fun BecalmButton(
         BecalmButtonVariant.Secondary -> {
             Button(
                 onClick = { if (isInteractive) onClick() },
-                modifier = effectiveModifier.glassPanel(MaterialTheme.shapes.small),
+                modifier = effectiveModifier
+                    .glassPanel(MaterialTheme.shapes.small)
+                    .becalmFocusRing(MaterialTheme.shapes.small, interactionSource),
                 enabled = isInteractive,
+                interactionSource = interactionSource,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onSurface,
@@ -122,8 +132,10 @@ public fun BecalmButton(
         BecalmButtonVariant.Text -> {
             TextButton(
                 onClick = { if (isInteractive) onClick() },
-                modifier = effectiveModifier,
+                modifier = effectiveModifier
+                    .becalmFocusRing(MaterialTheme.shapes.small, interactionSource),
                 enabled = isInteractive,
+                interactionSource = interactionSource,
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.primary,
                     disabledContentColor = MaterialTheme.colorScheme.primary,

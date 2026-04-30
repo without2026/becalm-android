@@ -1,7 +1,6 @@
 package com.becalm.android.ui.today
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,14 +16,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -138,69 +140,177 @@ public fun TodayTimelineContent(
         title = stringResource(R.string.today_title),
         actions = {
             MainTabHeaderActions(
-                state = headerState,
                 onOpenSettings = onOpenSettings,
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            if (state.processingPaused) {
-                Text(
-                    text = stringResource(R.string.processing_paused_banner),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .glassPanel(MaterialTheme.shapes.medium)
-                        .padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            MainTabStatusHeader(state = headerState)
-            Box(
+        // Single-column calm on every viewport: cap content at the timeline
+        // reading width and centre on tablets / foldables. Below the cap,
+        // fills available width on phone.
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize(),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pullRefresh(pullState),
+                    .widthIn(max = TimelineMaxContentWidth),
             ) {
-                when {
-                    state.loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
+                if (state.processingPaused) {
+                    Text(
+                        text = stringResource(R.string.processing_paused_banner),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .glassPanel(MaterialTheme.shapes.medium)
+                            .padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                MainTabStatusHeader(state = headerState)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pullRefresh(pullState),
+                ) {
+                    when {
+                        state.loading -> {
+                            TimelineSkeleton()
+                        }
+                        state.error != null -> {
+                            ErrorState(
+                                title = stringResource(R.string.error_generic_title),
+                                message = state.error,
+                            )
+                        }
+                        state.timeline.isEmpty() -> {
+                            EmptyState(
+                                title = stringResource(R.string.today_empty_title),
+                                message = stringResource(R.string.today_empty_message),
+                            )
+                        }
+                        else -> {
+                            TimelineList(
+                                items = state.timeline,
+                                personFocus = state.personFocus,
+                                onOpenCommitmentDetail = onOpenCommitmentDetail,
+                                onAddDueTime = onAddDueTime,
+                                contentPadding = PaddingValues(vertical = 4.dp),
+                            )
                         }
                     }
-                    state.error != null -> {
-                        ErrorState(
-                            title = stringResource(R.string.error_generic_title),
-                            message = state.error,
-                        )
-                    }
-                    state.timeline.isEmpty() -> {
-                        EmptyState(
-                            title = stringResource(R.string.today_empty_title),
-                            message = stringResource(R.string.today_empty_message),
-                        )
-                    }
-                    else -> {
-                        TimelineList(
-                            items = state.timeline,
-                            personFocus = state.personFocus,
-                            onOpenCommitmentDetail = onOpenCommitmentDetail,
-                            onAddDueTime = onAddDueTime,
-                            contentPadding = PaddingValues(vertical = 4.dp),
-                        )
-                    }
-                }
 
-                PullRefreshIndicator(
-                    refreshing = state.refreshing,
-                    state = pullState,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                    PullRefreshIndicator(
+                        refreshing = state.refreshing,
+                        state = pullState,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }
             }
         }
+    }
+}
+
+/** Reading-width cap for the Today timeline. Below this, content fills the
+ *  available width on phones; at or above (tablet, foldable open), the column
+ *  centres in the viewport so the single-column calm holds on every device. */
+private val TimelineMaxContentWidth: Dp = 600.dp
+
+/**
+ * Static skeleton placeholder rows shown during the cold-start no-data window.
+ *
+ * Matches the timeline row geometry (84dp min height, glassPanel card body,
+ * rail, time column) so real data lands in place without layout pop. No
+ * animation: motion is intentional only in this system, and a "loading
+ * shimmer" reads as process-noise on the first-line surface (DESIGN.md
+ * Process-Hidden Rule). Three rows is enough to communicate "list, loading"
+ * without padding the screen with placeholders.
+ */
+@Composable
+private fun TimelineSkeleton(modifier: Modifier = Modifier) {
+    // onSurfaceVariant (muted-silver #B2B2B2 on dark) at α=0.14 reads as a
+    // subtle visible placeholder over the cosmic-near-black ground.
+    // outlineVariant (#1E1E1E on dark) was effectively invisible against #111111.
+    val skeletonColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.14f)
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 4.dp),
+        modifier = modifier.fillMaxSize(),
+    ) {
+        items(count = 3, key = { index -> "timeline-skeleton-$index" }) {
+            TimelineSkeletonRow(
+                skeletonColor = skeletonColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimelineSkeletonRow(
+    skeletonColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.heightIn(min = 84.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(10.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(14.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .height(10.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .width(18.dp)
+                .heightIn(min = 84.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(skeletonColor),
+            )
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .weight(1f)
+                    .background(skeletonColor),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .width(54.dp)
+                .padding(top = 12.dp, start = 8.dp)
+                .height(12.dp)
+                .background(skeletonColor, RoundedCornerShape(4.dp)),
+        )
     }
 }
 
@@ -340,7 +450,9 @@ private fun TodayPersonFocusRow(person: TodayPersonFocus) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = label.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                // Match CommitmentCard's avatar fallback: first letter only,
+                // so emoji- / symbol-prefixed names render a legible initial.
+                text = label.firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
@@ -436,17 +548,19 @@ private fun TimelineCard(
     onAddDueTime: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val cardColor = timelineCardColor(item)
     val clickModifier = if (item is TimelineItem.Commitment) {
         Modifier.clickable { onOpenCommitmentDetail(item.id) }
     } else {
         Modifier
     }
+    // Surface = glassPanel only. Direction is signalled by the inline
+    // DirectionBadge below; type is signalled by the leading label. Tinting the
+    // surface itself was double-signal and used wrong (amber) colors for the
+    // take direction. See DESIGN.md §4 Two-Recipe Rule.
     Column(
         modifier = modifier
             .then(clickModifier)
-            .background(cardColor, MaterialTheme.shapes.medium)
-            .border(1.dp, cardColor.copy(alpha = 0.72f), MaterialTheme.shapes.medium)
+            .glassPanel(MaterialTheme.shapes.medium)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Text(
@@ -483,7 +597,9 @@ private fun TimelineCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = { onAddDueTime(item.id) },
-                    modifier = Modifier.align(Alignment.End),
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .defaultMinSize(minHeight = 44.dp),
                 ) {
                     Text(text = stringResource(R.string.today_add_due_time))
                 }
@@ -507,20 +623,6 @@ private fun typeLabelFor(item: TimelineItem): String = when (item) {
     }
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_type_event)
     is TimelineItem.Meeting -> stringResource(R.string.today_type_meeting)
-}
-
-@Composable
-private fun timelineCardColor(item: TimelineItem): Color = when (item) {
-    is TimelineItem.Commitment -> when (item.itemType) {
-        CommitmentItemType.SCHEDULE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-        CommitmentItemType.ACTION -> when (item.direction) {
-            "take" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.46f)
-            else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
-        }
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
-    }
-    is TimelineItem.Meeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.32f)
-    is TimelineItem.CalendarEvent -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
 }
 
 private fun formatKstTime(instant: Instant): String {

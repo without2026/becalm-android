@@ -25,7 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -78,21 +78,27 @@ public fun BecalmScaffold(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .drawBehind {
-                // Solid cosmic background
-                drawRect(color = bgColor)
-                // Top-half radial ambient glow
+            .drawWithCache {
+                // Build the radial-gradient brush once per layout-size change
+                // (drawWithCache re-runs only when [size] or input state
+                // invalidates) instead of allocating a fresh Brush every frame
+                // inside drawBehind.
                 val centerX = size.width / 2f
                 val centerY = -size.height * 0.3f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(glowCore, glowEdge),
-                        center = Offset(centerX, centerY),
-                        radius = size.width * 0.9f,
-                    ),
-                    radius = size.width * 0.9f,
+                val glowRadius = size.width * 0.9f
+                val ambientBrush = Brush.radialGradient(
+                    colors = listOf(glowCore, glowEdge),
                     center = Offset(centerX, centerY),
+                    radius = glowRadius,
                 )
+                onDrawBehind {
+                    drawRect(color = bgColor)
+                    drawCircle(
+                        brush = ambientBrush,
+                        radius = glowRadius,
+                        center = Offset(centerX, centerY),
+                    )
+                }
             },
     ) {
         Scaffold(

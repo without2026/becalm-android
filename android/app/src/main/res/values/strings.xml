@@ -33,6 +33,8 @@
 
     <!-- Error / empty states -->
     <string name="error_generic_title">Something went wrong</string>
+    <string name="error_state_retry">Retry</string>
+    <string name="commitment_mark_done_action">Mark done</string>
 
     <!-- Splash -->
     <string name="splash_title">BeCalm</string>
