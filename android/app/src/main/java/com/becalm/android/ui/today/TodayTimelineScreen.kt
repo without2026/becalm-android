@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -594,7 +595,9 @@ private fun TimelineCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
                     onClick = { onAddDueTime(item.id) },
-                    modifier = Modifier.align(Alignment.End),
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .defaultMinSize(minHeight = 44.dp),
                 ) {
                     Text(text = stringResource(R.string.today_add_due_time))
                 }
