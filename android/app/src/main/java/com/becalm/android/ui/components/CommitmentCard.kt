@@ -39,12 +39,17 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -62,6 +67,7 @@ import com.becalm.android.ui.theme.LocalKstDayTick
 import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.glassPanel
+import com.becalm.android.ui.theme.rememberReducedMotion
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -244,6 +250,26 @@ public fun CommitmentCard(
     val semanticsDesc = "$direction $title"
     val showMarkDone = onMarkDone != null && !isTerminal
 
+    // Mark-done confirmation pulse: brief 1.0 → 1.04 → 1.0 scale on the card
+    // when isTerminal flips from false to true (e.g. user marked done from
+    // anywhere). Combined with the existing alpha drop and the UNDO snackbar,
+    // this gives the 50s persona a tangible "the action went through" cue
+    // that does not depend on reading the dimmed status. Skipped on initial
+    // composition (cards already in COMPLETED state should not pulse on
+    // first render) and when the user has system reduced-motion enabled.
+    // impeccable critique R4 P2.
+    val reducedMotion = rememberReducedMotion()
+    val markDoneScale = remember { Animatable(1f) }
+    val previousTerminalState = remember { mutableStateOf(isTerminal) }
+    LaunchedEffect(isTerminal) {
+        val wasTerminal = previousTerminalState.value
+        previousTerminalState.value = isTerminal
+        if (!wasTerminal && isTerminal && !reducedMotion) {
+            markDoneScale.animateTo(targetValue = 1.04f, animationSpec = tween(durationMillis = 150))
+            markDoneScale.animateTo(targetValue = 1f, animationSpec = tween(durationMillis = 150))
+        }
+    }
+
     // Swipe-from-end (right edge → left) marks the commitment done. The 30s
     // power-user persona expects the gesture from Things 3 / Granola
     // muscle memory; the 50s persona never has to discover it (the inline
@@ -296,6 +322,10 @@ public fun CommitmentCard(
         modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
+            .graphicsLayer {
+                scaleX = markDoneScale.value
+                scaleY = markDoneScale.value
+            }
             .alpha(cardAlpha)
             .glassPanel()
             .then(
