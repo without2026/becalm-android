@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -66,6 +67,7 @@ public class ColdSyncViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val lifecycleCoordinator: ColdSyncLifecycleCoordinator,
     private val runtimeCoordinator: ColdSyncRuntimeCoordinator,
+    private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -101,11 +103,21 @@ public class ColdSyncViewModel @Inject constructor(
     private val derivedState = combine(
         sourceStatusRepository.observeAll(),
         runtimeCoordinator.observeUserProfileReady(),
+        userPrefsStore.observeEnabledSources(),
         skipEnabledFlow,
         transitioningFlow,
-        transitionSnapshotFlow,
-    ) { statuses, userProfileReady, skipEnabled, transitioning, lastTransition ->
-            buildUiState(statuses, userProfileReady, skipEnabled, transitioning, lastTransition)
+    ) { statuses, userProfileReady, enabledSources, skipEnabled, transitioning ->
+            CombinedFlowValues(statuses, userProfileReady, enabledSources, skipEnabled, transitioning)
+        }
+        .combine(transitionSnapshotFlow) { values, lastTransition ->
+            buildUiState(
+                values.statuses,
+                values.userProfileReady,
+                values.enabledSources,
+                values.skipEnabled,
+                values.transitioning,
+                lastTransition,
+            )
         }
         .catch { e ->
             logger.e(TAG, "source status observation failed", e as? Exception ?: Exception(e))
@@ -172,13 +184,19 @@ public class ColdSyncViewModel @Inject constructor(
     private fun buildUiState(
         statuses: List<com.becalm.android.data.repository.SourceStatus>,
         userProfileReady: Boolean,
+        enabledSources: Set<String>,
         skipEnabled: Boolean,
         transitioning: Boolean,
         lastTransition: ColdSyncTransitionSnapshot?,
     ): ColdSyncUiState {
+        // Only sources the user actually enabled during onboarding can ever leave
+        // NEVER_CONNECTED — gating `done` on the full STAGE1_TRACKED_SOURCES set
+        // would strand the screen forever for users who skip any source.
+        // Mirrors the filter used by ColdSyncRuntimeCoordinator.startStage1.
+        val activeTracked = STAGE1_TRACKED_SOURCES intersect enabledSources
         val sourceProgress = statuses
             .asSequence()
-            .filter { it.sourceType in STAGE1_TRACKED_SOURCES }
+            .filter { it.sourceType in activeTracked }
             .associate { status -> status.sourceType to sourceProgress(status.status) }
         val trackedProgress = linkedMapOf<String, Float>().apply {
             putAll(sourceProgress)
@@ -197,6 +215,14 @@ public class ColdSyncViewModel @Inject constructor(
             lastTransition = lastTransition,
         )
     }
+
+    private data class CombinedFlowValues(
+        val statuses: List<com.becalm.android.data.repository.SourceStatus>,
+        val userProfileReady: Boolean,
+        val enabledSources: Set<String>,
+        val skipEnabled: Boolean,
+        val transitioning: Boolean,
+    )
 
     private companion object {
         private const val SKIP_ENABLE_DELAY_MS: Long = 5_000L
