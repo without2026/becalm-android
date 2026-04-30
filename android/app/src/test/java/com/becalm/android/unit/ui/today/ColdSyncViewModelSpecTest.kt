@@ -4,6 +4,7 @@ import app.cash.turbine.ReceiveTurbine
 import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
@@ -41,7 +42,9 @@ class ColdSyncViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val sourceStatusFlow = MutableStateFlow<List<SourceStatus>>(emptyList())
+    private val enabledSourcesFlow = MutableStateFlow<Set<String>>(emptySet())
     private val sourceStatusRepository: SourceStatusRepository = mockk()
+    private val userPrefsStore: UserPrefsStore = mockk()
     private lateinit var lifecycleCoordinator: FakeColdSyncLifecycleCoordinator
     private lateinit var runtimeCoordinator: FakeColdSyncRuntimeCoordinator
     private val logger: Logger = mockk(relaxed = true)
@@ -52,7 +55,9 @@ class ColdSyncViewModelSpecTest {
         lifecycleCoordinator = FakeColdSyncLifecycleCoordinator()
         runtimeCoordinator = FakeColdSyncRuntimeCoordinator()
         sourceStatusFlow.value = emptyList()
+        enabledSourcesFlow.value = emptySet()
         every { sourceStatusRepository.observeAll() } returns sourceStatusFlow
+        every { userPrefsStore.observeEnabledSources() } returns enabledSourcesFlow
     }
 
     @After
@@ -85,6 +90,12 @@ class ColdSyncViewModelSpecTest {
     @Test
     fun `TDY-010 COLD-002 progress keeps syncing and never connected at zero while terminal rows are one`() = runTest {
         runtimeCoordinator.userProfileReady.value = false
+        enabledSourcesFlow.value = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.GOOGLE_CALENDAR,
+        )
         sourceStatusFlow.value = listOf(
             sourceStatus(SourceType.GMAIL, SourceConnectionStatus.SYNCING),
             sourceStatus(SourceType.OUTLOOK_MAIL, SourceConnectionStatus.NEVER_CONNECTED),
@@ -111,6 +122,14 @@ class ColdSyncViewModelSpecTest {
     @Test
     fun `TDY-010 COLD-003 done flips true once every tracked stage1 source is terminal`() = runTest {
         runtimeCoordinator.userProfileReady.value = true
+        enabledSourcesFlow.value = setOf(
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
         sourceStatusFlow.value = listOf(
             sourceStatus(SourceType.GMAIL, SourceConnectionStatus.ERROR),
             sourceStatus(SourceType.OUTLOOK_MAIL, SourceConnectionStatus.CONNECTED),
@@ -127,6 +146,69 @@ class ColdSyncViewModelSpecTest {
 
             assertTrue(state.done)
             assertEquals(1f, state.overallProgress)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `COLD-002b done flips when only the user-enabled source reaches terminal state`() = runTest {
+        runtimeCoordinator.userProfileReady.value = true
+        enabledSourcesFlow.value = setOf(SourceType.GMAIL)
+        sourceStatusFlow.value = listOf(
+            sourceStatus(SourceType.GMAIL, SourceConnectionStatus.CONNECTED),
+            sourceStatus(SourceType.OUTLOOK_MAIL, SourceConnectionStatus.NEVER_CONNECTED),
+            sourceStatus(SourceType.NAVER_IMAP, SourceConnectionStatus.NEVER_CONNECTED),
+            sourceStatus(SourceType.GOOGLE_CALENDAR, SourceConnectionStatus.NEVER_CONNECTED),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            val state = awaitMappedState(this@runTest, viewModel, this)
+
+            assertTrue(state.done)
+            assertEquals(setOf(SourceType.GMAIL, DefaultColdSyncRuntimeCoordinator.USER_PROFILE_SOURCE_ID), state.perSourceProgress.keys)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `COLD-002c done flips on profile readiness alone when no source is enabled`() = runTest {
+        runtimeCoordinator.userProfileReady.value = true
+        enabledSourcesFlow.value = emptySet()
+        sourceStatusFlow.value = listOf(
+            sourceStatus(SourceType.GMAIL, SourceConnectionStatus.NEVER_CONNECTED),
+            sourceStatus(SourceType.GOOGLE_CALENDAR, SourceConnectionStatus.NEVER_CONNECTED),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            val state = awaitMappedState(this@runTest, viewModel, this)
+
+            assertTrue(state.done)
+            assertEquals(setOf(DefaultColdSyncRuntimeCoordinator.USER_PROFILE_SOURCE_ID), state.perSourceProgress.keys)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `COLD-002d done stays false while any enabled source is still syncing`() = runTest {
+        runtimeCoordinator.userProfileReady.value = true
+        enabledSourcesFlow.value = setOf(SourceType.GMAIL, SourceType.OUTLOOK_MAIL)
+        sourceStatusFlow.value = listOf(
+            sourceStatus(SourceType.GMAIL, SourceConnectionStatus.CONNECTED),
+            sourceStatus(SourceType.OUTLOOK_MAIL, SourceConnectionStatus.SYNCING),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            val state = awaitMappedState(this@runTest, viewModel, this)
+
+            assertFalse(state.done)
+            assertEquals(0f, state.perSourceProgress.getValue(SourceType.OUTLOOK_MAIL))
+            assertEquals(1f, state.perSourceProgress.getValue(SourceType.GMAIL))
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -275,6 +357,7 @@ class ColdSyncViewModelSpecTest {
         sourceStatusRepository = sourceStatusRepository,
         lifecycleCoordinator = lifecycleCoordinator,
         runtimeCoordinator = runtimeCoordinator,
+        userPrefsStore = userPrefsStore,
         logger = logger,
     )
 
