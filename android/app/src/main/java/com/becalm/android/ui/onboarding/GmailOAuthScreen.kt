@@ -205,6 +205,7 @@ internal fun OAuthPlaceholderContent(
     onConnect: () -> Unit,
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    connectLoading: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -236,6 +237,8 @@ internal fun OAuthPlaceholderContent(
             text = connectLabel,
             onClick = onConnect,
             variant = BecalmButtonVariant.Primary,
+            enabled = !connectLoading,
+            loading = connectLoading,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -243,6 +246,7 @@ internal fun OAuthPlaceholderContent(
             text = stringResource(R.string.action_skip),
             onClick = onSkip,
             variant = BecalmButtonVariant.Text,
+            enabled = !connectLoading,
         )
     }
 }
