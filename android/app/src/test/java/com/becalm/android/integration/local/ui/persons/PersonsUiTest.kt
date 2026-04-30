@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.ui.persons.InteractionRow
@@ -87,6 +88,37 @@ class PersonsUiTest {
         composeRule.onNodeWithTag("persons-list")
             .performScrollToNode(hasText("미분류 이벤트"))
         composeRule.onNodeWithText("미분류 이벤트").assertExists()
+    }
+
+    @Test
+    fun `persons search input routes typed query`() {
+        var typedQuery: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                PersonsScreenContent(
+                    state = PersonsUiState(
+                        people = listOf(
+                            PersonRow(
+                                personRef = "kim@example.com",
+                                displayName = "김철수",
+                                lastInteractionAt = Instant.parse("2026-04-24T01:00:00Z"),
+                                interactionCount = 1,
+                            ),
+                        ),
+                        loading = false,
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    onQueryChange = { typedQuery = it },
+                    onPersonClick = {},
+                    onBlockPerson = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("persons-search-input").performTextInput("김")
+
+        composeRule.runOnIdle { assertEquals("김", typedQuery) }
     }
 
     @Test

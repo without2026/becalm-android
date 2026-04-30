@@ -20,6 +20,7 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.dto.TranscribeExtractResponse
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
@@ -29,6 +30,7 @@ import com.becalm.android.worker.WorkScheduler
 import com.squareup.moshi.Moshi
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.slot
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -143,6 +145,55 @@ class VoiceUploadWorkerNotificationSpecTest {
                 reasonCode = "output_truncated",
             )
         }
+    }
+
+    @Test
+    fun `VOI-001 successful empty extraction records last attempt to prevent duplicate reupload`() = runTest {
+        val entity = RawIngestionEventEntity(
+            id = "raw-1",
+            userId = "user-1",
+            clientEventId = "client-1",
+            sourceType = SourceType.CALL_RECORDING,
+            sourceRef = "content://voice/raw-1",
+            eventTitle = "통화 녹음",
+            timestamp = Instant.parse("2026-04-23T00:00:00Z"),
+            syncStatus = "pending",
+        )
+        val updatedSlot = slot<RawIngestionEventEntity>()
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
+        coEvery { rawIngestionEventDao.update(capture(updatedSlot)) } returns 1
+        coEvery {
+            voiceApi.transcribeExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns Response.success(
+            TranscribeExtractResponse(
+                rawEventId = "raw-1",
+                items = emptyList(),
+                personCandidates = emptyList(),
+                model = "gemini-2.5-flash",
+                region = "us-central1",
+                rawModelText = """{"items":[],"person_candidates":[]}""",
+            ),
+        )
+
+        val result = buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(0, updatedSlot.captured.commitmentsExtractedCount)
+        assertEquals("pending", updatedSlot.captured.syncStatus)
+        assertEquals(false, updatedSlot.captured.lastAttemptAt == null)
+        coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
     private fun buildWorker(): VoiceUploadWorker = VoiceUploadWorker(

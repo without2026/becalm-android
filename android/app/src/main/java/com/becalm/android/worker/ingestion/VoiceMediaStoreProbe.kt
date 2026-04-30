@@ -666,7 +666,11 @@ internal class VoiceMediaStoreProbe(
     }
 
     private fun classifyExistingVoiceRow(existing: RawIngestionEventEntity): VoiceInsertResult =
-        if (existing.syncStatus != "pending" || existing.commitmentsExtractedCount > 0) {
+        if (
+            existing.syncStatus != "pending" ||
+            existing.commitmentsExtractedCount > 0 ||
+            existing.lastAttemptAt != null
+        ) {
             VoiceInsertResult.DedupSkip
         } else {
             VoiceInsertResult.Dedup(existing.id)

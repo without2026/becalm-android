@@ -296,6 +296,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 val updated = entity.copy(
                     commitmentsExtractedCount = body.items.size,
                     eventSnippet = snippet,
+                    lastAttemptAt = now,
                     syncStatus = STATUS_PENDING,
                 )
                 rawIngestionEventDao.update(updated)

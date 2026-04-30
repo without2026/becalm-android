@@ -115,6 +115,14 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT * FROM source_person_candidates
+        WHERE user_id = :userId
+        """,
+    )
+    public fun observeCandidatesForUser(userId: String): Flow<List<SourcePersonCandidateEntity>>
+
+    @Query(
+        """
         SELECT * FROM person_manual_matches
         WHERE user_id = :userId
         """,

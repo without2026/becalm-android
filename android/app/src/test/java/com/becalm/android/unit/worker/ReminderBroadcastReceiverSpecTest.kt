@@ -69,6 +69,25 @@ class ReminderBroadcastReceiverSpecTest {
         verify(exactly = 0) { context.packageName }
     }
 
+    @Test
+    fun `CMT-008 handle drops no-deadline commitments without posting notification`() = runTest {
+        val context: Context = mockk(relaxed = true)
+        val commitmentDao: CommitmentDao = mockk()
+        val logger: Logger = mockk(relaxed = true)
+        val receiver = spyk(ReminderBroadcastReceiver())
+        receiver.commitmentDao = commitmentDao
+        receiver.logger = logger
+
+        coEvery { commitmentDao.findByIdForUser("user-1", "no-deadline-1") } returns
+            entity(id = "no-deadline-1", actionState = "pending", dueAt = null)
+
+        invokeHandle(receiver, context, "no-deadline-1", "user-1")
+
+        verify(exactly = 0) { context.getString(any<Int>()) }
+        verify(exactly = 0) { context.getString(any<Int>(), *anyVararg()) }
+        verify(exactly = 0) { context.packageName }
+    }
+
     private fun invokeHandle(
         receiver: ReminderBroadcastReceiver,
         context: Context,
@@ -97,6 +116,7 @@ class ReminderBroadcastReceiverSpecTest {
     private fun entity(
         id: String,
         actionState: String,
+        dueAt: Instant? = Instant.parse("2026-04-23T01:00:00Z"),
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = "user-1",
@@ -108,7 +128,7 @@ class ReminderBroadcastReceiverSpecTest {
         quote = "quote body",
         sourceEventTitle = "Call",
         sourceEventOccurredAt = Instant.parse("2026-04-23T00:00:00Z"),
-        dueAt = Instant.parse("2026-04-23T01:00:00Z"),
+        dueAt = dueAt,
         dueHint = null,
         dueIsApproximate = false,
         actionState = actionState,

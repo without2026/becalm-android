@@ -111,7 +111,7 @@ private fun CommitmentRow(row: InteractionRow.Commitment) {
     ) {
         Text(
             text = commitmentTypeLabel(row.itemType),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         IngestionTimestamp(timestamp = row.timestamp)
@@ -148,7 +148,7 @@ private fun CalendarMeetingRow(row: InteractionRow.CalendarMeeting) {
     ) {
         Text(
             text = stringResource(R.string.today_section_meetings),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         IngestionTimestamp(timestamp = row.timestamp)

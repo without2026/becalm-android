@@ -149,6 +149,13 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             )
             return
         }
+        if (entity.dueAt == null) {
+            logger.d(
+                TAG,
+                "silent drop: due_at missing for commitmentId_hash=${redact(commitmentId)}",
+            )
+            return
+        }
 
         postNotification(
             context = context,

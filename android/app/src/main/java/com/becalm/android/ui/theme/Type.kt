@@ -14,22 +14,28 @@ package com.becalm.android.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.becalm.android.R
 
 // ─── Font family ─────────────────────────────────────────────────────────────
 
 /**
- * Pretendard Variable font family — PLACEHOLDER.
+ * Pretendard Variable font family.
  *
- * The actual variable-font `.ttf` is scheduled for commit in R10.  Until then we
- * fall back to [FontFamily.Default] so the type scale below compiles and renders
- * with the system font (NotoSansCJK on One UI, sans-serif elsewhere).  Replacing
- * this constant with the proper [FontFamily] once `res/font/pretendard_variable.ttf`
- * lands is a drop-in swap — no other file needs to change.
+ * The same variable-font binary is registered across the weights used by the
+ * BeCalm type scale. Android keeps SEC CJK / NotoSansCJK-KR as the system
+ * fallback for missing glyphs, but Hangul and Latin both render through the
+ * bundled Pretendard resource in normal app surfaces.
  */
-internal val PretendardFontFamily: FontFamily = FontFamily.Default
+internal val PretendardFontFamily: FontFamily = FontFamily(
+    Font(R.font.pretendard_variable, weight = FontWeight.Light),
+    Font(R.font.pretendard_variable, weight = FontWeight.Normal),
+    Font(R.font.pretendard_variable, weight = FontWeight.Medium),
+    Font(R.font.pretendard_variable, weight = FontWeight.SemiBold),
+)
 
 // ─── Typography scale ─────────────────────────────────────────────────────────
 

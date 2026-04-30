@@ -1,16 +1,23 @@
 package com.becalm.android.ui.commitments
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -130,15 +137,17 @@ class CommitmentSheetsTest {
     @Test
     fun commitment_create_content_shows_required_inputs_direction_and_save() {
         var title: String? = null
+        var quote: String? = null
+        var personRef: String? = null
+        var dueHint: String? = null
         var direction: String? = null
         var saveClicks = 0
 
         composeTestRule.setContent {
             BecalmTheme {
-                CreateSheetContent(
-                    state = CreateUiState(
-                        mode = CommitmentCreateMode.MANUAL,
-                        draft = ManualCommitmentDraft(
+                var draft by remember {
+                    mutableStateOf(
+                        ManualCommitmentDraft(
                             title = "",
                             direction = "give",
                             quote = "",
@@ -147,13 +156,34 @@ class CommitmentSheetsTest {
                             dueHint = null,
                             dueIsApproximate = false,
                         ),
+                    )
+                }
+                CreateSheetContent(
+                    state = CreateUiState(
+                        mode = CommitmentCreateMode.MANUAL,
+                        draft = draft,
                     ),
-                    onTitleChange = { title = it },
-                    onDirectionChange = { direction = it },
-                    onQuoteChange = {},
-                    onPersonRefChange = {},
+                    onTitleChange = {
+                        title = it
+                        draft = draft.copy(title = it)
+                    },
+                    onDirectionChange = {
+                        direction = it
+                        draft = draft.copy(direction = it)
+                    },
+                    onQuoteChange = {
+                        quote = it
+                        draft = draft.copy(quote = it)
+                    },
+                    onPersonRefChange = {
+                        personRef = it
+                        draft = draft.copy(personRef = it)
+                    },
                     onDueAtMillisChange = {},
-                    onDueHintChange = {},
+                    onDueHintChange = {
+                        dueHint = it
+                        draft = draft.copy(dueHint = it)
+                    },
                     onApproxChange = {},
                     onSave = { saveClicks += 1 },
                     onCancel = {},
@@ -164,13 +194,87 @@ class CommitmentSheetsTest {
         composeTestRule.onNodeWithText(string(R.string.commitment_manual_field_title)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("commitment-create-title").performTextInput("New commitment")
         composeTestRule.onNodeWithText(string(R.string.commitment_manual_field_direction_take)).performClick()
+        composeTestRule.onNodeWithTag("commitment-create-form")
+            .performScrollToNode(hasTestTag("commitment-create-quote"))
+        composeTestRule.onNodeWithTag("commitment-create-quote").performTextInput("Please send the deck")
+        composeTestRule.onNodeWithTag("commitment-create-form")
+            .performScrollToNode(hasTestTag("commitment-create-person-ref"))
+        composeTestRule.onNodeWithTag("commitment-create-person-ref").performTextInput("alice@example.com")
+        composeTestRule.onNodeWithTag("commitment-create-form")
+            .performScrollToNode(hasTestTag("commitment-create-due-hint"))
+        composeTestRule.onNodeWithTag("commitment-create-due-hint").performTextInput("Friday afternoon")
         composeTestRule.onNodeWithTag("commitment-create-save")
             .performSemanticsAction(SemanticsActions.OnClick)
 
         composeTestRule.runOnIdle {
             assertEquals("New commitment", title)
+            assertEquals("Please send the deck", quote)
+            assertEquals("alice@example.com", personRef)
+            assertEquals("Friday afternoon", dueHint)
             assertEquals("take", direction)
             assertEquals(1, saveClicks)
+        }
+    }
+
+    @Test
+    fun commitment_edit_content_routes_text_field_changes() {
+        var title: String? = null
+        var dueHint: String? = null
+        var personRef: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                var state by remember {
+                    mutableStateOf(
+                        EditUiState(
+                            loading = false,
+                            readOnly = EditReadOnly(
+                                quote = "I will send it next week",
+                                quoteDisputed = false,
+                                sourceLabel = "voice · 4/24 10:00 KST",
+                            ),
+                            title = "Existing commitment",
+                            dueAtMillis = null,
+                            dueIsApproximate = false,
+                            dueHint = "",
+                            personRef = "person-1",
+                            direction = "give",
+                        ),
+                    )
+                }
+                EditSheetContent(
+                    state = state,
+                    onTitleChange = {
+                        title = it
+                        state = state.copy(title = it)
+                    },
+                    onDueAtMillisChange = {},
+                    onDueIsApproximateChange = {},
+                    onDueHintChange = {
+                        dueHint = it
+                        state = state.copy(dueHint = it)
+                    },
+                    onPersonRefChange = {
+                        personRef = it
+                        state = state.copy(personRef = it)
+                    },
+                    onDirectionChange = {},
+                    onToggleDispute = {},
+                    onSave = {},
+                    onCancel = {},
+                    onConfirmDelete = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("commitment-edit-title").performTextReplacement("Edited commitment")
+        composeTestRule.onNodeWithTag("commitment-edit-due-hint").performTextInput("Tomorrow morning")
+        composeTestRule.onNodeWithTag("commitment-edit-person-ref").performTextReplacement("bob@example.com")
+
+        composeTestRule.runOnIdle {
+            assertEquals("Edited commitment", title)
+            assertEquals("Tomorrow morning", dueHint)
+            assertEquals("bob@example.com", personRef)
         }
     }
 

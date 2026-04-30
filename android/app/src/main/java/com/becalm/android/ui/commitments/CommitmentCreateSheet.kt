@@ -176,6 +176,7 @@ internal fun CreateSheetContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f, fill = false)
+                .testTag("commitment-create-form")
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -222,7 +223,7 @@ internal fun CreateSheetContent(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = it,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
@@ -243,7 +244,9 @@ internal fun CreateSheetContent(
                                 state.fieldErrors[Field.QUOTE]?.let { Text(text = it) }
                             },
                             enabled = !state.saving,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("commitment-create-quote"),
                         )
                     }
                     CommitmentCreateMode.SUPERSEDE -> {
@@ -274,7 +277,9 @@ internal fun CreateSheetContent(
                     },
                     singleLine = true,
                     enabled = !state.saving,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("commitment-create-person-ref"),
                 )
             }
 
@@ -336,7 +341,9 @@ internal fun CreateSheetContent(
                     label = { Text(text = stringResource(R.string.commitment_manual_field_due_hint)) },
                     singleLine = true,
                     enabled = !state.saving,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("commitment-create-due-hint"),
                 )
             }
 
@@ -346,7 +353,7 @@ internal fun CreateSheetContent(
         state.saveError?.let {
             Text(
                 text = it,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
@@ -467,7 +474,7 @@ private fun DirectionOption(
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

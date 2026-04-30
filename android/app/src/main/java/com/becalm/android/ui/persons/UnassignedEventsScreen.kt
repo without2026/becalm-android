@@ -1,7 +1,8 @@
 package com.becalm.android.ui.persons
 
 import android.view.WindowManager
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,13 +11,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +27,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -82,7 +87,7 @@ public fun UnassignedEventsScreen(
     }
 
     BecalmScaffold(
-        title = stringResource(R.string.persons_unassigned_title),
+        title = stringResource(R.string.person_match_review_heading),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         navigationIcon = {
             IconButton(onClick = { navController.popBackStack() }) {
@@ -109,12 +114,35 @@ internal fun UnassignedEventsContent(
     onManualMatch: (UnassignedEventSummary, String, String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
+    var filter by remember { mutableStateOf(MatchQueueFilter.RECOMMENDED) }
+    var completedIds by remember { mutableStateOf(setOf<String>()) }
+    var laterIds by remember { mutableStateOf(setOf<String>()) }
+
+    val activeEvents = unassignedEvents.filterNot { it.id in completedIds }
+    val recommendedCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() != null }
+    val manualCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() == null }
+    val laterCount = activeEvents.count { it.id in laterIds }
+    val effectiveFilter = when {
+        filter == MatchQueueFilter.RECOMMENDED && recommendedCount == 0 && manualCount > 0 ->
+            MatchQueueFilter.MANUAL
+        filter == MatchQueueFilter.MANUAL && manualCount == 0 && recommendedCount > 0 ->
+            MatchQueueFilter.RECOMMENDED
+        else -> filter
+    }
+    val visibleEvents = activeEvents.filter { event ->
+        when (effectiveFilter) {
+            MatchQueueFilter.RECOMMENDED -> event.id !in laterIds && event.bestCandidate() != null
+            MatchQueueFilter.MANUAL -> event.id !in laterIds && event.bestCandidate() == null
+            MatchQueueFilter.LATER -> event.id in laterIds
+        }
+    }
+
     when {
         loading -> {
             BecalmSheetSkeleton(modifier = modifier)
         }
 
-        unassignedEvents.isEmpty() -> {
+        activeEvents.isEmpty() -> {
             EmptyState(
                 title = stringResource(R.string.persons_unassigned_empty_title),
                 message = stringResource(R.string.persons_unassigned_empty_message),
@@ -128,10 +156,35 @@ internal fun UnassignedEventsContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 modifier = modifier.fillMaxSize(),
             ) {
-                items(items = unassignedEvents, key = { it.id }) { event ->
-                    UnassignedMatchRow(
+                item(key = "match-review-header") {
+                    MatchReviewHeader(
+                        remainingCount = activeEvents.size,
+                        recommendedCount = recommendedCount,
+                        manualCount = manualCount,
+                        laterCount = laterCount,
+                        filter = effectiveFilter,
+                        onFilterChange = { filter = it },
+                    )
+                }
+                if (visibleEvents.isEmpty()) {
+                    item(key = "match-review-empty-filter") {
+                        MatchReviewEmptyFilter(filter = effectiveFilter)
+                    }
+                }
+                items(items = visibleEvents, key = { it.id }) { event ->
+                    PersonMatchReviewCard(
                         event = event,
-                        onManualMatch = onManualMatch,
+                        onConfirm = { anchor, nickname ->
+                            onManualMatch(event, anchor, nickname)
+                            completedIds = completedIds + event.id
+                            laterIds = laterIds - event.id
+                        },
+                        onLater = {
+                            laterIds = laterIds + event.id
+                            if (filter != MatchQueueFilter.LATER) {
+                                filter = MatchQueueFilter.RECOMMENDED
+                            }
+                        },
                     )
                 }
             }
@@ -140,13 +193,101 @@ internal fun UnassignedEventsContent(
 }
 
 @Composable
-private fun UnassignedMatchRow(
-    event: UnassignedEventSummary,
-    onManualMatch: (UnassignedEventSummary, String, String) -> Unit,
+private fun MatchReviewHeader(
+    remainingCount: Int,
+    recommendedCount: Int,
+    manualCount: Int,
+    laterCount: Int,
+    filter: MatchQueueFilter,
+    onFilterChange: (MatchQueueFilter) -> Unit,
 ) {
-    var personAnchor by remember(event.id) {
-        mutableStateOf(event.suggestedLabel.orEmpty())
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.person_match_review_heading),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.person_match_review_summary, remainingCount),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            MatchFilterChip(
+                selected = filter == MatchQueueFilter.RECOMMENDED,
+                label = stringResource(R.string.person_match_filter_recommended, recommendedCount),
+                onClick = { onFilterChange(MatchQueueFilter.RECOMMENDED) },
+            )
+            MatchFilterChip(
+                selected = filter == MatchQueueFilter.MANUAL,
+                label = stringResource(R.string.person_match_filter_manual, manualCount),
+                onClick = { onFilterChange(MatchQueueFilter.MANUAL) },
+            )
+            MatchFilterChip(
+                selected = filter == MatchQueueFilter.LATER,
+                label = stringResource(R.string.person_match_filter_later, laterCount),
+                onClick = { onFilterChange(MatchQueueFilter.LATER) },
+            )
+        }
     }
+}
+
+@Composable
+private fun MatchFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        },
+    )
+}
+
+@Composable
+private fun MatchReviewEmptyFilter(filter: MatchQueueFilter) {
+    val message = when (filter) {
+        MatchQueueFilter.RECOMMENDED -> R.string.person_match_empty_recommended
+        MatchQueueFilter.MANUAL -> R.string.person_match_empty_manual
+        MatchQueueFilter.LATER -> R.string.person_match_empty_later
+    }
+    Text(
+        text = stringResource(message),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+    )
+}
+
+@Composable
+private fun PersonMatchReviewCard(
+    event: UnassignedEventSummary,
+    onConfirm: (String, String) -> Unit,
+    onLater: () -> Unit,
+) {
+    val candidate = event.bestCandidate()
+    var manualOpen by remember(event.id) { mutableStateOf(candidate == null) }
+    var personAnchor by remember(event.id) { mutableStateOf(candidate?.anchor.orEmpty()) }
+    var selectedNickname by remember(event.id) { mutableStateOf(candidate?.displayName.orEmpty()) }
     var nickname by remember(event.id) { mutableStateOf("") }
 
     Column(
@@ -156,11 +297,18 @@ private fun UnassignedMatchRow(
             .glassPanel(MaterialTheme.shapes.medium)
             .padding(12.dp),
     ) {
-        EventSourceBadge(sourceType = event.sourceType)
-        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            EventSourceBadge(sourceType = event.sourceType)
+            Spacer(modifier = Modifier.weight(1f))
+            IngestionTimestamp(timestamp = event.timestamp)
+        }
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = event.title ?: stringResource(R.string.persons_unidentified),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
         if (!event.snippet.isNullOrBlank()) {
@@ -171,46 +319,186 @@ private fun UnassignedMatchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        IngestionTimestamp(timestamp = event.timestamp)
         Spacer(modifier = Modifier.height(12.dp))
-        BecalmTextField(
-            value = personAnchor,
-            onValueChange = { personAnchor = it },
-            placeholder = stringResource(R.string.persons_manual_match_anchor_hint),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        BecalmTextField(
-            value = nickname,
-            onValueChange = { nickname = it },
-            placeholder = stringResource(R.string.persons_manual_match_nickname_hint),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(modifier = Modifier.align(Alignment.End)) {
-            OutlinedButton(
-                enabled = personAnchor.isNotBlank(),
-                onClick = {
-                    onManualMatch(
-                        event,
+
+        if (candidate != null && !manualOpen) {
+            CandidateRecommendation(
+                candidate = candidate,
+                onSelect = {
+                    personAnchor = candidate.anchor
+                    selectedNickname = candidate.displayName
+                },
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                TextButton(onClick = onLater) {
+                    Text(text = stringResource(R.string.person_match_later_action))
+                }
+                OutlinedButton(onClick = { manualOpen = true }) {
+                    Text(text = stringResource(R.string.person_match_other_person_action))
+                }
+                Button(
+                    modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
+                    onClick = {
+                        onConfirm(
+                            candidate.anchor,
+                            selectedNickname.ifBlank { candidate.displayName },
+                        )
+                    },
+                ) {
+                    Text(text = stringResource(R.string.person_match_confirm_action))
+                }
+            }
+        } else {
+            ManualMatchPanel(
+                eventId = event.id,
+                personAnchor = personAnchor,
+                nickname = nickname,
+                onPersonAnchorChange = { personAnchor = it },
+                onNicknameChange = { nickname = it },
+                onLater = onLater,
+                onConfirm = {
+                    onConfirm(
                         personAnchor,
                         nickname.ifBlank { personAnchor },
                     )
                 },
-            ) {
-                Text(text = stringResource(R.string.persons_manual_add_person_action))
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                enabled = personAnchor.isNotBlank(),
-                onClick = { onManualMatch(event, personAnchor, nickname) },
-            ) {
-                Text(text = stringResource(R.string.persons_manual_match_action))
-            }
+            )
         }
     }
 }
+
+@Composable
+private fun CandidateRecommendation(
+    candidate: PersonMatchCandidateSummary,
+    onSelect: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel(MaterialTheme.shapes.small)
+            .padding(12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.person_match_recommendation_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        TextButton(
+            onClick = onSelect,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = stringResource(
+                        R.string.person_match_candidate_with_confidence,
+                        candidate.displayName,
+                        (candidate.confidence * 100).toInt().coerceIn(0, 100),
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (!candidate.detail.isNullOrBlank()) {
+                    Text(
+                        text = candidate.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (!candidate.evidence.isNullOrBlank()) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                text = stringResource(R.string.person_match_evidence, candidate.evidence),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ManualMatchPanel(
+    eventId: String,
+    personAnchor: String,
+    nickname: String,
+    onPersonAnchorChange: (String) -> Unit,
+    onNicknameChange: (String) -> Unit,
+    onLater: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.person_match_manual_label),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    BecalmTextField(
+        value = personAnchor,
+        onValueChange = onPersonAnchorChange,
+        placeholder = stringResource(R.string.persons_manual_match_anchor_hint),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("unassigned-match-anchor-$eventId"),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    BecalmTextField(
+        value = nickname,
+        onValueChange = onNicknameChange,
+        placeholder = stringResource(R.string.persons_manual_match_nickname_hint),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("unassigned-match-nickname-$eventId"),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        TextButton(onClick = onLater) {
+            Text(text = stringResource(R.string.person_match_later_action))
+        }
+        OutlinedButton(
+            enabled = personAnchor.isNotBlank(),
+            onClick = onConfirm,
+        ) {
+            Text(text = stringResource(R.string.persons_manual_add_person_action))
+        }
+        Button(
+            enabled = personAnchor.isNotBlank(),
+            onClick = onConfirm,
+        ) {
+            Text(text = stringResource(R.string.persons_manual_match_action))
+        }
+    }
+}
+
+private enum class MatchQueueFilter {
+    RECOMMENDED,
+    MANUAL,
+    LATER,
+}
+
+private fun UnassignedEventSummary.bestCandidate(): PersonMatchCandidateSummary? =
+    candidates.firstOrNull()
+        ?: suggestedLabel
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let {
+                PersonMatchCandidateSummary(
+                    anchor = it,
+                    displayName = it,
+                    detail = null,
+                    role = "suggested",
+                    evidence = null,
+                    confidence = 0.72,
+                )
+            }
 
 @PreviewLightDark
 @Composable

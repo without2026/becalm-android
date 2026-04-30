@@ -6,6 +6,7 @@ import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -41,6 +42,16 @@ public data class PersonListProjection(
     val lastInteractionSnippet: String?,
 )
 
+/** Candidate surfaced for an unresolved person interaction. */
+public data class PersonMatchCandidateSummary(
+    val anchor: String,
+    val displayName: String,
+    val detail: String?,
+    val role: String,
+    val evidence: String?,
+    val confidence: Double,
+)
+
 /** Unassigned bucket item surfaced on the persons screen. */
 public data class UnassignedEventSummary(
     val id: String,
@@ -51,6 +62,7 @@ public data class UnassignedEventSummary(
     val interactionKind: String = sourceType,
     val snippet: String? = null,
     val suggestedLabel: String? = null,
+    val candidates: List<PersonMatchCandidateSummary> = emptyList(),
 )
 
 /** Offline badge contract for the persons screen. */
@@ -140,14 +152,25 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> =
         combine(
             personIndexDao.observeUnmatchedInteractions(userId, limit),
+            personIndexDao.observeCandidatesForUser(userId),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { events, blockedPersonRefs ->
+        ) { events, candidates, blockedPersonRefs ->
             events
                 .filterNot { event ->
                     PersonIdentityResolver.isBlocked(event.suggestedLabel, blockedPersonRefs) ||
                         PersonIdentityResolver.isLikelyAutomated(event.suggestedLabel)
                 }
                 .map { event ->
+                    val eventCandidates = candidateSourceRefs(event.sourceRef)
+                        .flatMap { ref ->
+                            candidates.filter { candidate ->
+                                candidate.sourceType == event.sourceType &&
+                                    candidate.sourceRef == ref
+                            }
+                        }
+                        .mapNotNull { it.toMatchCandidateSummary(blockedPersonRefs) }
+                        .distinctBy { it.anchor }
+                        .sortedByDescending { it.confidence }
                     UnassignedEventSummary(
                         id = event.id,
                         sourceType = event.sourceType,
@@ -156,6 +179,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                         title = event.title,
                         snippet = event.snippet,
                         suggestedLabel = event.suggestedLabel,
+                        candidates = eventCandidates,
                         timestamp = event.occurredAt,
                     )
                 }
@@ -246,6 +270,39 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
 
     private fun String.removeIdentityPrefix(): String =
         substringAfter(':', this)
+
+    private fun candidateSourceRefs(sourceRef: String): List<String> =
+        listOf(
+            sourceRef,
+            sourceRef.removePrefix("raw:"),
+            sourceRef.takeIf { !it.startsWith("raw:") }?.let { "raw:$it" }.orEmpty(),
+        ).filter { it.isNotBlank() }.distinct()
+
+    private fun SourcePersonCandidateEntity.toMatchCandidateSummary(
+        blockedPersonRefs: Set<String>,
+    ): PersonMatchCandidateSummary? {
+        val anchor = email ?: phone ?: name ?: return null
+        if (
+            PersonIdentityResolver.isBlocked(anchor, blockedPersonRefs) ||
+            PersonIdentityResolver.isLikelyAutomated(anchor)
+        ) {
+            return null
+        }
+        val displayName = name ?: email ?: phone ?: return null
+        val detail = listOfNotNull(
+            email?.takeUnless { it == displayName },
+            phone?.takeUnless { it == displayName },
+            organization,
+        ).firstOrNull()
+        return PersonMatchCandidateSummary(
+            anchor = anchor,
+            displayName = displayName,
+            detail = detail,
+            role = role,
+            evidence = evidence,
+            confidence = confidence,
+        )
+    }
 
     private fun String?.toSourceSet(): Set<String> =
         this

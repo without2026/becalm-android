@@ -1,13 +1,12 @@
 package com.becalm.android.ui.today
 
 import android.content.Context
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -16,6 +15,8 @@ import com.becalm.android.ui.components.ChipState
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusChip
 import com.becalm.android.ui.components.SourceStatusStrip
+import com.becalm.android.ui.main.OverallSyncState
+import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -30,7 +31,9 @@ class TodayTimelineScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun today_screen_shows_processing_banner_overall_sync_1_of_7_and_seven_source_labels() {
+    fun today_content_shows_processing_banner_active_source_chips_source_warning_and_settings_action() {
+        var openSettingsCount = 0
+
         composeTestRule.setContent {
             BecalmTheme {
                 TodayTimelineContent(
@@ -52,9 +55,21 @@ class TodayTimelineScreenTest {
                                 errorMessage = null,
                                 lastSyncedAt = Instant.parse("2026-04-24T01:00:00Z"),
                             ),
+                            "outlook_mail" to SourceStatusUi(
+                                syncing = false,
+                                statusLabel = "ERROR",
+                                errorMessage = "token expired",
+                                lastSyncedAt = null,
+                            ),
+                            "naver_imap" to SourceStatusUi(
+                                syncing = false,
+                                statusLabel = "NEVER_CONNECTED",
+                                errorMessage = null,
+                                lastSyncedAt = null,
+                            ),
                         ),
                     ),
-                    onOpenSettings = {},
+                    onOpenSettings = { openSettingsCount += 1 },
                     onPullRefresh = {},
                 )
             }
@@ -62,29 +77,11 @@ class TodayTimelineScreenTest {
 
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
         composeTestRule.onNodeWithText("Voice").assertIsDisplayed()
         composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Outlook Mail").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Naver Email").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Daum Email").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Google Calendar").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Outlook Calendar").assertIsDisplayed()
-    }
-
-    @Test
-    fun today_settings_icon_dispatches_callback() {
-        var openSettingsCount = 0
-
-        composeTestRule.setContent {
-            BecalmTheme {
-                TodayTimelineContent(
-                    state = TodayUiState(loading = false),
-                    onOpenSettings = { openSettingsCount++ },
-                    onPullRefresh = {},
-                )
-            }
-        }
-
+        composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("Naver Email").assertCountEquals(0)
         composeTestRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeTestRule.runOnIdle {
@@ -157,18 +154,13 @@ class TodayTimelineScreenTest {
     }
 
     @Test
-    fun source_status_strip_renders_seven_product_sources() {
+    fun source_status_strip_renders_provided_active_sources_only() {
         composeTestRule.setContent {
             BecalmTheme {
                 SourceStatusStrip(
                     sources = listOf(
                         SourceStatusChip("voice", ChipState.Syncing),
                         SourceStatusChip("gmail", ChipState.Idle),
-                        SourceStatusChip("outlook_mail", ChipState.Error("expired")),
-                        SourceStatusChip("naver_imap", ChipState.Idle),
-                        SourceStatusChip("daum_imap", ChipState.Idle),
-                        SourceStatusChip("google_calendar", ChipState.Idle),
-                        SourceStatusChip("outlook_calendar", ChipState.Idle),
                     ),
                 )
             }
@@ -176,9 +168,7 @@ class TodayTimelineScreenTest {
 
         composeTestRule.onNodeWithText("Voice").assertIsDisplayed()
         composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("source-status-strip")
-            .performScrollToNode(hasText("Outlook Calendar"))
-        composeTestRule.onNodeWithText("Outlook Calendar").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

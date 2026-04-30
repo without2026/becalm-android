@@ -94,7 +94,7 @@ private fun SettingsPipaDisclosureBullet(label: String, value: String) {
     Column {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
