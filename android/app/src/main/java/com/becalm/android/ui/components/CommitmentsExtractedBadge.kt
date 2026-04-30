@@ -38,11 +38,14 @@ public fun CommitmentsExtractedBadge(
     modifier: Modifier = Modifier,
 ) {
     require(count > 0) { "CommitmentsExtractedBadge must only render when count > 0 (got $count)" }
+    // Neutral surfaceVariant (not tertiaryContainer / amber) — Single Voice
+    // Rule reserves the amber accent for D-0 / reminded / source-stale only.
+    // "X commitments extracted" is informational, not urgency-coded.
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(percent = 50),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
