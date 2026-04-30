@@ -51,7 +51,12 @@ public fun BecalmTheme(
             colorScheme = colorScheme,
             typography = BecalmTypography,
             shapes = BecalmShapes,
-            content = content,
-        )
+        ) {
+            // Single shared KST midnight tick for the whole content tree.
+            // See KstClock.kt for why this is hoisted instead of per-card.
+            ProvideKstDayTick {
+                content()
+            }
+        }
     }
 }
