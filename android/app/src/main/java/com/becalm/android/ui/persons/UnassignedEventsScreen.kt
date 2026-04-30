@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EventSourceBadge
@@ -111,12 +111,7 @@ internal fun UnassignedEventsContent(
 ) {
     when {
         loading -> {
-            Box(
-                modifier = modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+            BecalmSheetSkeleton(modifier = modifier)
         }
 
         unassignedEvents.isEmpty() -> {
