@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
+import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
@@ -49,6 +50,7 @@ class PersonDetailViewModelSpecTest {
     private val personIndexDao: PersonIndexDao = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
+    private val clock = FakeClock(Instant.parse("2026-04-23T03:00:00Z"))
 
     @Before
     fun setUp() {
@@ -138,6 +140,63 @@ class PersonDetailViewModelSpecTest {
         viewModel.onToggleCompletedExpanded()
         advanceUntilIdle()
         assertFalse(viewModel.uiState.value.completedExpanded)
+    }
+
+    @Test
+    fun `person detail hides calendar history before yesterday`() = runTest {
+        val personRef = "alice@example.com"
+        every { personEnrichmentRepository.observeByPersonRef(personRef) } returns flowOf(null)
+        every { rawIngestionRepository.observeForPerson("user-1", personRef, 100) } returns flowOf(emptyList())
+        every { commitmentRepository.observeAllForPerson("user-1", personRef) } returns
+            flowOf(
+                listOf(
+                    commitment(
+                        id = "old-calendar-schedule",
+                        itemType = CommitmentItemType.SCHEDULE,
+                        direction = null,
+                        actionState = "pending",
+                        timestamp = Instant.parse("2026-04-21T14:59:00Z").toEpochMilliseconds(),
+                    ).copy(
+                        sourceType = SourceType.GOOGLE_CALENDAR,
+                        dueAt = Instant.parse("2026-04-21T14:59:00Z"),
+                    ),
+                    commitment(
+                        id = "yesterday-calendar-schedule",
+                        itemType = CommitmentItemType.SCHEDULE,
+                        direction = null,
+                        actionState = "pending",
+                        timestamp = Instant.parse("2026-04-21T15:00:00Z").toEpochMilliseconds(),
+                    ).copy(
+                        sourceType = SourceType.GOOGLE_CALENDAR,
+                        dueAt = Instant.parse("2026-04-21T15:00:00Z"),
+                    ),
+                ),
+            )
+        every { calendarEventRepository.observeForPerson("user-1", personRef, 50) } returns
+            flowOf(
+                listOf(
+                    calendarEvent(
+                        id = "old-calendar",
+                        timestamp = Instant.parse("2026-04-21T14:59:00Z").toEpochMilliseconds(),
+                    ),
+                    calendarEvent(
+                        id = "yesterday-calendar",
+                        timestamp = Instant.parse("2026-04-21T15:00:00Z").toEpochMilliseconds(),
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personRef = personRef)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        val meetingTitles = state.interactionHistory
+            .filterIsInstance<InteractionRow.CalendarMeeting>()
+            .map { it.title }
+        assertFalse(meetingTitles.contains("old-calendar"))
+        assertTrue(meetingTitles.contains("yesterday-calendar"))
+        assertFalse(state.pendingCommitments.any { it.title == "old-calendar-schedule" })
+        assertTrue(state.pendingCommitments.any { it.title == "yesterday-calendar-schedule" })
     }
 
     @Test
@@ -293,6 +352,7 @@ class PersonDetailViewModelSpecTest {
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_REF to personRef)),
         logger = logger,
+        clock = clock,
     )
 
     private fun rawEvent(
