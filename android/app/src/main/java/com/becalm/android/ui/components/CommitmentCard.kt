@@ -90,9 +90,11 @@ import kotlinx.datetime.toLocalDateTime
  *                      the D-N badge. `null` = no badge shown. Converted to an
  *                      Asia/Seoul calendar date before diffing against today-in-KST
  *                      (data-model.yml:132-144, VOI-003 KST rendering rule).
- * @param dueIsApproximate When true the D-N badge switches to the `D~N` form (tilde
- *                      between the `D` and the count) to signal that the due date was
- *                      inferred from a fuzzy hint — commitment-management.spec.yml:39-43.
+ * @param dueIsApproximate When true the D-N badge switches to the `약 D-N` form
+ *                      (Korean "about" prefix) to signal that the due date was
+ *                      inferred from a fuzzy hint — commitment-management.spec.yml:39-43,
+ *                      impeccable critique R4 (originally `D~N`; the tilde
+ *                      tested poorly across both personas).
  *                      Default false.
  * @param dueHint       Optional verbatim due-date expression (e.g. "월말", "다음주")
  *                      captured from the source event. Rendered beneath the title
@@ -206,9 +208,9 @@ public fun CommitmentCard(
     //   D-0  same-day exact
     //   D-N  future N days exact
     //   D+N  overdue by N days
-    //   D~N  approximate (tilde sits BETWEEN the `D` and the count, not as a leading
-    //        prefix on the whole label — distinguishes spec-correct `D~3` from the
-    //        prior `~D-3` drift)
+    //   약 D-N approximate ("about D-N" Korean prefix; replaced the original `D~N`
+    //          spec form per impeccable critique R4 — the tilde tested poorly for
+    //          recall across both 30s and 50s personas)
     //
     // [KST] is the canonical business-calendar zone shared with
     // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
@@ -452,14 +454,19 @@ private fun statusColors(normalized: String): BecalmStateColors {
  * Builds the D-N badge label per commitment-management.spec.yml:39-43.
  *
  * Exact grammar:
- *  - `D-0`   same-day exact
- *  - `D-N`   future in N days (N > 0) exact
- *  - `D+N`   overdue by N days (N > 0)
- *  - `D~N`   approximate variant — tilde sits BETWEEN `D` and the count, so a
- *            same-day approximate renders `D~0`, three-days-out approximate
- *            renders `D~3`. Overdue + approximate is not a shape the spec
- *            enumerates; we conservatively prefer the exact overdue form
- *            (`D+N`) since the date is already known to have passed.
+ *  - `D-0`     same-day exact
+ *  - `D-N`     future in N days (N > 0) exact
+ *  - `D+N`     overdue by N days (N > 0)
+ *  - `약 D-N`  approximate variant. Originally the spec used `D~N` with the
+ *              tilde between `D` and the count. impeccable critique R4
+ *              found the tilde was a recall-heavy symbol — neither the 30s
+ *              nor the 50s persona reliably parsed it — and recommended a
+ *              localized prefix instead. Korean prefix `약` ("about") is
+ *              unambiguous in the Korean-first product context and reads
+ *              cleanly alongside the existing `D-N` form. Overdue +
+ *              approximate is not enumerated by the spec; we conservatively
+ *              prefer the exact overdue form (`D+N`) since the date is
+ *              already known to have passed.
  *
  * Kept internal rather than private so focused unit tests in
  * `CommitmentCardFormatterTest` can assert the exact strings without spinning
@@ -471,7 +478,7 @@ private fun statusColors(normalized: String): BecalmStateColors {
  */
 internal fun formatDayBadgeLabel(days: Int, approximate: Boolean): String = when {
     days < 0 -> "D+${-days}"
-    approximate -> "D~$days"
+    approximate -> "약 D-$days"
     else -> "D-$days"
 }
 
