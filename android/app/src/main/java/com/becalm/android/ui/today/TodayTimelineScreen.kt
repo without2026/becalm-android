@@ -57,6 +57,7 @@ import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -510,17 +511,20 @@ private fun typeLabelFor(item: TimelineItem): String = when (item) {
 }
 
 @Composable
-private fun timelineCardColor(item: TimelineItem): Color = when (item) {
-    is TimelineItem.Commitment -> when (item.itemType) {
-        CommitmentItemType.SCHEDULE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-        CommitmentItemType.ACTION -> when (item.direction) {
-            "take" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.46f)
-            else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
+private fun timelineCardColor(item: TimelineItem): Color {
+    val direction = MaterialTheme.becalmColors
+    return when (item) {
+        is TimelineItem.Commitment -> when (item.itemType) {
+            CommitmentItemType.SCHEDULE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+            CommitmentItemType.ACTION -> when (item.direction) {
+                "take" -> direction.directionTake.fill.copy(alpha = 0.46f)
+                else -> direction.directionGive.fill.copy(alpha = 0.38f)
+            }
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
         }
-        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
+        is TimelineItem.Meeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.32f)
+        is TimelineItem.CalendarEvent -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
     }
-    is TimelineItem.Meeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.32f)
-    is TimelineItem.CalendarEvent -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
 }
 
 private fun formatKstTime(instant: Instant): String {
