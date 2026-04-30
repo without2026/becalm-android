@@ -1,7 +1,6 @@
 package com.becalm.android.ui.today
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,7 +56,6 @@ import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -523,17 +521,19 @@ private fun TimelineCard(
     onAddDueTime: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val cardColor = timelineCardColor(item)
     val clickModifier = if (item is TimelineItem.Commitment) {
         Modifier.clickable { onOpenCommitmentDetail(item.id) }
     } else {
         Modifier
     }
+    // Surface = glassPanel only. Direction is signalled by the inline
+    // DirectionBadge below; type is signalled by the leading label. Tinting the
+    // surface itself was double-signal and used wrong (amber) colors for the
+    // take direction. See DESIGN.md §4 Two-Recipe Rule.
     Column(
         modifier = modifier
             .then(clickModifier)
-            .background(cardColor, MaterialTheme.shapes.medium)
-            .border(1.dp, cardColor.copy(alpha = 0.72f), MaterialTheme.shapes.medium)
+            .glassPanel(MaterialTheme.shapes.medium)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Text(
@@ -594,23 +594,6 @@ private fun typeLabelFor(item: TimelineItem): String = when (item) {
     }
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_type_event)
     is TimelineItem.Meeting -> stringResource(R.string.today_type_meeting)
-}
-
-@Composable
-private fun timelineCardColor(item: TimelineItem): Color {
-    val direction = MaterialTheme.becalmColors
-    return when (item) {
-        is TimelineItem.Commitment -> when (item.itemType) {
-            CommitmentItemType.SCHEDULE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-            CommitmentItemType.ACTION -> when (item.direction) {
-                "take" -> direction.directionTake.fill.copy(alpha = 0.46f)
-                else -> direction.directionGive.fill.copy(alpha = 0.38f)
-            }
-            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f)
-        }
-        is TimelineItem.Meeting -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.32f)
-        is TimelineItem.CalendarEvent -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f)
-    }
 }
 
 private fun formatKstTime(instant: Instant): String {
