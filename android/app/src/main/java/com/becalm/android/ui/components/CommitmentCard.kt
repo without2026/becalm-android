@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.defaultMinSize
@@ -34,7 +35,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -240,8 +244,56 @@ public fun CommitmentCard(
     val semanticsDesc = "$direction $title"
     val showMarkDone = onMarkDone != null && !isTerminal
 
+    // Swipe-from-end (right edge → left) marks the commitment done. The 30s
+    // power-user persona expects the gesture from Things 3 / Granola
+    // muscle memory; the 50s persona never has to discover it (the inline
+    // mark-done button is still rendered when [showMarkDone]). Disabled in
+    // terminal states so completed/cancelled rows can scroll without
+    // accidental gesture re-trigger. confirmValueChange returns false so the
+    // box snaps back instead of dismissing — the row stays in the list and
+    // its alpha drops via the existing terminal-state logic. impeccable
+    // critique R4 P1 (30s efficiency, hidden-power tonal direction).
+    val canSwipeToComplete = onMarkDone != null && !isTerminal
+    val swipeState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart && canSwipeToComplete) {
+                onMarkDone?.invoke()
+            }
+            false
+        },
+        positionalThreshold = { totalDistance -> totalDistance * 0.4f },
+    )
+
+    SwipeToDismissBox(
+        state = swipeState,
+        modifier = modifier,
+        backgroundContent = {
+            if (canSwipeToComplete &&
+                swipeState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            color = colors.actionStateReminded.fill,
+                            shape = MaterialTheme.shapes.medium,
+                        )
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = colors.actionStateReminded.text,
+                    )
+                }
+            }
+        },
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = canSwipeToComplete,
+    ) {
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .wrapContentHeight()
             .alpha(cardAlpha)
@@ -368,6 +420,7 @@ public fun CommitmentCard(
 
             }
         }
+    }
     }
 }
 
