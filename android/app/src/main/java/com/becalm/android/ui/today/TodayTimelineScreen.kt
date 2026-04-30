@@ -19,11 +19,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -165,12 +165,7 @@ public fun TodayTimelineContent(
             ) {
                 when {
                     state.loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
-                        }
+                        TimelineSkeleton()
                     }
                     state.error != null -> {
                         ErrorState(
@@ -202,6 +197,98 @@ public fun TodayTimelineContent(
                 )
             }
         }
+    }
+}
+
+/**
+ * Static skeleton placeholder rows shown during the cold-start no-data window.
+ *
+ * Matches the timeline row geometry (84dp min height, glassPanel card body,
+ * rail, time column) so real data lands in place without layout pop. No
+ * animation: motion is intentional only in this system, and a "loading
+ * shimmer" reads as process-noise on the first-line surface (DESIGN.md
+ * Process-Hidden Rule). Three rows is enough to communicate "list, loading"
+ * without padding the screen with placeholders.
+ */
+@Composable
+private fun TimelineSkeleton(modifier: Modifier = Modifier) {
+    val skeletonColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 4.dp),
+        modifier = modifier.fillMaxSize(),
+    ) {
+        items(count = 3, key = { index -> "timeline-skeleton-$index" }) {
+            TimelineSkeletonRow(
+                skeletonColor = skeletonColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimelineSkeletonRow(
+    skeletonColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.heightIn(min = 84.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .glassPanel(MaterialTheme.shapes.medium)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(10.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(14.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .height(10.dp)
+                    .background(skeletonColor, RoundedCornerShape(4.dp)),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .width(18.dp)
+                .heightIn(min = 84.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(skeletonColor),
+            )
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .weight(1f)
+                    .background(skeletonColor),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .width(54.dp)
+                .padding(top = 12.dp, start = 8.dp)
+                .height(12.dp)
+                .background(skeletonColor, RoundedCornerShape(4.dp)),
+        )
     }
 }
 
