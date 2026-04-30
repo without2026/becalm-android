@@ -44,6 +44,7 @@ import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -279,17 +280,44 @@ private fun OAuthEmailConsentConnectContent(
     modifier: Modifier = Modifier,
 ) {
     val provider = (copy.connectionTarget as EmailPipaConnectionTarget.OAuth).provider
+    // Debounce the consent CTA: once the user taps "동의하고 연결", the button
+    // disables and shows a loading spinner until OAuth resolves. Prior to this
+    // gate the CTA fired N times for N taps — the user, seeing no immediate
+    // response while the start-OAuth POST was in flight, would tap again 2-3s
+    // later, triggering duplicate browser launches and duplicate server-side
+    // mail_sources:sync POSTs (one of which then sat in a paused HTTP/2 stream
+    // and eventually timed out → unhandled exception → app crash; see
+    // EmailOAuthConnector / CalendarOAuthConnector try/catch). 20-second
+    // safety reset re-enables the button if OAuth doesn't resolve cleanly so
+    // the user is never permanently stuck.
+    var consentInFlight by remember { mutableStateOf(false) }
+    LaunchedEffect(consentInFlight) {
+        if (consentInFlight) {
+            delay(20_000L)
+            consentInFlight = false
+        }
+    }
     OnboardingEmailPipaConsentContent(
         copy = copy,
         onAgree = {
+            if (consentInFlight) return@OnboardingEmailPipaConsentContent
+            consentInFlight = true
             scope.launch {
                 val ok = persistConsent(copy.recipients, true)
                 when {
-                    !ok -> snackbarHostState.showSnackbar(writeFailedCopy)
-                    activity == null -> snackbarHostState.showSnackbar(missingActivityCopy)
+                    !ok -> {
+                        snackbarHostState.showSnackbar(writeFailedCopy)
+                        consentInFlight = false
+                    }
+                    activity == null -> {
+                        snackbarHostState.showSnackbar(missingActivityCopy)
+                        consentInFlight = false
+                    }
                     else -> {
                         onOAuthLaunchRequested()
                         connectEmailProvider(provider, activity)
+                        // Stay in-flight until OAuth resolves via EmailConnectEvent
+                        // (success → screen navigates away; failure → 20s reset).
                     }
                 }
             }
@@ -305,6 +333,7 @@ private fun OAuthEmailConsentConnectContent(
             }
         },
         agreeConnect = true,
+        agreeLoading = consentInFlight,
         modifier = modifier,
     )
 }
@@ -357,6 +386,7 @@ internal fun OnboardingEmailPipaConsentContent(
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
     agreeConnect: Boolean = false,
+    agreeLoading: Boolean = false,
 ) {
     val copy = pipaCopyForSlug(providerSlug) ?: return
     OnboardingEmailPipaConsentContent(
@@ -365,6 +395,7 @@ internal fun OnboardingEmailPipaConsentContent(
         onDeny = onDeny,
         modifier = modifier,
         agreeConnect = agreeConnect,
+        agreeLoading = agreeLoading,
     )
 }
 
@@ -375,6 +406,7 @@ private fun OnboardingEmailPipaConsentContent(
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
     agreeConnect: Boolean = false,
+    agreeLoading: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -401,6 +433,8 @@ private fun OnboardingEmailPipaConsentContent(
             ),
             onClick = onAgree,
             variant = BecalmButtonVariant.Primary,
+            enabled = !agreeLoading,
+            loading = agreeLoading,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -408,6 +442,7 @@ private fun OnboardingEmailPipaConsentContent(
             text = stringResource(R.string.onb_pipa_email_cta_deny),
             onClick = onDeny,
             variant = BecalmButtonVariant.Text,
+            enabled = !agreeLoading,
         )
     }
 }
