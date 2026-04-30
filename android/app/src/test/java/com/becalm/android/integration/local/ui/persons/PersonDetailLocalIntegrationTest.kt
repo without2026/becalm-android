@@ -2,6 +2,7 @@ package com.becalm.android.integration.local.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
@@ -170,6 +171,7 @@ class PersonDetailLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_REF to PERSON_REF)),
             logger = logger,
+            clock = FakeClock(Instant.parse("2026-04-23T03:00:00Z")),
         )
 
         viewModel.uiState.test {

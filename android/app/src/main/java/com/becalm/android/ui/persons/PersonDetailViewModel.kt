@@ -4,14 +4,20 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.util.Clock
+import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.remote.dto.SourceType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -27,7 +33,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 
 // ─── UI models ────────────────────────────────────────────────────────────────
 
@@ -159,6 +168,7 @@ public class PersonDetailViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
+    private val clock: Clock,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
@@ -201,6 +211,7 @@ public class PersonDetailViewModel @Inject constructor(
                     if (userId == null) {
                         flowOf(PersonDetailUiState(personRef = personRef, loading = false))
                     } else {
+                        val calendarCutoff = calendarHistoryCutoff()
                         combine(
                             personIndexDao.observeIdentitiesForPerson(userId, personRef),
                             personEnrichmentRepository.observeAll(),
@@ -214,7 +225,7 @@ public class PersonDetailViewModel @Inject constructor(
                                         personId = personRef,
                                         identities = identities,
                                         enrichmentRows = enrichmentRows,
-                                        interactions = interactions,
+                                        interactions = interactions.filterRecentCalendarHistory(calendarCutoff),
                                         rawEvents = legacy.rawEvents,
                                         completedExpanded = completedExpanded,
                                     )
@@ -223,8 +234,8 @@ public class PersonDetailViewModel @Inject constructor(
                                         personRef = personRef,
                                         enrichment = legacy.enrichment,
                                         rawEvents = legacy.rawEvents,
-                                        commitments = legacy.commitments,
-                                        calendarEvents = legacy.calendarEvents,
+                                        commitments = legacy.commitments.filterRecentCalendarCommitments(calendarCutoff),
+                                        calendarEvents = legacy.calendarEvents.filterRecentCalendarEvents(calendarCutoff),
                                         completedExpanded = completedExpanded,
                                     )
                                 }
@@ -261,6 +272,39 @@ public class PersonDetailViewModel @Inject constructor(
                 calendarEvents = calendarEvents,
             )
         }
+
+    private fun calendarHistoryCutoff(): Instant =
+        clock.today(KST).plus(DatePeriod(days = -1)).atStartOfDayIn(KST)
+
+    private fun List<PersonInteractionEntity>.filterRecentCalendarHistory(
+        cutoff: Instant,
+    ): List<PersonInteractionEntity> =
+        filterNot { interaction ->
+            interaction.isCalendarLike() && interaction.occurredAt < cutoff
+        }
+
+    private fun List<CalendarEventEntity>.filterRecentCalendarEvents(
+        cutoff: Instant,
+    ): List<CalendarEventEntity> =
+        filterNot { event -> event.startAt < cutoff }
+
+    private fun List<CommitmentEntity>.filterRecentCalendarCommitments(
+        cutoff: Instant,
+    ): List<CommitmentEntity> =
+        filterNot { commitment ->
+            commitment.sourceType in CALENDAR_SOURCE_TYPES &&
+                (commitment.dueAt ?: commitment.sourceEventOccurredAt) < cutoff
+        }
+
+    private fun PersonInteractionEntity.isCalendarLike(): Boolean =
+        interactionKind == "calendar" || sourceType in CALENDAR_SOURCE_TYPES
+
+    private companion object {
+        val CALENDAR_SOURCE_TYPES: Set<String> = setOf(
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+        )
+    }
 
     private data class LegacyDetailSnapshot(
         val enrichment: com.becalm.android.data.local.db.entity.PersonEnrichmentEntity?,
