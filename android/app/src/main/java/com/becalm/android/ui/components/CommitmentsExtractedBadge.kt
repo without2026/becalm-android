@@ -59,7 +59,7 @@ public fun CommitmentsExtractedBadge(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = stringResource(R.string.raw_event_commitments_extracted, count),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
             )
         }
     }
