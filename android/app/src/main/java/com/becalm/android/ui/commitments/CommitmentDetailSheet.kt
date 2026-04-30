@@ -37,6 +37,7 @@ import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.SheetCloseRow
 import com.becalm.android.ui.navigation.BecalmRoute
 import kotlinx.coroutines.flow.Flow
 
@@ -124,6 +125,7 @@ public fun CommitmentDetailSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        SheetCloseRow(onClose = onDismiss)
         when {
             state.loading -> {
                 BecalmSheetSkeleton(modifier = Modifier.heightIn(min = 160.dp))

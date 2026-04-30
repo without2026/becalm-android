@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
 import com.becalm.android.ui.components.BecalmSheetSkeleton
+import com.becalm.android.ui.components.SheetCloseRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDateTime
@@ -148,6 +149,7 @@ public fun CommitmentEditSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        SheetCloseRow(onClose = onDismiss)
         when {
             state.loading -> {
                 BecalmSheetSkeleton(modifier = Modifier.heightIn(min = 160.dp))
