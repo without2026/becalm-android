@@ -35,6 +35,7 @@
     <string name="error_generic_title">Something went wrong</string>
     <string name="error_state_retry">Retry</string>
     <string name="commitment_mark_done_action">Mark done</string>
+    <string name="today_source_strip_a11y_label">Data source status</string>
 
     <!-- Splash -->
     <string name="splash_title">BeCalm</string>
