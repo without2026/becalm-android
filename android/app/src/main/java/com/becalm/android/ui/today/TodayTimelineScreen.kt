@@ -230,7 +230,10 @@ private val TimelineMaxContentWidth: Dp = 600.dp
  */
 @Composable
 private fun TimelineSkeleton(modifier: Modifier = Modifier) {
-    val skeletonColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+    // onSurfaceVariant (muted-silver #B2B2B2 on dark) at α=0.14 reads as a
+    // subtle visible placeholder over the cosmic-near-black ground.
+    // outlineVariant (#1E1E1E on dark) was effectively invisible against #111111.
+    val skeletonColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.14f)
     LazyColumn(
         contentPadding = PaddingValues(vertical = 4.dp),
         modifier = modifier.fillMaxSize(),
