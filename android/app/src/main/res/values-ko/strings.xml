@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- App name -->
-    <string name="app_name">비캄</string>
+    <string name="app_name">BeCalm</string>
 
     <!-- Common -->
     <string name="action_skip">건너뛰기</string>
@@ -31,13 +31,13 @@
     <string name="action_close">닫기</string>
 
     <!-- Splash -->
-    <string name="splash_title">비캄</string>
+    <string name="splash_title">BeCalm</string>
     <string name="splash_tagline">약속을 관리하는 AI 비서</string>
 
     <!-- Terms -->
     <string name="terms_title">이용약관 및 개인정보처리방침</string>
     <string name="terms_subtitle">계속하기 전에 아래 내용을 읽고 동의해 주세요.</string>
-    <string name="terms_pipa_notice">비캄은 개인정보 보호법(PIPA)에 따라 귀하의 동의 하에 연락처, 캘린더 일정, 이메일 등 개인정보를 기기 내에서 수집·처리합니다. 귀하의 데이터는 우선 기기에 로컬 저장되며, 귀하의 명시적 동의 항목만 서버로 전송됩니다.</string>
+    <string name="terms_pipa_notice">BeCalm은 개인정보 보호법(PIPA)에 따라 귀하의 동의 하에 연락처, 캘린더 일정, 이메일 등 개인정보를 기기 내에서 수집·처리합니다. 귀하의 데이터는 우선 기기에 로컬 저장되며, 귀하의 명시적 동의 항목만 서버로 전송됩니다.</string>
     <string name="terms_accept_checkbox">약관을 읽고 동의합니다</string>
     <string name="terms_cta">계속</string>
     <string name="terms_decline_cta">동의 안 함 · 앱 종료</string>
@@ -60,7 +60,7 @@
     <!-- Onboarding: recording folder -->
     <string name="onb_recording_folder_title">녹음 폴더</string>
     <string name="onb_recording_folder_headline">녹음 파일 접근 허용</string>
-    <string name="onb_recording_folder_body">비캄은 약속 추출을 위해 음성 녹음 파일을 읽습니다. 파일은 기기에서만 처리되며, 추출된 약속 텍스트만 서버로 전송됩니다.</string>
+    <string name="onb_recording_folder_body">BeCalm은 약속 추출을 위해 음성 녹음 파일을 읽습니다. 파일은 기기에서만 처리되며, 추출된 약속 텍스트만 서버로 전송됩니다.</string>
     <string name="onb_recording_folder_detected_path_fmt">감지된 경로: %1$s</string>
     <string name="onb_recording_folder_voice_status_fmt">음성 메모 폴더: %1$s</string>
     <string name="onb_recording_folder_call_status_fmt">통화 녹음 폴더: %1$s</string>
@@ -71,18 +71,18 @@
     <!-- Onboarding: contacts -->
     <string name="onb_contacts_title">연락처 접근</string>
     <string name="onb_contacts_headline">연락처 연결</string>
-    <string name="onb_contacts_body">비캄은 상호작용 상대방의 이름 표시를 위해 연락처를 읽습니다. 연락처 데이터는 기기 밖으로 전송되지 않습니다. 언제든지 권한을 취소할 수 있습니다.</string>
+    <string name="onb_contacts_body">BeCalm은 상호작용 상대방의 이름 표시를 위해 연락처를 읽습니다. 연락처 데이터는 기기 밖으로 전송되지 않습니다. 언제든지 권한을 취소할 수 있습니다.</string>
     <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
 
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
     <string name="onb_gmail_headline">Gmail 연결</string>
-    <string name="onb_gmail_body">비캄은 이메일 스레드에서 약속을 감지하기 위해 Gmail에 접근합니다. 읽기 전용 권한을 요청합니다. 약속 관련 메타데이터만 동기화되며 이메일 본문은 업로드되지 않습니다.</string>
+    <string name="onb_gmail_body">BeCalm은 이메일 스레드에서 약속을 감지하기 위해 Gmail에 접근합니다. 읽기 전용 권한을 요청합니다. 약속 관련 메타데이터만 동기화되며 이메일 본문은 업로드되지 않습니다.</string>
 
     <!-- Onboarding: Outlook Mail OAuth -->
     <string name="onb_outlook_mail_title">Outlook 메일</string>
     <string name="onb_outlook_mail_headline">Outlook 메일 연결</string>
-    <string name="onb_outlook_mail_body">비캄은 이메일 스레드에서 약속을 감지하기 위해 Outlook 받은편지함에 접근합니다. 읽기 전용 권한을 요청합니다. 이메일 본문은 업로드되지 않습니다.</string>
+    <string name="onb_outlook_mail_body">BeCalm은 이메일 스레드에서 약속을 감지하기 위해 Outlook 받은편지함에 접근합니다. 읽기 전용 권한을 요청합니다. 이메일 본문은 업로드되지 않습니다.</string>
 
     <!-- Onboarding: IMAP -->
     <string name="onb_imap_title">IMAP / 앱 비밀번호</string>
@@ -99,12 +99,12 @@
     <!-- Onboarding: Google Calendar -->
     <string name="onb_gcal_title">Google 캘린더</string>
     <string name="onb_gcal_headline">Google 캘린더 연결</string>
-    <string name="onb_gcal_body">비캄은 예정 회의 및 관련 약속을 표시하기 위해 Google 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
+    <string name="onb_gcal_body">BeCalm은 예정 회의 및 관련 약속을 표시하기 위해 Google 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
     <!-- Onboarding: Outlook Calendar -->
     <string name="onb_outlook_cal_title">Outlook 캘린더</string>
     <string name="onb_outlook_cal_headline">Outlook 캘린더 연결</string>
-    <string name="onb_outlook_cal_body">비캄은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
+    <string name="onb_outlook_cal_body">BeCalm은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
     <!-- Onboarding: IMAP provider selector + errors (S6-H) -->
     <string name="onb_imap_provider_naver">네이버</string>
@@ -116,21 +116,21 @@
 
     <!-- Onboarding: Gmail OAuth errors (S6-F) -->
     <string name="onb_gmail_error_network">구글 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
-    <string name="onb_gmail_error_permission_denied">비캄에는 Gmail 읽기 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_gmail_error_permission_denied">BeCalm에는 Gmail 읽기 권한이 필요합니다. 권한을 허용해 주세요.</string>
     <string name="onb_gmail_error_unknown">Gmail 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
 
     <!-- Onboarding: Outlook OAuth errors (S6-G) -->
     <string name="onb_outlook_error_network">Microsoft 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
-    <string name="onb_outlook_error_permission_denied">비캄에는 Mail.Read 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_outlook_error_permission_denied">BeCalm에는 Mail.Read 권한이 필요합니다. 권한을 허용해 주세요.</string>
     <string name="onb_outlook_error_unknown">Outlook 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
 
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
     <string name="onb_pipa_email_title_gmail">Gmail 정보 이용 안내</string>
     <string name="onb_pipa_email_title_outlook">Outlook 메일 정보 이용 안내</string>
     <string name="onb_pipa_email_title_imap">IMAP 메일 정보 이용 안내</string>
-    <string name="onb_pipa_email_headline_gmail">비캄에 Gmail 읽기 권한을 허용해 주세요</string>
-    <string name="onb_pipa_email_headline_outlook">비캄에 Outlook 메일 읽기 권한을 허용해 주세요</string>
-    <string name="onb_pipa_email_headline_imap">비캄에 IMAP 메일함 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_gmail">BeCalm에 Gmail 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_outlook">BeCalm에 Outlook 메일 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_imap">BeCalm에 IMAP 메일함 읽기 권한을 허용해 주세요</string>
     <string name="onb_pipa_email_recipient">제공받는 자</string>
     <string name="onb_pipa_email_recipient_gmail">Google LLC (미국)</string>
     <string name="onb_pipa_email_recipient_outlook">Microsoft Corporation (미국)</string>
@@ -150,20 +150,20 @@
     <!-- Onboarding: Notification permission (S6-E) -->
     <string name="onb_notifications_title">알림</string>
     <string name="onb_notifications_headline">약속 30분 전 미리 알려드려요</string>
-    <string name="onb_notifications_body">비캄은 각 약속 만기 30분 전에 기기에서 알림을 띄워 드립니다. 알림은 전부 기기 내에서만 처리되며 서버로 전송되지 않습니다.</string>
-    <string name="onb_notifications_rationale">언제든 안드로이드 설정 → 앱 → 비캄 → 알림에서 변경할 수 있습니다.</string>
+    <string name="onb_notifications_body">BeCalm은 각 약속 만기 30분 전에 기기에서 알림을 띄워 드립니다. 알림은 전부 기기 내에서만 처리되며 서버로 전송되지 않습니다.</string>
+    <string name="onb_notifications_rationale">언제든 안드로이드 설정 → 앱 → BeCalm → 알림에서 변경할 수 있습니다.</string>
 
     <!-- Onboarding: Battery optimization -->
     <string name="onb_battery_title">백그라운드 실행</string>
-    <string name="onb_battery_headline">비캄 백그라운드 유지</string>
-    <string name="onb_battery_body">약속을 안정적으로 캡처하려면 비캄이 백그라운드에서 실행되어야 합니다. 비캄의 배터리 최적화를 비활성화해 주세요. 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
+    <string name="onb_battery_headline">BeCalm 백그라운드 유지</string>
+    <string name="onb_battery_body">약속을 안정적으로 캡처하려면 BeCalm이 백그라운드에서 실행되어야 합니다. BeCalm의 배터리 최적화를 비활성화해 주세요. 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
     <string name="onb_battery_cta">배터리 최적화 비활성화</string>
-    <string name="onb_battery_samsung_guide">삼성: 설정 → 디바이스 케어 → 배터리 → 백그라운드 사용 제한 → 절전 앱 → 비캄 제거</string>
+    <string name="onb_battery_samsung_guide">삼성: 설정 → 디바이스 케어 → 배터리 → 백그라운드 사용 제한 → 절전 앱 → BeCalm 제거</string>
 
     <!-- Onboarding: Cold sync -->
     <string name="onb_cold_sync_title">초기 동기화</string>
     <string name="onb_cold_sync_headline">데이터 동기화 중…</string>
-    <string name="onb_cold_sync_body">비캄이 기존 데이터를 처음으로 가져오고 있습니다. 몇 분 정도 걸릴 수 있습니다.</string>
+    <string name="onb_cold_sync_body">BeCalm이 기존 데이터를 처음으로 가져오고 있습니다. 몇 분 정도 걸릴 수 있습니다.</string>
     <string name="onb_cold_sync_done">완료! 탭하여 계속하세요.</string>
     <string name="onb_cold_sync_cta">오늘로 이동</string>
 
@@ -311,7 +311,7 @@
     <string name="settings_notifications_label">알림</string>
     <string name="settings_sources_label">데이터 소스</string>
     <string name="settings_sign_out_confirm_title">로그아웃하시겠습니까?</string>
-    <string name="settings_sign_out_confirm_message">비캄에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
+    <string name="settings_sign_out_confirm_message">BeCalm에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
     <string name="settings_wipe_confirm_title">모든 데이터를 삭제하시겠습니까?</string>
     <string name="settings_wipe_confirm_message">로컬에 저장된 모든 개인정보가 영구적으로 삭제되고 로그아웃됩니다. 이 작업은 취소할 수 없습니다.</string>
 
@@ -348,13 +348,13 @@
 
     <!-- Voice processing notification channel + alerts -->
     <string name="voice_failure_channel_name">음성 처리 알림</string>
-    <string name="voice_failure_channel_desc">비캄이 음성 녹음을 처리하지 못할 때 알립니다.</string>
+    <string name="voice_failure_channel_desc">BeCalm이 음성 녹음을 처리하지 못할 때 알립니다.</string>
     <string name="voice_failure_notification_title">음성 처리 실패</string>
-    <string name="voice_failure_notification_body_generic">%1$s을(를) 처리하지 못했습니다. 비캄에서 확인하거나 다시 시도해 주세요.</string>
+    <string name="voice_failure_notification_body_generic">%1$s을(를) 처리하지 못했습니다. BeCalm에서 확인하거나 다시 시도해 주세요.</string>
     <string name="voice_failure_notification_body_output_truncated">%1$s이(가) 너무 길어 처리하지 못했습니다. 더 짧은 녹음으로 다시 시도해 주세요.</string>
 
     <!-- Splash -->
-    <string name="splash_loading">비캄을 시작하는 중…</string>
+    <string name="splash_loading">BeCalm을 시작하는 중…</string>
 
     <!-- Onboarding: Calendar OAuth errors -->
     <string name="onb_gcal_error_unavailable">Google 캘린더 연결을 시작할 수 없습니다. 백엔드 OAuth 설정을 확인하거나 일단 건너뛰세요.</string>
@@ -390,7 +390,7 @@
 
     <!-- Privacy management screen -->
     <string name="privacy_management_title">개인정보 관리</string>
-    <string name="privacy_export_subtitle">기기에 저장된 비캄 데이터를 ZIP 파일로 저장합니다.</string>
+    <string name="privacy_export_subtitle">기기에 저장된 BeCalm 데이터를 ZIP 파일로 저장합니다.</string>
     <string name="privacy_withdraw_subtitle">소스별로 동의를 철회하고 향후 자동 처리를 중단합니다.</string>
     <string name="privacy_pause_subtitle">백그라운드 처리를 일시 중단하고, 나중에 다시 동기화하여 재개합니다.</string>
     <string name="privacy_delete_subtitle_fmt">로컬 계정 데이터를 삭제합니다. 현재 로컬 요약: 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개.</string>
