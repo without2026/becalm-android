@@ -14,6 +14,7 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
@@ -99,6 +100,7 @@ public class MediaStoreWorker @AssistedInject constructor(
     private val syncCursorStoreProvider: Provider<SyncCursorStore>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
+    private val sourceArtifactRepositoryProvider: Provider<SourceArtifactRepository>,
     private val workSchedulerProvider: Provider<WorkScheduler>,
     private val userPrefsStore: UserPrefsStore,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -114,6 +116,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         syncCursorStore: SyncCursorStore,
         sourceStatusRepository: SourceStatusRepository,
         rawIngestionEventDao: RawIngestionEventDao,
+        sourceArtifactRepository: SourceArtifactRepository,
         workScheduler: WorkScheduler,
         userPrefsStore: UserPrefsStore,
         processingStatusRepository: ProcessingStatusRepository,
@@ -126,8 +129,9 @@ public class MediaStoreWorker @AssistedInject constructor(
         workerParams = workerParams,
         syncCursorStoreProvider = Provider { syncCursorStore },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
-        rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
-        workSchedulerProvider = Provider { workScheduler },
+            rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
+            sourceArtifactRepositoryProvider = Provider { sourceArtifactRepository },
+            workSchedulerProvider = Provider { workScheduler },
         userPrefsStore = userPrefsStore,
         processingStatusRepository = processingStatusRepository,
         processingPauseGate = processingPauseGate,
@@ -152,27 +156,57 @@ public class MediaStoreWorker @AssistedInject constructor(
         val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
             .takeIf { it > 0 }
 
-        if (audioMissing) {
+        val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
+        val meetingEnabled = userPrefsStore.observeSourceEnabled(SourceType.MEETING).first()
+
+        if (audioMissing && voiceEnabled) {
             logger.w(TAG, "audio permission missing — blocked until user grants permission")
             processingStatusRepository.recordBlocked(SourceType.VOICE, "Audio permission missing")
             processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Audio permission missing")
-            return@withContext Result.success()
         }
 
         val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
         if (recordingsTreeUri.isNullOrBlank()) {
             logger.w(TAG, "recordings tree grant missing — blocked until user grants folder access")
-            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
-            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
+            if (voiceEnabled) {
+                processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
+                processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
+            }
+            if (meetingEnabled) {
+                processingStatusRepository.recordBlocked(SourceType.MEETING, "Recording folder permission missing")
+            }
             return@withContext Result.success()
         }
 
         val now = Clock.System.now()
-        processingStatusRepository.recordScanning(SourceType.VOICE)
-        processingStatusRepository.recordScanning(SourceType.CALL_RECORDING)
+        if (voiceEnabled && !audioMissing) {
+            processingStatusRepository.recordScanning(SourceType.VOICE)
+            processingStatusRepository.recordScanning(SourceType.CALL_RECORDING)
+        }
+        if (meetingEnabled) {
+            processingStatusRepository.recordScanning(SourceType.MEETING)
+        }
         val voiceMediaStoreProbe = createProbe()
-        val voiceInserted = voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
-        val callOutcome = voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
+        val voiceInserted = if (voiceEnabled && !audioMissing) {
+            voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
+        } else {
+            0
+        }
+        val callOutcome = if (voiceEnabled && !audioMissing) {
+            voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
+        } else {
+            CallRecordingIngestOutcome.Success(insertedCount = 0)
+        }
+        val meetingAudioOutcome = if (meetingEnabled && !audioMissing) {
+            voiceMediaStoreProbe.ingestMeetingAudio(now, lookbackDays)
+        } else {
+            MeetingIngestOutcome.Success(insertedCount = 0)
+        }
+        val meetingTranscriptOutcome = if (meetingEnabled) {
+            createMeetingDocumentTreeProbe().ingestMeetingTranscripts(now, lookbackDays)
+        } else {
+            MeetingIngestOutcome.Success(insertedCount = 0)
+        }
 
         // A ContentResolver query failure in the `Recordings/Call/` scan is recorded in
         // SourceStatusRepository but does not advance any cursor — returning
@@ -183,13 +217,28 @@ public class MediaStoreWorker @AssistedInject constructor(
             processingStatusRepository.recordError(SourceType.CALL_RECORDING, "MediaStore scan failed")
             return@withContext Result.retry()
         }
+        if (meetingAudioOutcome is MeetingIngestOutcome.ScanFailed ||
+            meetingTranscriptOutcome is MeetingIngestOutcome.ScanFailed
+        ) {
+            logger.w(TAG, "doWork meeting scan failed — requesting retry")
+            processingStatusRepository.recordError(SourceType.MEETING, "Meeting scan failed")
+            return@withContext Result.retry()
+        }
 
         val callInserted = (callOutcome as CallRecordingIngestOutcome.Success).insertedCount
-        processingStatusRepository.recordScanResult(SourceType.VOICE, voiceInserted, "Queued upload")
-        processingStatusRepository.recordScanResult(SourceType.CALL_RECORDING, callInserted, "Queued upload")
+        val meetingInserted = (meetingAudioOutcome as MeetingIngestOutcome.Success).insertedCount +
+            (meetingTranscriptOutcome as MeetingIngestOutcome.Success).insertedCount
+        if (voiceEnabled && !audioMissing) {
+            processingStatusRepository.recordScanResult(SourceType.VOICE, voiceInserted, "Queued upload")
+            processingStatusRepository.recordScanResult(SourceType.CALL_RECORDING, callInserted, "Queued upload")
+        }
+        if (meetingEnabled) {
+            processingStatusRepository.recordScanResult(SourceType.MEETING, meetingInserted, "Queued meeting import")
+        }
         logger.d(
             TAG,
-            "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted",
+            "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted " +
+                "meetingInserted=$meetingInserted",
         )
         workSchedulerProvider.get().enqueuePersonInteractionIndex()
         Result.success()
@@ -212,6 +261,17 @@ public class MediaStoreWorker @AssistedInject constructor(
             logger = logger,
         )
 
+    private fun createMeetingDocumentTreeProbe(): MeetingDocumentTreeProbe =
+        MeetingDocumentTreeProbe(
+            appContext = appContext,
+            syncCursorStore = syncCursorStoreProvider.get(),
+            sourceStatusRepository = sourceStatusRepositoryProvider.get(),
+            rawIngestionEventDao = rawIngestionEventDaoProvider.get(),
+            sourceArtifactRepository = sourceArtifactRepositoryProvider.get(),
+            userPrefsStore = userPrefsStore,
+            logger = logger,
+        )
+
     public companion object {
         private const val TAG = "MediaStoreWorker"
 
@@ -230,6 +290,12 @@ public class MediaStoreWorker @AssistedInject constructor(
          * subtrees, so an independent cursor per kind is the correctness-preserving choice.
          */
         public const val KIND_CALL_RECORDING: String = "call_recording"
+
+        /** [SyncCursorStore] MediaStore kind key for meeting audio under `Recordings/BeCalm Meetings/Audio/`. */
+        public const val KIND_MEETING: String = "meeting"
+
+        /** [SyncCursorStore] cursor key for meeting transcripts under `Recordings/BeCalm Meetings/Transcripts/`. */
+        public const val KIND_MEETING_TRANSCRIPT: String = "meeting_transcript"
         private const val NO_LOOKBACK: Int = -1
 
         /**

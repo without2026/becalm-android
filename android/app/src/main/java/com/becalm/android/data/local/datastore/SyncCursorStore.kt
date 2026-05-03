@@ -212,18 +212,19 @@ public interface SyncCursorStore {
      * Emits the `DATE_MODIFIED` / `DATE_ADDED` epoch-millisecond watermark for a
      * MediaStore-backed source, or `null` on first run.
      *
-     * [kind] must be "sms" or "voice". The sync engine queries MediaStore with
+     * [kind] must be "sms", "voice", "call_recording", "meeting", or "meeting_transcript".
+     * The sync engine queries MediaStore/SAF with
      * `WHERE date_modified > lastSeenTimestampMs` to avoid re-ingesting already-processed
      * rows.
      *
-     * @param kind MediaStore source kind: "sms" | "voice".
+     * @param kind MediaStore/SAF source kind.
      */
     public fun observeMediaStoreLastSeen(kind: String): Flow<Long?>
 
     /**
      * Persists the epoch-millisecond watermark for [kind].
      *
-     * @param kind    MediaStore source kind: "sms" | "voice".
+     * @param kind    MediaStore/SAF source kind.
      * @param epochMs Wall-clock epoch milliseconds of the most-recently ingested row,
      *                or `null` to reset.
      */

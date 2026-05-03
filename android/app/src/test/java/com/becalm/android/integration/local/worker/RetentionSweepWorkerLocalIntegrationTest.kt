@@ -23,7 +23,6 @@ import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -52,7 +51,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `EMAIL-006 local retention sweep prunes only synced rows older than thirty days and leaves commitments calendar intact`() = runTest {
+    fun `EMAIL-006 retention sweep no longer prunes local source originals`() = runTest {
         val userId = "user-a"
         userPrefsStore.setCurrentUserId(userId)
         val expiredRaw = rawEvent("raw-expired", userId, Instant.parse("2026-03-20T00:00:00Z"), "synced", SourceType.GMAIL)
@@ -68,10 +67,10 @@ class RetentionSweepWorkerLocalIntegrationTest {
         val result = newWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals(1, result.outputData.getInt(RetentionSweepWorker.KEY_EMAIL_DELETED, -1))
-        assertEquals(1, result.outputData.getInt(RetentionSweepWorker.KEY_RAW_DELETED, -1))
-        assertNull(db.rawIngestionEventDao().findById(expiredRaw.id, userId))
-        assertNull(db.emailBodyDao().getByRawEventId(expiredRaw.id))
+        assertEquals(0, result.outputData.getInt(RetentionSweepWorker.KEY_EMAIL_DELETED, -1))
+        assertEquals(0, result.outputData.getInt(RetentionSweepWorker.KEY_RAW_DELETED, -1))
+        assertNotNull(db.rawIngestionEventDao().findById(expiredRaw.id, userId))
+        assertNotNull(db.emailBodyDao().getByRawEventId(expiredRaw.id))
         assertNotNull(db.rawIngestionEventDao().findById(retainedPending.id, userId))
         assertNotNull(db.rawIngestionEventDao().findById(retainedAwaiting.id, userId))
         assertNotNull(db.rawIngestionEventDao().findById(retainedRecent.id, userId))

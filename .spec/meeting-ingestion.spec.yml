@@ -1,0 +1,81 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+# Meeting ingestion is Android-owned: the app accepts user-selected meeting audio or
+# transcript files, saves/copies them under the already-granted Recordings tree, and
+# also runs a meeting-specific scanner over Recordings/BeCalm Meetings/.
+
+module: meeting-ingestion
+platform: android
+version: 1
+# Boundary reference: docs/becalm-mvp-boundary.md
+
+behaviors:
+  - id: MTG-001
+    type: ui_interaction
+    description: "SourceDetailScreen(source_id='meeting')는 [미팅 오디오 추가]와 [전사본 추가] 버튼을 표시한다. 두 버튼은 각각 해당 하위 폴더를 초기 위치로 OS file picker를 열고, 선택 가능한 MIME/확장자를 제한한다"
+    screen: "SourceDetailScreen"
+    interaction: "Meetings source detail 진입"
+    precondition: "인증 완료, Recordings SAF tree URI grant 존재, source_type='meeting' route"
+    expected: "[미팅 오디오 추가] 버튼은 initialUri=Recordings/BeCalm Meetings/Audio/ 와 audio/m4a, audio/mp4, audio/aac, audio/mpeg, audio/wav MIME 및 .m4a/.mp4/.aac/.mp3/.wav 확장자만 허용한다. [전사본 추가] 버튼은 initialUri=Recordings/BeCalm Meetings/Transcripts/ 와 text/plain, text/markdown, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document MIME 및 .txt/.md/.pdf/.docx 확장자만 허용한다. 허용되지 않은 파일은 저장하지 않고 inline error를 표시한다"
+    source: user-request
+    tests: []
+
+  - id: MTG-002
+    type: lifecycle
+    description: "사용자가 미팅 오디오 파일을 선택하면 Android가 Recordings SAF tree 내부 `BeCalm Meetings/Audio/` 하위로 파일을 복사하고, source_type='meeting' raw_ingestion_events row를 Room에 INSERT한다"
+    trigger: "[미팅 오디오 추가] file picker result"
+    precondition: "선택 파일이 MTG-001 오디오 allowlist에 부합, Recordings tree URI에 write grant 보유, current_user_id 존재"
+    expected: "앱은 DocumentFile 또는 MediaStore create-write 경로로 `Recordings/BeCalm Meetings/Audio/{timestamp}-{sanitized_name}` 파일을 생성한다. 원본 파일은 삭제·이동하지 않는다. Room raw_ingestion_events에는 {source_type:'meeting', source_ref: saved content URI, event_title: display name, duration_seconds: resolver metadata 또는 null, sync_status:'pending' 또는 'awaiting_consent', commitments_extracted_count:0} 1건이 INSERT된다. PIPA 동의가 있으면 VoiceUploadWorker가 같은 URI로 enqueue된다"
+    source: user-request
+    tests: []
+
+  - id: MTG-003
+    type: lifecycle
+    description: "사용자가 전사본 파일을 선택하면 Android가 Recordings SAF tree 내부 `BeCalm Meetings/Transcripts/` 하위로 원본 파일을 복사하고, app-private source_artifacts Markdown archive와 source_type='meeting' raw event를 생성한다"
+    trigger: "[전사본 추가] file picker result"
+    precondition: "선택 파일이 MTG-001 transcript allowlist에 부합, 파일 크기 <= 10 MiB, current_user_id 존재"
+    expected: "앱은 `Recordings/BeCalm Meetings/Transcripts/{timestamp}-{sanitized_name}`에 원본 전사본을 복사한다. 텍스트 추출 가능한 .txt/.md는 app-private source_artifacts에 markdown_original로 저장하고 raw_ingestion_events.event_snippet은 첫 200자로 로컬 갱신한다. .pdf/.docx는 저장만 수행하고 텍스트 추출 실패 시 raw event는 보존하되 extraction enqueue는 하지 않으며 actionError에 지원 상태를 표시한다. Supabase/Railway에는 원문 파일 본문이나 full transcript를 영속 저장하지 않는다"
+    source: user-request
+    tests: []
+
+  - id: MTG-004
+    type: lifecycle
+    description: "미팅 오디오 raw event는 기존 `POST /v1/voice/transcribe_extract` draft extraction endpoint를 재사용한다"
+    trigger: "VoiceUploadWorker 실행, raw_event.source_type='meeting'"
+    precondition: "MTG-002 raw event, PIPA third-party provision consent true, audio URI 접근 가능, unmetered network"
+    expected: "Railway는 오디오 bytes를 요청 lifetime 내에서만 처리하고 VoiceExtractItem[]을 반환한다. Android는 Room commitments를 source_type='meeting'으로 INSERT하고 raw event event_snippet/commitments_extracted_count를 갱신한다. 이후 commitments/raw event mirror는 기존 batch API를 사용한다"
+    source: user-request
+    tests: []
+
+  - id: MTG-005
+    type: lifecycle
+    description: "미팅 전사본 텍스트 추출은 transient-only path다. Android local archive는 원문 보존을 소유하고, Railway/Supabase는 full transcript를 저장하지 않는다"
+    trigger: ".txt 또는 .md transcript import 후 extraction 실행"
+    precondition: "PIPA third-party provision consent true, transcript text <= 100,000 chars"
+    expected: "Android는 추출 요청에 필요한 transcript text를 transient body로만 전송한다. Railway는 structured items와 person candidates만 반환하고 transcript text를 DB·파일시스템·로그에 저장하지 않는다. Android는 returned items를 source_type='meeting' commitments로 Room에 저장한다"
+    source: user-request
+    tests: []
+
+  - id: MTG-006
+    type: consent
+    description: "PIPA 제3자 제공 + 국외 이전 동의 미수락 상태에서는 미팅 오디오/전사본 extraction이 실행되지 않고 raw event가 awaiting_consent로 대기한다"
+    trigger: "MTG-002 또는 MTG-003 raw event 생성"
+    precondition: "DataStore pipa_third_party_consent=false"
+    expected: "Railway 호출 발생하지 않음. raw_ingestion_events.sync_status='awaiting_consent'. 동의 ON 시 pending으로 전이되고 source_type에 맞는 extraction worker가 재진입한다"
+    source: user-request
+    tests: []
+
+  - id: MTG-007
+    type: lifecycle
+    description: "Meeting 전용 scanner는 Recordings/BeCalm Meetings/ 하위 파일을 source_type='meeting'으로만 수집하고 voice scanner와 겹치지 않는다"
+    trigger: "MediaStoreWorker one-shot/foreground catch-up 또는 ContentObserver nudge"
+    precondition: "인증 완료, Recordings SAF tree URI grant 존재, source_type='meeting' enabled"
+    expected: "Audio branch는 MediaStore.Audio에서 RELATIVE_PATH LIKE 'Recordings/BeCalm Meetings/Audio/%' 파일을 독립 cursor(kind='meeting')로 스캔하고 source_type='meeting' raw event를 INSERT한다. Transcript branch는 SAF DocumentsContract로 Recordings/BeCalm Meetings/Transcripts/ 하위를 스캔하고 .txt/.md/.pdf/.docx allowlist를 통과한 파일만 source_type='meeting' raw event로 INSERT한다. voice branch는 Recordings/BeCalm Meetings/% 를 NOT LIKE로 제외해 중복 voice raw event를 만들지 않는다. client_event_id는 저장 파일명/문서 ID 기반 deterministic UUID라 앱 수동 import와 scanner 재발견이 중복 INSERT되지 않는다"
+    source: user-request
+    tests: []
+
+invariants:
+  - "meeting은 새 user-facing source_type이다. SourceStatusStrip, SourcesListScreen, OverallSyncIndicator의 count 대상에 포함된다"
+  - "call_recording은 계속 별도 user-facing source chip이 아니라 voice pipeline provenance subtype이다"
+  - "앱은 사용자가 선택한 원본 미팅 오디오/전사본을 삭제·이동하지 않는다. Recordings/BeCalm Meetings/ 하위에는 앱이 만든 복사본 또는 사용자가 직접 투입한 미팅 자료만 저장된다"
+  - "오디오 bytes와 full transcript text는 PIPA third-party provision consent=true일 때만 device 외부로 전송된다"
+  - "full transcript는 Supabase/Postgres/Railway filesystem/log에 영속되지 않는다. Android app-private source_artifacts와 Recordings/BeCalm Meetings/ 복사본만 원문 보존 지점이다"

@@ -10,6 +10,7 @@ internal object SourceDetailActionResolver {
     fun reconnectDestinationFor(sourceType: String): SourceReconnectDestination? =
         when (sourceType) {
             SourceType.VOICE -> SourceReconnectDestination.RECORDING_FOLDER
+            SourceType.MEETING -> SourceReconnectDestination.RECORDING_FOLDER
             SourceType.GMAIL -> SourceReconnectDestination.GMAIL
             SourceType.OUTLOOK_MAIL -> SourceReconnectDestination.OUTLOOK_MAIL
             SourceType.NAVER_IMAP,

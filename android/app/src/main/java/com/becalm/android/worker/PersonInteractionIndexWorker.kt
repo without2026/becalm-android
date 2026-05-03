@@ -17,6 +17,7 @@ import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonAliasRuleEntity
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
@@ -60,13 +61,16 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val rawEvents = rawDaoProvider.get().findAllForUser(userId)
         val commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId)
         val calendarEvents = calendarDaoProvider.get().findAllForUser(userId)
+        val enrichmentRows = databaseProvider.get().personEnrichmentDao().observeAll().first()
         val existingCandidates = personIndexDaoProvider.get().findCandidatesForUser(userId)
         val manualMatches = personIndexDaoProvider.get().findManualMatchesForUser(userId)
         val aliasRules = personIndexDaoProvider.get().findEnabledAliasRulesForUser(userId)
         val existingStates = personIndexDaoProvider.get().findSourceStatesForUser(userId)
         val blockedPersonRefs = userPrefsStore.observeBlockedPersonRefs().first()
 
-        val generatedAliasRules = buildGeneratedAliasRules(userId, existingCandidates, blockedPersonRefs)
+        val generatedAliasRules =
+            buildGeneratedContactAliasRules(userId, enrichmentRows, blockedPersonRefs) +
+                buildGeneratedAliasRules(userId, existingCandidates, blockedPersonRefs)
         val resolverFingerprint = resolverFingerprint(
             manualMatches = manualMatches,
             aliasRules = aliasRules,
@@ -479,6 +483,10 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 )
             }
 
+            resolveExactAlias(sourceType, explicitAnchor)?.let { resolved ->
+                return upsertIdentityResolution(resolved, sourceType, lastSeenAt)
+            }
+
             upsertIdentity(explicitAnchor, sourceType, lastSeenAt)?.let { return it }
 
             val aliasResolved = resolveAlias(sourceType, texts)
@@ -520,6 +528,24 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 lastSeenAt = maxOf(previous?.lastSeenAt ?: lastSeenAt, lastSeenAt),
             )
             return resolved
+        }
+
+        private fun resolveExactAlias(sourceType: String, raw: String?): PersonIdentityResolution? {
+            if (shouldSuppress(raw)) return null
+            val normalized = PersonIdentityResolver.normalizeAlias(raw) ?: return null
+            val rule = aliasRules.firstOrNull { rule ->
+                rule.identityKey.substringAfter(':', missingDelimiterValue = rule.identityKey) !in blockedPersonRefs &&
+                    (rule.sourceScope == null || rule.sourceScope == sourceType) &&
+                    rule.normalizedAlias == normalized
+            } ?: return null
+            return PersonIdentityResolver.resolveIdentityKey(
+                userId = userId,
+                identityKey = rule.identityKey,
+                rawValue = rule.alias,
+                displayNameHint = rule.alias,
+                confidence = 0.99,
+                verified = true,
+            )
         }
 
         private fun resolveAlias(sourceType: String, texts: List<String?>): PersonIdentityResolution? {
@@ -780,6 +806,80 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 updatedAt = candidate.createdAt,
             )
         }
+
+    private fun buildGeneratedContactAliasRules(
+        userId: String,
+        enrichmentRows: List<PersonEnrichmentEntity>,
+        blockedPersonRefs: Set<String>,
+    ): List<PersonAliasRuleEntity> {
+        val proposals = mutableListOf<PersonAliasRuleEntity>()
+        val contactGroups = enrichmentRows
+            .filter { !it.sourceContactId.isNullOrBlank() }
+            .groupBy { it.sourceContactId!!.trim() }
+
+        contactGroups.values.forEach { rows ->
+            val resolvedRows = rows.mapNotNull { row ->
+                PersonIdentityResolver.resolve(userId, row.personRef)?.let { resolved ->
+                    row to resolved
+                }
+            }
+            val canonical = resolvedRows
+                .filter { (_, resolved) -> resolved.identityType == "phone" || resolved.identityType == "email" }
+                .filterNot { (row, resolved) ->
+                    PersonIdentityResolver.isLikelyAutomated(row.personRef) ||
+                        PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
+                        PersonIdentityResolver.isBlocked(
+                            resolved.identityKey.substringAfter(':', missingDelimiterValue = resolved.identityKey),
+                            blockedPersonRefs,
+                        )
+                }
+                .minWithOrNull(
+                    compareBy<Pair<PersonEnrichmentEntity, PersonIdentityResolution>> {
+                        if (it.second.identityType == "phone") 0 else 1
+                    }.thenBy { it.second.identityKey },
+                )
+                ?: return@forEach
+
+            val (canonicalRow, canonicalResolution) = canonical
+            val updatedAt = rows.maxOfOrNull { it.lastSyncedAt } ?: canonicalRow.lastSyncedAt
+            val aliasTexts = resolvedRows.flatMap { (row, resolved) ->
+                listOfNotNull(
+                    row.displayName,
+                    row.nickname,
+                    row.personRef.takeUnless { resolved.identityKey == canonicalResolution.identityKey },
+                )
+            }
+
+            aliasTexts.forEach { alias ->
+                if (PersonIdentityResolver.isLikelyAutomated(alias)) return@forEach
+                if (PersonIdentityResolver.isBlocked(alias, blockedPersonRefs)) return@forEach
+                val normalizedAlias = PersonIdentityResolver.normalizeAlias(alias) ?: return@forEach
+                val id = UUID.nameUUIDFromBytes(
+                    "generated-contact-alias:$userId:$normalizedAlias:${canonicalResolution.identityKey}"
+                        .toByteArray(Charsets.UTF_8),
+                ).toString()
+                proposals += PersonAliasRuleEntity(
+                    id = id,
+                    userId = userId,
+                    alias = alias,
+                    normalizedAlias = normalizedAlias,
+                    personId = canonicalResolution.personId,
+                    identityKey = canonicalResolution.identityKey,
+                    sourceScope = null,
+                    enabled = true,
+                    createdAt = canonicalRow.lastSyncedAt,
+                    updatedAt = updatedAt,
+                )
+            }
+        }
+
+        return proposals
+            .distinctBy { "${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}" }
+            .groupBy { "${it.normalizedAlias}|${it.sourceScope}" }
+            .values
+            .filter { rules -> rules.map { it.identityKey }.distinct().size == 1 }
+            .map { rules -> rules.maxBy { it.updatedAt } }
+    }
 
     private fun fingerprintOf(vararg parts: String?): String {
         val digest = MessageDigest.getInstance("SHA-256")

@@ -52,6 +52,8 @@ internal object WorkSchedulerRequests {
 
     fun resolveSource(sourceKey: String): SourceWorkSpec? =
         when (sourceKey) {
+            SourceType.VOICE -> SourceWorkSpec(MediaStoreWorker::class.java, UniqueWorkKeys.MEDIA_STORE)
+            SourceType.MEETING -> SourceWorkSpec(MediaStoreWorker::class.java, UniqueWorkKeys.MEDIA_STORE)
             SourceType.NAVER_IMAP -> SourceWorkSpec(ImapNaverWorker::class.java, UniqueWorkKeys.NAVER_IMAP)
             SourceType.DAUM_IMAP -> SourceWorkSpec(ImapDaumWorker::class.java, UniqueWorkKeys.DAUM_IMAP)
             SourceType.GOOGLE_CALENDAR -> SourceWorkSpec(GoogleCalendarWorker::class.java, UniqueWorkKeys.GCAL)

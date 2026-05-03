@@ -15,7 +15,7 @@ version: 1
 behaviors:
   - id: COLD-001
     type: lifecycle
-    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — provider fetch owner 기준으로 Android가 즉시 fan-out할 수 있는 high-priority source(google_calendar ±7일, outlook_calendar ±7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)를 실행한다. Gmail/Outlook Mail은 backend-managed owner이므로 cold sync local worker fan-out에 포함하지 않는다. voice/call_recording은 Stage 1에 포함되지 않음(녹음 파일은 대용량·시간 오래 걸림)"
+    description: "ColdSyncScreen 진입 직후 Stage 1 실행 — provider fetch owner 기준으로 Android가 즉시 fan-out할 수 있는 high-priority source(google_calendar ±7일, outlook_calendar ±7일, naver_imap 7일, daum_imap 7일, user_profile bootstrap)를 실행한다. Gmail/Outlook Mail은 backend-managed owner이므로 cold sync local worker fan-out에 포함하지 않는다. voice/call_recording/meeting은 Stage 1에 포함되지 않음(녹음·미팅 파일은 대용량·시간 오래 걸림)"
     trigger: "ColdSyncScreen 진입 (TDY-010 조건: Room에 raw_ingestion_events + commitments + calendar_events 0건)"
     precondition: "인증 완료, DataStore onboarding_completed=false, 최소 1개 소스 연결됨"
     expected: "Stage 1 코루틴 Scope 시작. IMAP worker는 ING-012 cursor 없이 초기 since=now()-7d로 fetch → Room INSERT한다. calendar thin worker는 Railway provider fetch를 trigger한 뒤 Room calendar_events projection을 refresh한다. user_profile bootstrap은 auth session + 기본 timezone/locale로 Room user_profile row를 로컬 생성/UPSERT하고, 이후 별도 user_profile mirror 경로로 서버에 반영한다. 동시에 SYNC-006 즉시 업로드도 큐잉되어 local raw_ingestion_events가 Railway로 mirror됨. 어떤 소스도 실패해도 Stage 1 전체 실패 처리하지 않음 — 완료된 소스만 UI에 반영하고 실패 소스는 error badge로 표시(Stage 2 또는 다음 ING-011에서 재시도)"
@@ -46,7 +46,7 @@ behaviors:
     description: "Stage 2 백그라운드 실행 — ColdSyncStage2Worker가 (a) 이메일 30일 백필(Stage 1의 7일 범위에서 확장), (b) 녹음 폴더 전체 스캔(MediaStore에서 지난 30일 .m4a 파일 목록화 + raw_ingestion_events INSERT), (c) 각 소스의 cursor 안정화(첫 실전 cursor 값 DataStore 저장)를 순차 수행한다"
     trigger: "COLD-003 완료 후 enqueueUniqueWork('cold-sync-stage2')"
     precondition: "Stage 1 완료, 네트워크 unmetered, battery not low"
-    expected: "이메일 어댑터(gmail·outlook_mail·naver_imap·daum_imap 순차): since=now()-30d로 재호출하여 Room에 중복 제외 추가 INSERT(client_event_id 멱등성으로 Stage 1과 겹치는 7일분은 덮어쓰기 없음). 녹음 폴더: MediaStore.Audio.Media CONTENT_URI에서 RELATIVE_PATH LIKE 'Recordings/%'인 파일들을 DATE_MODIFIED 역순 스캔 → source_type='voice'|'call_recording' raw_ingestion_events INSERT(sync_status='awaiting_consent' if pipa_third_party_consent=false, else 'pending'). 각 소스의 최신 cursor(ING-012 정의)를 DataStore에 저장. 완료 후 DataStore cold_sync_stage2_completed_at=now() 저장"
+    expected: "이메일 어댑터(gmail·outlook_mail·naver_imap·daum_imap 순차): since=now()-30d로 재호출하여 Room에 중복 제외 추가 INSERT(client_event_id 멱등성으로 Stage 1과 겹치는 7일분은 덮어쓰기 없음). 녹음 폴더: MediaStore.Audio.Media CONTENT_URI에서 RELATIVE_PATH LIKE 'Recordings/%'인 파일들을 DATE_MODIFIED 역순 스캔 → source_type='voice'|'call_recording' raw_ingestion_events INSERT(sync_status='awaiting_consent' if pipa_third_party_consent=false, else 'pending'), 단 Recordings/BeCalm Meetings/%는 voice 스캔에서 제외하고 meeting scanner가 Audio/Transcripts 하위를 source_type='meeting'으로 수집한다. 각 소스의 최신 cursor(ING-012 정의)를 DataStore에 저장. 완료 후 DataStore cold_sync_stage2_completed_at=now() 저장"
     source: phase2-acceptance
     tests: []
 
@@ -89,7 +89,7 @@ behaviors:
     tests: []
 
 invariants:
-  - "Stage 1은 7개 작업(calendar×2 + email×4 + user_profile) 병렬 실행이며 voice/call_recording은 포함되지 않는다 (녹음 폴더는 Stage 2로 이월)"
+  - "Stage 1은 7개 작업(calendar×2 + email×4 + user_profile) 병렬 실행이며 voice/call_recording/meeting은 포함되지 않는다 (녹음 폴더는 Stage 2로 이월, meeting은 사용자 import 기반)"
   - "Stage 1 완료 시점 또는 [나중에 하기] 시점에 onboarding_completed=true가 기록된다 — 이후 ColdSyncScreen은 재표시되지 않는다"
   - "Stage 2는 완전 백그라운드이며 사용자 포그라운드 경험을 차단하지 않는다 — TodayTimelineScreen 상단 배너로만 진행률 surfacing"
   - "Stage 1·Stage 2 모두 client_event_id 멱등성을 기반으로 중복 없이 재실행 가능하다 — 앱 프로세스 kill 후 재시작에도 데이터 손실·중복 없음"

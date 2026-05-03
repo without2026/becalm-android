@@ -18,6 +18,8 @@ import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.EmailBodyRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
+import com.becalm.android.data.repository.SourceArchiveStore
+import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.persons.ARG_EVENT_ID
 import com.becalm.android.ui.persons.ARG_PERSON_REF
@@ -83,6 +85,11 @@ class PersonDetailLocalIntegrationTest {
     )
     private val emailBodyRepository = EmailBodyRepositoryImpl(
         dao = db.emailBodyDao(),
+        ioDispatcher = UnconfinedTestDispatcher(),
+    )
+    private val sourceArtifactRepository = SourceArtifactRepositoryImpl(
+        dao = db.sourceArtifactDao(),
+        store = SourceArchiveStore(LocalIntegrationSupport.appContext()),
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 
@@ -241,6 +248,7 @@ class PersonDetailLocalIntegrationTest {
         val viewModel = RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
             emailBodyRepository = emailBodyRepository,
+            sourceArtifactRepository = sourceArtifactRepository,
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
@@ -248,6 +256,7 @@ class PersonDetailLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to "email-event")),
             logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
         )
 
         viewModel.uiState.test {
@@ -314,6 +323,7 @@ class PersonDetailLocalIntegrationTest {
         val viewModel = RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
             emailBodyRepository = emailBodyRepository,
+            sourceArtifactRepository = sourceArtifactRepository,
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
@@ -321,6 +331,7 @@ class PersonDetailLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to "calendar-event")),
             logger = logger,
+            ioDispatcher = UnconfinedTestDispatcher(),
         )
 
         viewModel.uiState.test {

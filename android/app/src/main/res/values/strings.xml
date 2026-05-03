@@ -271,6 +271,8 @@
     <string name="raw_event_body_expand">Show full message</string>
     <string name="raw_event_body_collapse">Collapse</string>
     <string name="raw_event_body_html_only_notice">This message arrived as HTML only. Plain text is not available in local storage.</string>
+    <string name="raw_event_original_deleted_notice">The original was deleted from this device.</string>
+    <string name="raw_event_original_truncated_notice">This original is long, so only a preview is shown here.</string>
 
     <!-- Raw event detail — source badges -->
     <string name="raw_event_source_badge_gmail">Gmail</string>
@@ -521,6 +523,11 @@
     <string name="source_detail_title">Source Detail</string>
     <string name="source_detail_status_section">Status</string>
     <string name="source_detail_recent_events_section">Recent Events</string>
+    <string name="source_detail_meeting_import_section">Meeting files</string>
+    <string name="source_detail_meeting_audio_add">Add meeting audio</string>
+    <string name="source_detail_meeting_transcript_add">Add transcript</string>
+    <string name="source_detail_meeting_audio_formats">M4A, MP4, AAC, MP3, WAV only</string>
+    <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX only</string>
     <string name="source_detail_empty_events">No events recorded from this source yet.</string>
     <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
 
@@ -536,6 +543,13 @@
     <string name="privacy_delete_subtitle_fmt">Deletes local account data. Current local summary: commitments %1$d, contact enrichment %2$d, email rows %3$d.</string>
     <string name="privacy_activity_log_title">활동 내역</string>
     <string name="privacy_activity_log_subtitle">Review local-only PIPA rights activity history.</string>
+    <string name="privacy_source_archive_title">Source originals</string>
+    <string name="privacy_source_archive_subtitle_fmt">%1$d local originals, %2$s. Delete archived originals before a selected date.</string>
+    <string name="privacy_source_archive_empty">No local source originals are archived on this device.</string>
+    <string name="privacy_source_archive_cutoff_label">Delete originals before date</string>
+    <string name="privacy_source_archive_delete_confirm">Delete archived originals</string>
+    <string name="privacy_source_archive_deleted_fmt">Deleted %1$d archived originals.</string>
+    <string name="privacy_source_archive_delete_failed">Could not delete archived originals.</string>
     <string name="privacy_correction_guidance">정정은 각 상세 편집 화면에서 처리됩니다. 약속 수정은 편집 화면, 연락처 보강은 원본 이벤트 또는 연락처 경로를 이용하세요.</string>
     <string name="privacy_export_cancelled">Export was cancelled.</string>
     <string name="privacy_export_failed">Could not write the export ZIP.</string>

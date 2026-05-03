@@ -18,3 +18,9 @@ public data class EmailBodyUi(
     val bodyPlain: String?,
     val bodyHtml: String?,
 )
+
+public data class ArchivedOriginalUi(
+    val bodyText: String?,
+    val deletedFromDevice: Boolean,
+    val truncated: Boolean,
+)

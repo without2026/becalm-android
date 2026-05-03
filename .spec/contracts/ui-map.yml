@@ -127,10 +127,10 @@ routes:
 
   - path: /persons/{person_id}/events/{event_id}
     screen: RawEventDetailSheet
-    data: []
-    components: [EventSourceBadge, EventTitleText, EventSnippetText, DurationText, LocationText, CommitmentsExtractedBadge, IngestionTimestamp, BackButton]
+    data: ["Room raw_ingestion_events", "Room email_body fallback", "Room source_artifacts + app-private Markdown archive"]
+    components: [EventSourceBadge, EventTitleText, EventSnippetText, ArchivedOriginalBlock, DurationText, LocationText, CommitmentsExtractedBadge, IngestionTimestamp, BackButton]
     auth: required
-    # Bottom sheet — raw event drill-down with extended fields. Data loaded from Room directly.
+    # Bottom sheet — raw event drill-down with extended fields. Data loaded from Room directly. If source_artifacts has markdown_original and the file is readable, render archived original first. If archive metadata exists but file is gone, show local deletion notice. Fallback to email_body.body_plain/body_html and raw snippet.
 
   - path: /persons/unassigned
     screen: UnassignedEventsScreen
@@ -153,24 +153,32 @@ routes:
   - path: /settings
     screen: SettingsScreen
     data: ["POST https://<supabase-project>.supabase.co/auth/v1/logout"]
-    components: [SourcesEntryRow, AccountSection, LogoutButton]
+    components: [SourcesEntryRow, PrivacyManagementEntryRow, AccountSection, LogoutButton]
     auth: required
     # Accessed via top-right settings icon on TodayTimelineScreen (not hamburger menu).
+
+  - path: /settings/privacy
+    screen: PrivacyManagementScreen
+    data: ["Room source_artifacts metadata", "app-private source_archive files", "PIPA action log"]
+    components: [PrivacyActionCard, SourceArchiveDeleteAction, DateCutoffInput, ConfirmSourceArchiveDeleteButton, ExportButton, ConsentWithdrawAction, ProcessingPauseAction, AccountDeleteAction, ActivityLogAction]
+    auth: required
+    # SourceArchiveDeleteAction deletes archived Markdown originals before the chosen date. It must not delete raw_ingestion_events, commitments, calendar_events, person index rows, source connections, or enrichment rows.
 
   - path: /settings/sources
     screen: SourcesListScreen
     data: []
     components: [SourceStatusRow]
     auth: required
-    # SMG-001: 7-source list + '연락처' pseudo-source row (ENR-008).
+    # SMG-001: 8-source list + '연락처' pseudo-source row (ENR-008). meeting은 앱에서 저장한 미팅 오디오/전사본 source다.
 
   - path: /settings/sources/{source_id}
     screen: SourceDetailScreen
     data: []
-    components: [SourceStatusDetail, LastSyncInfo, ReconnectButton, DisconnectButton, ManualSyncButton]
+    components: [SourceStatusDetail, LastSyncInfo, ReconnectButton, DisconnectButton, ManualSyncButton, MeetingAudioAddButton, MeetingTranscriptAddButton]
     auth: required
     # SMG-002..005: source detail, reconnect flow, disconnect, manual per-source sync.
-    # source_id enum: voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    # source_id enum: voice | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    # source_id='meeting' only: MeetingAudioAddButton opens a picker restricted to .m4a/.mp4/.aac/.mp3/.wav audio; MeetingTranscriptAddButton opens a picker restricted to .txt/.md/.pdf/.docx transcript files.
 
   - path: /settings/sources/contacts
     screen: ContactsSourceDetailScreen
@@ -191,12 +199,12 @@ shared_components:
       state: "OverallSyncState"
       syncingCount: int
       lastSyncAt: "datetime?"
-    description: "7개 사용자-facing source 상태 집계. 4가지 상태: idle / 'syncing N/7' / 'synced HH:mm' / '일부 소스 실패 — 설정에서 확인'(경고색). 탭 인터랙션 없음"
+    description: "8개 사용자-facing source 상태 집계. 4가지 상태: idle / 'syncing N/8' / 'synced HH:mm' / '일부 소스 실패 — 설정에서 확인'(경고색). 탭 인터랙션 없음"
 
   - name: SourceStatusStrip
     props:
       sources: "SourceStatus[]"
-    description: "7개 소스(Voice, Gmail, Outlook Mail, Naver Email, Daum Email, Google Calendar, Outlook Calendar) 칩 배열. 각 칩: idle(회색) / syncing(스피너) / error(빨간 점) / synced(초록 체크+HH:mm). 읽기 전용 — 탭 인터랙션 없음"
+    description: "8개 소스(Voice, Meetings, Gmail, Outlook Mail, Naver Email, Daum Email, Google Calendar, Outlook Calendar) 칩 배열. 각 칩: idle(회색) / syncing(스피너) / error(빨간 점) / synced(초록 체크+HH:mm). 읽기 전용 — 탭 인터랙션 없음"
 
   - name: TodayTimeline
     props:

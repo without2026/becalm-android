@@ -17,7 +17,6 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -301,7 +300,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 )
                 rawIngestionEventDao.update(updated)
 
-                sourceStatusRepository.recordSyncSuccess(SourceType.VOICE, now)
+                sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
                 processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
                 workScheduler.enqueuePersonInteractionIndex()
                 logger.d(

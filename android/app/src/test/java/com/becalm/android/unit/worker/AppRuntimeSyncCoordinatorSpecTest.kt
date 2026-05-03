@@ -35,6 +35,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     fun `startup starts foreground catch-up and schedules periodic redundancy when capabilities are available`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
@@ -68,6 +69,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     fun `startup stops observer and cancels periodic enrichment when permissions are absent`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns false
         every { mediaAudioPermissionChecker.isGranted() } returns false
@@ -91,6 +93,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     fun `startup keeps observer stopped when voice source is disabled even if permission exists`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
@@ -110,6 +113,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     fun `startup keeps observer stopped when SAF tree grant is missing even if voice and permission exist`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
@@ -147,6 +151,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     fun `refresh schedules newly enabled sources after initial recurring enrollment`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
         every { contactsPermissionChecker.isGranted() } returns false
         every { mediaAudioPermissionChecker.isGranted() } returns false

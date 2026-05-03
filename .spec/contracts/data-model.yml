@@ -29,9 +29,9 @@ tables:
       - name: source_type
         type: text
         nullable: false
-        # enum: voice | call_recording | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-        # voice = Samsung 음성 녹음(Voice Recorder), call_recording = Samsung 통화 녹음(Call). 두 소스는 동일한 Vertex AI Gemini 파이프라인(VOI-001)에서 처리되며, UI·필터링·법적 증거성 표시에서만 구분됨
-        # 사용자-facing source label은 naver_imap='Naver Email', daum_imap='Daum Email'. SourceStatusStrip/OverallSyncIndicator는 voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar의 7개 source를 기준으로 계산하고 call_recording은 별도 칩을 두지 않음.
+        # enum: voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+        # voice = Samsung 음성 녹음(Voice Recorder), call_recording = Samsung 통화 녹음(Call), meeting = 사용자가 앱에서 Recordings/BeCalm Meetings/로 저장한 미팅 오디오 또는 전사본. voice/call_recording/meeting 오디오는 동일한 Vertex AI Gemini 파이프라인(VOI-001)에서 처리되며, source_type은 UI·필터링·증거성 표시 용도로 보존된다.
+        # 사용자-facing source label은 meeting='Meetings', naver_imap='Naver Email', daum_imap='Daum Email'. SourceStatusStrip/OverallSyncIndicator는 voice, meeting, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar의 8개 source를 기준으로 계산하고 call_recording은 별도 칩을 두지 않음.
       - name: source_ref
         type: text
         nullable: true
@@ -44,15 +44,15 @@ tables:
       - name: event_title
         type: text
         nullable: true
-        # voice: MediaStore TITLE / email: subject / calendar: event title. Populated at ingestion time.
+        # voice/meeting audio: MediaStore TITLE 또는 SAF display name / meeting transcript: user-picked file title / email: subject / calendar: event title. Populated at ingestion time.
       - name: event_snippet
         type: text
         nullable: true
-        # voice: Android가 draft extraction 응답을 받은 뒤 첫 번째 commitment.quote(<=100 chars)를 로컬에 반영한 값 — transcript 자체는 영속되지 않으므로 recall용 최소 텍스트 소스다. commitments가 0건이면 null. / email: first 200 chars of body / calendar: null
+        # voice/meeting audio: Android가 draft extraction 응답을 받은 뒤 첫 번째 commitment.quote(<=100 chars)를 로컬에 반영한 값. meeting transcript: transcript extraction 응답의 첫 commitment.quote 또는 사용자 전사본 앞 200자 로컬-only preview. full transcript는 Supabase/Railway에 영속되지 않는다. / email: first 200 chars of body / calendar: null
       - name: duration_seconds
         type: int
         nullable: true
-        # voice only: MediaStore DURATION / 1000. null for non-voice sources.
+        # voice/call_recording/meeting audio only: MediaStore DURATION / 1000 or resolver metadata. null for transcript-only and non-audio sources.
       - name: location
         type: text
         nullable: true
@@ -70,7 +70,7 @@ tables:
         nullable: false
         default: "'pending'"
         # enum: pending | synced | failed | quarantined | awaiting_consent — Room-side tracking column, not uploaded to Supabase
-        # awaiting_consent: voice source만 사용. pipa_third_party_consent=false인 동안 VoiceUploadWorker가 업로드를 보류. 동의 ON 시 자동으로 pending으로 전이 (VOI-004).
+        # awaiting_consent: voice/call_recording/meeting audio 및 meeting transcript source에서 사용. pipa_third_party_consent=false인 동안 Railway extraction 업로드를 보류. 동의 ON 시 자동으로 pending으로 전이 (VOI-004, MTG-006).
       - name: quarantine_reason
         type: text
         nullable: true
@@ -190,9 +190,9 @@ tables:
       - name: source_type
         type: text
         nullable: false
-        # enum: voice | call_recording | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar | manual
+        # enum: voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar | manual
         # 'manual' = user-created via CommitmentCreateSheet (manual-commitment.spec.yml MAN-001..006). No associated raw_ingestion_events row.
-        # UI label mapping: naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. call_recording은 source provenance 보존용이며 Today/Settings의 source status count에는 포함되지 않는다.
+        # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. call_recording은 source provenance 보존용이며 Today/Settings의 source status count에는 포함되지 않는다.
       - name: source_ref
         type: text
         nullable: true
@@ -357,7 +357,7 @@ tables:
 
   - name: email_body
     room_only: true
-    # PIPA invariant: 이메일 원문은 온디바이스 전용. Railway/Supabase로 전송 절대 금지. 30일 retention sweep 대상.
+    # PIPA invariant: 이메일 원문은 온디바이스 전용. Railway/Supabase DB persist 금지. 자동 age-based 삭제 대상이 아니며 사용자의 명시적 source archive 삭제 액션으로만 제거.
     columns:
       - name: id
         type: uuid
@@ -418,6 +418,60 @@ tables:
       - columns: [raw_event_id]
         type: btree
       - columns: [provider_message_id]
+
+  - name: source_artifacts
+    room_only: true
+    # Local-first source recall archive metadata. The Markdown original lives in app-private files storage; this table stores only the relative path and integrity metadata. No Supabase/Railway mirror.
+    columns:
+      - name: id
+        type: uuid
+        primary: true
+        nullable: false
+        default: gen_random_uuid()
+      - name: user_id
+        type: uuid
+        nullable: false
+      - name: raw_event_id
+        type: uuid
+        nullable: true
+        # Optional local pointer to raw_ingestion_events.id. Nullable so archive metadata can survive raw row lifecycle changes; delete-by-date targets artifacts, not raw events.
+      - name: source_type
+        type: text
+        nullable: false
+      - name: source_ref
+        type: text
+        nullable: true
+      - name: artifact_type
+        type: text
+        nullable: false
+        # enum: markdown_original
+      - name: local_path
+        type: text
+        nullable: false
+        # Path relative to Context.filesDir, e.g. source_archive/<user_hash>/email/2026/05/<raw_event_id>.md
+      - name: sha256
+        type: text
+        nullable: false
+      - name: byte_size
+        type: integer
+        nullable: false
+      - name: occurred_at
+        type: timestamptz
+        nullable: false
+      - name: created_at
+        type: timestamptz
+        nullable: false
+      - name: updated_at
+        type: timestamptz
+        nullable: false
+    indexes:
+      - columns: [user_id, source_type, source_ref, artifact_type]
+        type: btree
+        unique: true
+      - columns: [user_id, occurred_at]
+        type: btree
+      - columns: [raw_event_id]
+        type: btree
         type: btree
 
   - name: persons_enrichment
@@ -525,7 +579,7 @@ derived_models:
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
-  - "Room 전용 엔티티 (Supabase 없음): EmailBody, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다"
+  - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
   - "Today/Settings의 source status는 별도 Room 테이블이 아니라 로컬 파생 projection이다. source status row/chip을 서버 API 또는 단일 DB row에서 직접 읽는 계약은 없다"
   - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 mirror. sync_status·retry_count·last_attempt_at는 Room-side tracking 컬럼으로 Supabase에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
@@ -540,12 +594,12 @@ migration_notes:
   - "Supabase 리전: ap-northeast-2 (PIPA 한국 개인정보보호법 준수)"
   - "Room DB 파일 분리 정책: DB 파일명은 `becalm_<sha256(supabase_user_id)[:16]>.db` 형식으로 user 단위 격리 (AUTH-008). 동일 디바이스에서 계정 전환·공유 시 RLS와 무관하게 로컬 레벨에서 데이터가 섞이지 않는다. 로그아웃은 해당 user의 DB 연결을 close()할 뿐 파일 삭제는 하지 않음 — 동일 계정 재로그인 시 데이터 복원"
   - "user_profile 테이블: 로그인 직후 Android가 auth session + 기본 timezone/locale로 로컬 row를 bootstrap하고, 이후 Railway `PATCH /v1/user_profile`로 mirror한다. phone_e164_self는 Settings > 내 프로필에서 사용자 직접 입력 — 미입력 시 voice 파이프라인 Gemini 프롬프트는 fallback 문구 '본인과 상대방을 구분해 direction을 추정하라'만 사용. display_name_override는 UI 상단 바 인사말 및 Gemini 프롬프트에서 활용. Supabase 미러는 export/PIPA 용도이며 MVP Android는 server→Room 역방향 sync를 사용하지 않는다"
-  - "Vertex AI 리전: asia-northeast3 (서울). ZDR(Zero Data Retention) 플래그 필수. voice-pipeline v2는 Railway `POST /v1/voice/transcribe_extract`에서 Vertex AI Gemini 2.5 Flash를 호출하며 오디오 바이트·transcript·Gemini 응답은 요청 lifetime 내 ephemeral. Railway는 draft만 반환하고, Android가 Room commitments를 먼저 갱신한 뒤 commitments:batch로 Supabase mirror를 수행한다"
-  - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice source에 대한 Railway 업로드가 차단됨 (VOI-004, ONB-PIPA)"
-  - "리텐션 정책 (MVP 확정): Room raw_ingestion_events 및 연관 EmailBody는 timestamp 기준 30일 rolling window로 자동 삭제된다. 일일 WorkManager RetentionSweepWorker가 `DELETE FROM raw_ingestion_events WHERE timestamp < now() - INTERVAL '30 days' AND sync_status='synced'`를 실행하며 synced되지 않은 레코드는 업로드 완료 전까지 보존된다. Supabase(서버 미러)도 동일한 30일 규칙을 서버 측 cron으로 병렬 적용한다. commitments 및 calendar_events는 action_state/status 기준 별도 lifecycle을 따르므로 30일 정책 적용 대상 아님. persons_enrichment는 CONTACTS 원본이 사용자 기기에 상존하는 한 유지되며, 일반 로그아웃은 보존하고 계정 삭제/앱 삭제 시에만 삭제한다"
+  - "Vertex AI 리전: asia-northeast3 (서울). ZDR(Zero Data Retention) 플래그 필수. voice-pipeline v2는 Railway `POST /v1/voice/transcribe_extract`에서 Vertex AI Gemini 2.5 Flash를 호출하며 오디오 바이트·transcript·Gemini 응답은 요청 lifetime 내 ephemeral. Railway는 draft만 반환하고, Android가 Room commitments를 먼저 갱신한 뒤 commitments:batch로 Supabase mirror를 수행한다. meeting audio도 같은 endpoint를 재사용하고 source_type은 Android Room에서 보존한다"
+  - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice/call_recording/meeting source에 대한 Railway extraction 업로드가 차단됨 (VOI-004, MTG-006, ONB-PIPA)"
+  - "원문 보존 정책 (MVP 확정): Room raw_ingestion_events 및 연관 EmailBody/source_artifacts는 timestamp 기준 자동 삭제하지 않는다. 원문 recall은 app-private Markdown archive(source_artifacts.artifact_type='markdown_original')가 소유하며 사용자가 Privacy Management에서 특정 날짜 이전 원문 삭제를 명시 실행할 때만 source_artifacts 파일과 metadata가 삭제된다. 삭제 후에도 raw_ingestion_events·commitments·calendar_events·person index는 유지되어 timeline/context metadata가 보존된다. synced되지 않은 raw_ingestion_events는 Railway durable result 전까지 어떤 user cleanup에서도 삭제 금지. Supabase 서버 미러는 원문 본문을 저장하지 않고 raw metadata/commitments lifecycle만 따른다"
   - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
   - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. backend mirror pagination도 reset될 수 있다. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."
   - "RISK — CONTACTS 권한 부여 범위: EnrichmentWorker는 ContactsContract.CommonDataKinds.StructuredName·Nickname·Organization만 읽음. SMS·통화기록·사진 등 접근 없음. 앱 스토어 심사 시 READ_CONTACTS 사용 목적 명시 필요 (개인화된 표시명 — 서버 전송 없음)"
   - "commitments 편집/삭제/이의제기/승계 컬럼 6개 추가: last_edited_by(uuid, fk auth.users.id), last_edited_at(timestamptz), quote_disputed(bool default false), quote_disputed_at(timestamptz), deleted_at(timestamptz), supersedes_commitment_id(uuid, fk commitments.id). Room 마이그레이션: ALTER TABLE commitments ADD COLUMN last_edited_by TEXT; ADD COLUMN last_edited_at INTEGER; ADD COLUMN quote_disputed INTEGER NOT NULL DEFAULT 0; ADD COLUMN quote_disputed_at INTEGER; ADD COLUMN deleted_at INTEGER; ADD COLUMN supersedes_commitment_id TEXT REFERENCES commitments(id) ON DELETE SET NULL; CREATE INDEX idx_commitments_user_deleted ON commitments(user_id, deleted_at); CREATE INDEX idx_commitments_supersedes ON commitments(supersedes_commitment_id). Supabase Postgres: 동일 DDL(uuid 타입·NULL allowed·FK 명시) + 선택적 `CREATE INDEX idx_commitments_user_deleted_partial ON commitments(user_id) WHERE deleted_at IS NULL` (post-MVP 최적화). 기존 row는 모든 신규 컬럼이 NULL 또는 false로 backfill — 서비스 동작에 영향 없음. 모든 클라이언트 쿼리는 `WHERE deleted_at IS NULL` 필터 추가 필수(AppDatabase DAO 레벨 일괄 적용). commitment-edit.spec.yml EDIT-001..008 및 manual-commitment.spec.yml MAN-001..006이 이 스키마를 전제로 한다."
-  - "commitments.source_type enum 확장: 기존 8종(voice|call_recording|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar)에 'manual'을 추가. raw_ingestion_events.source_type은 **확장하지 않음** — 수동 약속은 원본 이벤트가 없어 raw 테이블에 row를 만들지 않는다(manual-commitment.spec.yml MAN-003 invariant). 마이그레이션 DDL 변경 없음(컬럼 타입은 TEXT) — 애플리케이션 레벨 enum 검증만 업데이트. Railway는 POST /v1/commitments에서 source_type='manual'을 수락하도록 서버 validation 확장 필요."
+  - "source_type enum 확장: raw_ingestion_events는 meeting을 추가해 9종(voice|call_recording|meeting|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar)을 허용한다. commitments.source_type은 여기에 manual을 추가해 10종을 허용한다. 수동 약속은 원본 이벤트가 없어 raw 테이블에 row를 만들지 않는다(manual-commitment.spec.yml MAN-003 invariant). 마이그레이션 DDL 변경 없음(컬럼 타입은 TEXT) — 애플리케이션 레벨 enum 검증과 Railway validation만 업데이트."
   - "calendar_events 반복 일정 컬럼 2개 추가: recurring_event_id(text, nullable), original_start_at(timestamptz, nullable). Google Calendar의 recurringEventId·originalStartTime 및 MS Graph의 seriesMasterId·originalStart에서 채운다. Room 마이그레이션: ALTER TABLE calendar_events ADD COLUMN recurring_event_id TEXT; ADD COLUMN original_start_at INTEGER; CREATE INDEX idx_calendar_events_user_recurring ON calendar_events(user_id, recurring_event_id). Supabase Postgres: 동일 DDL + 동일 index. 기존 row는 NULL backfill — 현재 동작에 영향 없음(non-recurring 이벤트는 여전히 NULL). post-MVP에서 '반복 — 매주 월' 뱃지, 시리즈 전체 [완료] 등 UI에 활용. 이동(override)된 instance는 start_at != original_start_at로 감지되어 '원래: M/d HH:mm' 보조 라벨 표시 가능."

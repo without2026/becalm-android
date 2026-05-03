@@ -32,6 +32,7 @@ public class DefaultRuntimeSyncSourceResolver @Inject constructor(
     override suspend fun foregroundSources(): Set<String> =
         buildSet {
             if (canRunVoice()) add(SourceType.VOICE)
+            if (canRunMeeting()) add(SourceType.MEETING)
             addAll(periodicSources())
         }
 
@@ -58,6 +59,10 @@ public class DefaultRuntimeSyncSourceResolver @Inject constructor(
     private suspend fun canRunVoice(): Boolean =
         userPrefsStore.observeSourceEnabled(SourceType.VOICE).first() &&
             mediaAudioPermissionChecker.isGranted() &&
+            !userPrefsStore.observeRecordingFolderTreeUri().first().isNullOrBlank()
+
+    private suspend fun canRunMeeting(): Boolean =
+        userPrefsStore.observeSourceEnabled(SourceType.MEETING).first() &&
             !userPrefsStore.observeRecordingFolderTreeUri().first().isNullOrBlank()
 
     private suspend fun canRunBackendMail(provider: EmailPipaProvider): Boolean =

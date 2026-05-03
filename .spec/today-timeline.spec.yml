@@ -26,7 +26,7 @@ behaviors:
 
   - id: TDY-003
     type: ui_interaction
-    description: "SourceStatusStrip은 읽기 전용 진단 표시다. 7개 칩(voice/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
+    description: "SourceStatusStrip은 읽기 전용 진단 표시다. 8개 칩(voice/meeting/gmail/outlook_mail/naver_email/daum_email/google_calendar/outlook_calendar)이 각각 4가지 시각 상태 중 하나를 표시한다: idle(회색) / syncing(애니메이션 스피너) / error(빨간 점) / synced(초록 체크 + HH:mm). 칩 탭 인터랙션 없음 — 오류 복구는 설정 화면을 통한다"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
     precondition: "gmail source synced 상태, outlook_mail source error 상태, voice/naver_email/daum_email/google_calendar/outlook_calendar idle"
@@ -74,10 +74,10 @@ behaviors:
 
   - id: TDY-008
     type: ui_interaction
-    description: "OverallSyncIndicator가 7개 사용자-facing source 상태를 집계하여 4가지 상태 중 하나를 표시한다: idle(전체 idle) / 'syncing N/7'(1개 이상 syncing) / 'synced HH:mm'(전체 synced, 오류 없음, min(last_sync_at) 표시) / '일부 소스 실패 — 설정에서 확인'(1개 이상 error, 경고색)"
+    description: "OverallSyncIndicator가 8개 사용자-facing source 상태를 집계하여 4가지 상태 중 하나를 표시한다: idle(전체 idle) / 'syncing N/8'(1개 이상 syncing) / 'synced HH:mm'(전체 synced, 오류 없음, min(last_sync_at) 표시) / '일부 소스 실패 — 설정에서 확인'(1개 이상 error, 경고색)"
     screen: "TodayTimelineScreen"
     interaction: "화면 진입"
-    precondition: "7개 source 중 gmail=synced(10:30), voice=syncing, 나머지 idle"
+    precondition: "8개 source 중 gmail=synced(10:30), voice=syncing, meeting=idle, 나머지 idle"
     expected: "OverallSyncIndicator가 'syncing 1/7' 상태로 표시됨. voice 어댑터 완료 후 'synced 10:30'으로 변경됨"
     source: phase2-acceptance
     tests: []
@@ -88,7 +88,7 @@ behaviors:
     gesture: "pull-to-refresh"
     screen: "TodayTimelineScreen"
     precondition: "TodayTimelineScreen 표시됨, Room에 CalendarEvent 2건 캐시됨"
-    expected: "pull-to-refresh 즉시 TodayTimeline이 Room 캐시로 렌더링됨. 동시에 ING-011 병렬 어댑터 실행 시작됨. OverallSyncIndicator가 'syncing N/7'으로 전환됨. 어댑터 완료 후 Room 신규 데이터로 TodayTimeline 갱신됨"
+    expected: "pull-to-refresh 즉시 TodayTimeline이 Room 캐시로 렌더링됨. 동시에 ING-011 병렬 어댑터 실행 시작됨. OverallSyncIndicator가 'syncing N/8'으로 전환됨. 어댑터 완료 후 Room 신규 데이터로 TodayTimeline 갱신됨"
     source: phase2-acceptance
     tests: []
 

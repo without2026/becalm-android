@@ -2,7 +2,6 @@ package com.becalm.android.worker
 
 import android.content.Context
 import androidx.hilt.work.HiltWorker
-import androidx.room.withTransaction
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -16,55 +15,13 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
 import kotlinx.coroutines.flow.first
-import kotlin.time.Duration.Companion.days
 
 /**
- * Daily retention-sweep [CoroutineWorker] that prunes on-device `email_body` and
- * `raw_ingestion_events` rows older than 30 days with `sync_status = 'synced'`.
+ * Legacy retention-sweep [CoroutineWorker].
  *
- * ## Spec contract
- * - EMAIL-006 (`.spec/email-pipeline.spec.yml:58-64`) — "30일 경과 + sync_status='synced'
- *   조건 만족 시 RetentionSweepWorker가 EmailBody와 raw_ingestion_events를 함께 DELETE".
- * - Cross-module invariant at `.spec/data-ingestion.spec.yml:160` — commitments and
- *   calendar_events are **explicitly excluded** from this sweep. Those tables have
- *   independent lifecycles (soft-delete + user-driven edits); conflating them here
- *   would destroy user-confirmed state.
- * - `.spec/data-ingestion.spec.yml:151` — pending / failed / awaiting_consent raw events
- *   are never deleted because the server has not yet acknowledged receipt.
- *
- * ## Order of DELETEs
- * The two DAO queries run inside a single [BeCalmDatabase.withTransaction] so either
- * both succeed or neither is visible. The `email_body` DELETE fires **first**, then the
- * `raw_ingestion_events` DELETE — explicitly 2-step even though `ForeignKey.CASCADE`
- * on `email_body.raw_event_id` would co-delete the body automatically. Three reasons
- * motivate the explicit 2-step approach (see plan appendix):
- *
- * 1. **Observability** — each DAO returns the affected row count independently, so
- *    [Result.success] output data can surface `email_deleted` and `raw_deleted` as
- *    distinct metrics. Relying on CASCADE would leave `email_deleted = 0` even when
- *    real body rows disappeared via the FK path.
- * 2. **Regression defence** — should a future migration accidentally drop the CASCADE
- *    behaviour, the explicit DELETE keeps the contract intact without surprise orphans.
- * 3. **Predictability** — a SQL reviewer can see, at a glance, exactly which two
- *    tables this worker mutates and no others.
- *
- * ## Cutoff computation
- * `cutoffMillis = (clock.nowInstant() - 30.days).toEpochMilliseconds()`. Both DAO
- * queries receive the identical `cutoffMillis` so their eligibility windows are
- * aligned against the same wall-clock snapshot. The [Clock] abstraction is injected
- * rather than calling `kotlinx.datetime.Clock.System` directly so unit tests can
- * drive time deterministically with a fake (see [RetentionSweepWorkerTest]).
- *
- * ## Failure handling
- * Any exception out of [doWork]'s transaction returns [Result.retry], letting
- * WorkManager apply its default backoff. The sweep is fully idempotent (a successful
- * second run returns counts of zero), so a retry after partial progress is safe.
- *
- * ## Out of scope
- * - Voice transcript retention (separate storage, different policy).
- * - Sentry / metrics streaming — current output data only carries the two counts.
- * - Manual sweep trigger UI.
- * - Retention-duration changes (30-day value is spec-fixed).
+ * Source originals are now retained local-first until the user explicitly deletes archived
+ * originals from Privacy Management. This worker remains scheduled as a stable lifecycle hook,
+ * but it no longer deletes `email_body`, `raw_ingestion_events`, or source archive files.
  */
 @HiltWorker
 public class RetentionSweepWorker @AssistedInject constructor(
@@ -116,45 +73,18 @@ public class RetentionSweepWorker @AssistedInject constructor(
                 ),
             )
         }
-        val cutoffInstant = clock.nowInstant() - RETENTION_WINDOW
-        val cutoffMillis = cutoffInstant.toEpochMilliseconds()
-        val rawIngestionEventDao = rawIngestionEventDaoProvider.get()
-        val emailBodyDao = emailBodyDaoProvider.get()
-        val db = dbProvider.get()
-
-        return runCatching {
-            // Atomically delete email bodies first, then their parent raw events.
-            // Both DAO calls share `cutoffMillis` so the two windows align.
-            val (emailDeleted, rawDeleted) = db.withTransaction {
-                val emails = emailBodyDao.deleteOlderThanForSynced(cutoffMillis)
-                val raws = rawIngestionEventDao.deleteSyncedOlderThan(cutoffMillis)
-                emails to raws
-            }
-            logger.d(
-                TAG,
-                "RetentionSweepWorker cutoffMillis=$cutoffMillis " +
-                    "emailDeleted=$emailDeleted rawDeleted=$rawDeleted",
-            )
-            Result.success(
-                workDataOf(
-                    KEY_EMAIL_DELETED to emailDeleted,
-                    KEY_RAW_DELETED to rawDeleted,
-                ),
-            )
-        }.getOrElse { error ->
-            // Retry on any failure — WorkManager applies default exponential backoff.
-            // Sweep is idempotent (subsequent success path returns 0/0 when there is
-            // nothing left to prune), so partial progress followed by retry is safe.
-            logger.w(TAG, "RetentionSweepWorker failed: ${error.message}")
-            Result.retry()
-        }
+        logger.d(TAG, "RetentionSweepWorker no-op — source originals are user-retained")
+        return Result.success(
+            workDataOf(
+                KEY_EMAIL_DELETED to 0,
+                KEY_RAW_DELETED to 0,
+            ),
+        )
     }
 
     public companion object {
         private const val TAG: String = "RetentionSweep"
 
-        /** 30-day rolling retention window from EMAIL-006 and data-ingestion:160. */
-        private val RETENTION_WINDOW = 30.days
         private const val MAX_RETRIES: Int = 5
 
         /**

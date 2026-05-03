@@ -65,6 +65,7 @@ internal fun EmailEventDetailSection(
         EventSnippetText(snippet = state.snippet)
 
         EmailBodyBlock(
+            archivedOriginal = state.archivedOriginal,
             body = state.emailBody,
         )
 
@@ -106,8 +107,20 @@ private const val BODY_COLLAPSED_CHAR_LIMIT: Int = 500
  */
 @Composable
 private fun EmailBodyBlock(
+    archivedOriginal: ArchivedOriginalUi?,
     body: EmailBodyUi?,
 ) {
+    if (archivedOriginal?.bodyText != null) {
+        ExpandableBodyText(bodyPlain = archivedOriginal.bodyText)
+        if (archivedOriginal.truncated) {
+            ArchivedOriginalTruncatedRow()
+        }
+        return
+    }
+    if (archivedOriginal?.deletedFromDevice == true) {
+        ArchivedOriginalDeletedRow()
+        return
+    }
     if (body == null) return
     val bodyPlain = body.bodyPlain
     val bodyHtml = body.bodyHtml
@@ -117,6 +130,24 @@ private fun EmailBodyBlock(
         bodyHtml != null -> HtmlOnlyDegradeRow()
         else -> Unit
     }
+}
+
+@Composable
+private fun ArchivedOriginalDeletedRow() {
+    Text(
+        text = stringResource(R.string.raw_event_original_deleted_notice),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ArchivedOriginalTruncatedRow() {
+    Text(
+        text = stringResource(R.string.raw_event_original_truncated_notice),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

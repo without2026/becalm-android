@@ -32,8 +32,10 @@ import com.becalm.android.data.remote.imap.ImapMessage
 import com.becalm.android.data.remote.imap.ImapProviderDenylist
 import com.becalm.android.data.remote.imap.ImapSpecialUse
 import com.becalm.android.data.repository.EmailBodyRepository
+import com.becalm.android.data.repository.EmailOriginalArchiveInput
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.email.EmailPersonRef
 import com.becalm.android.domain.email.EmailSnippetBuilder
@@ -105,6 +107,7 @@ public class ImapNaverWorker @AssistedInject constructor(
     private val imapClient: ImapClient,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val emailBodyRepositoryProvider: Provider<EmailBodyRepository>,
+    private val sourceArtifactRepositoryProvider: Provider<SourceArtifactRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
     private val userPrefsStore: UserPrefsStore,
@@ -128,6 +131,8 @@ public class ImapNaverWorker @AssistedInject constructor(
         get() = rawIngestionRepositoryProvider.get()
     private val emailBodyRepository: EmailBodyRepository
         get() = emailBodyRepositoryProvider.get()
+    private val sourceArtifactRepository: SourceArtifactRepository
+        get() = sourceArtifactRepositoryProvider.get()
     private val sourceStatusRepository: SourceStatusRepository
         get() = sourceStatusRepositoryProvider.get()
 
@@ -347,7 +352,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             // Persist EmailBody + optional extraction enqueue per message.
             fetched.messages.forEachIndexed { index, message ->
                 val rawEventId = resolution.rawEventIds.getOrNull(index) ?: return@forEachIndexed
-                persistEmailBody(message, rawEventId, mailboxKey)
+                persistEmailBody(message, rawEventId, mailboxKey, userId)
             }
         }
 
@@ -442,6 +447,7 @@ public class ImapNaverWorker @AssistedInject constructor(
         message: ImapMessage,
         rawEventId: String,
         mailboxKey: String,
+        userId: String,
     ) {
         val folderLabel = folderLabelFor(mailboxKey)
         val snippetResult = EmailSnippetBuilder.buildSnippet(
@@ -477,6 +483,26 @@ public class ImapNaverWorker @AssistedInject constructor(
             receivedAt = message.sentAt,
         )
         emailBodyRepository.insert(body)
+        runCatching {
+            sourceArtifactRepository.archiveEmailOriginal(
+                EmailOriginalArchiveInput(
+                    userId = userId,
+                    rawEventId = rawEventId,
+                    sourceType = SourceType.NAVER_IMAP,
+                    sourceRef = message.providerMessageId(),
+                    occurredAt = message.sentAt,
+                    title = message.subject,
+                    folder = folderLabel,
+                    fromAddress = message.fromEmail?.let(::canonicalizeEmail),
+                    toAddresses = message.toAddresses.map { it.lowercase() },
+                    attachmentsCount = message.attachmentsMeta.size,
+                    bodyPlain = body.bodyPlain,
+                    bodyHtml = body.bodyHtml,
+                ),
+            )
+        }.onFailure { error ->
+            logger.w(TAG, "source archive write failed raw=${rawEventId.hashCode()} reason=${error.message}")
+        }
 
         // EMAIL-003: subject-only snippets are too thin for LLM extraction; bump
         // the metric and skip the enqueue, but keep the body row so the UI can still

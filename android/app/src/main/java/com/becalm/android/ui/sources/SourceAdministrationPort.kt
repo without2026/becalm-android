@@ -109,6 +109,11 @@ public class DefaultSourceAdministrationPort @Inject constructor(
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, null)
                 true
             }
+            SourceType.MEETING -> {
+                syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, null)
+                syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING_TRANSCRIPT, null)
+                true
+            }
             else -> false
         }
 

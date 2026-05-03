@@ -37,7 +37,7 @@ behaviors:
 
   - id: ONB-003
     type: permission
-    description: "녹음 폴더 권한 요청 시 READ_MEDIA_AUDIO + SAF URI 권한을 요청한다. SAF grant는 상위 'Recordings/' 단일 URI에 부여되며 하위 'Voice Recorder/'(source_type='voice')와 'Call/'(source_type='call_recording') 두 서브디렉토리를 동시에 커버한다 — 사용자는 한 번의 폴더 선택으로 두 소스를 모두 활성화한다"
+    description: "녹음 폴더 권한 요청 시 READ_MEDIA_AUDIO + SAF URI 권한을 요청한다. SAF grant는 상위 'Recordings/' 단일 URI에 부여되며 하위 'Voice Recorder/'(source_type='voice'), 'Call/'(source_type='call_recording'), 앱 생성 'BeCalm Meetings/'(source_type='meeting') 서브디렉토리를 동시에 커버한다 — 사용자는 한 번의 폴더 선택으로 녹음 감지와 미팅 자료 저장을 모두 활성화한다"
     os_permission: "READ_MEDIA_AUDIO"
     precondition: "RecordingFolderScreen 표시됨, READ_MEDIA_AUDIO 미부여"
     expected: "시스템 READ_MEDIA_AUDIO 권한 다이얼로그 표시됨. 승인 시 SAF folder picker가 'Recordings/' 초기 위치로 열림. grant된 URI는 tree permission으로 하위 서브디렉토리 traverse를 포함하므로 음성/통화 두 폴더를 별도 grant 없이 감지한다"
