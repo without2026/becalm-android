@@ -219,6 +219,8 @@ public class ForegroundCatchUpScheduler @Inject constructor(
             ("enqueueing OutlookCalWorker catch-up" to { workScheduler.enqueueOutlookCalOneShotNow() }),
         SourceType.VOICE to
             ("enqueueing MediaStoreWorker catch-up (voice)" to { workScheduler.enqueueMediaStoreOneShotNow() }),
+        SourceType.MEETING to
+            ("enqueueing MediaStoreWorker catch-up (meeting)" to { workScheduler.enqueueMediaStoreOneShotNow() }),
     )
 
     /**

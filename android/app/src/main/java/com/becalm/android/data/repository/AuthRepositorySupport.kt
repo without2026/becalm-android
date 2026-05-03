@@ -38,6 +38,7 @@ internal class AuthSessionCleanupPlanner(
     private val workScheduler: WorkScheduler,
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val sourceArtifactRepository: SourceArtifactRepository,
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -46,6 +47,7 @@ internal class AuthSessionCleanupPlanner(
         add(ioStep("cancelAllWorkers") { workScheduler.cancelAll() })
         add(ioStep("stopContentObservers") { contentObserverBootstrap.stop() })
         if (session != null) add(NamedAuthStep("serverRevoke") { authClientProvider.get().signOut(session.accessToken) })
+        if (session != null) add(ioStep("sourceArchiveDeleteAll") { sourceArtifactRepository.deleteAllForUser(session.userId) })
         add(ioStep("personEnrichmentDeleteAll") { personEnrichmentRepository.deleteAll() })
         add(NamedAuthStep("imapCredentialClear") { imapCredentialStore.clearAll() })
         add(NamedAuthStep("googleOAuthCleanup") { oauthCredentialStore.clearGoogle() })

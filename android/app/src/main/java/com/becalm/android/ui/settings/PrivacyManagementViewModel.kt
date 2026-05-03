@@ -14,6 +14,7 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
@@ -31,6 +32,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 
 public data class PrivacyManagementUiState(
     val loading: Boolean = true,
@@ -48,6 +52,9 @@ public data class PrivacyManagementUiState(
     val commitmentCount: Int = 0,
     val emailCount: Int = 0,
     val enrichmentCount: Int = 0,
+    val sourceArchiveCount: Int = 0,
+    val sourceArchiveBytes: Long = 0L,
+    val sourceArchiveDeleting: Boolean = false,
     val exporting: Boolean = false,
     val signedOut: Boolean = false,
     val error: String? = null,
@@ -58,6 +65,8 @@ public sealed interface PrivacyManagementEffect {
         val fileName: String,
         val bytes: ByteArray,
     ) : PrivacyManagementEffect
+
+    public data class SourceArchiveDeleted(val deletedCount: Int) : PrivacyManagementEffect
 }
 
 public enum class WithdrawConsentTarget {
@@ -79,6 +88,7 @@ public class PrivacyManagementViewModel @Inject constructor(
     private val commitmentDao: CommitmentDao,
     private val personEnrichmentDao: PersonEnrichmentDao,
     private val privacyDataExporter: PrivacyDataExporter,
+    private val sourceArtifactRepository: SourceArtifactRepository,
     private val workScheduler: WorkScheduler,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
@@ -134,6 +144,7 @@ public class PrivacyManagementViewModel @Inject constructor(
             val userId = session?.userId
             val commitmentCount = userId?.let { commitmentDao.countForUser(it) } ?: 0
             val emailCount = userId?.let { rawIngestionEventDao.countEmailRowsForUser(it) } ?: 0
+            val archiveSummary = userId?.let { sourceArtifactRepository.summary(it) }
             val enrichmentCount = personEnrichmentDao.countAll()
             _staticState.value = _staticState.value.copy(
                 loading = false,
@@ -141,6 +152,8 @@ public class PrivacyManagementViewModel @Inject constructor(
                 commitmentCount = commitmentCount,
                 emailCount = emailCount,
                 enrichmentCount = enrichmentCount,
+                sourceArchiveCount = archiveSummary?.count ?: 0,
+                sourceArchiveBytes = archiveSummary?.totalBytes ?: 0L,
             )
         }
     }
@@ -190,6 +203,52 @@ public class PrivacyManagementViewModel @Inject constructor(
 
     public fun onExportFailed(message: String) {
         _staticState.value = _staticState.value.copy(exporting = false, error = message)
+    }
+
+    public fun onDeleteSourceArchiveBefore(cutoffDateText: String) {
+        viewModelScope.launch(ioDispatcher) {
+            val userId = currentUserId()
+            if (userId.isNullOrBlank()) {
+                _staticState.value = _staticState.value.copy(error = "no signed-in user")
+                return@launch
+            }
+            val cutoff = runCatching {
+                LocalDate.parse(cutoffDateText.trim()).atStartOfDayIn(TimeZone.of("Asia/Seoul"))
+            }.getOrElse {
+                _staticState.value = _staticState.value.copy(error = "date must be YYYY-MM-DD")
+                return@launch
+            }
+            _staticState.value = _staticState.value.copy(sourceArchiveDeleting = true, error = null)
+            runCatching {
+                sourceArtifactRepository.deleteBefore(userId, cutoff)
+            }.onSuccess { result ->
+                userPrefsStore.appendPipaActionLog(
+                    PipaActionLogEntry(
+                        action = "source_archive_delete_before",
+                        timestampIso = Clock.System.now().toString(),
+                        details = mapOf(
+                            "cutoff_date" to cutoffDateText.trim(),
+                            "deleted_count" to result.deletedCount.toString(),
+                            "failed_count" to result.failedCount.toString(),
+                        ),
+                    ),
+                )
+                val summary = sourceArtifactRepository.summary(userId)
+                _staticState.value = _staticState.value.copy(
+                    sourceArchiveCount = summary.count,
+                    sourceArchiveBytes = summary.totalBytes,
+                    sourceArchiveDeleting = false,
+                    error = null,
+                )
+                _effects.emit(PrivacyManagementEffect.SourceArchiveDeleted(result.deletedCount))
+            }.onFailure { error ->
+                logger.e(TAG, "source archive delete failed", error)
+                _staticState.value = _staticState.value.copy(
+                    sourceArchiveDeleting = false,
+                    error = error.message ?: "source archive delete failed",
+                )
+            }
+        }
     }
 
     public fun onWithdrawConsent(target: WithdrawConsentTarget) {

@@ -1,5 +1,6 @@
 package com.becalm.android.ui.sources
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
@@ -40,6 +43,7 @@ import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.statusStringToSyncStatus
+import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchSourceDetailEffect
 import com.becalm.android.ui.theme.BecalmTheme
@@ -65,6 +69,24 @@ public fun SourceDetailScreen(
     viewModel: SourceDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val audioPicker = rememberLauncherForActivityResult(
+        MeetingOpenDocumentContract(),
+    ) { uri ->
+        viewModel.onMeetingAudioSelected(uri)
+    }
+    val transcriptPicker = rememberLauncherForActivityResult(
+        MeetingOpenDocumentContract(),
+    ) { uri ->
+        viewModel.onMeetingTranscriptSelected(uri)
+    }
+    val audioMimeTypes = remember { MeetingImportFilePolicy.AUDIO_MIME_TYPES }
+    val transcriptMimeTypes = remember { MeetingImportFilePolicy.TRANSCRIPT_MIME_TYPES }
+    val meetingAudioInitialUri = remember(state.meetingAudioPickerInitialUri) {
+        state.meetingAudioPickerInitialUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+    }
+    val meetingTranscriptInitialUri = remember(state.meetingTranscriptPickerInitialUri) {
+        state.meetingTranscriptPickerInitialUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+    }
 
     CollectFlowEffect(viewModel.effects) { effect ->
         navController.dispatchSourceDetailEffect(effect)
@@ -110,6 +132,22 @@ public fun SourceDetailScreen(
                     onDisconnectClick = viewModel::onDisconnectClick,
                     onDisconnectDismiss = viewModel::onDisconnectDismiss,
                     onDisconnectConfirm = viewModel::onDisconnectConfirm,
+                    onMeetingAudioAdd = {
+                        audioPicker.launch(
+                            MeetingOpenDocumentRequest(
+                                mimeTypes = audioMimeTypes,
+                                initialUri = meetingAudioInitialUri,
+                            ),
+                        )
+                    },
+                    onMeetingTranscriptAdd = {
+                        transcriptPicker.launch(
+                            MeetingOpenDocumentRequest(
+                                mimeTypes = transcriptMimeTypes,
+                                initialUri = meetingTranscriptInitialUri,
+                            ),
+                        )
+                    },
                 )
             }
         }
@@ -125,6 +163,8 @@ public fun SourceDetailScreenContent(
     onDisconnectClick: () -> Unit,
     onDisconnectDismiss: () -> Unit,
     onDisconnectConfirm: () -> Unit,
+    onMeetingAudioAdd: () -> Unit,
+    onMeetingTranscriptAdd: () -> Unit,
 ) {
     val syncStatus = statusStringToSyncStatus(state.status)
     val statusLabel = when (syncStatus) {
@@ -237,6 +277,48 @@ public fun SourceDetailScreenContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("source-detail-disconnect"),
+                        )
+                    }
+                    if (state.showMeetingAudioAddButton || state.showMeetingTranscriptAddButton) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = stringResource(R.string.source_detail_meeting_import_section),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (state.showMeetingAudioAddButton) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        BecalmButton(
+                            text = stringResource(R.string.source_detail_meeting_audio_add),
+                            onClick = onMeetingAudioAdd,
+                            variant = BecalmButtonVariant.Secondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source-detail-meeting-audio-add"),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.source_detail_meeting_audio_formats),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (state.showMeetingTranscriptAddButton) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        BecalmButton(
+                            text = stringResource(R.string.source_detail_meeting_transcript_add),
+                            onClick = onMeetingTranscriptAdd,
+                            variant = BecalmButtonVariant.Secondary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("source-detail-meeting-transcript-add"),
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.source_detail_meeting_transcript_formats),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -355,6 +437,8 @@ private fun PreviewSourceDetailScreenWithEvents() {
                 onDisconnectClick = {},
                 onDisconnectDismiss = {},
                 onDisconnectConfirm = {},
+                onMeetingAudioAdd = {},
+                onMeetingTranscriptAdd = {},
             )
         }
     }

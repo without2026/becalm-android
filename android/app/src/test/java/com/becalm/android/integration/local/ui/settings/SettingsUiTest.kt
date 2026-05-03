@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
@@ -108,6 +109,7 @@ class SettingsUiTest {
         var exportClicks = 0
         var withdrawClicks = 0
         var pauseClicks = 0
+        var archiveClicks = 0
         var deleteClicks = 0
         var activityLogClicks = 0
 
@@ -119,12 +121,15 @@ class SettingsUiTest {
                         commitmentCount = 4,
                         enrichmentCount = 2,
                         emailCount = 9,
+                        sourceArchiveCount = 2,
+                        sourceArchiveBytes = 2048L,
                     ),
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
                     onExportClick = { exportClicks += 1 },
                     onOpenConsentWithdraw = { withdrawClicks += 1 },
                     onOpenProcessingPause = { pauseClicks += 1 },
+                    onOpenSourceArchiveDelete = { archiveClicks += 1 },
                     onOpenAccountDeletion = { deleteClicks += 1 },
                     onOpenActivityLog = { activityLogClicks += 1 },
                 )
@@ -134,19 +139,22 @@ class SettingsUiTest {
         composeRule.onNodeWithText(string(R.string.privacy_export_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.privacy_withdraw_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.privacy_pause_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.privacy_delete_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.privacy_activity_log_title)).assertExists()
-        composeRule.onNodeWithText(string(R.string.privacy_delete_subtitle_fmt, 4, 2, 9)).assertExists()
+        composeRule.onNodeWithTag("privacy-source-archive-card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("privacy-delete-card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_delete_subtitle_fmt, 4, 2, 9)).assertIsDisplayed()
 
-        composeRule.onNodeWithTag("privacy-export-card").performClick()
-        composeRule.onNodeWithTag("privacy-withdraw-card").performClick()
-        composeRule.onNodeWithTag("privacy-pause-card").performClick()
-        composeRule.onNodeWithTag("privacy-delete-card").performClick()
+        composeRule.onNodeWithTag("privacy-export-card").performScrollTo().performClick()
+        composeRule.onNodeWithTag("privacy-withdraw-card").performScrollTo().performClick()
+        composeRule.onNodeWithTag("privacy-pause-card").performScrollTo().performClick()
+        composeRule.onNodeWithTag("privacy-source-archive-card").performScrollTo().performClick()
+        composeRule.onNodeWithTag("privacy-delete-card").performScrollTo().performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, exportClicks)
             assertEquals(1, withdrawClicks)
             assertEquals(1, pauseClicks)
+            assertEquals(1, archiveClicks)
             assertEquals(1, deleteClicks)
             assertEquals(0, activityLogClicks)
         }

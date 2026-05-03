@@ -1,5 +1,6 @@
 package com.becalm.android.ui.sources
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,8 +9,10 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,6 +70,10 @@ public data class SourceDetailUiState(
     val showReconnectButton: Boolean = false,
     val showDisconnectButton: Boolean = false,
     val showManualSyncButton: Boolean = false,
+    val showMeetingAudioAddButton: Boolean = false,
+    val showMeetingTranscriptAddButton: Boolean = false,
+    val meetingAudioPickerInitialUri: String? = null,
+    val meetingTranscriptPickerInitialUri: String? = null,
     val showDisconnectConfirmDialog: Boolean = false,
     val disconnectOutcome: SourceDisconnectOutcome? = null,
     val actionError: String? = null,
@@ -118,6 +125,7 @@ public class SourceDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val sourceAdministrationPort: SourceAdministrationPort,
     private val sourceSyncPort: SourceSyncPort,
+    private val meetingImportRepository: MeetingImportRepository,
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -176,6 +184,28 @@ public class SourceDetailViewModel @Inject constructor(
         }
     }
 
+    /** Imports a user-selected meeting audio file into Recordings/BeCalm Meetings/Audio. */
+    public fun onMeetingAudioSelected(uri: Uri?) {
+        if (uri == null || sourceType != SourceType.MEETING) return
+        viewModelScope.launch {
+            when (val result = meetingImportRepository.importAudio(uri)) {
+                is BecalmResult.Success -> _actionError.value = null
+                is BecalmResult.Failure -> _actionError.value = result.error.safeMessage
+            }
+        }
+    }
+
+    /** Imports a user-selected transcript into Recordings/BeCalm Meetings/Transcripts. */
+    public fun onMeetingTranscriptSelected(uri: Uri?) {
+        if (uri == null || sourceType != SourceType.MEETING) return
+        viewModelScope.launch {
+            when (val result = meetingImportRepository.importTranscript(uri)) {
+                is BecalmResult.Success -> _actionError.value = null
+                is BecalmResult.Failure -> _actionError.value = result.error.safeMessage
+            }
+        }
+    }
+
     /** Opens the confirmation dialog for disconnecting this source. */
     public fun onDisconnectClick() {
         if (!hasValidSourceType) return
@@ -225,10 +255,16 @@ public class SourceDetailViewModel @Inject constructor(
     } else {
         sourceStatusRepository.observeFor(sourceType)
     }
-
     private val _dialogState = MutableStateFlow(false)
     private val _disconnectOutcome = MutableStateFlow<SourceDisconnectOutcome?>(null)
     private val _actionError = MutableStateFlow<String?>(null)
+    private val _meetingPickerFolders = MutableStateFlow(MeetingPickerFolders())
+    private val meetingPickerStateFlow = combine(
+        _actionError,
+        _meetingPickerFolders,
+    ) { actionError, folders ->
+        actionError to folders
+    }
 
     /**
      * Observable state consumed by the source detail composable.
@@ -253,14 +289,15 @@ public class SourceDetailViewModel @Inject constructor(
             eventsFlow,
             _dialogState,
             _disconnectOutcome,
-            _actionError,
-        ) { status, sourceEvents, showDisconnectConfirmDialog, disconnectOutcome, actionError ->
+            meetingPickerStateFlow,
+        ) { status, sourceEvents, showDisconnectConfirmDialog, disconnectOutcome, meetingPickerState ->
             buildUiState(
                 status = status,
                 sourceEvents = sourceEvents,
                 showDisconnectConfirmDialog = showDisconnectConfirmDialog,
                 disconnectOutcome = disconnectOutcome,
-                actionError = actionError,
+                actionError = meetingPickerState.first,
+                pickerFolders = meetingPickerState.second,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -275,6 +312,8 @@ public class SourceDetailViewModel @Inject constructor(
             logger.e(TAG, "sourceType argument missing from SavedStateHandle")
         } else if (!hasValidSourceType) {
             logger.w(TAG, "rejected unknown sourceType")
+        } else if (sourceType == SourceType.MEETING) {
+            prepareMeetingImportFolders()
         }
     }
 
@@ -289,12 +328,42 @@ public class SourceDetailViewModel @Inject constructor(
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
         actionError: String?,
-    ): SourceDetailUiState = SourceDetailProjector.buildUiState(
-        sourceType = sourceType,
-        status = status,
-        sourceEvents = sourceEvents,
-        showDisconnectConfirmDialog = showDisconnectConfirmDialog,
-        disconnectOutcome = disconnectOutcome,
-        actionError = actionError,
+        pickerFolders: MeetingPickerFolders,
+    ): SourceDetailUiState {
+        val base = SourceDetailProjector.buildUiState(
+            sourceType = sourceType,
+            status = status,
+            sourceEvents = sourceEvents,
+            showDisconnectConfirmDialog = showDisconnectConfirmDialog,
+            disconnectOutcome = disconnectOutcome,
+            actionError = actionError,
+        )
+        return if (sourceType != SourceType.MEETING) {
+            base
+        } else {
+            base.copy(
+                meetingAudioPickerInitialUri = pickerFolders.audioUri,
+                meetingTranscriptPickerInitialUri = pickerFolders.transcriptUri,
+            )
+        }
+    }
+
+    private fun prepareMeetingImportFolders() {
+        viewModelScope.launch {
+            val audio = meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio)
+            val transcript = meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Transcript)
+            val audioUri = (audio as? BecalmResult.Success)?.value
+            val transcriptUri = (transcript as? BecalmResult.Success)?.value
+            _meetingPickerFolders.value = MeetingPickerFolders(audioUri, transcriptUri)
+            val firstFailure = listOf(audio, transcript).filterIsInstance<BecalmResult.Failure>().firstOrNull()
+            if (firstFailure != null) {
+                _actionError.value = firstFailure.error.safeMessage
+            }
+        }
+    }
+
+    private data class MeetingPickerFolders(
+        val audioUri: String? = null,
+        val transcriptUri: String? = null,
     )
 }

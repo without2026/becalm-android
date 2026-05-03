@@ -3,19 +3,24 @@ package com.becalm.android.ui.persons
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ─── UI model ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +59,7 @@ public data class RawEventDetailUiState(
     val attendeesRaw: String? = null,
     val commitmentQuotes: List<String> = emptyList(),
     val emailBody: EmailBodyUi? = null,
+    val archivedOriginal: ArchivedOriginalUi? = null,
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
     val loading: Boolean = true,
@@ -86,10 +92,12 @@ internal const val ERROR_EVENT_NOT_FOUND = "Event not found"
 public class RawEventDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val emailBodyRepository: EmailBodyRepository,
+    private val sourceArtifactRepository: SourceArtifactRepository,
     private val projectionPort: RawEventDetailProjectionPort,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
     private val eventId: String = savedStateHandle[ARG_EVENT_ID] ?: ""
@@ -124,14 +132,18 @@ public class RawEventDetailViewModel @Inject constructor(
                 return@launch
             }
 
-            val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
-            val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
-            _uiState.value = RawEventDetailProjector.buildLoadedState(
-                entity = entity,
-                emailBody = maybeLoadEmailBody(entity),
-                commitmentQuotes = commitmentQuotes,
-                attendeesRaw = attendeesRaw,
-            )
+            val loadedState = withContext(ioDispatcher) {
+                val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
+                val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
+                RawEventDetailProjector.buildLoadedState(
+                    entity = entity,
+                    emailBody = maybeLoadEmailBody(entity),
+                    archivedOriginal = sourceArtifactRepository.findMarkdownOriginal(userId, entity.id),
+                    commitmentQuotes = commitmentQuotes,
+                    attendeesRaw = attendeesRaw,
+                )
+            }
+            _uiState.value = loadedState
         }
     }
 

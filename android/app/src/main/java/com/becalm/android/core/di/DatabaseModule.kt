@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import dagger.Module
 import dagger.Provides
@@ -108,6 +109,12 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): EmailBodyDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::emailBodyDao)
+
+    @Provides
+    public fun provideSourceArtifactDao(
+        provider: BeCalmDatabaseProvider,
+    ): SourceArtifactDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::sourceArtifactDao)
 
     @Provides
     public fun provideUserProfileDao(

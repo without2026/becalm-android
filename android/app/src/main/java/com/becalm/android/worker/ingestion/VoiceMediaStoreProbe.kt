@@ -15,6 +15,8 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.meeting.MeetingImportFolderKind
+import com.becalm.android.domain.meeting.MeetingImportFolders
 import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
@@ -166,6 +168,7 @@ internal class VoiceMediaStoreProbe(
             val voiceRecorder: String,
             val voiceRecorderLegacy: String,
             val callExclusion: String,
+            val meetingExclusion: String,
         )
         val patterns = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // RELATIVE_PATH ends with "/" (e.g. "Voice Recorder/"); trailing slash prevents
@@ -176,6 +179,7 @@ internal class VoiceMediaStoreProbe(
                 voiceRecorder = "${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%",
                 voiceRecorderLegacy = "${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG_LEGACY}/%",
                 callExclusion = callSubfolderExclusion,
+                meetingExclusion = MeetingImportFolders.MEETINGS_RELATIVE_PATH_PATTERN,
             )
         } else {
             // DATA is the full absolute path — match at any depth with leading `%`.
@@ -184,10 +188,11 @@ internal class VoiceMediaStoreProbe(
                 voiceRecorder = "%/${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG}/%",
                 voiceRecorderLegacy = "%/${MediaStoreWorker.RECORDER_FOLDER_SAMSUNG_LEGACY}/%",
                 callExclusion = "%/$callSubfolderExclusion",
+                meetingExclusion = MeetingImportFolders.MEETINGS_DATA_PATH_PATTERN,
             )
         }
         val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND (" +
-            "($folderColumn LIKE ? AND $folderColumn NOT LIKE ?)" +
+            "($folderColumn LIKE ? AND $folderColumn NOT LIKE ? AND $folderColumn NOT LIKE ?)" +
             " OR $folderColumn LIKE ?" +
             " OR $folderColumn LIKE ?" +
             ")"
@@ -195,6 +200,7 @@ internal class VoiceMediaStoreProbe(
             lastSeenSec.toString(),
             patterns.recordings,
             patterns.callExclusion,
+            patterns.meetingExclusion,
             patterns.voiceRecorder,
             patterns.voiceRecorderLegacy,
         )
@@ -487,6 +493,126 @@ internal class VoiceMediaStoreProbe(
         return CallRecordingIngestOutcome.Success(insertedCount = insertedCount)
     }
 
+    suspend fun ingestMeetingAudio(now: Instant, lookbackDays: Int? = null): MeetingIngestOutcome {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId == null) {
+            logger.w(TAG, "userId null — skipping meeting audio ingestion this cycle")
+            return MeetingIngestOutcome.Success(insertedCount = 0)
+        }
+
+        val pipaConsented = userPrefsStore.observeThirdPartyProvisionConsent().first()
+        val persistedCursorMs = syncCursorStore.observeMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING).first()
+        val lookbackCursorMs = lookbackDays?.let { days ->
+            now.toEpochMilliseconds() - days * 86_400_000L
+        } ?: 0L
+        val lastSeenMs = maxOf(persistedCursorMs ?: 0L, lookbackCursorMs)
+        val lastSeenSec = lastSeenMs / 1_000L
+
+        val folderColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.RELATIVE_PATH
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Audio.Media.DATA
+        }
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            folderColumn,
+        )
+        val meetingAudioPattern = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MeetingImportFolders.targetRelativePath(MeetingImportFolderKind.Audio)
+        } else {
+            MeetingImportFolders.targetDataPath(MeetingImportFolderKind.Audio)
+        }
+        val selection = "${MediaStore.Audio.Media.DATE_ADDED} >= ? AND $folderColumn LIKE ?"
+        val selectionArgs = arrayOf(lastSeenSec.toString(), meetingAudioPattern)
+        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} ASC"
+
+        var insertedCount = 0
+        var hasInsertFailure = false
+        var maxDateAddedMs = lastSeenMs
+
+        val scanned = queryMediaStore(
+            uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            projection = projection,
+            selection = selection,
+            selectionArgs = selectionArgs,
+            sortOrder = sortOrder,
+            onError = { e ->
+                logger.e(TAG, "meeting audio MediaStore query failed", e)
+                sourceStatusRepository.recordSyncError(SourceType.MEETING, e.message ?: "query failed", now)
+            },
+        ) { cursor ->
+            val idxId = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val idxDateAdded = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            val idxDuration = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+            val idxDisplayName = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+
+            while (cursor.moveToNext()) {
+                val row = readVoiceRow(
+                    cursor = cursor,
+                    idxId = idxId,
+                    idxDateAdded = idxDateAdded,
+                    idxDuration = idxDuration,
+                    idxDisplayName = idxDisplayName,
+                    clientEventIdPrefix = MEETING_AUDIO_CLIENT_EVENT_ID_PREFIX,
+                ).let { mediaRow ->
+                    val key = "meeting:audio:${mediaRow.displayName}"
+                    mediaRow.copy(
+                        clientEventId = stableClientEventId(key),
+                        legacyClientEventId = key,
+                    )
+                }
+                logger.d(
+                    TAG,
+                    "meeting audio row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} " +
+                        "dateAddedSec=${row.dateAddedSec}",
+                )
+
+                when (
+                    val insertResult = insertVoiceRow(
+                        row = row,
+                        userId = userId,
+                        pipaConsented = pipaConsented,
+                        sourceType = SourceType.MEETING,
+                        eventTitle = row.displayName,
+                    )
+                ) {
+                    VoiceInsertResult.Failed -> {
+                        hasInsertFailure = true
+                        continue
+                    }
+                    VoiceInsertResult.DedupSkip -> continue
+                    is VoiceInsertResult.Fresh -> {
+                        val rowMs = row.dateAddedSec * 1_000L
+                        if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+                        insertedCount++
+                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = true)) {
+                            hasInsertFailure = true
+                        }
+                    }
+                    is VoiceInsertResult.Dedup -> {
+                        val rowMs = row.dateAddedSec * 1_000L
+                        if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
+                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = false)) {
+                            hasInsertFailure = true
+                        }
+                    }
+                }
+            }
+        }
+        if (!scanned) return MeetingIngestOutcome.ScanFailed
+
+        if (!hasInsertFailure && maxDateAddedMs > lastSeenMs) {
+            syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, maxDateAddedMs)
+        }
+        sourceStatusRepository.recordSyncSuccess(SourceType.MEETING, now)
+        logger.d(TAG, "meeting audio inserted=$insertedCount")
+        return MeetingIngestOutcome.Success(insertedCount = insertedCount)
+    }
+
     /**
      * MediaStore cursor 스캔 스캐폴드를 한 군데로 모은 헬퍼.
      * `CancellationException`은 그대로 rethrow하여 WorkManager 취소 경로를 보존한다.
@@ -708,6 +834,7 @@ internal class VoiceMediaStoreProbe(
          * expectation baked into the plan doc §5.1.
          */
         private const val CALL_RECORDING_CLIENT_EVENT_ID_PREFIX = "mediastore:call_recording:"
+        private const val MEETING_AUDIO_CLIENT_EVENT_ID_PREFIX = "mediastore:meeting_audio:"
     }
 }
 

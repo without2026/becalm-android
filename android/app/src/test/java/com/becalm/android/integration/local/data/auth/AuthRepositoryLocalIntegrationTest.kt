@@ -23,6 +23,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthRepositoryImpl
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.ContentObserverBootstrap
 import com.becalm.android.worker.WorkScheduler
@@ -104,6 +105,7 @@ class AuthRepositoryLocalIntegrationTest {
     }
     private val imapCredentialStore = mockk<com.becalm.android.data.local.secure.ImapCredentialStore>(relaxed = true)
     private val oauthCredentialStore = mockk<OAuthCredentialStore>(relaxed = true)
+    private val sourceArtifactRepository = mockk<SourceArtifactRepository>(relaxed = true)
     private val processRestarter = mockk<ProcessRestarter>()
     private val repository: AuthRepository = AuthRepositoryImpl(
         authClientProvider = Provider { authClient },
@@ -116,6 +118,7 @@ class AuthRepositoryLocalIntegrationTest {
         workScheduler = workScheduler,
         contentObserverBootstrap = contentObserverBootstrap,
         personEnrichmentRepository = enrichmentRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
         imapCredentialStore = imapCredentialStore,
         oauthCredentialStore = oauthCredentialStore,
         processRestarter = processRestarter,

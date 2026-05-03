@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.ui.persons.ARG_EVENT_ID
 import com.becalm.android.ui.persons.RawEventDetailProjectionPort
 import com.becalm.android.ui.persons.RawEventDetailViewModel
@@ -38,6 +39,7 @@ class RawEventDetailViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val emailBodyRepository: EmailBodyRepository = mockk()
+    private val sourceArtifactRepository: SourceArtifactRepository = mockk()
     private val projectionPort: RawEventDetailProjectionPort = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
@@ -48,6 +50,7 @@ class RawEventDetailViewModelSpecTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         coEvery { projectionPort.loadCommitmentQuotes(any(), any()) } returns emptyList()
         coEvery { projectionPort.loadCalendarAttendeesRaw(any(), any()) } returns null
+        coEvery { sourceArtifactRepository.findMarkdownOriginal(any(), any()) } returns null
     }
 
     @After
@@ -212,10 +215,12 @@ class RawEventDetailViewModelSpecTest {
     private fun buildViewModel(eventId: String): RawEventDetailViewModel = RawEventDetailViewModel(
         rawIngestionRepository = rawIngestionRepository,
         emailBodyRepository = emailBodyRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
         projectionPort = projectionPort,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to eventId)),
         logger = logger,
+        ioDispatcher = testDispatcher,
     )
 
     private fun rawEvent(

@@ -15,6 +15,7 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
+import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
@@ -79,6 +80,7 @@ class SourcesLocalIntegrationTest {
         api = api,
         logger = logger,
     )
+    private val meetingImportRepository = mockk<MeetingImportRepository>(relaxed = true)
     private val enrichmentRepository = PersonEnrichmentRepositoryImpl(
         dao = db.personEnrichmentDao(),
         logger = logger,
@@ -208,6 +210,7 @@ class SourcesLocalIntegrationTest {
                 override suspend fun disconnect(sourceType: String) = error("not used")
             },
             sourceSyncPort = sourceSyncPort,
+            meetingImportRepository = meetingImportRepository,
             logger = logger,
         )
         sourceDetailViewModel.setUserId(USER_ID)
@@ -299,6 +302,7 @@ class SourcesLocalIntegrationTest {
                 logger = logger,
             ),
             sourceSyncPort = sourceSyncPort,
+            meetingImportRepository = meetingImportRepository,
             logger = logger,
         )
         sourceDetailViewModel.setUserId(USER_ID)

@@ -72,6 +72,7 @@ public fun PrivacyManagementScreen(
     onOpenProcessingPause: (() -> Unit)? = null,
     onOpenAccountDeletion: (() -> Unit)? = null,
     onOpenActivityLog: (() -> Unit)? = null,
+    onDeleteSourceArchiveBefore: ((String) -> Unit)? = null,
 ) {
     val privacyViewModel = if (
         stateOverride == null ||
@@ -84,7 +85,8 @@ public fun PrivacyManagementScreen(
             onOpenConsentWithdraw == null ||
             onOpenProcessingPause == null ||
             onOpenAccountDeletion == null ||
-            onOpenActivityLog == null
+            onOpenActivityLog == null ||
+            onDeleteSourceArchiveBefore == null
     ) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<PrivacyManagementViewModel>()
     } else {
@@ -100,6 +102,8 @@ public fun PrivacyManagementScreen(
     val context = LocalContext.current
     var pendingExportBytes by remember { mutableStateOf<ByteArray?>(null) }
     var showExportConfirm by remember { mutableStateOf(false) }
+    var showArchiveDeleteConfirm by remember { mutableStateOf(false) }
+    var archiveCutoffDate by remember { mutableStateOf("") }
     val createDocument = rememberLauncherForActivityResult(CreateDocument("application/zip")) { uri ->
         val bytes = pendingExportBytes
         if (uri == null || bytes == null) {
@@ -147,6 +151,11 @@ public fun PrivacyManagementScreen(
                     onFailed = onExportFailed ?: requireNotNull(privacyViewModel)::onExportFailed,
                 )
             }
+            is PrivacyManagementEffect.SourceArchiveDeleted -> {
+                snackbarHostState.showSnackbar(
+                    context.getString(R.string.privacy_source_archive_deleted_fmt, effect.deletedCount),
+                )
+            }
         }
     }
 
@@ -162,6 +171,7 @@ public fun PrivacyManagementScreen(
         onOpenProcessingPause = onOpenProcessingPause ?: { navController.navigate(BecalmRoute.ProcessingPause.path) },
         onOpenAccountDeletion = onOpenAccountDeletion ?: { navController.navigate(BecalmRoute.AccountDeletion.path) },
         onOpenActivityLog = onOpenActivityLog ?: { navController.navigate(BecalmRoute.ActivityLog.path) },
+        onOpenSourceArchiveDelete = { showArchiveDeleteConfirm = true },
     )
 
     if (showExportConfirm) {
@@ -184,6 +194,45 @@ public fun PrivacyManagementScreen(
             },
         )
     }
+
+    if (showArchiveDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showArchiveDeleteConfirm = false },
+            title = { Text(stringResource(R.string.privacy_source_archive_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.privacy_source_archive_subtitle_fmt, state.sourceArchiveCount, formatBytes(state.sourceArchiveBytes)))
+                    OutlinedTextField(
+                        value = archiveCutoffDate,
+                        onValueChange = { archiveCutoffDate = it },
+                        label = { Text(stringResource(R.string.privacy_source_archive_cutoff_label)) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("privacy-source-archive-cutoff"),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = archiveCutoffDate.isNotBlank() && !state.sourceArchiveDeleting,
+                    onClick = {
+                        showArchiveDeleteConfirm = false
+                        (onDeleteSourceArchiveBefore ?: requireNotNull(privacyViewModel)::onDeleteSourceArchiveBefore)(
+                            archiveCutoffDate,
+                        )
+                    },
+                ) {
+                    Text(stringResource(R.string.privacy_source_archive_delete_confirm))
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showArchiveDeleteConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -196,6 +245,7 @@ internal fun PrivacyManagementScreenContent(
     onOpenProcessingPause: () -> Unit,
     onOpenAccountDeletion: () -> Unit,
     onOpenActivityLog: () -> Unit,
+    onOpenSourceArchiveDelete: () -> Unit,
 ) {
     BecalmScaffold(
         title = stringResource(R.string.privacy_management_title),
@@ -244,6 +294,21 @@ internal fun PrivacyManagementScreenContent(
                     testTag = "privacy-pause-card",
                 )
                 PrivacyActionCard(
+                    title = stringResource(R.string.privacy_source_archive_title),
+                    subtitle = if (state.sourceArchiveCount == 0) {
+                        stringResource(R.string.privacy_source_archive_empty)
+                    } else {
+                        stringResource(
+                            R.string.privacy_source_archive_subtitle_fmt,
+                            state.sourceArchiveCount,
+                            formatBytes(state.sourceArchiveBytes),
+                        )
+                    },
+                    onClick = onOpenSourceArchiveDelete,
+                    enabled = state.sourceArchiveCount > 0 && !state.sourceArchiveDeleting,
+                    testTag = "privacy-source-archive-card",
+                )
+                PrivacyActionCard(
                     title = stringResource(R.string.privacy_delete_title),
                     subtitle = stringResource(R.string.privacy_delete_subtitle_fmt, state.commitmentCount, state.enrichmentCount, state.emailCount),
                     onClick = onOpenAccountDeletion,
@@ -262,6 +327,13 @@ internal fun PrivacyManagementScreenContent(
             }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val kib = bytes / 1024.0
+    if (kib < 1024.0) return "%.1f KB".format(kib)
+    return "%.1f MB".format(kib / 1024.0)
 }
 
 @Composable

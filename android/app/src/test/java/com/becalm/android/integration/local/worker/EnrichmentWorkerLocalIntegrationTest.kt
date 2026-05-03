@@ -27,8 +27,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Provider
+import kotlin.time.Duration.Companion.days
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -115,7 +117,9 @@ class EnrichmentWorkerLocalIntegrationTest {
                 syncStatus = "synced",
             ),
         )
-        val freshSyncedAt = Instant.parse("2026-04-22T10:00:00Z")
+        val freshSyncedAt = Instant.fromEpochMilliseconds(
+            Clock.System.now().minus(1.days).toEpochMilliseconds(),
+        )
         enrichmentRepository.upsert(
             PersonEnrichmentEntity(
                 personRef = "friend@example.com",

@@ -14,7 +14,9 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
 import com.becalm.android.worker.ingestion.MediaStoreWorker
@@ -37,6 +39,7 @@ class MediaStoreWorkerSpecTest {
     private val syncCursorStore: SyncCursorStore = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
+    private val sourceArtifactRepository: SourceArtifactRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -64,6 +67,8 @@ class MediaStoreWorkerSpecTest {
         every {
             ContextCompat.checkSelfPermission(any(), any())
         } returns android.content.pm.PackageManager.PERMISSION_GRANTED
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
     }
 
     @After
@@ -96,6 +101,7 @@ class MediaStoreWorkerSpecTest {
         syncCursorStore = syncCursorStore,
         sourceStatusRepository = sourceStatusRepository,
         rawIngestionEventDao = rawIngestionEventDao,
+        sourceArtifactRepository = sourceArtifactRepository,
         workScheduler = workScheduler,
         userPrefsStore = userPrefsStore,
         processingStatusRepository = processingStatusRepository,

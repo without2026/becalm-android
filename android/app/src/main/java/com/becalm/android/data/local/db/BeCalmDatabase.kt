@@ -11,6 +11,7 @@ import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -22,6 +23,7 @@ import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.PersonManualMatchEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceArtifactEntity
 import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.local.db.entity.UserProfileEntity
@@ -106,10 +108,11 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         PersonAliasRuleEntity::class,
         PersonIndexSourceStateEntity::class,
         SourcePersonCandidateEntity::class,
+        SourceArtifactEntity::class,
         EmailBodyEntity::class,
         UserProfileEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -119,8 +122,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 12) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 12) literal"
+        require(DATABASE_VERSION == 13) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 13) literal"
         }
     }
 
@@ -151,6 +154,9 @@ public abstract class BeCalmDatabase : RoomDatabase() {
      * style callers while the room-only ownership remains explicit.
      */
     internal abstract fun emailBodyDao(): EmailBodyDao
+
+    /** Returns the DAO for app-private source archive metadata. */
+    public abstract fun sourceArtifactDao(): SourceArtifactDao
 
     /** Returns the DAO for the `user_profile` local bootstrap table (v7+). */
     public abstract fun userProfileDao(): UserProfileDao
@@ -195,7 +201,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 12
+        public const val DATABASE_VERSION: Int = 13
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

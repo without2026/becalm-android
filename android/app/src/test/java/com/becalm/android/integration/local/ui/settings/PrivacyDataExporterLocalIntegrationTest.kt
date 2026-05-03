@@ -35,6 +35,7 @@ class PrivacyDataExporterLocalIntegrationTest {
         commitmentDao = db.commitmentDao(),
         calendarEventDao = db.calendarEventDao(),
         emailBodyDao = db.emailBodyDao(),
+        sourceArtifactDao = db.sourceArtifactDao(),
         personEnrichmentDao = db.personEnrichmentDao(),
         userProfileDao = db.userProfileDao(),
         userPrefsStore = prefs,

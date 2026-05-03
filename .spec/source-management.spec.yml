@@ -5,7 +5,7 @@
 # Source of truth is local Room/UI state; provider fetch owner is source-specific.
 # Fetch owner table:
 #   backend-managed: gmail, outlook_mail, google_calendar, outlook_calendar
-#   local-worker: voice, naver_imap, daum_imap
+#   local-worker: voice, meeting, naver_imap, daum_imap
 module: source-management
 platform: android
 version: 1
@@ -14,11 +14,11 @@ version: 1
 behaviors:
   - id: SMG-001
     type: ui_interaction
-    description: "Settings → Sources 목록 화면에서 7개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 8개 행"
+    description: "Settings → Sources 목록 화면에서 8개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 9개 행"
     screen: "SourcesListScreen"
     interaction: "화면 진입"
-    precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, Naver Email disconnected, Daum Email connected, google_calendar connected, outlook_calendar disconnected. READ_CONTACTS 부여됨"
-    expected: "8개 행 표시됨. Gmail: '연결됨'. Outlook: '오류 — 토큰이 만료되었습니다'. voice: '연결됨'. Naver Email: '미연결'. Daum Email: '연결됨'. google_calendar: '연결됨'. outlook_calendar: '미연결'. 연락처: '연결됨 — N명 보강됨' + last_synced_at. READ_CONTACTS 미부여 시 연락처 행: '미연결'"
+    precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, meeting connected, Naver Email disconnected, Daum Email connected, google_calendar connected, outlook_calendar disconnected. READ_CONTACTS 부여됨"
+    expected: "9개 행 표시됨. Gmail: '연결됨'. Outlook: '오류 — 토큰이 만료되었습니다'. voice: '연결됨'. Meetings: '연결됨'. Naver Email: '미연결'. Daum Email: '연결됨'. google_calendar: '연결됨'. outlook_calendar: '미연결'. 연락처: '연결됨 — N명 보강됨' + last_synced_at. READ_CONTACTS 미부여 시 연락처 행: '미연결'"
     source: phase2-acceptance
     tests: []
 
@@ -34,7 +34,7 @@ behaviors:
 
   - id: SMG-003
     type: ui_interaction
-    description: "미연결 또는 오류 상태 소스 탭 시 해당 소스의 재연결 플로우로 이동한다 — OAuth 소스는 OAuth 재인증, IMAP 소스는 앱 비밀번호 재입력, voice는 SAF 폴더 재선택"
+    description: "미연결 또는 오류 상태 소스 탭 시 해당 소스의 재연결 플로우로 이동한다 — OAuth 소스는 OAuth 재인증, IMAP 소스는 앱 비밀번호 재입력, voice/meeting은 SAF Recordings 폴더 재선택"
     screen: "SourceDetailScreen"
     interaction: "disconnected 또는 error 소스 카드 탭"
     precondition: "SourcesListScreen에서 Outlook Mail(error) 카드 탭"
@@ -58,8 +58,18 @@ behaviors:
     screen: "SourceDetailScreen"
     interaction: "[지금 동기화] 버튼 탭"
     precondition: "인증 완료 상태에서 SourceDetailScreen 표시됨, Gmail connected 상태, [지금 동기화] 탭, 네트워크 연결됨"
-    expected: "Railway `POST /v1/mail_sources:sync?provider=gmail` 이 호출됨. 다른 소스는 영향받지 않는다. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨. IMAP/voice 같은 local source는 기존처럼 해당 WorkManager worker만 실행된다. 인증 전이면 CTA는 숨김 또는 비활성화되어 enqueue가 발생하지 않는다"
+    expected: "Railway `POST /v1/mail_sources:sync?provider=gmail` 이 호출됨. 다른 소스는 영향받지 않는다. SourceStatusStrip Gmail 칩 syncing 상태로 전환 → 완료 후 synced로 전환됨. IMAP/voice/meeting 같은 local source는 기존처럼 해당 WorkManager worker만 실행된다. 인증 전이면 CTA는 숨김 또는 비활성화되어 enqueue가 발생하지 않는다"
     source: phase2-acceptance
+    tests: []
+
+  - id: SMG-006
+    type: ui_interaction
+    description: "Meetings 소스 상세 화면은 미팅 자료를 앱 내 Recordings 내부 폴더로 저장하는 두 개의 명시적 추가 버튼을 표시한다"
+    screen: "SourceDetailScreen"
+    interaction: "source_id='meeting' 화면 진입"
+    precondition: "인증 완료, Recordings SAF tree URI grant 보유"
+    expected: "[미팅 오디오 추가]와 [전사본 추가] 버튼 표시. [미팅 오디오 추가]는 Recordings/BeCalm Meetings/Audio/를 picker 초기 위치로 열고 audio/m4a, audio/mp4, audio/aac, audio/mpeg, audio/wav 및 .m4a/.mp4/.aac/.mp3/.wav만 허용. [전사본 추가]는 Recordings/BeCalm Meetings/Transcripts/를 picker 초기 위치로 열고 text/plain, text/markdown, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document 및 .txt/.md/.pdf/.docx만 허용. 저장 결과는 MTG-002/003에 따른다"
+    source: user-request
     tests: []
 
 invariants:

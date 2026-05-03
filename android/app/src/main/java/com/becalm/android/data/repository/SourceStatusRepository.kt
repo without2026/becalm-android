@@ -211,7 +211,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     // ─── Observation ─────────────────────────────────────────────────────────
 
     override fun observeAll(): Flow<List<SourceStatus>> {
-        // PRODUCT_SOURCES (7 user-facing sources) — NOT the schema-level ALL set.
+        // PRODUCT_SOURCES (8 user-facing sources) — NOT the schema-level ALL set.
         // ALL still includes CALL_RECORDING, but that remains a schema-only carve-out
         // and must not appear in the Sources strip or Today aggregate banner.
         return userPrefs.data

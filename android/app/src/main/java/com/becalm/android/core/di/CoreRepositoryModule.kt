@@ -10,6 +10,8 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourcePersonCandidateRepository
 import com.becalm.android.data.repository.SourcePersonCandidateRepositoryImpl
+import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
 import dagger.Binds
@@ -55,4 +57,10 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindEmailBodyRepository(
         impl: EmailBodyRepositoryImpl,
     ): EmailBodyRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindSourceArtifactRepository(
+        impl: SourceArtifactRepositoryImpl,
+    ): SourceArtifactRepository
 }

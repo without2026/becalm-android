@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentDecisionStatus
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -277,6 +278,138 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             .observeInteractionsForPerson(USER_ID, candidatePersonId, limit = 10)
             .first()
         assertTrue(interactions.none { it.sourceRef == "commitment:commitment-decision-candidate-only" })
+    }
+
+    @Test
+    fun `contact enrichment merges phone email and name rows into the phone person`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personEnrichmentDao().upsertAll(
+            listOf(
+                PersonEnrichmentEntity(
+                    personRef = CUSTOMER_PHONE,
+                    displayName = "김지훈",
+                    sourceContactId = "contact-jihun",
+                    lastSyncedAt = Instant.parse("2026-04-29T00:00:00Z"),
+                ),
+                PersonEnrichmentEntity(
+                    personRef = CUSTOMER_EMAIL,
+                    displayName = "김지훈",
+                    sourceContactId = "contact-jihun",
+                    lastSyncedAt = Instant.parse("2026-04-29T00:00:00Z"),
+                ),
+            ),
+        )
+        db.rawIngestionEventDao().insertAll(
+            listOf(
+                rawEvent(
+                    id = "raw-contact-phone",
+                    clientEventId = "client-contact-phone",
+                    sourceType = SourceType.VOICE,
+                    sourceRef = "content://voice/contact-phone",
+                    personRef = CUSTOMER_PHONE,
+                    title = "김지훈 통화",
+                    snippet = "다음 주 일정 조율",
+                    folder = null,
+                    at = "2026-04-29T01:00:00Z",
+                ),
+                rawEvent(
+                    id = "raw-contact-email",
+                    clientEventId = "client-contact-email",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-contact-email",
+                    personRef = CUSTOMER_EMAIL,
+                    title = "김지훈 후속 메일",
+                    snippet = "통화 내용 정리드립니다.",
+                    folder = "INBOX",
+                    at = "2026-04-29T02:00:00Z",
+                ),
+            ),
+        )
+        db.calendarEventDao().insertAll(
+            listOf(
+                CalendarEventEntity(
+                    id = "calendar-contact-name",
+                    userId = USER_ID,
+                    sourceType = SourceType.GOOGLE_CALENDAR,
+                    sourceRef = "calendar-contact-name",
+                    title = "김지훈 미팅",
+                    startAt = Instant.parse("2026-04-30T01:00:00Z"),
+                    endAt = Instant.parse("2026-04-30T02:00:00Z"),
+                    attendeesRaw = null,
+                    syncStatus = "synced",
+                ),
+            ),
+        )
+
+        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
+
+        val phonePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_PHONE)).personId
+        val emailPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        val phoneInteractions = db.personIndexDao()
+            .observeInteractionsForPerson(USER_ID, phonePersonId, limit = 20)
+            .first()
+        val emailInteractions = db.personIndexDao()
+            .observeInteractionsForPerson(USER_ID, emailPersonId, limit = 20)
+            .first()
+
+        assertTrue(phoneInteractions.any { it.sourceRef == "raw:raw-contact-phone" })
+        assertTrue(phoneInteractions.any { it.sourceRef == "raw:raw-contact-email" })
+        assertTrue(phoneInteractions.any { it.sourceRef == "calendar:calendar-contact-name:title" })
+        assertTrue(emailInteractions.none { it.sourceRef == "raw:raw-contact-email" })
+    }
+
+    @Test
+    fun `contact enrichment skips ambiguous display names across different contacts`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val otherPhone = "+821099998888"
+        db.personEnrichmentDao().upsertAll(
+            listOf(
+                PersonEnrichmentEntity(
+                    personRef = CUSTOMER_PHONE,
+                    displayName = "김지훈",
+                    sourceContactId = "contact-jihun-1",
+                    lastSyncedAt = Instant.parse("2026-04-29T00:00:00Z"),
+                ),
+                PersonEnrichmentEntity(
+                    personRef = otherPhone,
+                    displayName = "김지훈",
+                    sourceContactId = "contact-jihun-2",
+                    lastSyncedAt = Instant.parse("2026-04-29T00:00:00Z"),
+                ),
+            ),
+        )
+        db.calendarEventDao().insertAll(
+            listOf(
+                CalendarEventEntity(
+                    id = "calendar-ambiguous-name",
+                    userId = USER_ID,
+                    sourceType = SourceType.GOOGLE_CALENDAR,
+                    sourceRef = "calendar-ambiguous-name",
+                    title = "김지훈 미팅",
+                    startAt = Instant.parse("2026-04-30T01:00:00Z"),
+                    endAt = Instant.parse("2026-04-30T02:00:00Z"),
+                    attendeesRaw = null,
+                    syncStatus = "synced",
+                ),
+            ),
+        )
+
+        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
+
+        val phonePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_PHONE)).personId
+        val otherPhonePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, otherPhone)).personId
+        assertTrue(
+            db.personIndexDao()
+                .observeInteractionsForPerson(USER_ID, phonePersonId, limit = 10)
+                .first()
+                .none { it.sourceRef == "calendar:calendar-ambiguous-name:title" },
+        )
+        assertTrue(
+            db.personIndexDao()
+                .observeInteractionsForPerson(USER_ID, otherPhonePersonId, limit = 10)
+                .first()
+                .none { it.sourceRef == "calendar:calendar-ambiguous-name:title" },
+        )
     }
 
     @Test
