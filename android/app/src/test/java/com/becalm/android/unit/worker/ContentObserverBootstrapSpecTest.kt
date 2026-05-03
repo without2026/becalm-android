@@ -13,7 +13,12 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
 class ContentObserverBootstrapSpecTest {
 
     private val context: Context = mockk(relaxed = true)
@@ -40,6 +45,13 @@ class ContentObserverBootstrapSpecTest {
                 capture(observer),
             )
         }
+        verify(exactly = 1) {
+            contentResolver.registerContentObserver(
+                MediaStore.Files.getContentUri("external"),
+                true,
+                any(),
+            )
+        }
 
         observer.captured.onChange(false, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
 
@@ -60,6 +72,13 @@ class ContentObserverBootstrapSpecTest {
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 true,
                 capture(observer),
+            )
+        }
+        verify(exactly = 1) {
+            contentResolver.registerContentObserver(
+                MediaStore.Files.getContentUri("external"),
+                true,
+                any(),
             )
         }
 

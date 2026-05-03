@@ -1,6 +1,7 @@
 package com.becalm.android.ui.sources
 
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 
@@ -30,6 +31,8 @@ internal object SourceDetailProjector {
             showReconnectButton = connectionButtons.showReconnectButton,
             showDisconnectButton = connectionButtons.showDisconnectButton,
             showManualSyncButton = connectionButtons.showManualSyncButton,
+            showMeetingAudioAddButton = sourceType == SourceType.MEETING,
+            showMeetingTranscriptAddButton = sourceType == SourceType.MEETING,
             showDisconnectConfirmDialog = showDisconnectConfirmDialog,
             disconnectOutcome = disconnectOutcome,
             actionError = actionError,

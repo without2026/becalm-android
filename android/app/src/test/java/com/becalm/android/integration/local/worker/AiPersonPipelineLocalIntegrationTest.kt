@@ -80,6 +80,7 @@ class AiPersonPipelineLocalIntegrationTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+        every { userPrefsStore.observeBlockedPersonRefs() } returns flowOf(emptySet())
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
 
         mockkStatic(ContextCompat::class)

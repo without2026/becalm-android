@@ -124,16 +124,18 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
 
         val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
+        val meetingEnabled = userPrefsStore.observeSourceEnabled(SourceType.MEETING).first()
         val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
         val audioGranted = mediaAudioPermissionChecker.isGranted()
-        if (voiceEnabled && audioGranted && !recordingsTreeUri.isNullOrBlank()) {
+        if ((voiceEnabled || meetingEnabled) && !recordingsTreeUri.isNullOrBlank() && (audioGranted || meetingEnabled)) {
             contentObserverBootstrap.start()
-            logger.d(TAG, "voice realtime observer enabled")
+            logger.d(TAG, "recordings realtime observer enabled")
         } else {
             contentObserverBootstrap.stop()
             logger.d(
                 TAG,
-                "voice realtime observer disabled voiceEnabled=$voiceEnabled audioGranted=$audioGranted hasTree=${!recordingsTreeUri.isNullOrBlank()}",
+                "recordings realtime observer disabled voiceEnabled=$voiceEnabled meetingEnabled=$meetingEnabled " +
+                    "audioGranted=$audioGranted hasTree=${!recordingsTreeUri.isNullOrBlank()}",
             )
         }
 

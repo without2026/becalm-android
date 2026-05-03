@@ -11,6 +11,9 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceArchiveDeleteResult
+import com.becalm.android.data.repository.SourceArchiveSummary
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.ui.settings.PrivacyDataExporter
 import com.becalm.android.ui.settings.PrivacyExportPayload
 import com.becalm.android.ui.settings.PrivacyManagementEffect
@@ -51,6 +54,7 @@ class PrivacyManagementViewModelSpecTest {
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val enrichmentDao: PersonEnrichmentDao = mockk(relaxed = true)
     private val exporter: PrivacyDataExporter = mockk(relaxed = true)
+    private val sourceArtifactRepository: SourceArtifactRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler = mockk(relaxed = true)
@@ -74,6 +78,7 @@ class PrivacyManagementViewModelSpecTest {
         coEvery { commitmentDao.countForUser("user-1") } returns 3
         coEvery { rawDao.countEmailRowsForUser("user-1") } returns 5
         coEvery { enrichmentDao.countAll() } returns 2
+        coEvery { sourceArtifactRepository.summary("user-1") } returns SourceArchiveSummary(count = 0, totalBytes = 0L)
     }
 
     @After
@@ -144,6 +149,34 @@ class PrivacyManagementViewModelSpecTest {
         assertTrue(viewModel.uiState.value.signedOut)
     }
 
+    @Test
+    fun `source archive delete before removes local originals and emits count`() = runTest {
+        coEvery { sourceArtifactRepository.summary("user-1") } returnsMany listOf(
+            SourceArchiveSummary(count = 2, totalBytes = 4096L),
+            SourceArchiveSummary(count = 1, totalBytes = 1024L),
+        )
+        coEvery {
+            sourceArtifactRepository.deleteBefore("user-1", any())
+        } returns SourceArchiveDeleteResult(deletedCount = 1, failedCount = 0)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        val effectDeferred = async { viewModel.effects.first() }
+        viewModel.onDeleteSourceArchiveBefore("2026-04-01")
+        advanceUntilIdle()
+
+        val effect = effectDeferred.await()
+        assertEquals(1, (effect as PrivacyManagementEffect.SourceArchiveDeleted).deletedCount)
+        assertEquals(1, viewModel.uiState.value.sourceArchiveCount)
+        assertEquals(1024L, viewModel.uiState.value.sourceArchiveBytes)
+        coVerify { sourceArtifactRepository.deleteBefore("user-1", any()) }
+        coVerify {
+            userPrefsStore.appendPipaActionLog(
+                match { it.action == "source_archive_delete_before" && it.details["deleted_count"] == "1" },
+            )
+        }
+    }
+
     private fun buildViewModel(): PrivacyManagementViewModel = PrivacyManagementViewModel(
         userPrefsStore = userPrefsStore,
         authRepository = authRepository,
@@ -152,10 +185,12 @@ class PrivacyManagementViewModelSpecTest {
         commitmentDao = commitmentDao,
         personEnrichmentDao = enrichmentDao,
         privacyDataExporter = exporter,
+        sourceArtifactRepository = sourceArtifactRepository,
         workScheduler = workScheduler,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
         foregroundCatchUpScheduler = foregroundCatchUpScheduler,
         logger = logger,
+        ioDispatcher = dispatcher,
     )
 
     private val fakeSession = SupabaseSession(

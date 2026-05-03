@@ -731,6 +731,47 @@ private val MIGRATION_11_12 = object : Migration(11, 12) {
     }
 }
 
+// ─── Migration 12 → 13 (local source archive metadata) ───────────────────────
+//
+// Adds the Room-only `source_artifacts` table. The original Markdown files live
+// under app-private files storage; this table stores only a relative path and
+// integrity metadata. No Supabase/Railway migration accompanies this local table.
+private val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `source_artifacts` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `raw_event_id` TEXT,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT,
+                `artifact_type` TEXT NOT NULL,
+                `local_path` TEXT NOT NULL,
+                `sha256` TEXT NOT NULL,
+                `byte_size` INTEGER NOT NULL,
+                `occurred_at` INTEGER NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_source_artifacts_user_source_type` " +
+                "ON `source_artifacts` (`user_id`, `source_type`, `source_ref`, `artifact_type`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_artifacts_user_occurred` " +
+                "ON `source_artifacts` (`user_id`, `occurred_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_artifacts_raw_event` " +
+                "ON `source_artifacts` (`raw_event_id`)",
+        )
+    }
+}
+
 public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -743,4 +784,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_9_10,
     MIGRATION_10_11,
     MIGRATION_11_12,
+    MIGRATION_12_13,
 )

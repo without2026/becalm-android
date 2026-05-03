@@ -112,6 +112,8 @@ class SourcesUiTest {
                     onDisconnectClick = { disconnectClicks += 1 },
                     onDisconnectDismiss = { dismissClicks += 1 },
                     onDisconnectConfirm = { confirmClicks += 1 },
+                    onMeetingAudioAdd = {},
+                    onMeetingTranscriptAdd = {},
                 )
             }
         }
@@ -129,6 +131,45 @@ class SourcesUiTest {
             assertEquals(1, disconnectClicks)
             assertEquals(1, dismissClicks)
             assertEquals(0, confirmClicks)
+        }
+    }
+
+    @Test
+    fun `meeting source detail shows format-scoped add buttons`() {
+        var audioClicks = 0
+        var transcriptClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceDetailScreenContent(
+                    state = SourceDetailUiState(
+                        sourceType = "meeting",
+                        status = "CONNECTED",
+                        showMeetingAudioAddButton = true,
+                        showMeetingTranscriptAddButton = true,
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(),
+                    onReconnect = {},
+                    onManualSync = {},
+                    onDisconnectClick = {},
+                    onDisconnectDismiss = {},
+                    onDisconnectConfirm = {},
+                    onMeetingAudioAdd = { audioClicks += 1 },
+                    onMeetingTranscriptAdd = { transcriptClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("source-detail-meeting-audio-add").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-detail-meeting-transcript-add").assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_meeting_audio_formats)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_meeting_transcript_formats)).assertIsDisplayed()
+        composeRule.onNodeWithTag("source-detail-meeting-audio-add").performClick()
+        composeRule.onNodeWithTag("source-detail-meeting-transcript-add").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, audioClicks)
+            assertEquals(1, transcriptClicks)
         }
     }
 

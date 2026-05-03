@@ -8,12 +8,14 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceArtifactEntity
 import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -43,6 +45,7 @@ public class PrivacyDataExporter @Inject constructor(
     private val commitmentDao: CommitmentDao,
     private val calendarEventDao: CalendarEventDao,
     private val emailBodyDao: EmailBodyDao,
+    private val sourceArtifactDao: SourceArtifactDao,
     private val personEnrichmentDao: PersonEnrichmentDao,
     private val userProfileDao: UserProfileDao,
     private val userPrefsStore: UserPrefsStore,
@@ -69,6 +72,11 @@ public class PrivacyDataExporter @Inject constructor(
             Types.newParameterizedType(List::class.java, EmailBodyEntity::class.java),
         )
     }
+    private val sourceArtifactsAdapter by lazy {
+        moshi.adapter<List<SourceArtifactEntity>>(
+            Types.newParameterizedType(List::class.java, SourceArtifactEntity::class.java),
+        )
+    }
     private val enrichmentAdapter by lazy {
         moshi.adapter<List<PersonEnrichmentEntity>>(
             Types.newParameterizedType(List::class.java, PersonEnrichmentEntity::class.java),
@@ -86,6 +94,7 @@ public class PrivacyDataExporter @Inject constructor(
         val commitments = commitmentDao.findAllForUser(userId)
         val calendarEvents = calendarEventDao.findAllForUser(userId)
         val emailBodies = emailBodyDao.findAllForUser(userId)
+        val sourceArtifacts = sourceArtifactDao.findAllForUser(userId)
         val enrichment = personEnrichmentDao.observeAll().first()
         val userProfile = userProfileDao.findByUserId(userId)
         val datastoreDump = mapOf(
@@ -119,6 +128,7 @@ public class PrivacyDataExporter @Inject constructor(
             putJson(zip, "commitments.json", commitmentsAdapter.toJson(commitments))
             putJson(zip, "calendar_events.json", calendarEventsAdapter.toJson(calendarEvents))
             putJson(zip, "email_body.json", emailBodiesAdapter.toJson(emailBodies))
+            putJson(zip, "source_artifacts.json", sourceArtifactsAdapter.toJson(sourceArtifacts))
             putJson(zip, "persons_enrichment.json", enrichmentAdapter.toJson(enrichment))
             putJson(zip, "user_profile.json", userProfileAdapter.toJson(userProfile))
             putJson(zip, "datastore.json", datastoreAdapter.toJson(datastoreDump))
@@ -145,6 +155,7 @@ public class PrivacyDataExporter @Inject constructor(
             - commitments.json
             - calendar_events.json
             - email_body.json
+            - source_artifacts.json (metadata only; Markdown file bodies are not included)
             - persons_enrichment.json
             - user_profile.json
             - datastore.json

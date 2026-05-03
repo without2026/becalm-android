@@ -64,6 +64,14 @@ public class DefaultSourceSyncPort @Inject constructor(
             SourceType.OUTLOOK_CALENDAR,
             -> syncBackendManagedCalendar(sourceType)
 
+            SourceType.VOICE,
+            SourceType.MEETING,
+            -> {
+                workScheduler.enqueueExpedited(sourceType)
+                logger.d(TAG, "manual sync delegated to MediaStore worker sourceType=$sourceType")
+                BecalmResult.Success(Unit)
+            }
+
             else -> {
                 workScheduler.enqueueExpedited(sourceType)
                 logger.d(TAG, "manual sync delegated to local worker sourceType=$sourceType")

@@ -8,9 +8,11 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.ui.sources.ARG_SOURCE_TYPE
 import com.becalm.android.ui.sources.SourceAdministrationPort
 import com.becalm.android.ui.sources.SourceDetailEffect
@@ -48,11 +50,16 @@ class SourceDetailViewModelSpecTest {
     private val sourceStatusRepository: SourceStatusRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val sourceSyncPort: SourceSyncPort = mockk(relaxed = true)
+    private val meetingImportRepository: MeetingImportRepository = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        coEvery { meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio) } returns
+            BecalmResult.Success("content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio")
+        coEvery { meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Transcript) } returns
+            BecalmResult.Success("content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FTranscripts")
     }
 
     @After
@@ -204,6 +211,24 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
+    fun `SMG-003 disconnected meeting source reconnect routes to recording folder`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.MEETING) } returns
+            flowOf(status(sourceType = SourceType.MEETING, status = SourceConnectionStatus.NEVER_CONNECTED))
+
+        val viewModel = buildViewModel(SourceType.MEETING)
+
+        viewModel.effects.test {
+            viewModel.onReconnect()
+
+            assertEquals(
+                SourceDetailEffect.OpenReconnect(SourceReconnectDestination.RECORDING_FOLDER),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `SMG-004 disconnect click and dismiss toggle confirm dialog`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
             flowOf(status(sourceType = SourceType.GMAIL, status = SourceConnectionStatus.CONNECTED))
@@ -322,6 +347,36 @@ class SourceDetailViewModelSpecTest {
         coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
         coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
         coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.GOOGLE_CALENDAR) }
+    }
+
+    @Test
+    fun `SMG-006 meeting source exposes add-audio and add-transcript actions`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.MEETING) } returns
+            flowOf(status(sourceType = SourceType.MEETING, status = SourceConnectionStatus.CONNECTED))
+        every { rawIngestionRepository.observeForSourceType("user-1", SourceType.MEETING, 50) } returns
+            flowOf(emptyList())
+        val viewModel = buildViewModel(SourceType.MEETING)
+        viewModel.setUserId("user-1")
+
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status.isBlank()) {
+                state = awaitItem()
+            }
+
+            assertEquals(SourceType.MEETING, state.sourceType)
+            assertTrue(state.showMeetingAudioAddButton)
+            assertTrue(state.showMeetingTranscriptAddButton)
+            assertEquals(
+                "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio",
+                state.meetingAudioPickerInitialUri,
+            )
+            assertEquals(
+                "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FTranscripts",
+                state.meetingTranscriptPickerInitialUri,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -445,6 +500,7 @@ class SourceDetailViewModelSpecTest {
         rawIngestionRepository = rawIngestionRepository,
         sourceAdministrationPort = sourceAdministrationPort,
         sourceSyncPort = sourceSyncPort,
+        meetingImportRepository = meetingImportRepository,
         logger = logger,
     )
 

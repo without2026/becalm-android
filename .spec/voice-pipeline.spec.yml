@@ -13,8 +13,8 @@ version: 2
 behaviors:
   - id: VOI-001
     type: lifecycle
-    description: "VoiceUploadWorker가 source_type IN ('voice','call_recording'), sync_status='pending'인 raw_ingestion_event에 대해 Railway `POST /v1/voice/transcribe_extract`로 오디오 파일을 multipart 업로드하고 structured items(action|schedule|decision)를 수신한다. Android는 이 items를 Room commitments(trackable items)로 INSERT하고, 전체 item count와 첫 quote를 raw event metadata에 보존한다. 음성 메모(voice)와 통화 녹음(call_recording)은 동일 파이프라인을 공유하며 source_type은 UI 배지·필터·증거성 표시 용도로만 보존된다"
-    trigger: "Room raw_ingestion_events에 source_type IN ('voice','call_recording'), sync_status='pending' 레코드 삽입됨"
+    description: "VoiceUploadWorker가 source_type IN ('voice','call_recording','meeting'), sync_status='pending'인 raw_ingestion_event에 대해 Railway `POST /v1/voice/transcribe_extract`로 오디오 파일을 multipart 업로드하고 structured items(action|schedule|decision)를 수신한다. Android는 이 items를 Room commitments(trackable items)로 INSERT하고, 전체 item count와 첫 quote를 raw event metadata에 보존한다. 음성 메모(voice), 통화 녹음(call_recording), 미팅 오디오(meeting)는 동일 파이프라인을 공유하며 source_type은 UI 배지·필터·증거성 표시 용도로 보존된다"
+    trigger: "Room raw_ingestion_events에 source_type IN ('voice','call_recording','meeting'), sync_status='pending' 레코드 삽입됨"
     precondition: "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent=true), Supabase JWT 유효, READ_MEDIA_AUDIO 권한 부여, 오디오 파일 URI 접근 가능, Wi-Fi 또는 unmetered 네트워크 연결"
     expected: "Railway endpoint가 HTTP 200 + raw_event_id + items[] 반환. Android는 event_snippet(첫 item.quote) 를 로컬 갱신한 뒤, item_type in ('action','schedule','decision') trackable row를 Room commitments에 N건 INSERT한다 (N >= 0). action row는 direction in ('give','take'), schedule row는 schedule_status 필수, decision row는 decision_status 필수다. action row만 action_state lifecycle query 대상이며 schedule/decision row는 action_state 기본값 'pending' 를 storage sentinel로만 유지한다. raw_ingestion_events.commitments_extracted_count는 이 persisted item 전체 count를 기록한다. 모든 persisted item의 source_type은 원본 raw event의 source_type을 그대로 상속한다. 이후 CommitmentUploader가 /v1/commitments 계열 mirror를 수행한다. Vertex AI 응답 JSON은 Railway 요청 lifetime 외부로 전파되지 않음(DB·로그 저장 금지)."
     source: phase2-acceptance
@@ -24,7 +24,7 @@ behaviors:
     type: lifecycle
     description: "Railway `/v1/voice/transcribe_extract`는 오디오 파일 전체를 분할 없이 단일 Gemini 2.5 Flash 호출로 처리한다 — cross-boundary commitment 손실과 화자/맥락 단절을 방지하기 위함"
     trigger: "Railway가 유효한 오디오 업로드 수신 (duration_seconds ≤ 7200)"
-    precondition: "duration_seconds in [1, 7200], audio codec=.m4a AAC, Gemini 2.5 Flash audio multimodal 엔드포인트 가용"
+    precondition: "duration_seconds in [1, 7200], audio codec=.m4a/.mp4/.aac/.mp3/.wav 중 하나, Gemini 2.5 Flash audio multimodal 엔드포인트 가용"
     expected: "Vertex AI 호출 1회 (전체 오디오 + responseSchema = VoiceExtractItem[]). HTTP 200 + { items: [...], model: 'gemini-2.5-flash', region: 'us-central1' } 반환. Gemini 응답에 finish_reason='MAX_TOKENS'가 포함되거나 JSON이 잘린 경우(스키마 검증 실패) HTTP 502 + { error: 'output_truncated' } 반환 — 해당 raw_event는 quarantine되며 post-MVP overlap-chunk 경로로 재처리 예정. duration_seconds > 7200인 요청은 업스트림(api-contract 422)에서 차단되어 본 behavior에 도달하지 않음."
     source: phase2-acceptance
     tests: []
@@ -41,8 +41,8 @@ behaviors:
   - id: VOI-004
     type: consent
     description: "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent) 미수락 상태에서는 VoiceUploadWorker가 Railway 호출을 수행하지 않고 raw_ingestion_event를 sync_status='awaiting_consent'로 대기시킨다"
-    trigger: "source_type='voice' raw event 생성 시점에 pipa_third_party_consent=false"
-    precondition: "DataStore pipa_third_party_consent=false, source_type='voice' raw event 삽입됨"
+    trigger: "source_type IN ('voice','call_recording','meeting') raw event 생성 시점에 pipa_third_party_consent=false"
+    precondition: "DataStore pipa_third_party_consent=false, source_type IN ('voice','call_recording','meeting') raw event 삽입됨"
     expected: "Railway 호출 발생하지 않음. raw_ingestion_events.sync_status='awaiting_consent'로 전이. 이후 ONB-PIPA 또는 Settings에서 동의 토글 ON 시 자동으로 sync_status='pending'으로 복귀되어 VoiceUploadWorker가 재진입. 동의 토글 OFF로 전환 시 새 raw event만 awaiting_consent로 들어가며 이미 업로드 완료된 commitments는 영향받지 않는다(소급 삭제 없음 — 사용자가 개별 삭제 필요)."
     source: phase2-acceptance
     tests: []
@@ -77,7 +77,7 @@ behaviors:
 invariants:
   - "오디오 바이트는 pipa_third_party_consent=true일 때만 device 외부로 전송된다"
   - "Transcript(STT 중간 산출물)는 Android·Railway·Supabase Postgres 어디에도 영속되지 않는다 — Railway 요청 lifetime 내 ephemeral"
-  - "voice recall용으로 저장되는 텍스트는 commitment.quote(verbatim, <=100 chars)와 raw_ingestion_events.event_snippet뿐이다 — full transcript 저장 금지"
+  - "voice/call_recording/meeting audio recall용으로 저장되는 텍스트는 commitment.quote(verbatim, <=100 chars)와 raw_ingestion_events.event_snippet뿐이다 — full transcript 저장 금지"
   - "원본 오디오 파일은 사용자 자산이므로 앱이 삭제·복사·이동하지 않는다"
   - "Vertex AI 호출은 us-central1 endpoint를 사용한다. 오디오/응답은 요청 lifetime 내 ephemeral이며 at-rest 저장을 수행하지 않는다"
   - "Vertex AI ZDR(Zero Data Retention) 플래그 필수 — Google이 프롬프트/응답을 로깅/학습에 사용하지 못하도록 차단"

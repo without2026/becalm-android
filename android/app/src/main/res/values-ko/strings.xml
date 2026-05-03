@@ -230,6 +230,8 @@
     <string name="raw_event_body_expand">전체 보기</string>
     <string name="raw_event_body_collapse">접기</string>
     <string name="raw_event_body_html_only_notice">HTML 전용 이메일이며 로컬 저장소에 plain text 본문이 없습니다.</string>
+    <string name="raw_event_original_deleted_notice">원문이 이 기기에서 삭제되었습니다.</string>
+    <string name="raw_event_original_truncated_notice">원문이 길어 이 화면에는 미리보기만 표시합니다.</string>
 
     <!-- Raw event detail — 출처 배지 -->
     <string name="raw_event_source_badge_gmail">Gmail</string>
@@ -336,6 +338,11 @@
     <string name="source_detail_events_synced_fmt">최근 항목 %1$d개 표시</string>
     <string name="source_detail_last_error_fmt">마지막 오류: %1$s</string>
     <string name="source_detail_recent_events_section">최근 이벤트</string>
+    <string name="source_detail_meeting_import_section">미팅 파일</string>
+    <string name="source_detail_meeting_audio_add">미팅 오디오 추가</string>
+    <string name="source_detail_meeting_transcript_add">전사본 추가</string>
+    <string name="source_detail_meeting_audio_formats">M4A, MP4, AAC, MP3, WAV만 가능</string>
+    <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX만 가능</string>
     <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
     <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
 
@@ -395,6 +402,13 @@
     <string name="privacy_pause_subtitle">백그라운드 처리를 일시 중단하고, 나중에 다시 동기화하여 재개합니다.</string>
     <string name="privacy_delete_subtitle_fmt">로컬 계정 데이터를 삭제합니다. 현재 로컬 요약: 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개.</string>
     <string name="privacy_activity_log_subtitle">로컬에 저장된 PIPA 권리 활동 이력을 확인합니다.</string>
+    <string name="privacy_source_archive_title">원문 아카이브</string>
+    <string name="privacy_source_archive_subtitle_fmt">이 기기에 원문 %1$d건, %2$s가 보관되어 있습니다. 선택한 날짜 이전 원문만 삭제할 수 있습니다.</string>
+    <string name="privacy_source_archive_empty">이 기기에 보관된 원문이 없습니다.</string>
+    <string name="privacy_source_archive_cutoff_label">이 날짜 이전 원문 삭제</string>
+    <string name="privacy_source_archive_delete_confirm">원문 아카이브 삭제</string>
+    <string name="privacy_source_archive_deleted_fmt">원문 %1$d건을 삭제했습니다.</string>
+    <string name="privacy_source_archive_delete_failed">원문 아카이브를 삭제하지 못했습니다.</string>
     <string name="privacy_export_cancelled">내보내기가 취소되었습니다.</string>
     <string name="privacy_export_failed">내보내기 ZIP 파일을 만들지 못했습니다.</string>
     <string name="privacy_pause_description">처리를 일시 중단하면 로컬 데이터는 유지되지만, 재개 전까지 모든 백그라운드 수집·업로드 작업이 건너뛰어집니다.</string>

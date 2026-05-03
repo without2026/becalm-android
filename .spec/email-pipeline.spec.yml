@@ -57,10 +57,10 @@ behaviors:
 
   - id: EMAIL-006
     type: privacy
-    description: "EmailBody는 Railway/Supabase에 절대 업로드되지 않는다 (data-ingestion invariants 중복 선언). Railway는 raw_ingestion_events.event_snippet(앞 200자)만 받음. 본문 전체는 Room에만 저장되고 30일 retention 정책(4-2)에 따라 synced 이후 자동 삭제"
+    description: "EmailBody와 source original archive는 Railway/Supabase에 절대 저장되지 않는다 (data-ingestion invariants 중복 선언). Railway는 추출 컨텍스트로 body_plain을 request lifetime 동안 받을 수 있으나 Supabase raw_ingestion_events에는 event_title/event_snippet 등 metadata만 저장한다. 본문 전체 recall은 Android app-private storage의 Markdown archive + Room source_artifacts metadata가 소유하며 자동 age-based 삭제 대상이 아니다"
     trigger: "이메일 어댑터 fetch + EmailBody INSERT + Railway batch upload"
     precondition: "EmailBody.body_plain 또는 body_html 존재, raw_ingestion_events upload 대상"
-    expected: "Railway payload에는 event_snippet(≤200자)만 포함. body_plain·body_html·attachments_meta·raw_headers는 절대 전송되지 않음. 30일 경과 + sync_status='synced' 조건 만족 시 RetentionSweepWorker가 EmailBody와 raw_ingestion_events를 함께 DELETE"
+    expected: "Supabase raw_ingestion_events에는 event_snippet(≤500자 mirror 한도)과 metadata만 저장. body_plain은 Android→Railway 추출 요청에 transient context로 포함될 수 있으나 Railway/Supabase DB에 persist 금지. body_html·attachments_meta·raw_headers는 device boundary 밖으로 전송 금지. 이메일 원문은 source_artifacts(artifact_type='markdown_original')가 가리키는 app-private Markdown 파일로 로컬 보존되며, 사용자가 Privacy Management에서 특정 날짜 이전 원문 삭제를 실행할 때만 archive 파일과 source_artifacts row가 삭제됨"
     source: phase2-acceptance
     tests: []
 
@@ -76,7 +76,8 @@ behaviors:
 invariants:
   - "INBOX→take, SENT→give는 direction 기본 가정이며 LLM이 본문 증거로 override 가능하다 — 최종 근거는 commitments.quote에 보존된다"
   - "person_ref는 INBOX=From, SENT=To[0]로 결정되며 To가 10명 초과 group 메일은 person_ref=null (Unassigned)"
-  - "EmailBody.body_plain/body_html/attachments_meta는 Railway·Supabase로 업로드 금지 (로컬 only)"
+  - "EmailBody.body_html/attachments_meta/raw_headers 및 source_artifacts Markdown 원문은 Railway·Supabase로 업로드 금지 (로컬 only). EmailBody.body_plain은 추출 요청의 transient context로만 사용 가능하며 서버 DB persist 금지"
+  - "이메일 원문 archive는 자동 age-based retention 삭제 대상이 아니며, 사용자의 명시적 날짜 기준 삭제 액션으로만 제거된다"
   - "첨부파일 바이트는 다운로드하지 않는다 — 메타데이터만 보존"
   - "HTML 파싱 실패는 event를 quarantine하지 않고 subject fallback으로 graceful degrade"
   - "회신 메일의 quoted block은 LLM 프롬프트에서 quoted_text context로 분리 — 인용 영역에서는 commitment 추출하지 않는다"

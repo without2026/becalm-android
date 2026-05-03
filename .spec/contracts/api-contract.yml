@@ -12,8 +12,9 @@ version: 1
 # Today/Settings의 SourceStatusStrip, SourcesList, OverallSyncIndicator는 Railway `GET /v1/source_status`
 # 값을 우선 merge하고, 네트워크/서버 실패 시 Android local-derived state로 fallback한다. voice처럼 Android-only
 # runtime 상태가 더 정확한 source는 로컬 기록(recordSyncStart/Success/Error)이 동일 cache를 갱신한다.
-# 사용자-facing status 대상 source는 7개(voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar,
-# outlook_calendar)이며, call_recording은 voice pipeline provenance subtype으로만 남고 별도 status chip을 만들지 않는다.
+# 사용자-facing status 대상 source는 8개(voice, meeting, gmail, outlook_mail, naver_imap, daum_imap,
+# google_calendar, outlook_calendar)이며, call_recording은 voice pipeline provenance subtype으로만 남고
+# 별도 status chip을 만들지 않는다.
 #
 # Error envelope for all Railway endpoints:
 #   4xx/5xx: { error: string, message: string, request_id?: string }
@@ -41,8 +42,8 @@ types:
 
   SourceStatusItem:
     owner: railway_first_with_android_fallback
-    source_id: string           # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-    label: string               # Voice | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
+    source_id: string           # voice | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    label: string               # Voice | Meetings | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
     connection_state: string    # connected | disconnected | error
     visual_state: string        # idle | syncing | error | synced
     last_sync_at?: datetime
@@ -173,8 +174,8 @@ endpoints:
     body:
       events:
         - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
-          source_type: string         # voice | call_recording | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-                                     # UI label mapping: naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 7 user-facing sources: voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
+          source_type: string         # voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+                                     # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 8 user-facing sources: voice, meeting, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
           source_ref?: string
           person_ref?: string         # Canonicalized counterparty; null if unidentifiable
           event_title?: string        # voice: MediaStore title / email: subject / calendar: title
@@ -209,12 +210,12 @@ endpoints:
     content_type: multipart/form-data
     idempotency: client_event_id   # 동일 raw event에 대한 추출 재시도 dedupe 키. 이 endpoint는 draft extraction only이며 DB write authority를 갖지 않는다.
     body:
-      audio: binary                # .m4a AAC. 메모리 스트리밍으로 수신 — 서버는 파일시스템/Supabase Storage에 저장하지 않음
+      audio: binary                # .m4a/.mp4/.aac/.mp3/.wav. 메모리 스트리밍으로 수신 — 서버는 파일시스템/Supabase Storage에 저장하지 않음
       client_event_id: uuid        # raw_ingestion_events의 멱등 키와 동일
       duration_seconds: int
       timestamp: datetime
       person_ref?: string
-      event_title?: string         # MediaStore TITLE
+      event_title?: string         # MediaStore TITLE, SAF display name, or meeting file title
     constraints:
       max_body_bytes: 62914560     # 60 MiB. 60분 AAC 128kbps 상한. 초과 시 413
       max_duration_seconds: 7200   # 120분. 초과 시 422 — client가 파일 분할 후 재업로드
@@ -242,6 +243,8 @@ endpoints:
       - "서버는 Vertex AI 호출을 us-central1 엔드포인트로 수행하고 ZDR(Zero Data Retention) 정책을 적용한다"
       - "오디오 바이트·transcript·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
       - "이 endpoint는 draft extraction only다. Railway는 commitments/raw_ingestion_events를 직접 write하지 않고, Android가 응답을 받아 로컬 Room을 먼저 갱신한 뒤 별도 batch mirror로 서버에 반영한다"
+      - "source_type은 multipart body에 포함하지 않는다. Android가 raw_event.source_type(voice|call_recording|meeting)을 보존하고, returned items를 해당 source_type commitment로 저장한다"
+      - "미팅 전사본(.txt/.md)은 audio endpoint를 사용하지 않는다. transcript extraction은 별도 transient-only endpoint 또는 Android-local extraction worker가 소유하며 full transcript 저장은 금지된다"
       - "오디오 처리 전략: 청크 분할 없이 전체 파일을 단일 Gemini 호출로 전달 — cross-boundary commitment와 화자 맥락 손실 방지. max_duration_seconds=7200(120분) 상한은 단일 호출 안전 범위(입력 1M 토큰 / 출력 8192 토큰 여유)를 기준으로 설정. 상한 초과는 클라이언트에서 quarantine."
     spec_refs: [VOI-001, VOI-002, VOI-003, VOI-006, VOI-007]
 
@@ -266,8 +269,8 @@ endpoints:
         # Commitment type includes: id, user_id, item_type, direction?, schedule_status?, decision_status?, counterparty_raw, person_ref,
         # title, description, quote, source_event_title, source_event_occurred_at,
         # due_at (ISO8601 KST), due_hint, due_is_approximate,
-        # action_state, source_type (voice|call_recording|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
-        # UI label mapping: naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'; call_recording remains an internal/raw subtype rather than a separate source-status chip.
+        # action_state, source_type (voice|call_recording|meeting|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
+        # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'; call_recording remains an internal/raw subtype rather than a separate source-status chip.
         # source_ref, confidence,
         # sync_status, created_at, updated_at,
         # last_edited_by, last_edited_at, quote_disputed, quote_disputed_at,
@@ -408,7 +411,7 @@ endpoints:
     response:
       200:
         sources:
-          - source_type: string   # voice | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+          - source_type: string   # voice | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
             state: string         # idle | syncing | synced | error
             last_sync_at?: datetime
             last_error?: string
