@@ -18,6 +18,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 
@@ -100,6 +101,13 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
                 personIndexDao.upsertPersons(participants.mapNotNull { it.toPersonEntity() })
                 personIndexDao.upsertIdentities(participants.mapNotNull { it.toPersonIdentityEntity() })
                 personIndexDao.upsertSourceEventParticipants(participants)
+                personIndexDao.upsertDirtySources(
+                    PersonIndexDirtySources.forSourceParticipants(
+                        participants = participants,
+                        reason = "source_participant_refresh",
+                        now = Clock.System.now(),
+                    ),
+                )
             }
 
             totalFetched += body.data.size

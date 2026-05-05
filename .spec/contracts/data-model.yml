@@ -572,6 +572,21 @@ derived_models:
       - "enrichedCount는 persons_enrichment row count"
       - "lastSyncAt은 EnrichmentWorker 마지막 성공 시각"
 
+  PersonIndexProjection:
+    owner: android_client_only
+    description: "People/PersonDetail UI가 읽는 person_interactions, unmatched_person_interactions, person_identities projection"
+    inputs:
+      - "canonical source graph: source_event_participants, commitment_participants, commitments, raw_ingestion_events"
+      - "Room-only incremental queue: person_index_dirty_sources"
+      - "DataStore blocked person refs"
+    rules:
+      - "source graph write path는 변경된 raw:<source_event_id> 또는 commitment:<commitment_id> key를 person_index_dirty_sources에 UPSERT한다"
+      - "PersonInteractionIndexWorker는 dirty queue가 있으면 queued key만 읽고 해당 projection slice만 delete/rebuild한다"
+      - "dirty queue가 비어 있고 person_index_source_state가 비어 있으면 최초 bootstrap으로 전체 source graph를 projection한다"
+      - "dirty queue가 비어 있고 blocked person refs가 있으면 suppression fingerprint 검증을 위해 전체 source graph를 재검증한다"
+      - "dirty queue가 비어 있고 source state가 있으면 full source graph scan 없이 no-op으로 종료한다"
+      - "person_interactions의 canonical grouping key는 person_id이며 raw/commitment counterparty_ref fallback은 projection input으로 쓰지 않는다"
+
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
   - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
@@ -580,6 +595,7 @@ migration_notes:
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
   - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
   - "relation intelligence 전환: Supabase와 Android Room은 canonical person/relation mirror(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 공유한다. Android-only sync/projection/cache 컬럼은 허용하지만 backend-managed source wiring의 기준 key는 `person_id`다"
+  - "person_index_dirty_sources는 Android Room-only incremental projection queue다. Supabase mirror 대상이 아니며, source_event_participants/commitment_participants/commitments 쓰기 이후 changed source key만 기록해 PersonInteractionIndexWorker가 전체 source graph를 매번 scan하지 않도록 한다."
   - "raw_ingestion_events / commitments의 상대방 seed 필드는 `counterparty_ref`로 통일한다. Android Room, DTO 내부 모델, Railway API input 모두 이 이름을 사용한다. People/PersonDetail UI 모델과 route argument는 `person_id`만 사용한다."
   - "`person_ref`는 Vertex/LLM item output schema와 Android local contacts enrichment cache(`persons_enrichment.person_ref`)의 legacy-compatible anchor 이름으로만 허용된다. raw/commitment durable schema나 People/PersonDetail primary projection에서 `person_ref` grouping/fallback은 제거됐다."
   - "commitments.status 컬럼 → action_state 컬럼으로 대체: enum이 pending|done|overdue에서 pending|reminded|followed_up|completed로 변경. Room 마이그레이션: ALTER TABLE commitments RENAME COLUMN status TO action_state; UPDATE commitments SET action_state='pending' WHERE action_state='done' OR action_state='overdue'"

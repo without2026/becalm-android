@@ -11,7 +11,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.repository.MeetingTranscriptArchiveInput
+import com.becalm.android.data.repository.MeetingTranscriptIngestionFinalizer
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
@@ -131,17 +131,15 @@ internal class MeetingDocumentTreeProbe(
                 is InsertResult.Fresh -> {
                     insertedCount++
                     if (candidate.isText) {
-                        archiveTextTranscript(
+                        meetingTranscriptFinalizer().archiveAndEnqueue(
                             userId = userId,
                             rawEventId = result.id,
                             sourceRef = candidate.documentUri.toString(),
                             occurredAt = candidate.occurredAt,
-                            displayName = candidate.displayName,
-                            documentUri = candidate.documentUri,
+                            title = candidate.displayName,
+                            text = readUtf8Preview(candidate.documentUri),
+                            syncStatus = candidate.syncStatus,
                         )
-                        if (candidate.syncStatus == "pending") {
-                            workScheduler.enqueueMeetingTranscriptUpload(result.id)
-                        }
                     }
                     if (candidate.lastModifiedMs > maxLastModifiedMs) {
                         maxLastModifiedMs = candidate.lastModifiedMs
@@ -257,27 +255,11 @@ internal class MeetingDocumentTreeProbe(
         return existing?.let(::classifyExisting) ?: InsertResult.DedupSkip
     }
 
-    private suspend fun archiveTextTranscript(
-        userId: String,
-        rawEventId: String,
-        sourceRef: String,
-        occurredAt: Instant,
-        displayName: String,
-        documentUri: Uri,
-    ) {
-        val text = readUtf8Preview(documentUri) ?: return
-        if (text.isBlank()) return
-        sourceArtifactRepository.archiveMeetingTranscript(
-            MeetingTranscriptArchiveInput(
-                userId = userId,
-                rawEventId = rawEventId,
-                sourceRef = sourceRef,
-                occurredAt = occurredAt,
-                title = displayName,
-                text = text,
-            ),
+    private fun meetingTranscriptFinalizer(): MeetingTranscriptIngestionFinalizer =
+        MeetingTranscriptIngestionFinalizer(
+            sourceArtifactRepository = sourceArtifactRepository,
+            workScheduler = workScheduler,
         )
-    }
 
     private fun readUtf8Preview(uri: Uri): String? {
         val bytes = appContext.contentResolver.openInputStream(uri)?.use { input ->

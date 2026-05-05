@@ -16,9 +16,9 @@ import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
-import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.toPlainRequestBody
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -26,16 +26,10 @@ import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okio.BufferedSink
-import java.io.IOException
-
-// sync_status 리터럴. STATUS_PENDING 은 [SourceExtractionMappers] 와 공유하기 위해 그쪽에 internal 로 두고
-// STATUS_AWAITING_CONSENT 는 이 파일에서만 쓰이므로 file-private 으로 유지한다.
-private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 
 /**
  * [CoroutineWorker] that uploads a voice recording to Railway's
@@ -180,22 +174,16 @@ public class VoiceUploadWorker @AssistedInject constructor(
             return@withContext Result.failure()
         }
 
-        // Step 3: load entity — scoped to the current user so a stale enqueue from a previous
-        // session cannot read another user's row if the DB was not wiped on sign-out.
-        val userId = userPrefsStore.observeCurrentUserId().first()
-        if (userId.isNullOrBlank()) {
-            logger.e(TAG, "no active userId — failing id=${redact(rawEventId)}")
-            return@withContext Result.failure()
+        val delegate = extractionDelegate()
+        val context = when (val load = delegate.loadContext(rawEventId)) {
+            is LocalSourceExtractionLoadResult.Loaded -> load
+            is LocalSourceExtractionLoadResult.Terminal -> return@withContext load.result
         }
-        val entity = rawIngestionEventDao.findById(id = rawEventId, userId = userId)
-        if (entity == null) {
-            logger.e(TAG, "RawIngestionEventEntity not found id=${redact(rawEventId)}")
-            return@withContext Result.failure()
-        }
+        val entity = context.entity
         processingStatusRepository.recordUploading(entity.sourceType, "Queued audio analysis")
 
         // VOI-004: PIPA consent gate (first check — pre-upload).
-        if (parkIfConsentWithdrawn(entity, rawEventId, stage = "PIPA consent not granted")) {
+        if (delegate.parkIfConsentWithdrawn(entity, stage = "PIPA consent not granted")) {
             return@withContext Result.success()
         }
 
@@ -215,184 +203,59 @@ public class VoiceUploadWorker @AssistedInject constructor(
                     "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
                 )
                 processingStatusRepository.recordError(entity.sourceType, "Audio file unavailable")
-                markFailed(entity, reasonCode = "audio_unavailable")
+                markFailed(delegate, entity, reasonCode = "audio_unavailable")
                 return@withContext Result.success()
             }
 
         // VOI-004: second PIPA gate — consent may have been withdrawn while this job was queued
         // or while buildAudioPart was running. Check immediately before the network call so no
         // audio bytes are transmitted after consent is revoked (finding #1 in-flight race fix).
-        if (parkIfConsentWithdrawn(entity, rawEventId, stage = "PIPA consent withdrawn before network call")) {
+        if (delegate.parkIfConsentWithdrawn(entity, stage = "PIPA consent withdrawn before network call")) {
             return@withContext Result.success()
         }
 
-        val parts = entity.toSourceExtractionRequestParts(rawEventId)
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing audio with Gemini")
-
-        val response = try {
-            sourceExtractionApi.commitmentExtract(
-                audio = audioPart,
-                inputModality = "audio".toPlainRequestBody(),
-                sourceType = parts.sourceType,
-                clientEventId = parts.clientEventId,
-                rawEventId = parts.rawEventId,
-                durationSeconds = parts.durationSeconds ?: "0".toPlainRequestBody(),
-                timestamp = parts.timestamp,
-                counterpartyRef = parts.counterpartyRef,
-                eventTitle = parts.eventTitle,
-                folder = parts.folder,
-                conversationRef = null,
-                previousThreadContext = null,
-                bodyText = parts.bodyText,
+        delegate.uploadRunner().upload(
+            SourceExtractionUploadRequest(
+                userId = context.userId,
+                entity = entity,
+                rawEventId = rawEventId,
+                inputModality = "audio",
+                audioPart = audioPart,
+                durationSecondsFallback = "0".toPlainRequestBody(),
+                nonRetryableErrorMessage = "Upload rejected",
+                onMarkFailed = { reasonCode -> markFailed(delegate, entity, reasonCode) },
+                onRateLimited = { retryAfterSec ->
+                    val rateLimitedAttempt = inputData.getInt(KEY_RATE_LIMITED_ATTEMPT, 0)
+                    logger.w(
+                        TAG,
+                        "HTTP 429 id=${redact(rawEventId)} retryAfter=${retryAfterSec}s " +
+                            "rateLimitedAttempt=$rateLimitedAttempt",
+                    )
+                    handleRateLimited(delegate, entity, rawEventId, audioUriString, retryAfterSec, rateLimitedAttempt)
+                },
             )
-        } catch (e: IOException) {
-            logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
-            return@withContext handleFailure(entity)
-        }
-
-        when (response.code()) {
-            200 -> {
-                val body = response.body()
-                if (body == null) {
-                    logger.e(TAG, "empty 200 body id=${redact(rawEventId)}")
-                    return@withContext handleFailure(entity)
-                }
-
-                val now = Clock.System.now()
-
-                extractionPersister().persist(
-                    userId = userId,
-                    entity = entity,
-                    body = body,
-                    now = now,
-                )
-                logger.d(
-                    TAG,
-                    "upload success id=${redact(rawEventId)} items=${body.items.size}",
-                )
-                Result.success()
-            }
-
-            401 -> {
-                // AuthInterceptor already attempted refresh; second 401 means token is invalid
-                logger.w(TAG, "HTTP 401 after refresh id=${redact(rawEventId)} — marking failed")
-                processingStatusRepository.recordError(entity.sourceType, "Unauthorized")
-                markFailed(entity, reasonCode = "unauthorized")
-                Result.success()
-            }
-
-            403, 413, 422 -> {
-                // Non-retryable: PIPA server-side guard failure, body too large, or duration exceeded
-                logger.w(TAG, "HTTP ${response.code()} non-retryable id=${redact(rawEventId)} — quarantining")
-                processingStatusRepository.recordError(entity.sourceType, "Upload rejected")
-                markFailed(entity, reasonCode = "non_retryable_http_${response.code()}")
-                Result.success()
-            }
-
-            502 -> {
-                // Parse the error envelope to distinguish deterministic vs transient failures.
-                // api-contract.yml: output_truncated and schema_violation are non-retryable;
-                // only vertex_upstream_error is retryable (finding #4 fix).
-                handleVoice502(response.errorBody()?.string(), entity, rawEventId)
-            }
-
-            429 -> {
-                val retryAfterSec = response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull()
-                val rateLimitedAttempt = inputData.getInt(KEY_RATE_LIMITED_ATTEMPT, 0)
-                logger.w(
-                    TAG,
-                    "HTTP 429 id=${redact(rawEventId)} retryAfter=${retryAfterSec}s " +
-                        "rateLimitedAttempt=$rateLimitedAttempt",
-                )
-                handleRateLimited(entity, rawEventId, audioUriString, retryAfterSec, rateLimitedAttempt)
-            }
-
-            500, 503 -> {
-                logger.w(TAG, "HTTP ${response.code()} transient id=${redact(rawEventId)} attempt=$runAttemptCount")
-                handleFailure(entity)
-            }
-
-            else -> {
-                logger.w(TAG, "HTTP ${response.code()} unexpected id=${redact(rawEventId)} — marking failed")
-                processingStatusRepository.recordError(entity.sourceType, "Unexpected HTTP ${response.code()}")
-                markFailed(entity, reasonCode = "unexpected_http_${response.code()}")
-                Result.success()
-            }
-        }
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun extractionPersister(): StructuredExtractionPersister =
-        StructuredExtractionPersister(
+    private fun extractionDelegate(): LocalSourceExtractionDelegate =
+        LocalSourceExtractionDelegate(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
+            sourceExtractionApi = sourceExtractionApi,
+            userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,
             workScheduler = workScheduler,
-            logger = logger,
-        )
-
-    /**
-     * VOI-004 PIPA consent gate 구현 — pre-upload, post-upload 두 번 호출된다.
-     * 반환값이 true 이면 caller 는 즉시 중단해야 한다.
-     * 동의가 철회된 경우 entity 를 `awaiting_consent` 상태로 파킹하고,
-     * 업로드는 절대 수행하지 않는다 (오디오 바이트가 서버로 나가지 않음).
-     * [stage] 는 로그에 기록되어 어느 gate 에서 차단됐는지 구분한다.
-     */
-    private suspend fun parkIfConsentWithdrawn(
-        entity: RawIngestionEventEntity,
-        rawEventId: String,
-        stage: String,
-    ): Boolean {
-        val hasConsent = userPrefsStore.observeThirdPartyProvisionConsent().first()
-        if (hasConsent) return false
-        logger.w(TAG, "$stage — parking id=${redact(rawEventId)} as awaiting_consent")
-        processingStatusRepository.recordBlocked(entity.sourceType, "PIPA consent required")
-        val parked = entity.copy(syncStatus = STATUS_AWAITING_CONSENT)
-        rawIngestionEventDao.update(parked)
-        return true
-    }
-
-    /**
-     * Handles an HTTP 502 response by parsing the error envelope and dispatching via
-     * [SourceExtractionUploadStateMachine.decide502Action]. Finding #4 fix.
-     */
-    private suspend fun handleVoice502(
-        errorBodyString: String?,
-        entity: RawIngestionEventEntity,
-        rawEventId: String,
-    ): Result {
-        val envelope = runCatchingNonCancel(
+            moshi = moshi,
             logger = logger,
             tag = TAG,
-            op = "HTTP 502 — failed to parse error envelope id=${redact(rawEventId)}",
-            block = {
-                errorBodyString?.let {
-                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
-                }
-            },
-            onFailure = { null },
+            runAttemptCount = runAttemptCount,
+            maxAttempts = MAX_ATTEMPTS,
         )
-
-        val errorCode = envelope?.error
-        logger.w(TAG, "HTTP 502 id=${redact(rawEventId)} error=$errorCode attempt=$runAttemptCount")
-
-        return when (SourceExtractionUploadStateMachine.decide502Action(errorCode)) {
-            SourceExtraction502Action.Quarantine -> {
-                // Deterministic server-side failure — no point retrying.
-                logger.w(TAG, "HTTP 502 non-retryable ($errorCode) id=${redact(rawEventId)} — quarantining")
-                processingStatusRepository.recordError(entity.sourceType, errorCode ?: "Voice extraction failed")
-                markFailed(entity, reasonCode = errorCode ?: "vertex_502_unknown")
-                Result.success()
-            }
-            SourceExtraction502Action.HandleAsTransient -> {
-                // vertex_upstream_error or unparseable — treat as transient.
-                handleFailure(entity)
-            }
-        }
-    }
 
     /**
      * Builds a [MultipartBody.Part] by opening a streaming [okhttp3.RequestBody] from the
@@ -427,22 +290,6 @@ public class VoiceUploadWorker @AssistedInject constructor(
     }
 
     /**
-     * Handles a transient failure by dispatching via [SourceExtractionUploadStateMachine.decideRetryAction]
-     * (spec VOI-006).
-     */
-    private suspend fun handleFailure(entity: RawIngestionEventEntity): Result {
-        return when (SourceExtractionUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
-            RetryAction.Quarantine -> {
-                logger.w(TAG, "exhausted retries id=${redact(entity.id)} — marking failed")
-                markFailed(entity, reasonCode = "retry_exhausted")
-                Result.success()
-            }
-            // The row stays "pending" so WorkManager can retry it on the next attempt.
-            RetryAction.Retry -> Result.retry()
-        }
-    }
-
-    /**
      * Handles an HTTP 429 by honoring the server-supplied `Retry-After` seconds hint.
      *
      * When retries remain, re-enqueues a [VoiceUploadWorker] with the delay computed by
@@ -469,6 +316,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * Spec refs: api-contract.yml 429 (Retry-After 존중), VOI-006.
      */
     private suspend fun handleRateLimited(
+        delegate: LocalSourceExtractionDelegate,
         entity: RawIngestionEventEntity,
         rawEventId: String,
         audioUri: String,
@@ -482,9 +330,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
             logger.w(
                 TAG,
                 "exhausted 429 budget id=${redact(rawEventId)} " +
-                    "rateLimitedAttempt=$rateLimitedAttempt — marking failed",
+                "rateLimitedAttempt=$rateLimitedAttempt — marking failed",
             )
-            markFailed(entity, reasonCode = "rate_limited_exhausted")
+            markFailed(delegate, entity, reasonCode = "rate_limited_exhausted")
             Result.success()
         } else {
             val delaySec = UploadBackoff.nextDelaySeconds(
@@ -515,14 +363,12 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * is the single source of truth for retry counting), so this is the only place the column
      * is bumped for voice uploads.
      */
-    private suspend fun markFailed(entity: RawIngestionEventEntity, reasonCode: String?) {
-        rawIngestionEventDao.update(
-            entity.copy(
-                syncStatus = "failed",
-                retryCount = entity.retryCount + 1,
-                lastAttemptAt = Clock.System.now(),
-            ),
-        )
+    private suspend fun markFailed(
+        delegate: LocalSourceExtractionDelegate,
+        entity: RawIngestionEventEntity,
+        reasonCode: String?,
+    ) {
+        delegate.markFailed(entity, reasonCode)
         if (userPrefsStore.observeNotificationsEnabled().first()) {
             voiceFailureNotifier.notifyFailure(
                 context = appContext,
@@ -554,12 +400,6 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
         /** Streaming buffer size — 64 KiB chunks per VOI-007. */
         private const val STREAM_BUFFER_BYTES = 65536
-
-        /**
-         * HTTP header carrying a server-supplied retry hint in seconds on 429 responses.
-         * Spec refs: api-contract.yml § /v1/extractions/commitments 429; VOI-006.
-         */
-        private const val HEADER_RETRY_AFTER: String = "Retry-After"
 
         /** WorkManager input [androidx.work.Data] key: UUID of the owning [RawIngestionEventEntity]. */
         public const val KEY_RAW_EVENT_ID: String = "raw_event_id"

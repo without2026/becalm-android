@@ -15,6 +15,7 @@ import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
@@ -22,6 +23,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.SourceInteractionKind
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.security.MessageDigest
@@ -32,12 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
-private fun interactionKindFor(sourceType: String): String = when {
-    sourceType.contains("calendar") -> "calendar"
-    sourceType.contains("mail") || sourceType.contains("imap") || sourceType == "gmail" -> "email"
-    sourceType == "voice" || sourceType == "call_recording" -> "call"
-    else -> sourceType
-}
+private fun interactionKindFor(sourceType: String): String = SourceInteractionKind.forSourceType(sourceType)
 
 @HiltWorker
 public class PersonInteractionIndexWorker @AssistedInject constructor(
@@ -59,20 +56,24 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        val rawEvents = rawDaoProvider.get().findAllForUser(userId)
-        val commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId)
-        val sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId)
-        val commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId)
-        val existingStates = personIndexDaoProvider.get().findSourceStatesForUser(userId)
+        val dao = personIndexDaoProvider.get()
+        val existingStates = dao.findSourceStatesForUser(userId)
+        val dirtySources = dao.findDirtySourcesForUser(userId, DIRTY_LIMIT)
         val blockedPersonRefs = userPrefsStore.observeBlockedPersonRefs().first()
+        val projectionInput = loadProjectionInput(
+            userId = userId,
+            dirtySources = dirtySources,
+            existingStates = existingStates,
+            forceFullVerification = dirtySources.isEmpty() && blockedPersonRefs.isNotEmpty(),
+        )
 
         val suppressionFingerprint = suppressionFingerprint(blockedPersonRefs)
         val sourceRecords = buildSourceRecords(
             suppressionFingerprint = suppressionFingerprint,
-            rawEvents = rawEvents,
-            commitments = commitments,
-            sourceParticipants = sourceParticipants,
-            commitmentParticipants = commitmentParticipants,
+            rawEvents = projectionInput.rawEvents,
+            commitments = projectionInput.commitments,
+            sourceParticipants = projectionInput.sourceParticipants,
+            commitmentParticipants = projectionInput.commitmentParticipants,
         )
         val recordsByKey = sourceRecords.associateBy { it.key }
         val existingStateByKey = existingStates.associateBy { it.key() }
@@ -80,11 +81,18 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             existingStateByKey[record.key]?.fingerprint != record.fingerprint
         }
         val obsoleteStates = existingStates.filter { state ->
-            state.key() !in recordsByKey
+            state.key() !in recordsByKey && projectionInput.includesState(state)
         }
 
         if (changedRecords.isEmpty() && obsoleteStates.isEmpty()) {
-            logger.d(TAG, "person index unchanged sources=${sourceRecords.size}")
+            if (dirtySources.isNotEmpty()) {
+                dao.deleteDirtySourcesByIds(userId, dirtySources.map { it.id })
+            }
+            logger.d(
+                TAG,
+                "person index unchanged sources=${sourceRecords.size} dirtySources=${dirtySources.size} " +
+                    "mode=${projectionInput.mode}",
+            )
             notifyMatchingState(userId)
             return@withContext Result.success()
         }
@@ -97,24 +105,24 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         val snapshot = builder.snapshot()
         databaseProvider.get().withTransaction {
-            val dao = personIndexDaoProvider.get()
+            val txDao = personIndexDaoProvider.get()
             (changedRecords.map { it.key } + obsoleteStates.map { it.key() })
                 .distinct()
                 .forEach { key ->
-                    dao.deleteInteractionsForSource(
+                    txDao.deleteInteractionsForSource(
                         userId = userId,
                         sourceType = key.sourceType,
                         sourceRef = key.sourceRef,
                         interactionKind = key.interactionKind,
                     )
-                    dao.deleteUnmatchedInteractionsForSource(
+                    txDao.deleteUnmatchedInteractionsForSource(
                         userId = userId,
                         sourceType = key.sourceType,
                         sourceRef = key.sourceRef,
                         interactionKind = key.interactionKind,
                     )
                     if (key !in recordsByKey) {
-                        dao.deleteSourceState(
+                        txDao.deleteSourceState(
                             userId = userId,
                             sourceType = key.sourceType,
                             sourceRef = key.sourceRef,
@@ -122,21 +130,71 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                         )
                     }
                 }
-            if (snapshot.identities.isNotEmpty()) dao.upsertIdentities(snapshot.identities)
-            if (snapshot.interactions.isNotEmpty()) dao.upsertInteractions(snapshot.interactions)
-            if (snapshot.unmatched.isNotEmpty()) dao.upsertUnmatchedInteractions(snapshot.unmatched)
+            if (snapshot.identities.isNotEmpty()) txDao.upsertIdentities(snapshot.identities)
+            if (snapshot.interactions.isNotEmpty()) txDao.upsertInteractions(snapshot.interactions)
+            if (snapshot.unmatched.isNotEmpty()) txDao.upsertUnmatchedInteractions(snapshot.unmatched)
             val sourceStates = changedRecords.map { it.toState(userId) }
-            if (sourceStates.isNotEmpty()) dao.upsertSourceStates(sourceStates)
+            if (sourceStates.isNotEmpty()) txDao.upsertSourceStates(sourceStates)
+            if (dirtySources.isNotEmpty()) txDao.deleteDirtySourcesByIds(userId, dirtySources.map { it.id })
         }
 
         logger.d(
             TAG,
-                "indexed changedSources=${changedRecords.size} obsoleteSources=${obsoleteStates.size} " +
+                "indexed mode=${projectionInput.mode} dirtySources=${dirtySources.size} " +
+                "changedSources=${changedRecords.size} obsoleteSources=${obsoleteStates.size} " +
                 "identities=${snapshot.identities.size} interactions=${snapshot.interactions.size} " +
                 "unmatched=${snapshot.unmatched.size}",
         )
         notifyMatchingState(userId)
         Result.success()
+    }
+
+    private suspend fun loadProjectionInput(
+        userId: String,
+        dirtySources: List<PersonIndexDirtySourceEntity>,
+        existingStates: List<PersonIndexSourceStateEntity>,
+        forceFullVerification: Boolean,
+    ): ProjectionInput {
+        if (dirtySources.isEmpty()) {
+            return if (existingStates.isEmpty() || forceFullVerification) {
+                ProjectionInput(
+                    mode = if (existingStates.isEmpty()) "bootstrap" else "suppression",
+                    dirtySources = emptyList(),
+                    rawEvents = rawDaoProvider.get().findAllForUser(userId),
+                    commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId),
+                    sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId),
+                    commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId),
+                )
+            } else {
+                ProjectionInput.empty(mode = "idle", dirtySources = emptyList())
+            }
+        }
+
+        val rawEventIds = dirtySources
+            .mapNotNull { it.sourceRef.removePrefix("raw:").takeIf { id -> it.sourceRef.startsWith("raw:") && id.isNotBlank() } }
+            .distinct()
+        val commitmentIds = dirtySources
+            .mapNotNull {
+                it.sourceRef.removePrefix("commitment:")
+                    .takeIf { id -> it.sourceRef.startsWith("commitment:") && id.isNotBlank() }
+            }
+            .distinct()
+        return ProjectionInput(
+            mode = "dirty",
+            dirtySources = dirtySources,
+            rawEvents = rawEventIds.takeIf { it.isNotEmpty() }
+                ?.let { rawDaoProvider.get().findByIdsForUser(userId, it) }
+                ?: emptyList(),
+            commitments = commitmentIds.takeIf { it.isNotEmpty() }
+                ?.let { commitmentDaoProvider.get().findLiveByIdsForPersonIndex(userId, it) }
+                ?: emptyList(),
+            sourceParticipants = rawEventIds.takeIf { it.isNotEmpty() }
+                ?.let { personIndexDaoProvider.get().findSourceEventParticipantsForUserAndEventIds(userId, it) }
+                ?: emptyList(),
+            commitmentParticipants = commitmentIds.takeIf { it.isNotEmpty() }
+                ?.let { personIndexDaoProvider.get().findCommitmentParticipantsForUserAndCommitmentIds(userId, it) }
+                ?: emptyList(),
+        )
     }
 
     private suspend fun notifyMatchingState(userId: String) {
@@ -444,6 +502,39 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val unmatched: List<UnmatchedPersonInteractionEntity>,
     )
 
+    private data class ProjectionInput(
+        val mode: String,
+        val dirtySources: List<PersonIndexDirtySourceEntity>,
+        val rawEvents: List<RawIngestionEventEntity>,
+        val commitments: List<CommitmentEntity>,
+        val sourceParticipants: List<SourceEventParticipantEntity>,
+        val commitmentParticipants: List<CommitmentParticipantEntity>,
+    ) {
+        fun includesState(state: PersonIndexSourceStateEntity): Boolean {
+            if (mode == "bootstrap" || mode == "suppression") return true
+            return dirtySources.any { dirty ->
+                dirty.sourceRef == state.sourceRef &&
+                    dirty.interactionKind == state.interactionKind &&
+                    (dirty.sourceType == state.sourceType || dirty.sourceType == SourceInteractionKind.COMMITMENT)
+            }
+        }
+
+        companion object {
+            fun empty(
+                mode: String,
+                dirtySources: List<PersonIndexDirtySourceEntity>,
+            ): ProjectionInput =
+                ProjectionInput(
+                    mode = mode,
+                    dirtySources = dirtySources,
+                    rawEvents = emptyList(),
+                    commitments = emptyList(),
+                    sourceParticipants = emptyList(),
+                    commitmentParticipants = emptyList(),
+                )
+        }
+    }
+
     private data class SourceKey(
         val sourceType: String,
         val sourceRef: String,
@@ -501,5 +592,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
     private companion object {
         private const val TAG = "PersonIndexWorker"
+        private const val DIRTY_LIMIT = 500
     }
 }

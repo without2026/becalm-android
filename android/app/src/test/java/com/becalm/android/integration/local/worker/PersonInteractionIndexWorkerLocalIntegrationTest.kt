@@ -10,6 +10,7 @@ import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
@@ -192,6 +193,86 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         assertTrue(db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first().isEmpty())
     }
 
+    @Test
+    fun `dirty source queue reindexes only queued source projection`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val firstPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        val updatedPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, UPDATED_EMAIL)).personId
+        val untouchedPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, UNTOUCHED_EMAIL)).personId
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-dirty-1", sourceType = SourceType.GMAIL, counterpartyRef = null))
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-dirty-2", sourceType = SourceType.GMAIL, counterpartyRef = null))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-dirty-1",
+                    sourceEventId = "raw-dirty-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-1",
+                    personId = firstPersonId,
+                    email = CUSTOMER_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+                sourceParticipant(
+                    id = "participant-dirty-2",
+                    sourceEventId = "raw-dirty-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-2",
+                    personId = untouchedPersonId,
+                    email = UNTOUCHED_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        logger.clear()
+
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-dirty-1",
+                    sourceEventId = "raw-dirty-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-1",
+                    personId = updatedPersonId,
+                    email = UPDATED_EMAIL,
+                    displayName = "Updated Customer",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertDirtySources(
+            listOf(
+                PersonIndexDirtySources.rawEvent(
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceEventId = "raw-dirty-1",
+                    reason = "test",
+                    now = Instant.parse("2026-04-29T05:00:00Z"),
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().observeInteractionsForPerson(USER_ID, firstPersonId, limit = 20).first().isEmpty())
+        assertEquals(
+            listOf("raw:raw-dirty-1"),
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, updatedPersonId, limit = 20).first()
+                .map { it.sourceRef },
+        )
+        assertEquals(
+            listOf("raw:raw-dirty-2"),
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, untouchedPersonId, limit = 20).first()
+                .map { it.sourceRef },
+        )
+        assertTrue(db.personIndexDao().findDirtySourcesForUser(USER_ID, limit = 10).isEmpty())
+        assertTrue(logger.entries.any { "indexed mode=dirty dirtySources=1 changedSources=1" in it.message })
+    }
+
     private fun newWorker(): PersonInteractionIndexWorker =
         PersonInteractionIndexWorker(
             appContext = LocalIntegrationSupport.appContext(),
@@ -315,5 +396,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     private companion object {
         const val USER_ID = "user-1"
         const val CUSTOMER_EMAIL = "customer@example.com"
+        const val UPDATED_EMAIL = "updated@example.com"
+        const val UNTOUCHED_EMAIL = "untouched@example.com"
     }
 }

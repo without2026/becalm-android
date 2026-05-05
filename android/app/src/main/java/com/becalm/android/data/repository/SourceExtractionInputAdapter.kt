@@ -5,6 +5,9 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.RawIngestionEventDto
 import com.becalm.android.data.remote.dto.SourceEventParticipantInputDto
 import java.util.UUID
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,18 +19,64 @@ import org.json.JSONObject
  * event metadata, optional transient body, and participant hints.
  */
 internal class SourceExtractionInputAdapter(
-    private val emailBodyRepository: EmailBodyRepository,
+    private val emailBodyRepository: EmailBodyRepository? = null,
 ) {
     suspend fun toUploadDto(event: RawIngestionEventEntity): RawIngestionEventDto {
-        val normalized = NormalizedSourceEvent.from(
-            rawEvent = event,
-            emailBody = event.emailBodyForExtraction(),
+        return toNormalizedEvent(event).toDto()
+    }
+
+    suspend fun toRequestParts(
+        event: RawIngestionEventEntity,
+        rawEventId: String,
+        bodyTextOverride: String? = null,
+    ): SourceExtractionRequestParts {
+        return toNormalizedEvent(event).toRequestParts(
+            rawEventId = rawEventId,
+            bodyTextOverride = bodyTextOverride,
         )
-        return normalized.toDto()
     }
 
     private suspend fun RawIngestionEventEntity.emailBodyForExtraction(): EmailBodyEntity? =
-        emailBodyRepository.getByRawEventId(id)
+        emailBodyRepository?.getByRawEventId(id)
+
+    private suspend fun toNormalizedEvent(event: RawIngestionEventEntity): NormalizedSourceEvent =
+        NormalizedSourceEvent.from(
+            rawEvent = event,
+            emailBody = event.emailBodyForExtraction(),
+        )
+}
+
+internal data class SourceExtractionRequestParts(
+    val sourceType: RequestBody,
+    val clientEventId: RequestBody,
+    val rawEventId: RequestBody,
+    val durationSeconds: RequestBody?,
+    val timestamp: RequestBody,
+    val counterpartyRef: RequestBody?,
+    val eventTitle: RequestBody?,
+    val folder: RequestBody?,
+    val bodyText: RequestBody?,
+)
+
+internal fun String.toPlainRequestBody(): RequestBody =
+    toRequestBody("text/plain".toMediaTypeOrNull())
+
+internal fun NormalizedSourceEvent.toRequestParts(
+    rawEventId: String,
+    bodyTextOverride: String? = null,
+): SourceExtractionRequestParts {
+    val dto = toDto()
+    return SourceExtractionRequestParts(
+        sourceType = dto.sourceType.toPlainRequestBody(),
+        clientEventId = dto.clientEventId.toPlainRequestBody(),
+        rawEventId = rawEventId.toPlainRequestBody(),
+        durationSeconds = dto.durationSeconds?.toString()?.toPlainRequestBody(),
+        timestamp = dto.timestamp.toString().toPlainRequestBody(),
+        counterpartyRef = dto.counterpartyRef?.toPlainRequestBody(),
+        eventTitle = dto.eventTitle?.toPlainRequestBody(),
+        folder = dto.folder?.toPlainRequestBody(),
+        bodyText = (bodyTextOverride ?: dto.emailBodyPlain)?.toPlainRequestBody(),
+    )
 }
 
 internal data class NormalizedSourceEvent(

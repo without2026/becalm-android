@@ -8,9 +8,8 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
-import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceOriginalResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -29,8 +28,8 @@ import kotlinx.coroutines.withContext
  *
  * Exposes only display-safe fields extracted from the underlying raw entity,
  * keeping PII (raw personRef, raw headers) out of the UI layer. Email-specific
- * fields are populated only when the loaded event's `source_type` is in
- * [EMAIL_SOURCE_TYPES]; for other sources they remain null / zero.
+ * fields are populated only when the loaded event is an email source; for other
+ * sources they remain null / zero.
  *
  * @property eventId Primary-key of the loaded event.
  * @property sourceType Source-type label (e.g. "gmail", "voice").
@@ -76,10 +75,8 @@ internal const val ERROR_EVENT_NOT_FOUND = "Event not found"
  * ViewModel for RawEventDetailScreen (SRC-008).
  *
  * Loads a single raw ingestion event by its primary-key [eventId] using
- * [RawIngestionRepository.findById]. When the loaded event is in
- * [EMAIL_SOURCE_TYPES] the VM additionally joins [EmailBodyRepository] to hydrate
- * [RawEventDetailUiState.emailBody] and [RawEventDetailUiState.attachmentCount];
- * non-email sources skip that call entirely.
+ * [RawIngestionRepository.findById], then resolves any local original/email body
+ * through [SourceOriginalResolver].
  *
  * The current user ID is resolved from [UserPrefsStore.observeCurrentUserId] and
  * passed to the user-scoped [RawIngestionRepository.findById] call — prevents
@@ -91,8 +88,7 @@ internal const val ERROR_EVENT_NOT_FOUND = "Event not found"
 @HiltViewModel
 public class RawEventDetailViewModel @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
-    private val emailBodyRepository: EmailBodyRepository,
-    private val sourceArtifactRepository: SourceArtifactRepository,
+    private val sourceOriginalResolver: SourceOriginalResolver,
     private val projectionPort: RawEventDetailProjectionPort,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
@@ -135,10 +131,11 @@ public class RawEventDetailViewModel @Inject constructor(
             val loadedState = withContext(ioDispatcher) {
                 val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
                 val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
+                val sourceOriginal = sourceOriginalResolver.resolve(userId, entity)
                 RawEventDetailProjector.buildLoadedState(
                     entity = entity,
-                    emailBody = maybeLoadEmailBody(entity),
-                    archivedOriginal = sourceArtifactRepository.findMarkdownOriginal(userId, entity.id),
+                    emailBody = sourceOriginal.emailBody,
+                    archivedOriginal = sourceOriginal.archivedOriginal,
                     commitmentQuotes = commitmentQuotes,
                     attendeesRaw = attendeesRaw,
                 )
@@ -146,17 +143,5 @@ public class RawEventDetailViewModel @Inject constructor(
             _uiState.value = loadedState
         }
     }
-
-    /**
-     * Returns the joined [EmailBodyEntity] when [entity] is an email source, or
-     * null otherwise. Non-email sources skip the repository round-trip entirely
-     * so voice / calendar / call-recording events pay no extra cost.
-     */
-    private suspend fun maybeLoadEmailBody(entity: RawIngestionEventEntity): EmailBodyEntity? =
-        if (entity.sourceType in EMAIL_SOURCE_TYPES) {
-            emailBodyRepository.getByRawEventId(entity.id)
-        } else {
-            null
-        }
 
 }

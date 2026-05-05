@@ -5,7 +5,6 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.becalm.android.core.di.IoDispatcher
-import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -20,9 +19,9 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
-import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
+import com.becalm.android.worker.WorkerRunGuard
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import javax.inject.Provider
@@ -60,13 +59,14 @@ public class BackendMailSyncWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result = withContext(ioDispatcher) {
-        if (processingPauseGate.shouldSkip(TAG)) {
-            return@withContext Result.success()
-        }
-        if (runAttemptCount >= MAX_RETRIES) {
-            logger.e(TAG, "Exceeded $MAX_RETRIES attempts, failing permanently")
-            return@withContext Result.failure()
-        }
+        WorkerRunGuard(
+            tag = TAG,
+            runAttemptCount = runAttemptCount,
+            maxRetries = MAX_RETRIES,
+            processingPauseGate = processingPauseGate,
+            logger = logger,
+        ).terminalResultOrNull()?.let { return@withContext it }
+
         val userId = authRepositoryProvider.get().currentSession()?.userId
         if (userId == null) {
             logger.w(TAG, "no active session — skipping backend mail sync")
@@ -82,7 +82,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         var shouldRetry = false
         providers.forEach { provider ->
             val result = syncProvider(provider, userId)
-            if (result == ProviderSyncResult.RETRY) shouldRetry = true
+            if (result == ServerBackedSourceSyncResult.RETRY) shouldRetry = true
         }
         if (shouldRetry) Result.retry() else Result.success()
     }
@@ -97,97 +97,64 @@ public class BackendMailSyncWorker @AssistedInject constructor(
         userPrefsStore.observeEmailSourceConnected(provider).first() &&
             userPrefsStore.observeEmailSourceManagedByBackend(provider).first()
 
-    private suspend fun syncProvider(provider: MailProviderSpec, userId: String): ProviderSyncResult {
-        sourceStatusRepository.recordSyncStart(provider.sourceType)
-        processingStatusRepository.recordScanning(provider.sourceType, "Checking new mail")
-
-        return try {
-            processingStatusRepository.recordGemini(provider.sourceType, "Checking mail with Gemini")
-            val response = apiProvider.get().syncMailSource(provider = provider.sourceType)
-            if (!response.isSuccessful) {
-                return response.code().toProviderFailure(provider)
-            }
-
-            val synced = response.body()?.synced ?: 0
-            processingStatusRepository.recordSynced(
-                sourceType = provider.sourceType,
-                itemCount = synced,
-                message = "Checked recent mail",
-            )
-            sourceStatusRepository.recordSyncSuccess(provider.sourceType, clock.nowInstant())
-            logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=$synced")
-            refreshRawEventsAndCommitments(provider, userId)
-        } catch (error: Exception) {
-            when (error) {
-                is HttpException -> error.code().toProviderFailure(provider)
-                else -> {
-                    logger.w(TAG, "backend mail sync transient failure source=${provider.sourceType}", error)
-                    sourceStatusRepository.recordSyncError(provider.sourceType, "Network error", clock.nowInstant())
-                    processingStatusRepository.recordError(provider.sourceType, "Network error")
-                    ProviderSyncResult.RETRY
-                }
-            }
-        }
-    }
-
-    private suspend fun refreshRawEventsAndCommitments(provider: MailProviderSpec, userId: String): ProviderSyncResult {
-        val coordinator = SourceRelationRefreshCoordinator(
+    private suspend fun syncProvider(provider: MailProviderSpec, userId: String): ServerBackedSourceSyncResult {
+        val runner = ServerBackedSourceSyncRunner(
             rawIngestionRepository = rawIngestionRepositoryProvider.get(),
             commitmentRepository = commitmentRepositoryProvider.get(),
             sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
             commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+            sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
             workScheduler = workScheduler,
+            clock = clock,
             logger = logger,
+            tag = TAG,
         )
-        return when (
-            val result = coordinator.refresh(
-                userId = userId,
-                plan = SourceRelationRefreshPlan(
+        return runner.run(
+            userId = userId,
+            request = ServerBackedSourceSyncRequest(
+                sourceType = provider.sourceType,
+                scanMessage = "Checking new mail",
+                geminiMessage = "Checking mail with Gemini",
+                syncedMessage = "Checked recent mail",
+                recordSyncSuccessBeforeRefresh = true,
+                refreshFailureMessage = { "Relation refresh failed" },
+                refreshFailureRetryable = { true },
+                refreshPlan = SourceRelationRefreshPlan(
                     sourceType = provider.sourceType,
                     rawSourceType = provider.sourceType,
                 ),
-            )
-        ) {
-            is BecalmResult.Success -> {
-                logger.d(
-                    TAG,
-                    "relation refresh after mail sync source=${provider.sourceType} changed=${result.value.changedCount}",
-                )
-                ProviderSyncResult.SUCCESS
-            }
-            is BecalmResult.Failure -> {
-                sourceStatusRepository.recordSyncError(
-                    provider.sourceType,
-                    "Relation refresh failed",
-                    clock.nowInstant(),
-                )
-                processingStatusRepository.recordError(provider.sourceType, "Relation refresh failed")
-                logger.w(
-                    TAG,
-                    "relation refresh after mail sync failed source=${provider.sourceType} " +
-                        "error=${result.error::class.simpleName}",
-                )
-                ProviderSyncResult.RETRY
-            }
-        }
+                trigger = { triggerMailSync(provider) },
+            ),
+        )
     }
 
-    private suspend fun Int.toProviderFailure(provider: MailProviderSpec): ProviderSyncResult {
-        val message = "HTTP $this"
-        sourceStatusRepository.recordSyncError(provider.sourceType, message, clock.nowInstant())
-        processingStatusRepository.recordError(provider.sourceType, message)
-        logger.w(TAG, "backend mail sync failed source=${provider.sourceType} code=$this")
-        return when (this) {
-            429, in 500..599 -> ProviderSyncResult.RETRY
-            else -> ProviderSyncResult.FAILURE
+    private suspend fun triggerMailSync(provider: MailProviderSpec): ServerBackedTriggerResult =
+        try {
+            val response = apiProvider.get().syncMailSource(provider = provider.sourceType)
+            if (!response.isSuccessful) {
+                val message = "HTTP ${response.code()}"
+                ServerBackedTriggerResult.Failure(
+                    message = message,
+                    retryable = response.code() == 429 || response.code() in 500..599,
+                )
+            } else {
+                val synced = response.body()?.synced ?: 0
+                logger.d(TAG, "backend mail sync success source=${provider.sourceType} synced=$synced")
+                ServerBackedTriggerResult.Success(syncedCount = synced)
+            }
+        } catch (error: Exception) {
+            when (error) {
+                is HttpException -> ServerBackedTriggerResult.Failure(
+                    message = "HTTP ${error.code()}",
+                    retryable = error.code() == 429 || error.code() in 500..599,
+                )
+                else -> {
+                    logger.w(TAG, "backend mail sync transient failure source=${provider.sourceType}", error)
+                    ServerBackedTriggerResult.Failure(message = "Network error", retryable = true)
+                }
+            }
         }
-    }
-
-    private enum class ProviderSyncResult {
-        SUCCESS,
-        RETRY,
-        FAILURE,
-    }
 
     private sealed class MailProviderSpec(
         val sourceType: String,

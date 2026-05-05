@@ -410,6 +410,17 @@ public interface CommitmentDao {
     )
     public suspend fun findLiveForPersonIndex(userId: String): List<CommitmentEntity>
 
+    @Query(
+        """
+        SELECT * FROM commitments
+        WHERE user_id = :userId
+          AND id IN (:ids)
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC
+        """,
+    )
+    public suspend fun findLiveByIdsForPersonIndex(userId: String, ids: List<String>): List<CommitmentEntity>
+
     // ─── List reads ────────────────────────────────────────────────────────────
 
     /**

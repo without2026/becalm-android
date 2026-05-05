@@ -140,7 +140,7 @@ internal class SourceRelationRefreshCoordinator(
             localWriteCount = plan.localWriteCount,
         )
         if (stats.changedCount > 0) {
-            workScheduler.enqueuePersonInteractionIndex()
+            SourceGraphChangedNotifier(workScheduler).notifyChanged()
         }
         return BecalmResult.Success(stats)
     }

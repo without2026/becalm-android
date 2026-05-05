@@ -7,17 +7,17 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
-import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.ColdSyncWorkInputs
 import com.becalm.android.worker.ProcessingPauseGate
-import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
+import com.becalm.android.worker.WorkerRunGuard
 import kotlinx.datetime.Instant
 
 internal suspend fun runServerBackedCalendarSync(
@@ -36,13 +36,13 @@ internal suspend fun runServerBackedCalendarSync(
     clock: Clock,
     logger: Logger,
 ): Result {
-    if (processingPauseGate.shouldSkip(tag)) {
-        return Result.success()
-    }
-    if (runAttemptCount >= MAX_RETRIES) {
-        logger.e(tag, "Exceeded $MAX_RETRIES attempts, failing permanently")
-        return Result.failure()
-    }
+    WorkerRunGuard(
+        tag = tag,
+        runAttemptCount = runAttemptCount,
+        maxRetries = MAX_RETRIES,
+        processingPauseGate = processingPauseGate,
+        logger = logger,
+    ).terminalResultOrNull()?.let { return it }
     logger.d(tag, "doWork started runAttempt=$runAttemptCount")
 
     val userId = authRepository.currentSession()?.userId
@@ -54,105 +54,67 @@ internal suspend fun runServerBackedCalendarSync(
     val startedAt = clock.nowInstant()
     val lookbackDays = inputData.getInt(ColdSyncWorkInputs.KEY_LOOKBACK_DAYS, NO_LOOKBACK)
         .takeIf { it > 0 }
-    sourceStatusRepository.recordSyncStart(sourceType)
-
-    when (val syncResult = calendarEventRepository.triggerServerSync()) {
-        is BecalmResult.Success -> {
-            logger.d(tag, "triggerServerSync succeeded synced=${syncResult.value.synced}")
-        }
-        is BecalmResult.Failure -> {
-            val error = syncResult.error
-            return when (error) {
-                is BecalmError.RateLimited -> {
-                    logger.w(
-                        tag,
-                        "triggerServerSync rate-limited retryAfter=${error.retryAfterSeconds}s — scheduling retry",
-                    )
-                    Result.retry()
-                }
-                is BecalmError.Unauthorized -> {
-                    logger.w(tag, "triggerServerSync unauthorized — session invalid; failing")
-                    sourceStatusRepository.recordSyncError(
-                        sourceType,
-                        "Unauthorized: session invalid",
-                        clock.nowInstant(),
-                    )
-                    Result.failure()
-                }
-                is BecalmError.Network, is BecalmError.ServerError -> {
-                    val msg = error.toCalendarSyncMessage()
-                    logger.w(tag, "triggerServerSync transient error: $msg — scheduling retry")
-                    Result.retry()
-                }
-                else -> {
-                    val msg = error.toCalendarSyncMessage()
-                    logger.e(tag, "triggerServerSync failed: $msg")
-                    sourceStatusRepository.recordSyncError(
-                        sourceType,
-                        msg,
-                        clock.nowInstant(),
-                    )
-                    Result.failure()
-                }
-            }
-        }
-    }
-
     val rangeStart = lookbackDays?.let { windowDays -> daysAgo(startedAt, windowDays) }
     val rangeEnd = lookbackDays?.let { windowDays -> daysAhead(startedAt, windowDays) }
-    val relationRefreshStats = when (
-        val refreshResult = SourceRelationRefreshCoordinator(
-            calendarEventRepository = calendarEventRepository,
-            commitmentRepository = commitmentRepository,
-            sourceEventParticipantRepository = sourceEventParticipantRepository,
-            commitmentParticipantRepository = commitmentParticipantRepository,
-            workScheduler = workScheduler,
-            logger = logger,
-        ).refresh(
-            userId = userId,
-            plan = SourceRelationRefreshPlan(
+
+    val result = ServerBackedSourceSyncRunner(
+        calendarEventRepository = calendarEventRepository,
+        commitmentRepository = commitmentRepository,
+        sourceEventParticipantRepository = sourceEventParticipantRepository,
+        commitmentParticipantRepository = commitmentParticipantRepository,
+        sourceStatusRepository = sourceStatusRepository,
+        workScheduler = workScheduler,
+        clock = clock,
+        logger = logger,
+        tag = tag,
+    ).run(
+        userId = userId,
+        request = ServerBackedSourceSyncRequest(
+            sourceType = sourceType,
+            refreshPlan = SourceRelationRefreshPlan(
                 sourceType = sourceType,
                 calendarRefresh = CalendarRelationRefresh(
                     rangeStart = rangeStart,
                     rangeEnd = rangeEnd,
                 ),
             ),
+            refreshFailureMessage = { error -> error.toCalendarSyncMessage() },
+            refreshFailureRetryable = { error ->
+                error is BecalmError.Network || error is BecalmError.ServerError
+            },
+            trigger = {
+                when (val syncResult = calendarEventRepository.triggerServerSync()) {
+                    is BecalmResult.Success -> {
+                        logger.d(tag, "triggerServerSync succeeded synced=${syncResult.value.synced}")
+                        ServerBackedTriggerResult.Success()
+                    }
+                    is BecalmResult.Failure -> {
+                        val error = syncResult.error
+                        val message = if (error is BecalmError.Unauthorized) {
+                            "Unauthorized: session invalid"
+                        } else {
+                            error.toCalendarSyncMessage()
+                        }
+                        logger.w(tag, "triggerServerSync failed: $message")
+                        ServerBackedTriggerResult.Failure(
+                            message = message,
+                            retryable = error is BecalmError.RateLimited ||
+                                error is BecalmError.Network ||
+                                error is BecalmError.ServerError,
+                        )
+                    }
+                }
+            },
+        ),
+    ).toWorkerResult()
+
+    if (result is Result.Success) {
+        logger.d(
+            tag,
+            "doWork success elapsedMs=${clock.nowInstant().toEpochMilliseconds() - startedAt.toEpochMilliseconds()}",
         )
-    ) {
-        is BecalmResult.Success -> refreshResult.value
-        is BecalmResult.Failure -> {
-            val error = refreshResult.error
-            val msg = error.toCalendarSyncMessage()
-            return when (error) {
-                is BecalmError.Network, is BecalmError.ServerError -> {
-                    logger.w(tag, "commitment participant refresh after calendar sync transient error: $msg — scheduling retry")
-                    Result.retry()
-                }
-                else -> {
-                    logger.e(tag, "commitment participant refresh after calendar sync failed: $msg")
-                    sourceStatusRepository.recordSyncError(
-                        sourceType,
-                        msg,
-                        clock.nowInstant(),
-                    )
-                    Result.failure()
-                }
-            }
-        }
     }
-
-    logger.d(
-        tag,
-        "relation refresh after calendar sync complete changed=${relationRefreshStats.changedCount}",
-    )
-
-    sourceStatusRepository.recordSyncSuccess(sourceType, clock.nowInstant())
-
-    logger.d(
-        tag,
-        "doWork success changed=${relationRefreshStats.changedCount} elapsedMs=${clock.nowInstant().toEpochMilliseconds() - startedAt.toEpochMilliseconds()}",
-    )
-    return Result.success()
+    return result
 }
 
 private const val NO_LOOKBACK: Int = -1

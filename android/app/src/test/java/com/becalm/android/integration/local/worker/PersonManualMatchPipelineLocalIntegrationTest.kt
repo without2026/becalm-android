@@ -4,8 +4,10 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
 import com.becalm.android.worker.WorkScheduler
@@ -71,10 +73,55 @@ class PersonManualMatchPipelineLocalIntegrationTest {
 
         newWorker().doWork()
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
 
         db.rawIngestionEventDao().insert(rawEvent(id = "raw-future-1", snippet = "$NAVER_NICKNAME 확인 메일입니다."))
         newWorker().doWork()
         assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
+    }
+
+    @Test
+    fun `manual match resolves unmatched source participant into person projection`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-relation-1", snippet = "Steve 검토 필요"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-unresolved-1",
+                    sourceEventId = "raw-relation-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-1",
+                    displayName = "Steve",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-relation-1",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "Customer",
+        )
+        assertTrue(result is BecalmResult.Success)
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertEquals(listOf("raw:raw-relation-1"), interactions.map { it.sourceRef })
+        assertEquals(1, scheduler.personIndexEnqueueCount)
     }
 
     private fun newWorker(): PersonInteractionIndexWorker =
@@ -103,6 +150,34 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             folder = "INBOX",
             timestamp = Instant.parse("2026-04-29T00:00:00Z"),
             syncStatus = "synced",
+        )
+
+    private fun sourceParticipant(
+        id: String,
+        sourceEventId: String,
+        sourceType: String,
+        sourceRef: String,
+        displayName: String,
+    ): SourceEventParticipantEntity =
+        SourceEventParticipantEntity(
+            id = id,
+            userId = USER_ID,
+            sourceEventId = sourceEventId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            personId = null,
+            role = "mentioned",
+            relationToUser = "referenced",
+            identityType = null,
+            normalizedValue = null,
+            displayNameRaw = displayName,
+            emailRaw = null,
+            phoneRaw = null,
+            organizationRaw = null,
+            evidence = displayName,
+            confidence = 0.45,
+            resolutionStatus = "unresolved",
+            createdAt = Instant.parse("2026-04-29T00:00:00Z"),
         )
 
     private class RecordingWorkScheduler : WorkScheduler {
@@ -144,5 +219,6 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         private const val USER_ID = "user-1"
         private const val NAVER_EMAIL = "noreply@navercorp.com"
         private const val NAVER_NICKNAME = "네이버 예약팀"
+        private const val CUSTOMER_EMAIL = "customer@example.com"
     }
 }

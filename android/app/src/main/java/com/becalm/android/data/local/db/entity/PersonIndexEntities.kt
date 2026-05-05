@@ -287,8 +287,8 @@ public data class CommitmentParticipantEntity(
 /**
  * Source row that looked person-relevant but did not have a resolvable person anchor.
  *
- * These rows power manual repair UI. Once the user matches a row, the exact source tuple is
- * stored in [PersonManualMatchEntity] and the next index rebuild converts it into a normal
+ * These rows power manual repair UI. Once the user matches a row, the matching source
+ * participant is resolved and the next index rebuild converts it into a normal
  * [PersonInteractionEntity].
  */
 @Entity(
@@ -330,93 +330,11 @@ public data class UnmatchedPersonInteractionEntity(
 )
 
 /**
- * User-confirmed exact mapping from a source row to a canonical person.
- */
-@Entity(
-    tableName = "person_manual_matches",
-    indices = [
-        Index(
-            name = "ux_person_manual_matches_user_source",
-            value = ["user_id", "source_type", "source_ref", "interaction_kind"],
-            unique = true,
-        ),
-        Index(
-            name = "idx_person_manual_matches_user_person",
-            value = ["user_id", "matched_person_id"],
-        ),
-    ],
-)
-public data class PersonManualMatchEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "user_id")
-    val userId: String,
-    @ColumnInfo(name = "source_type")
-    val sourceType: String,
-    @ColumnInfo(name = "source_ref")
-    val sourceRef: String,
-    @ColumnInfo(name = "interaction_kind")
-    val interactionKind: String,
-    @ColumnInfo(name = "matched_person_id")
-    val matchedPersonId: String,
-    @ColumnInfo(name = "matched_identity_key")
-    val matchedIdentityKey: String,
-    @ColumnInfo(name = "nickname")
-    val nickname: String?,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Instant,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Instant,
-)
-
-/**
- * User-taught alias that can resolve future rows without requiring another manual match.
- */
-@Entity(
-    tableName = "person_alias_rules",
-    indices = [
-        Index(
-            name = "ux_person_alias_rules_user_alias_scope",
-            value = ["user_id", "normalized_alias", "source_scope"],
-            unique = true,
-        ),
-        Index(
-            name = "idx_person_alias_rules_user_person",
-            value = ["user_id", "person_id"],
-        ),
-    ],
-)
-public data class PersonAliasRuleEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "user_id")
-    val userId: String,
-    @ColumnInfo(name = "alias")
-    val alias: String,
-    @ColumnInfo(name = "normalized_alias")
-    val normalizedAlias: String,
-    @ColumnInfo(name = "person_id")
-    val personId: String,
-    @ColumnInfo(name = "identity_key")
-    val identityKey: String,
-    @ColumnInfo(name = "source_scope")
-    val sourceScope: String?,
-    @ColumnInfo(name = "enabled")
-    val enabled: Boolean,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Instant,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Instant,
-)
-
-/**
  * Fingerprint of a source-derived person-index row from the last successful index pass.
  *
  * The index worker uses this table to avoid tearing down and rebuilding every person
- * interaction on each source sync. A row is reprocessed only when its source payload, or the
- * resolver state that can affect matching (manual matches / alias rules), changes.
+ * interaction on each source sync. A row is reprocessed only when its source payload or
+ * suppression state changes.
  */
 @Entity(
     tableName = "person_index_source_state",
@@ -446,6 +364,45 @@ public data class PersonIndexSourceStateEntity(
     val interactionKind: String,
     @ColumnInfo(name = "fingerprint")
     val fingerprint: String,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Instant,
+)
+
+/**
+ * Room-only queue of source graph keys that need person-index projection refresh.
+ *
+ * The source/commitment relation tables remain canonical. This table only records which
+ * source event or commitment changed so [com.becalm.android.worker.PersonInteractionIndexWorker]
+ * can rebuild a small projection slice instead of scanning every source row on each sync.
+ */
+@Entity(
+    tableName = "person_index_dirty_sources",
+    indices = [
+        Index(
+            name = "ux_person_index_dirty_sources_user_source",
+            value = ["user_id", "source_type", "source_ref", "interaction_kind"],
+            unique = true,
+        ),
+        Index(
+            name = "idx_person_index_dirty_sources_user_updated",
+            value = ["user_id", "updated_at"],
+        ),
+    ],
+)
+public data class PersonIndexDirtySourceEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "source_type")
+    val sourceType: String,
+    @ColumnInfo(name = "source_ref")
+    val sourceRef: String,
+    @ColumnInfo(name = "interaction_kind")
+    val interactionKind: String,
+    @ColumnInfo(name = "reason")
+    val reason: String?,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Instant,
 )

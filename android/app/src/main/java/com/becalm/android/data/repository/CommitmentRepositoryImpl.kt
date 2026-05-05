@@ -178,6 +178,15 @@ public class CommitmentRepositoryImpl @Inject constructor(
                             .associateBy { it.id }
                     val entities = page.data.map { it.toEntity(userId, existingById[it.id]) }
                     dao.insertAll(entities)
+                    if (entities.isNotEmpty()) {
+                        databaseProvider.get().personIndexDao().upsertDirtySources(
+                            PersonIndexDirtySources.forCommitments(
+                                commitments = entities,
+                                reason = "commitment_refresh",
+                                now = Clock.System.now(),
+                            ),
+                        )
+                    }
                     totalFetched += page.data.size
                     totalUpserted += entities.size
                     lastHasMore = page.hasMore

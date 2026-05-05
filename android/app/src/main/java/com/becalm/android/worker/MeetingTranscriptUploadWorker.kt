@@ -12,20 +12,15 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
-import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
-import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import java.io.IOException
 import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
 
 @HiltWorker
 public class MeetingTranscriptUploadWorker @AssistedInject constructor(
@@ -104,92 +99,46 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
             return@withContext Result.failure()
         }
 
-        val userId = userPrefsStore.observeCurrentUserId().first()
-        if (userId.isNullOrBlank()) {
-            logger.e(TAG, "no active userId — failing id=${redact(rawEventId)}")
-            return@withContext Result.failure()
+        val delegate = extractionDelegate()
+        val context = when (val load = delegate.loadContext(rawEventId)) {
+            is LocalSourceExtractionLoadResult.Loaded -> load
+            is LocalSourceExtractionLoadResult.Terminal -> return@withContext load.result
         }
+        val entity = context.entity
 
-        val entity = rawIngestionEventDao.findById(id = rawEventId, userId = userId)
-            ?: run {
-                logger.e(TAG, "RawIngestionEventEntity not found id=${redact(rawEventId)}")
-                return@withContext Result.failure()
-            }
-
-        if (parkIfConsentWithdrawn(entity)) {
+        if (delegate.parkIfConsentWithdrawn(entity)) {
             return@withContext Result.success()
         }
 
         val transcript = readTranscriptText(entity.sourceRef)
             ?: run {
                 processingStatusRepository.recordError(entity.sourceType, "Transcript unavailable")
-                markFailed(entity, reasonCode = "transcript_unavailable")
+                delegate.markFailed(entity, reasonCode = "transcript_unavailable")
                 return@withContext Result.success()
             }
 
         if (transcript.isBlank()) {
             processingStatusRepository.recordError(entity.sourceType, "Transcript empty")
-            markFailed(entity, reasonCode = "empty_transcript")
+            delegate.markFailed(entity, reasonCode = "empty_transcript")
             return@withContext Result.success()
         }
 
-        if (parkIfConsentWithdrawn(entity)) {
+        if (delegate.parkIfConsentWithdrawn(entity)) {
             return@withContext Result.success()
         }
 
-        val parts = entity.toSourceExtractionRequestParts(rawEventId, bodyText = transcript)
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing transcript with Gemini")
-        val response = try {
-            sourceExtractionApi.commitmentExtract(
-                audio = null,
-                inputModality = "transcript".toPlainRequestBody(),
-                sourceType = parts.sourceType,
-                clientEventId = parts.clientEventId,
-                rawEventId = parts.rawEventId,
-                durationSeconds = null,
-                timestamp = parts.timestamp,
-                counterpartyRef = parts.counterpartyRef,
-                eventTitle = parts.eventTitle,
-                folder = parts.folder,
-                conversationRef = null,
-                previousThreadContext = null,
-                bodyText = parts.bodyText,
+        delegate.uploadRunner().upload(
+            SourceExtractionUploadRequest(
+                userId = context.userId,
+                entity = entity,
+                rawEventId = rawEventId,
+                inputModality = "transcript",
+                bodyText = transcript,
+                nonRetryableErrorMessage = "Transcript rejected",
+                onMarkFailed = { reasonCode -> delegate.markFailed(entity, reasonCode) },
             )
-        } catch (e: IOException) {
-            logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
-            return@withContext handleTransientFailure(entity)
-        }
-
-        when (response.code()) {
-            200 -> {
-                val body = response.body()
-                    ?: return@withContext handleTransientFailure(entity)
-                extractionPersister().persist(
-                    userId = userId,
-                    entity = entity,
-                    body = body,
-                    now = Clock.System.now(),
-                )
-                Result.success()
-            }
-            401 -> {
-                processingStatusRepository.recordError(entity.sourceType, "Unauthorized")
-                markFailed(entity, reasonCode = "unauthorized")
-                Result.success()
-            }
-            403, 413, 422 -> {
-                processingStatusRepository.recordError(entity.sourceType, "Transcript rejected")
-                markFailed(entity, reasonCode = "non_retryable_http_${response.code()}")
-                Result.success()
-            }
-            502 -> handleVoice502(response.errorBody()?.string(), entity)
-            429, 500, 503 -> handleTransientFailure(entity)
-            else -> {
-                processingStatusRepository.recordError(entity.sourceType, "Unexpected HTTP ${response.code()}")
-                markFailed(entity, reasonCode = "unexpected_http_${response.code()}")
-                Result.success()
-            }
-        }
+        )
     }
 
     private fun readTranscriptText(sourceRef: String?): String? {
@@ -210,67 +159,21 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         return bytes.toString(Charsets.UTF_8)
     }
 
-    private suspend fun parkIfConsentWithdrawn(entity: RawIngestionEventEntity): Boolean {
-        if (userPrefsStore.observeThirdPartyProvisionConsent().first()) return false
-        processingStatusRepository.recordBlocked(entity.sourceType, "PIPA consent required")
-        rawIngestionEventDao.update(entity.copy(syncStatus = STATUS_AWAITING_CONSENT))
-        return true
-    }
-
-    private suspend fun handleVoice502(
-        errorBodyString: String?,
-        entity: RawIngestionEventEntity,
-    ): Result {
-        val envelope = runCatchingNonCancel(
-            logger = logger,
-            tag = TAG,
-            op = "HTTP 502 parse failed id=${redact(entity.id)}",
-            block = {
-                errorBodyString?.let {
-                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
-                }
-            },
-            onFailure = { null },
-        )
-        return when (SourceExtractionUploadStateMachine.decide502Action(envelope?.error)) {
-            SourceExtraction502Action.Quarantine -> {
-                processingStatusRepository.recordError(entity.sourceType, envelope?.error ?: "Transcript extraction failed")
-                markFailed(entity, reasonCode = envelope?.error ?: "vertex_502_unknown")
-                Result.success()
-            }
-            SourceExtraction502Action.HandleAsTransient -> handleTransientFailure(entity)
-        }
-    }
-
-    private suspend fun handleTransientFailure(entity: RawIngestionEventEntity): Result =
-        when (SourceExtractionUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
-            RetryAction.Quarantine -> {
-                markFailed(entity, reasonCode = "retry_exhausted")
-                Result.success()
-            }
-            RetryAction.Retry -> Result.retry()
-        }
-
-    private suspend fun markFailed(entity: RawIngestionEventEntity, reasonCode: String?) {
-        logger.w(TAG, "mark failed id=${redact(entity.id)} reason=$reasonCode")
-        rawIngestionEventDao.update(
-            entity.copy(
-                syncStatus = "failed",
-                retryCount = entity.retryCount + 1,
-                lastAttemptAt = Clock.System.now(),
-            ),
-        )
-    }
-
-    private fun extractionPersister(): StructuredExtractionPersister =
-        StructuredExtractionPersister(
+    private fun extractionDelegate(): LocalSourceExtractionDelegate =
+        LocalSourceExtractionDelegate(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
+            sourceExtractionApi = sourceExtractionApi,
+            userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,
             workScheduler = workScheduler,
+            moshi = moshi,
             logger = logger,
+            tag = TAG,
+            runAttemptCount = runAttemptCount,
+            maxAttempts = MAX_ATTEMPTS,
         )
 
     public companion object {
@@ -278,6 +181,5 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         private const val TAG = "MeetingTranscriptUpload"
         private const val MAX_ATTEMPTS = 3
         private const val MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
-        private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
     }
 }

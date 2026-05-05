@@ -15,6 +15,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.Response
 
@@ -98,6 +99,13 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
             val participants = body.data.map { it.toEntity(userId) }
             if (participants.isNotEmpty()) {
                 personIndexDao.upsertCommitmentParticipants(participants)
+                personIndexDao.upsertDirtySources(
+                    PersonIndexDirtySources.forCommitmentParticipants(
+                        participants = participants,
+                        reason = "commitment_participant_refresh",
+                        now = Clock.System.now(),
+                    ),
+                )
             }
 
             totalFetched += body.data.size

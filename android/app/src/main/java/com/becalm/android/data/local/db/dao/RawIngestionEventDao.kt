@@ -262,6 +262,16 @@ public interface RawIngestionEventDao {
 
     @Query(
         """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND id IN (:ids)
+        ORDER BY timestamp DESC
+        """,
+    )
+    public suspend fun findByIdsForUser(userId: String, ids: List<String>): List<RawIngestionEventEntity>
+
+    @Query(
+        """
         SELECT COUNT(*) FROM raw_ingestion_events
         WHERE user_id = :userId
         """,
