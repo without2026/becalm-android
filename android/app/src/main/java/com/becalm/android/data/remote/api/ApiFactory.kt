@@ -45,7 +45,7 @@ public object ApiFactory {
      * @param isDebug When `true` enables `BASIC` HTTP logging; `false` disables all logging.
      *   Pass `BuildConfig.DEBUG` from the application module.
      * @param timeouts Timeout configuration. Defaults to [HttpTimeouts.Default].
-     *   Pass [HttpTimeouts.Voice] for audio upload calls.
+     *   Pass [HttpTimeouts.SourceExtraction] for source extraction calls.
      */
     public fun createOkHttpClient(
         authProvider: AuthTokenProvider,
@@ -105,16 +105,16 @@ public object ApiFactory {
         retrofit.create(RailwayApi::class.java)
 
     /**
-     * Creates the [VoiceApi] Retrofit service proxy from a pre-built [Retrofit] instance.
+     * Creates the [SourceExtractionApi] Retrofit service proxy from a pre-built [Retrofit] instance.
      *
      * The [Retrofit] instance must be built with an [OkHttpClient] that uses
-     * [HttpTimeouts.Voice] (connect=30s, read=180s, write=180s) to accommodate
-     * audio file uploads up to 60 MiB and Vertex AI inference latency (VOI-006).
+     * [HttpTimeouts.SourceExtraction] (connect=30s, read=180s, write=180s) to accommodate
+     * audio file uploads up to 60 MiB, transcript extraction, and Vertex AI inference latency (VOI-006).
      *
-     * @param retrofit [Retrofit] instance from [createRetrofit], configured with voice timeouts.
+     * @param retrofit [Retrofit] instance from [createRetrofit], configured with extraction timeouts.
      */
-    public fun createVoiceApi(retrofit: Retrofit): VoiceApi =
-        retrofit.create(VoiceApi::class.java)
+    public fun createSourceExtractionApi(retrofit: Retrofit): SourceExtractionApi =
+        retrofit.create(SourceExtractionApi::class.java)
 
     private const val MAX_PARALLEL_REQUESTS = 8
     private const val MAX_PARALLEL_REQUESTS_PER_HOST = 4

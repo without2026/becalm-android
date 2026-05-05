@@ -5,10 +5,10 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
-import com.becalm.android.data.remote.dto.CommitmentDraftDto
 import com.becalm.android.data.remote.dto.PersonCandidateDto
-import com.becalm.android.data.remote.dto.VoiceExtractItemDto
+import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.repository.NormalizedSourceEvent
 import com.becalm.android.domain.person.PersonIdentityResolver
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -24,87 +24,37 @@ internal const val STATUS_PENDING: String = "pending"
  * commitment extraction 멀티파트 폼 필드 생성을 한 곳으로 통합한다.
  * 각 필드의 값과 content type("text/plain") 을 원본 인라인 코드와 byte-identical 하게 보존한다.
  */
-internal data class VoiceRequestParts(
+internal data class SourceExtractionRequestParts(
     val sourceType: RequestBody,
     val clientEventId: RequestBody,
     val rawEventId: RequestBody,
-    val durationSeconds: RequestBody,
+    val durationSeconds: RequestBody?,
     val timestamp: RequestBody,
     val counterpartyRef: RequestBody?,
     val eventTitle: RequestBody?,
+    val folder: RequestBody?,
+    val bodyText: RequestBody?,
 )
 
-internal fun RawIngestionEventEntity.toRequestParts(rawEventId: String): VoiceRequestParts =
-    VoiceRequestParts(
-        sourceType = sourceType.toPlainRequestBody(),
-        clientEventId = clientEventId.toPlainRequestBody(),
-        rawEventId = rawEventId.toPlainRequestBody(),
-        durationSeconds = (durationSeconds ?: 0).toString().toPlainRequestBody(),
-        timestamp = timestamp.toString().toPlainRequestBody(),
-        counterpartyRef = counterpartyRef?.toPlainRequestBody(),
-        eventTitle = eventTitle?.toPlainRequestBody(),
-    )
-
-/**
- * Maps a [CommitmentDraftDto] received from Railway to a [CommitmentEntity] ready for
- * Room insertion.
- *
- * The [CommitmentEntity.id] is a deterministic UUID v3 (name-based, MD5) keyed on
- * `"commitment:<rawEventId>:<index>"`. This ensures that re-processing the same audio
- * (e.g., a replayed 200 response) produces an upsert on the same primary key rather than
- * inserting a duplicate row — CommitmentDao uses [androidx.room.OnConflictStrategy.REPLACE],
- * so duplicate inserts become idempotent (finding #2 fix).
- *
- * @param rawEventId UUID of the originating [RawIngestionEventEntity] (used for deterministic ID).
- * @param index 0-based position of this commitment in the response list (used for deterministic ID).
- * @param userId Supabase auth.users UUID of the owning user.
- * @param sourceRef Source reference from the originating [RawIngestionEventEntity].
- * @param sourceType Source type of the originating [RawIngestionEventEntity]. MUST be inherited
- *   verbatim per VOI-001 (voice-pipeline.spec.yml:18) — the extracted commitment is NEVER
- *   re-tagged as a different source even though it flows through the voice Gemini pipeline.
- *   Accepts both "voice" and "call_recording" (data-model.yml:32).
- * @param sourceEventTitle Event title from the originating [RawIngestionEventEntity].
- * @param sourceEventOccurredAt Timestamp of the source event (not extraction time).
- * @param now Wall-clock instant used for [CommitmentEntity.createdAt] and [CommitmentEntity.updatedAt].
- */
-internal fun CommitmentDraftDto.toCommitmentEntity(
+internal fun RawIngestionEventEntity.toSourceExtractionRequestParts(
     rawEventId: String,
-    index: Int,
-    userId: String,
-    sourceRef: String?,
-    sourceType: String,
-    sourceEventTitle: String?,
-    sourceEventOccurredAt: Instant,
-    now: Instant,
-): CommitmentEntity = CommitmentEntity(
-    // Deterministic UUID v3 (nameUUIDFromBytes uses MD5) keyed on rawEventId+index.
-    // Re-processing the same response yields the same ID → upsert, not duplicate.
-    id = UUID.nameUUIDFromBytes(
-        "commitment:$rawEventId:$index".toByteArray(Charsets.UTF_8),
-    ).toString(),
-    userId = userId,
-    direction = direction.lowercase(),
-    counterpartyRaw = null,
-    counterpartyRef = counterpartyRef,
-    title = text.take(500), // reasonable title truncation
-    description = null,
-    quote = quote,
-    sourceEventTitle = sourceEventTitle,
-    sourceEventOccurredAt = sourceEventOccurredAt,
-    dueAt = dueAt,
-    dueHint = dueHint,
-    dueIsApproximate = dueIsApproximate,
-    actionState = "pending",
-    sourceType = sourceType,
-    sourceRef = sourceRef,
-    confidence = confidence.toDouble(),
-    commitmentState = CommitmentLifecycleLegacy.DRAFT,
-    syncStatus = STATUS_PENDING,
-    createdAt = now,
-    updatedAt = now,
-)
+    bodyText: String? = null,
+): SourceExtractionRequestParts {
+    val dto = NormalizedSourceEvent.from(rawEvent = this, emailBody = null).toDto()
+    return SourceExtractionRequestParts(
+        sourceType = dto.sourceType.toPlainRequestBody(),
+        clientEventId = dto.clientEventId.toPlainRequestBody(),
+        rawEventId = rawEventId.toPlainRequestBody(),
+        durationSeconds = dto.durationSeconds?.toString()?.toPlainRequestBody(),
+        timestamp = dto.timestamp.toString().toPlainRequestBody(),
+        counterpartyRef = dto.counterpartyRef?.toPlainRequestBody(),
+        eventTitle = dto.eventTitle?.toPlainRequestBody(),
+        folder = dto.folder?.toPlainRequestBody(),
+        bodyText = bodyText?.toPlainRequestBody(),
+    )
+}
 
-internal fun VoiceExtractItemDto.toTrackableCommitmentEntity(
+internal fun SourceExtractedItemDto.toTrackableCommitmentEntity(
     rawEventId: String,
     index: Int,
     userId: String,

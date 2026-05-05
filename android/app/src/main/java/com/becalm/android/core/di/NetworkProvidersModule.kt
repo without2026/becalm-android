@@ -4,7 +4,7 @@ import com.becalm.android.BuildConfig
 import com.becalm.android.data.remote.api.ApiFactory
 import com.becalm.android.data.remote.api.HttpTimeouts
 import com.becalm.android.data.remote.api.RailwayApi
-import com.becalm.android.data.remote.api.VoiceApi
+import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.interceptor.AuthTokenProvider
 import com.becalm.android.data.remote.interceptor.IdempotencyKeyProvider
 import com.becalm.android.data.remote.supabase.SupabaseConfig
@@ -76,27 +76,27 @@ public object NetworkProvidersModule {
 
     @Provides
     @Singleton
-    public fun provideVoiceApi(
+    public fun provideSourceExtractionApi(
         authProvider: AuthTokenProvider,
         authFailureSessionInvalidator: com.becalm.android.data.auth.AuthFailureSessionInvalidator,
         idempotencyProvider: IdempotencyKeyProvider,
         moshi: Moshi,
         config: BecalmApiConfig,
-    ): VoiceApi {
-        val voiceOkHttp = ApiFactory.createOkHttpClient(
+    ): SourceExtractionApi {
+        val sourceExtractionOkHttp = ApiFactory.createOkHttpClient(
             authProvider = authProvider,
             authFailureSessionInvalidator = authFailureSessionInvalidator,
             idempotencyProvider = idempotencyProvider,
             railwayHost = config.baseUrl.toHttpUrlOrNull()?.host.orEmpty(),
             isDebug = BuildConfig.DEBUG,
-            timeouts = HttpTimeouts.Voice,
+            timeouts = HttpTimeouts.SourceExtraction,
         )
-        val voiceRetrofit = ApiFactory.createRetrofit(
+        val sourceExtractionRetrofit = ApiFactory.createRetrofit(
             baseUrl = config.baseUrl,
-            okHttp = voiceOkHttp,
+            okHttp = sourceExtractionOkHttp,
             moshi = moshi,
         )
-        return ApiFactory.createVoiceApi(voiceRetrofit)
+        return ApiFactory.createSourceExtractionApi(sourceExtractionRetrofit)
     }
 
 }

@@ -42,7 +42,7 @@ behaviors:
     description: "미팅 오디오 raw event는 기존 `POST /v1/extractions/commitments` draft extraction endpoint를 재사용한다"
     trigger: "VoiceUploadWorker 실행, raw_event.source_type='meeting'"
     precondition: "MTG-002 raw event, PIPA third-party provision consent true, audio URI 접근 가능, unmetered network"
-    expected: "Railway는 오디오 bytes를 요청 lifetime 내에서만 처리하고 VoiceExtractItem[]을 반환한다. Android는 Room commitments를 source_type='meeting'으로 INSERT하고 raw event event_snippet/commitments_extracted_count를 갱신한다. 이후 commitments/raw event mirror는 기존 batch API를 사용한다"
+    expected: "Railway는 오디오 bytes를 요청 lifetime 내에서만 처리하고 SourceExtractedItem[]을 반환한다. Android는 Room commitments를 source_type='meeting'으로 INSERT하고 raw event event_snippet/commitments_extracted_count를 갱신한다. 이후 commitments/raw event mirror는 기존 batch API를 사용한다"
     source: user-request
     tests: []
 

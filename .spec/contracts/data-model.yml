@@ -155,7 +155,7 @@ tables:
       - name: due_at
         type: timestamptz
         nullable: true
-        # CommitmentDraft.due_at(ISO8601 KST)에서 정규화된 시점. 저장은 UTC, 클라이언트 렌더링·Railway 페이로드는 KST(+09:00) 고정. D-N 배지는 due_at을 local KST date로 변환 후 today와 비교
+        # SourceExtractedItem.due_at(ISO8601 KST)에서 정규화된 시점. 저장은 UTC, 클라이언트 렌더링·Railway 페이로드는 KST(+09:00) 고정. D-N 배지는 due_at을 local KST date로 변환 후 today와 비교
       - name: due_hint
         type: text
         nullable: true

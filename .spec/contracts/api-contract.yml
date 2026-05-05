@@ -117,10 +117,10 @@ types:
     account_email?: string
     display_name?: string
 
-  VoiceExtractItem:
+  SourceExtractedItem:
     type: string              # "action" | "schedule" | "decision"
     text: string              # 원문 언어를 유지한 정규화 문구
-    quote: string             # 오디오에서 추출한 verbatim 원문 발화 단편(<=100 chars, 원문 언어 유지)
+    quote: string             # source에서 추출한 verbatim 근거 단편(<=100 chars, 원문 언어 유지)
     person_ref?: string       # 정규화된 상대방 식별자. 식별 불가 시 null
     due_at?: datetime         # ISO8601 with explicit +09:00 offset (KST) or null
     due_hint?: string         # 원문 시점 표현(원문 언어 유지)
@@ -129,17 +129,6 @@ types:
     direction?: string        # type=action 일 때만 "give" | "take"
     schedule_status?: string  # type=schedule 일 때만 "confirmed" | "changed" | "postponed" | "cancelled" | "follow_up"
     decision_status?: string  # type=decision 일 때만 "approved" | "rejected" | "chosen" | "deferred" | "ongoing"
-
-  CommitmentDraft:
-    # Android의 현재 Room commitment 저장을 위한 legacy action projection.
-    direction: string           # "give" | "take"
-    text: string                # 요약 문구 (1~2 문장)
-    quote: string               # 오디오에서 추출한 verbatim 원문 발화 단편(<=100 chars) — recall용 최소 evidence, 앱이 요약·편집 금지
-    person_ref?: string         # 정규화된 상대방 식별자 (정규화 우선순위: phone E.164 > email lowercase > display_name normalized). 식별 불가 시 null
-    due_at?: datetime           # ISO8601 with explicit +09:00 offset (KST). Android는 UTC로 저장·계산하되 payload는 KST로 전송한다. 발화에 시점 언급이 없으면 null
-    due_hint?: string           # 원문에서 추출한 시점 문구 원본 (예: "다음주", "월말까지", "이번달 안에", "내일 오전"). 상대적/모호 표현은 due_at으로 해석할 때 손실되므로 원문 보존
-    due_is_approximate: bool    # default false. true이면 due_at이 명시적 날짜·시각이 아닌 hint에서 LLM이 추론한 값 — UI는 "약" 마크(예: "~4/24")로 표기하여 사용자에게 보정 필요 여부를 알림
-    confidence: float           # 0.0 ~ 1.0
 
   Commitment:
     id: uuid
@@ -267,7 +256,7 @@ endpoints:
     response:
       200:
         raw_event_id: uuid
-        items: "VoiceExtractItem[]"
+        items: "SourceExtractedItem[]"
         person_candidates: "PersonCandidate[]"
         model: string                        # "gemini-2.5-flash"
         region: string                       # "us-central1"
