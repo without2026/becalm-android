@@ -129,9 +129,9 @@ public class MediaStoreWorker @AssistedInject constructor(
         workerParams = workerParams,
         syncCursorStoreProvider = Provider { syncCursorStore },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
-            rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
-            sourceArtifactRepositoryProvider = Provider { sourceArtifactRepository },
-            workSchedulerProvider = Provider { workScheduler },
+        rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
+        sourceArtifactRepositoryProvider = Provider { sourceArtifactRepository },
+        workSchedulerProvider = Provider { workScheduler },
         userPrefsStore = userPrefsStore,
         processingStatusRepository = processingStatusRepository,
         processingPauseGate = processingPauseGate,
@@ -178,69 +178,113 @@ public class MediaStoreWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        val now = Clock.System.now()
-        if (voiceEnabled && !audioMissing) {
-            processingStatusRepository.recordScanning(SourceType.VOICE)
-            processingStatusRepository.recordScanning(SourceType.CALL_RECORDING)
-        }
-        if (meetingEnabled) {
-            processingStatusRepository.recordScanning(SourceType.MEETING)
-        }
-        val voiceMediaStoreProbe = createProbe()
-        val voiceInserted = if (voiceEnabled && !audioMissing) {
-            voiceMediaStoreProbe.ingestVoiceRecordings(now, lookbackDays)
-        } else {
-            0
-        }
-        val callOutcome = if (voiceEnabled && !audioMissing) {
-            voiceMediaStoreProbe.ingestCallRecordings(now, lookbackDays)
-        } else {
-            CallRecordingIngestOutcome.Success(insertedCount = 0)
-        }
-        val meetingAudioOutcome = if (meetingEnabled && !audioMissing) {
-            voiceMediaStoreProbe.ingestMeetingAudio(now, lookbackDays)
-        } else {
-            MeetingIngestOutcome.Success(insertedCount = 0)
-        }
-        val meetingTranscriptOutcome = if (meetingEnabled) {
-            createMeetingDocumentTreeProbe().ingestMeetingTranscripts(now, lookbackDays)
-        } else {
-            MeetingIngestOutcome.Success(insertedCount = 0)
-        }
+        val scanResult = runScanTasks(
+            now = Clock.System.now(),
+            lookbackDays = lookbackDays,
+            voiceEnabled = voiceEnabled,
+            meetingEnabled = meetingEnabled,
+            audioMissing = audioMissing,
+        )
+        if (scanResult.shouldRetry) return@withContext Result.retry()
 
-        // A ContentResolver query failure in the `Recordings/Call/` scan is recorded in
-        // SourceStatusRepository but does not advance any cursor — returning
-        // [Result.success] would swallow the failure and skip retry/backoff. Map to
-        // [Result.retry] so WorkManager re-attempts this run (ING-001 data-loss guard).
-        if (callOutcome is CallRecordingIngestOutcome.ScanFailed) {
-            logger.w(TAG, "doWork call_recording scan failed — requesting retry")
-            processingStatusRepository.recordError(SourceType.CALL_RECORDING, "MediaStore scan failed")
-            return@withContext Result.retry()
-        }
-        if (meetingAudioOutcome is MeetingIngestOutcome.ScanFailed ||
-            meetingTranscriptOutcome is MeetingIngestOutcome.ScanFailed
-        ) {
-            logger.w(TAG, "doWork meeting scan failed — requesting retry")
-            processingStatusRepository.recordError(SourceType.MEETING, "Meeting scan failed")
-            return@withContext Result.retry()
-        }
-
-        val callInserted = (callOutcome as CallRecordingIngestOutcome.Success).insertedCount
-        val meetingInserted = (meetingAudioOutcome as MeetingIngestOutcome.Success).insertedCount +
-            (meetingTranscriptOutcome as MeetingIngestOutcome.Success).insertedCount
-        if (voiceEnabled && !audioMissing) {
-            processingStatusRepository.recordScanResult(SourceType.VOICE, voiceInserted, "Queued upload")
-            processingStatusRepository.recordScanResult(SourceType.CALL_RECORDING, callInserted, "Queued upload")
-        }
-        if (meetingEnabled) {
-            processingStatusRepository.recordScanResult(SourceType.MEETING, meetingInserted, "Queued meeting import")
-        }
         logger.d(
             TAG,
-            "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted " +
-                "meetingInserted=$meetingInserted",
+            "doWork complete voiceInserted=${scanResult.voiceInserted} " +
+                "callRecordingInserted=${scanResult.callInserted} meetingInserted=${scanResult.meetingInserted}",
         )
         Result.success()
+    }
+
+    private suspend fun runScanTasks(
+        now: kotlinx.datetime.Instant,
+        lookbackDays: Int?,
+        voiceEnabled: Boolean,
+        meetingEnabled: Boolean,
+        audioMissing: Boolean,
+    ): LocalFileScanResult {
+        val voiceProbe = createProbe()
+        val meetingProbe by lazy { createMeetingDocumentTreeProbe() }
+        val tasks = listOf(
+            LocalFileScanTask(
+                sourceType = SourceType.VOICE,
+                enabled = voiceEnabled && !audioMissing,
+                scanMessage = "Queued upload",
+                onScan = { LocalFileScanOutcome.Success(voiceProbe.ingestVoiceRecordings(now, lookbackDays)) },
+            ),
+            LocalFileScanTask(
+                sourceType = SourceType.CALL_RECORDING,
+                enabled = voiceEnabled && !audioMissing,
+                scanMessage = "Queued upload",
+                onScan = {
+                    when (val outcome = voiceProbe.ingestCallRecordings(now, lookbackDays)) {
+                        is CallRecordingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
+                        CallRecordingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("MediaStore scan failed")
+                    }
+                },
+            ),
+            LocalFileScanTask(
+                sourceType = SourceType.MEETING,
+                enabled = meetingEnabled && !audioMissing,
+                scanMessage = "Queued meeting import",
+                onScan = {
+                    when (val outcome = voiceProbe.ingestMeetingAudio(now, lookbackDays)) {
+                        is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
+                        MeetingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("Meeting scan failed")
+                    }
+                },
+            ),
+            LocalFileScanTask(
+                sourceType = SourceType.MEETING,
+                enabled = meetingEnabled,
+                scanMessage = "Queued meeting import",
+                onScan = {
+                    when (val outcome = meetingProbe.ingestMeetingTranscripts(now, lookbackDays)) {
+                        is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
+                        MeetingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("Meeting scan failed")
+                    }
+                },
+            ),
+        )
+
+        val insertedBySource = linkedMapOf(
+            SourceType.VOICE to 0,
+            SourceType.CALL_RECORDING to 0,
+            SourceType.MEETING to 0,
+        )
+        var shouldRetry = false
+        val enabledTasks = tasks.filter { it.enabled }
+        enabledTasks
+            .map { it.sourceType }
+            .distinct()
+            .forEach { sourceType -> processingStatusRepository.recordScanning(sourceType) }
+        enabledTasks.forEach { task ->
+            when (val outcome = task.onScan()) {
+                is LocalFileScanOutcome.Success -> {
+                    insertedBySource[task.sourceType] = insertedBySource.getValue(task.sourceType) + outcome.insertedCount
+                }
+                is LocalFileScanOutcome.Failed -> {
+                    logger.w(TAG, "doWork ${task.sourceType} scan failed — requesting retry")
+                    processingStatusRepository.recordError(task.sourceType, outcome.message)
+                    shouldRetry = true
+                }
+            }
+        }
+        if (!shouldRetry) {
+            enabledTasks.groupBy { it.sourceType }
+                .forEach { (sourceType, sourceTasks) ->
+                    processingStatusRepository.recordScanResult(
+                        sourceType = sourceType,
+                        itemCount = insertedBySource.getValue(sourceType),
+                        newItemsMessage = sourceTasks.first().scanMessage,
+                    )
+                }
+        }
+        return LocalFileScanResult(
+            voiceInserted = insertedBySource.getValue(SourceType.VOICE),
+            callInserted = insertedBySource.getValue(SourceType.CALL_RECORDING),
+            meetingInserted = insertedBySource.getValue(SourceType.MEETING),
+            shouldRetry = shouldRetry,
+        )
     }
 
     /** 지정 권한이 현재 미허용 상태면 true를 반환한다. */
@@ -341,3 +385,22 @@ public class MediaStoreWorker @AssistedInject constructor(
         // `SourceType.CALL_RECORDING` tagging.
     }
 }
+
+private data class LocalFileScanTask(
+    val sourceType: String,
+    val enabled: Boolean,
+    val scanMessage: String,
+    val onScan: suspend () -> LocalFileScanOutcome,
+)
+
+private sealed interface LocalFileScanOutcome {
+    data class Success(val insertedCount: Int) : LocalFileScanOutcome
+    data class Failed(val message: String) : LocalFileScanOutcome
+}
+
+private data class LocalFileScanResult(
+    val voiceInserted: Int,
+    val callInserted: Int,
+    val meetingInserted: Int,
+    val shouldRetry: Boolean,
+)

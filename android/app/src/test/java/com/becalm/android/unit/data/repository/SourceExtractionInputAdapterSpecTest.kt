@@ -7,6 +7,7 @@ import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -92,6 +93,31 @@ class SourceExtractionInputAdapterSpecTest {
         assertEquals("+821012341234", participant?.phone)
     }
 
+    @Test
+    fun `builds direct extraction request parts from the same normalized source`() = runTest {
+        val raw = rawEvent(
+            sourceType = SourceType.MEETING,
+            counterpartyRef = "Customer",
+        ).copy(durationSeconds = 60)
+        val adapter = SourceExtractionInputAdapter(emailBodyRepository = FakeEmailBodyRepository())
+
+        val dto = adapter.toUploadDto(raw)
+        val parts = adapter.toRequestParts(
+            event = raw,
+            rawEventId = raw.id,
+            bodyTextOverride = "회의록 본문",
+        )
+
+        assertEquals(dto.sourceType, parts.sourceType.readUtf8())
+        assertEquals(dto.clientEventId, parts.clientEventId.readUtf8())
+        assertEquals(raw.id, parts.rawEventId.readUtf8())
+        assertEquals(dto.durationSeconds.toString(), parts.durationSeconds?.readUtf8())
+        assertEquals(dto.timestamp.toString(), parts.timestamp.readUtf8())
+        assertEquals(dto.counterpartyRef, parts.counterpartyRef?.readUtf8())
+        assertEquals(dto.eventTitle, parts.eventTitle?.readUtf8())
+        assertEquals("회의록 본문", parts.bodyText?.readUtf8())
+    }
+
     private fun rawEvent(
         sourceType: String,
         sourceRef: String? = "source-1",
@@ -127,4 +153,10 @@ class SourceExtractionInputAdapterSpecTest {
     private companion object {
         val NOW: Instant = Instant.parse("2026-05-05T00:00:00Z")
     }
+}
+
+private fun okhttp3.RequestBody.readUtf8(): String {
+    val buffer = Buffer()
+    writeTo(buffer)
+    return buffer.readUtf8()
 }

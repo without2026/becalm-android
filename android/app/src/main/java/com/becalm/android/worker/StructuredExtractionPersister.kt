@@ -7,6 +7,7 @@ import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
+import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import kotlinx.datetime.Instant
@@ -66,6 +67,23 @@ internal class StructuredExtractionPersister(
         if (commitmentParticipants.isNotEmpty()) {
             personIndexDao.upsertCommitmentParticipants(commitmentParticipants)
         }
+        val dirtySources =
+            PersonIndexDirtySources.rawEvent(
+                userId = userId,
+                sourceType = entity.sourceType,
+                sourceEventId = entity.id,
+                reason = "local_extraction",
+                now = now,
+            )
+                .let(::listOf) +
+                PersonIndexDirtySources.forCommitments(
+                    commitments = commitmentEntities,
+                    reason = "local_extraction",
+                    now = now,
+                )
+        if (dirtySources.isNotEmpty()) {
+            personIndexDao.upsertDirtySources(dirtySources)
+        }
 
         rawIngestionEventDao.update(
             entity.copy(
@@ -78,7 +96,7 @@ internal class StructuredExtractionPersister(
 
         sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
         processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
-        workScheduler.enqueuePersonInteractionIndex()
+        SourceGraphChangedNotifier(workScheduler).notifyChanged()
         logger.d(TAG, "extraction persisted id=${redact(entity.id)} items=${body.items.size}")
         return StructuredExtractionPersistStats(
             itemCount = body.items.size,

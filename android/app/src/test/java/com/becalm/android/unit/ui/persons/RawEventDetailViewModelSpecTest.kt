@@ -9,6 +9,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.ui.persons.ARG_EVENT_ID
 import com.becalm.android.ui.persons.RawEventDetailProjectionPort
 import com.becalm.android.ui.persons.RawEventDetailViewModel
@@ -40,6 +41,10 @@ class RawEventDetailViewModelSpecTest {
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val emailBodyRepository: EmailBodyRepository = mockk()
     private val sourceArtifactRepository: SourceArtifactRepository = mockk()
+    private val sourceOriginalResolver = SourceOriginalResolver(
+        emailBodyRepository = emailBodyRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
+    )
     private val projectionPort: RawEventDetailProjectionPort = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
@@ -214,8 +219,7 @@ class RawEventDetailViewModelSpecTest {
 
     private fun buildViewModel(eventId: String): RawEventDetailViewModel = RawEventDetailViewModel(
         rawIngestionRepository = rawIngestionRepository,
-        emailBodyRepository = emailBodyRepository,
-        sourceArtifactRepository = sourceArtifactRepository,
+        sourceOriginalResolver = sourceOriginalResolver,
         projectionPort = projectionPort,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(ARG_EVENT_ID to eventId)),

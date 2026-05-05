@@ -39,9 +39,6 @@ public class OutlookCalendarWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     public override suspend fun doWork(): Result {
-        if (processingPauseGate.shouldSkip(TAG)) {
-            return Result.success()
-        }
         return runServerBackedCalendarSync(
             sourceType = SourceType.OUTLOOK_CALENDAR,
             tag = TAG,

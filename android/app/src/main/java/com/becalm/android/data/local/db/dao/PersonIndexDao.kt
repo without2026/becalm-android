@@ -5,12 +5,11 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
-import com.becalm.android.data.local.db.entity.PersonAliasRuleEntity
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
+import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
-import com.becalm.android.data.local.db.entity.PersonManualMatchEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import kotlinx.coroutines.flow.Flow
@@ -48,13 +47,10 @@ public interface PersonIndexDao {
     public suspend fun upsertUnmatchedInteractions(rows: List<UnmatchedPersonInteractionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    public suspend fun upsertManualMatch(row: PersonManualMatchEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    public suspend fun upsertAliasRule(row: PersonAliasRuleEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertSourceStates(rows: List<PersonIndexSourceStateEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertDirtySources(rows: List<PersonIndexDirtySourceEntity>)
 
     @Query("DELETE FROM person_interactions WHERE user_id = :userId")
     public suspend fun deleteInteractionsForUser(userId: String): Int
@@ -118,11 +114,32 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        DELETE FROM person_index_dirty_sources
+        WHERE user_id = :userId
+          AND id IN (:ids)
+        """,
+    )
+    public suspend fun deleteDirtySourcesByIds(userId: String, ids: List<String>): Int
+
+    @Query(
+        """
         SELECT * FROM source_event_participants
         WHERE user_id = :userId
         """,
     )
     public suspend fun findSourceEventParticipantsForUser(userId: String): List<SourceEventParticipantEntity>
+
+    @Query(
+        """
+        SELECT * FROM source_event_participants
+        WHERE user_id = :userId
+          AND source_event_id IN (:sourceEventIds)
+        """,
+    )
+    public suspend fun findSourceEventParticipantsForUserAndEventIds(
+        userId: String,
+        sourceEventIds: List<String>,
+    ): List<SourceEventParticipantEntity>
 
     @Query(
         """
@@ -134,6 +151,56 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        UPDATE source_event_participants
+        SET
+            person_id = :personId,
+            identity_type = CASE
+                WHEN identity_type IS NULL OR identity_type = '' THEN :identityType
+                ELSE identity_type
+            END,
+            normalized_value = CASE
+                WHEN normalized_value IS NULL OR normalized_value = '' THEN :normalizedValue
+                ELSE normalized_value
+            END,
+            display_name_raw = COALESCE(display_name_raw, :displayNameHint),
+            email_raw = CASE
+                WHEN :identityType = 'email' AND (email_raw IS NULL OR email_raw = '') THEN :rawValue
+                ELSE email_raw
+            END,
+            phone_raw = CASE
+                WHEN :identityType = 'phone' AND (phone_raw IS NULL OR phone_raw = '') THEN :rawValue
+                ELSE phone_raw
+            END,
+            resolution_status = 'resolved',
+            confidence = CASE
+                WHEN confidence < :confidence THEN :confidence
+                ELSE confidence
+            END
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND resolution_status = 'unresolved'
+          AND (
+                source_ref = :sourceRef
+             OR source_event_id = :sourceEventId
+             OR ('raw:' || source_event_id) = :sourceRef
+          )
+        """,
+    )
+    public suspend fun resolveUnmatchedSourceEventParticipants(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceEventId: String,
+        personId: String,
+        identityType: String,
+        normalizedValue: String,
+        rawValue: String,
+        displayNameHint: String?,
+        confidence: Double,
+    ): Int
+
+    @Query(
+        """
         SELECT * FROM commitment_participants
         WHERE user_id = :userId
         """,
@@ -142,21 +209,15 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        SELECT * FROM person_manual_matches
+        SELECT * FROM commitment_participants
         WHERE user_id = :userId
+          AND commitment_id IN (:commitmentIds)
         """,
     )
-    public suspend fun findManualMatchesForUser(userId: String): List<PersonManualMatchEntity>
-
-    @Query(
-        """
-        SELECT * FROM person_alias_rules
-        WHERE user_id = :userId
-          AND enabled = 1
-        ORDER BY LENGTH(normalized_alias) DESC
-        """,
-    )
-    public suspend fun findEnabledAliasRulesForUser(userId: String): List<PersonAliasRuleEntity>
+    public suspend fun findCommitmentParticipantsForUserAndCommitmentIds(
+        userId: String,
+        commitmentIds: List<String>,
+    ): List<CommitmentParticipantEntity>
 
     @Query(
         """
@@ -165,6 +226,19 @@ public interface PersonIndexDao {
         """,
     )
     public suspend fun findSourceStatesForUser(userId: String): List<PersonIndexSourceStateEntity>
+
+    @Query(
+        """
+        SELECT * FROM person_index_dirty_sources
+        WHERE user_id = :userId
+        ORDER BY updated_at ASC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findDirtySourcesForUser(
+        userId: String,
+        limit: Int,
+    ): List<PersonIndexDirtySourceEntity>
 
     @Query(
         """

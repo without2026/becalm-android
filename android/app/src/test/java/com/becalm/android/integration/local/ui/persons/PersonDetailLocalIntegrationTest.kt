@@ -23,6 +23,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourceArchiveStore
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
+import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.persons.ARG_EVENT_ID
@@ -94,6 +95,10 @@ class PersonDetailLocalIntegrationTest {
         dao = db.sourceArtifactDao(),
         store = SourceArchiveStore(LocalIntegrationSupport.appContext()),
         ioDispatcher = UnconfinedTestDispatcher(),
+    )
+    private val sourceOriginalResolver = SourceOriginalResolver(
+        emailBodyRepository = emailBodyRepository,
+        sourceArtifactRepository = sourceArtifactRepository,
     )
 
     @Before
@@ -267,8 +272,7 @@ class PersonDetailLocalIntegrationTest {
 
         val viewModel = RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
-            emailBodyRepository = emailBodyRepository,
-            sourceArtifactRepository = sourceArtifactRepository,
+            sourceOriginalResolver = sourceOriginalResolver,
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),
@@ -342,8 +346,7 @@ class PersonDetailLocalIntegrationTest {
 
         val viewModel = RawEventDetailViewModel(
             rawIngestionRepository = rawIngestionRepository,
-            emailBodyRepository = emailBodyRepository,
-            sourceArtifactRepository = sourceArtifactRepository,
+            sourceOriginalResolver = sourceOriginalResolver,
             projectionPort = RoomBackedRawEventDetailProjectionPort(
                 commitmentDao = db.commitmentDao(),
                 calendarEventDao = db.calendarEventDao(),

@@ -989,6 +989,40 @@ private val MIGRATION_15_16 = object : Migration(15, 16) {
     }
 }
 
+// ─── Migration 16 → 17 (incremental person-index dirty queue) ───────────────
+//
+// PersonInteractionIndexWorker no longer needs to rescan every source participant row on
+// each refresh. Source graph write paths enqueue changed source keys here; the worker drains
+// this Room-only queue and rebuilds only those projection slices.
+private val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `person_manual_matches`")
+        db.execSQL("DROP TABLE IF EXISTS `person_alias_rules`")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_index_dirty_sources` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `interaction_kind` TEXT NOT NULL,
+                `reason` TEXT,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_index_dirty_sources_user_source` " +
+                "ON `person_index_dirty_sources` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_index_dirty_sources_user_updated` " +
+                "ON `person_index_dirty_sources` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1018,4 +1052,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_13_14,
     MIGRATION_14_15,
     MIGRATION_15_16,
+    MIGRATION_16_17,
 )

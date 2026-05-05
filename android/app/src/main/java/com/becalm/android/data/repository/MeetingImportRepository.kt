@@ -132,22 +132,15 @@ public class MeetingImportRepository @Inject constructor(
                     kind == ImportKind.Transcript &&
                     MeetingImportFilePolicy.isTextTranscript(mimeType, meta.displayName)
                 ) {
-                    val text = resolver.readUtf8Preview(uri, MAX_TRANSCRIPT_BYTES)
-                    if (!text.isNullOrBlank()) {
-                        sourceArtifactRepository.archiveMeetingTranscript(
-                            MeetingTranscriptArchiveInput(
-                                userId = userId,
-                                rawEventId = rawEvent.id,
-                                sourceRef = savedFile.uri.toString(),
-                                occurredAt = occurredAt,
-                                title = meta.displayName,
-                                text = text,
-                            ),
-                        )
-                    }
-                    if (rawEvent.syncStatus == "pending") {
-                        workScheduler.enqueueMeetingTranscriptUpload(rawEvent.id)
-                    }
+                    meetingTranscriptFinalizer().archiveAndEnqueue(
+                        userId = userId,
+                        rawEventId = rawEvent.id,
+                        sourceRef = savedFile.uri.toString(),
+                        occurredAt = occurredAt,
+                        title = meta.displayName,
+                        text = resolver.readUtf8Preview(uri, MAX_TRANSCRIPT_BYTES),
+                        syncStatus = rawEvent.syncStatus,
+                    )
                 } else if (rawEvent.syncStatus == "pending") {
                     workScheduler.enqueueVoiceUpload(rawEvent.id, savedFile.uri.toString())
                 }
@@ -159,6 +152,12 @@ public class MeetingImportRepository @Inject constructor(
                 BecalmResult.Failure(BecalmError.Unknown(t))
             }
         }
+
+    private fun meetingTranscriptFinalizer(): MeetingTranscriptIngestionFinalizer =
+        MeetingTranscriptIngestionFinalizer(
+            sourceArtifactRepository = sourceArtifactRepository,
+            workScheduler = workScheduler,
+        )
 
     private fun buildRawEvent(
         userId: String,
