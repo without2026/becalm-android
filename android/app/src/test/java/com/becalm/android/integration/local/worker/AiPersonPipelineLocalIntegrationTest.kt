@@ -11,13 +11,13 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.api.VoiceApi
+import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.PersonCandidateDto
 import com.becalm.android.data.remote.dto.ScheduleStatus
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.remote.dto.TranscribeExtractResponse
-import com.becalm.android.data.remote.dto.VoiceExtractItemDto
-import com.becalm.android.data.remote.dto.VoiceItemType
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
+import com.becalm.android.data.remote.dto.SourceExtractedItemDto
+import com.becalm.android.data.remote.dto.SourceExtractedItemType
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.person.PersonIdentityResolver
@@ -63,7 +63,7 @@ class AiPersonPipelineLocalIntegrationTest {
     private val contentResolver: ContentResolver = mockk(relaxed = true)
     private val parsedUri: Uri = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk()
-    private val voiceApi: VoiceApi = mockk()
+    private val sourceExtractionApi: SourceExtractionApi = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
@@ -100,7 +100,7 @@ class AiPersonPipelineLocalIntegrationTest {
     fun `Vertex voice response is persisted and indexed into the same person`() = runTest {
         db.rawIngestionEventDao().insert(aiVoiceRawEvent())
         coEvery {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 audio = any(),
                 inputModality = any(),
                 sourceType = any(),
@@ -177,7 +177,7 @@ class AiPersonPipelineLocalIntegrationTest {
             rawIngestionEventDao = db.rawIngestionEventDao(),
             commitmentDao = db.commitmentDao(),
             personIndexDao = db.personIndexDao(),
-            voiceApi = voiceApi,
+            sourceExtractionApi = sourceExtractionApi,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,
@@ -216,12 +216,12 @@ class AiPersonPipelineLocalIntegrationTest {
             syncStatus = "pending",
         )
 
-    private fun aiVoiceResponse(): TranscribeExtractResponse =
-        TranscribeExtractResponse(
+    private fun aiVoiceResponse(): SourceExtractionResponse =
+        SourceExtractionResponse(
             rawEventId = RAW_ID,
             items = listOf(
-                VoiceExtractItemDto(
-                    type = VoiceItemType.SCHEDULE,
+                SourceExtractedItemDto(
+                    type = SourceExtractedItemType.SCHEDULE,
                     text = "내일 오전 10시 데모 미팅을 확정한다",
                     quote = "내일 오전 10시 데모 미팅 확정입니다.",
                     counterpartyRef = CUSTOMER_EMAIL,
@@ -231,8 +231,8 @@ class AiPersonPipelineLocalIntegrationTest {
                     confidence = 0.94f,
                     scheduleStatus = ScheduleStatus.CONFIRMED,
                 ),
-                VoiceExtractItemDto(
-                    type = VoiceItemType.ACTION,
+                SourceExtractedItemDto(
+                    type = SourceExtractedItemType.ACTION,
                     text = "오늘 견적서를 보낸다",
                     quote = "견적서는 오늘 보내드리겠습니다.",
                     counterpartyRef = CUSTOMER_EMAIL,

@@ -6,7 +6,7 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.dto.TranscribeExtractResponse
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import kotlinx.datetime.Instant
@@ -23,7 +23,7 @@ internal class StructuredExtractionPersister(
     suspend fun persist(
         userId: String,
         entity: RawIngestionEventEntity,
-        body: TranscribeExtractResponse,
+        body: SourceExtractionResponse,
         now: Instant,
     ): StructuredExtractionPersistStats {
         val commitmentEntities = body.items.mapIndexed { index, dto ->

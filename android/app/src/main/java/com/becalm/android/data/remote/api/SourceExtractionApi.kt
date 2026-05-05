@@ -1,6 +1,6 @@
 package com.becalm.android.data.remote.api
 
-import com.becalm.android.data.remote.dto.TranscribeExtractResponse
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -19,7 +19,7 @@ import retrofit2.http.Part
  *
  * ## Timeouts
  * Audio uploads can reach 60 MiB (120-minute AAC, api-contract.yml max_body_bytes=62914560).
- * The Retrofit client used for this interface must be configured with [HttpTimeouts.Voice]
+ * The Retrofit client used for this interface must be configured with [HttpTimeouts.SourceExtraction]
  * (connect=30s, read=180s, write=180s) to accommodate slow upload links without premature
  * read/write timeout on the server's streaming response.
  *
@@ -30,7 +30,7 @@ import retrofit2.http.Part
  *
  * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
  */
-public interface VoiceApi {
+public interface SourceExtractionApi {
 
     /**
      * Uploads normalized source content to Railway for server-side business-item extraction via
@@ -79,5 +79,5 @@ public interface VoiceApi {
         @Part("conversation_ref") conversationRef: RequestBody?,
         @Part("previous_thread_context") previousThreadContext: RequestBody?,
         @Part("body_text") bodyText: RequestBody?,
-    ): Response<TranscribeExtractResponse>
+    ): Response<SourceExtractionResponse>
 }
