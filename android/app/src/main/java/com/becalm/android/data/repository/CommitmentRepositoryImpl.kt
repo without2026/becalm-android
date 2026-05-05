@@ -121,8 +121,8 @@ public class CommitmentRepositoryImpl @Inject constructor(
     ): Flow<List<TodayCommitmentRow>> =
         dao.observeTimelineForToday(userId, endOfTodayEpochMs, startOfTodayEpochMs)
 
-    override fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>> =
-        dao.observeAllForPerson(userId, personRef)
+    override fun observeAllForPerson(userId: String, counterpartyRef: String): Flow<List<CommitmentEntity>> =
+        dao.observeAllForPerson(userId, counterpartyRef)
 
     override fun observeById(id: String): Flow<CommitmentEntity?> =
         dao.observeById(id)
@@ -135,7 +135,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
     override suspend fun refreshSince(
         userId: String,
         since: Instant?,
-        personRef: String?,
+        counterpartyRef: String?,
         direction: String?,
         actionState: String?,
     ): BecalmResult<CommitmentRepository.RefreshStats> {
@@ -153,7 +153,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
                     cursor = cursor,
                     limit = PAGE_LIMIT,
                     since = since?.toString(),
-                    personRef = personRef,
+                    personId = counterpartyRef,
                     direction = direction,
                     actionState = actionState,
                 )
@@ -317,7 +317,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
             dueAt = patch.dueAt,
             dueHint = patch.dueHint,
             approx = patch.dueIsApproximate,
-            personRef = patch.personRef,
+            counterpartyRef = patch.counterpartyRef,
             direction = patch.direction,
             actorId = actorId,
             editedAt = editedAt,
@@ -335,7 +335,6 @@ public class CommitmentRepositoryImpl @Inject constructor(
                 dueAt = patch.dueAt,
                 dueHint = patch.dueHint,
                 dueIsApproximate = patch.dueIsApproximate,
-                personRef = patch.personRef,
                 direction = patch.direction,
                 lastEditedBy = actorId,
                 lastEditedAt = editedAt,
@@ -501,7 +500,7 @@ public class CommitmentRepositoryImpl @Inject constructor(
             itemType = CommitmentItemType.ACTION,
             direction = input.direction,
             counterpartyRaw = oldRow?.counterpartyRaw,
-            personRef = input.personRef,
+            counterpartyRef = input.counterpartyRef,
             title = input.title,
             description = null,
             quote = oldRow?.quote ?: input.quote,

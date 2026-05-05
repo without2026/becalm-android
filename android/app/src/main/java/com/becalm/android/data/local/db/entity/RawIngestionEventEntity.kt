@@ -20,7 +20,7 @@ import kotlinx.datetime.Instant
  * Indices defined per spec (`data-model.yml § raw_ingestion_events.indexes`):
  * - `idx_raw_events_user_sync` — supports [RawIngestionEventDao.findPendingForUpload]
  * - `idx_raw_events_user_time` — supports chronological timeline queries
- * - `idx_raw_events_user_person_time` — supports PersonDetailScreen timeline query
+ * - `idx_raw_events_user_counterparty_time` — supports counterparty-scoped local queries
  *
  * Logical foreign key (not enforced by Room):
  * - `user_id` → `auth.users.id` (many-to-one, on_delete: cascade) per
@@ -48,8 +48,8 @@ import kotlinx.datetime.Instant
             value = ["user_id", "timestamp"],
         ),
         Index(
-            name = "idx_raw_events_user_person_time",
-            value = ["user_id", "person_ref", "timestamp"],
+            name = "idx_raw_events_user_counterparty_time",
+            value = ["user_id", "counterparty_ref", "timestamp"],
         ),
         Index(
             name = "ux_raw_events_user_client_event",
@@ -104,8 +104,8 @@ public data class RawIngestionEventEntity(
      * Null for events with no identifiable counterparty (e.g., self-dictated notes).
      * Null values appear under the "Unassigned" group in the UI.
      */
-    @ColumnInfo(name = "person_ref")
-    val personRef: String? = null,
+    @ColumnInfo(name = "counterparty_ref")
+    val counterpartyRef: String? = null,
 
     /**
      * Voice: MediaStore TITLE; email: subject; calendar: event title.
@@ -148,7 +148,7 @@ public data class RawIngestionEventEntity(
      * The folder label reaches Room via the current ingestion owner and is mirrored here
      * so that downstream consumers (SyncWorker, UI timelines) can read the hint
      * without joining against [EmailBodyEntity]. EMAIL-002 uses the hint to pick the
-     * correct participant column when deriving [personRef]: `INBOX` → `From`,
+     * correct participant column when deriving [counterpartyRef]: `INBOX` → `From`,
      * `SENT` → first `To[0]`. Spec: `.spec/email-pipeline.spec.yml:15-18`.
      *
      * Nullable at the schema level because `ALTER TABLE ADD COLUMN` on SQLite forbids

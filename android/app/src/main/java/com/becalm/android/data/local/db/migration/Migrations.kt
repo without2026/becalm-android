@@ -772,6 +772,236 @@ private val MIGRATION_12_13 = object : Migration(12, 13) {
     }
 }
 
+// ─── Migration 13 → 14 (backend relation-intelligence mirror) ───────────────
+//
+// Aligns Room's canonical person/relation tables with the backend relation
+// schema. Local-only person repair/projection columns remain in place, but Android
+// now has first-class mirrors for persons, source_event_participants, and
+// commitment_participants instead of relying on source_person_candidates/person_ref
+// as the only person wiring surface.
+private val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `persons` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `display_name` TEXT NOT NULL,
+                `kind` TEXT NOT NULL,
+                `primary_email` TEXT,
+                `primary_phone` TEXT,
+                `confidence` REAL NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                `archived_at` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_persons_user_updated` " +
+                "ON `persons` (`user_id`, `updated_at`)",
+        )
+
+        addColumnIfMissing(db, "person_identities", "identity_value", "TEXT NOT NULL DEFAULT ''")
+        addColumnIfMissing(db, "person_identities", "normalized_value", "TEXT NOT NULL DEFAULT ''")
+        addColumnIfMissing(db, "person_identities", "display_name", "TEXT")
+        addColumnIfMissing(db, "person_identities", "source_ref", "TEXT")
+        addColumnIfMissing(db, "person_identities", "is_primary", "INTEGER NOT NULL DEFAULT 0")
+        addColumnIfMissing(db, "person_identities", "created_at", "INTEGER NOT NULL DEFAULT 0")
+        addColumnIfMissing(db, "person_identities", "updated_at", "INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            UPDATE `person_identities`
+            SET
+                identity_value = CASE WHEN identity_value = '' THEN raw_value ELSE identity_value END,
+                normalized_value = CASE
+                    WHEN normalized_value != '' THEN normalized_value
+                    WHEN instr(identity_key, ':') > 0 THEN substr(identity_key, instr(identity_key, ':') + 1)
+                    ELSE raw_value
+                END,
+                display_name = COALESCE(display_name, display_name_hint),
+                is_primary = CASE WHEN verified != 0 THEN 1 ELSE is_primary END,
+                created_at = CASE WHEN created_at = 0 THEN last_seen_at ELSE created_at END,
+                updated_at = CASE WHEN updated_at = 0 THEN last_seen_at ELSE updated_at END
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_identities_user_identity` " +
+                "ON `person_identities` (`user_id`, `identity_type`, `normalized_value`)",
+        )
+
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO `persons` (
+                `id`, `user_id`, `display_name`, `kind`, `primary_email`, `primary_phone`,
+                `confidence`, `created_at`, `updated_at`, `archived_at`
+            )
+            SELECT
+                person_id,
+                user_id,
+                COALESCE(MAX(display_name_hint), MAX(raw_value), person_id),
+                'person',
+                MAX(CASE WHEN identity_type = 'email' THEN normalized_value ELSE NULL END),
+                MAX(CASE WHEN identity_type = 'phone' THEN normalized_value ELSE NULL END),
+                MAX(confidence),
+                MIN(created_at),
+                MAX(updated_at),
+                NULL
+            FROM `person_identities`
+            GROUP BY user_id, person_id
+            """.trimIndent(),
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `source_event_participants` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `source_event_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT,
+                `person_id` TEXT,
+                `role` TEXT NOT NULL,
+                `relation_to_user` TEXT NOT NULL,
+                `identity_type` TEXT,
+                `normalized_value` TEXT,
+                `display_name_raw` TEXT,
+                `email_raw` TEXT,
+                `phone_raw` TEXT,
+                `organization_raw` TEXT,
+                `evidence` TEXT,
+                `confidence` REAL NOT NULL,
+                `resolution_status` TEXT NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_user_event` " +
+                "ON `source_event_participants` (`user_id`, `source_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_user_person` " +
+                "ON `source_event_participants` (`user_id`, `person_id`, `created_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_unresolved` " +
+                "ON `source_event_participants` (`user_id`, `resolution_status`, `created_at`)",
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `commitment_participants` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `commitment_id` TEXT NOT NULL,
+                `person_id` TEXT NOT NULL,
+                `role` TEXT NOT NULL,
+                `evidence` TEXT,
+                `confidence` REAL NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_commitment_participants_user_commitment_person_role` " +
+                "ON `commitment_participants` (`user_id`, `commitment_id`, `person_id`, `role`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitment_participants_user_person` " +
+                "ON `commitment_participants` (`user_id`, `person_id`, `created_at`)",
+        )
+
+        addColumnIfMissing(db, "person_interactions", "source_event_id", "TEXT")
+        addColumnIfMissing(db, "person_interactions", "commitment_id", "TEXT")
+        addColumnIfMissing(db, "person_interactions", "interaction_key", "TEXT NOT NULL DEFAULT ''")
+        addColumnIfMissing(db, "person_interactions", "interaction_type", "TEXT NOT NULL DEFAULT ''")
+        addColumnIfMissing(db, "person_interactions", "created_at", "INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            UPDATE `person_interactions`
+            SET
+                source_event_id = CASE
+                    WHEN source_event_id IS NULL AND source_ref LIKE 'raw:%' THEN substr(source_ref, 5)
+                    ELSE source_event_id
+                END,
+                commitment_id = CASE
+                    WHEN commitment_id IS NULL AND source_ref LIKE 'commitment:%' THEN substr(source_ref, 12)
+                    ELSE commitment_id
+                END,
+                interaction_type = CASE WHEN interaction_type = '' THEN interaction_kind ELSE interaction_type END,
+                interaction_key = CASE
+                    WHEN interaction_key = '' THEN user_id || ':' || person_id || ':' ||
+                        COALESCE(source_event_id, source_ref) || ':' || COALESCE(commitment_id, '') || ':' || interaction_kind
+                    ELSE interaction_key
+                END,
+                created_at = CASE WHEN created_at = 0 THEN occurred_at ELSE created_at END
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_interactions_user_key` " +
+                "ON `person_interactions` (`user_id`, `interaction_key`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_person_occurred` " +
+                "ON `person_interactions` (`user_id`, `person_id`, `occurred_at`)",
+        )
+    }
+}
+
+// ─── Migration 14 → 15 (counterparty_ref naming contract) ────────────────────
+//
+// raw_ingestion_events / commitments used to store the source counterparty seed in
+// `person_ref`, which conflicted with the relation-intelligence contract where UI
+// person identity is `person_id`. v15 renames those durable local columns to
+// `counterparty_ref`. The contacts enrichment cache keeps `persons_enrichment.person_ref`
+// because it is a local contacts lookup anchor, not the relation UI key.
+private val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP INDEX IF EXISTS `idx_raw_events_user_person_time`")
+        db.execSQL("DROP INDEX IF EXISTS `idx_commitments_user_person_due`")
+
+        db.execSQL("ALTER TABLE `raw_ingestion_events` RENAME COLUMN `person_ref` TO `counterparty_ref`")
+        db.execSQL("ALTER TABLE `commitments` RENAME COLUMN `person_ref` TO `counterparty_ref`")
+
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_raw_events_user_counterparty_time` " +
+                "ON `raw_ingestion_events` (`user_id`, `counterparty_ref`, `timestamp`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitments_user_counterparty_due` " +
+                "ON `commitments` (`user_id`, `counterparty_ref`, `due_at`)",
+        )
+    }
+}
+
+// ─── Migration 15 → 16 (remove source_person_candidates legacy cache) ───────
+//
+// Person matching and PersonWorker indexing now read source_event_participants directly.
+// The former source_person_candidates cache duplicated the same data for review UI and
+// could drift from the canonical participant table, so v16 drops it.
+private val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `source_person_candidates`")
+    }
+}
+
+private fun addColumnIfMissing(
+    db: SupportSQLiteDatabase,
+    tableName: String,
+    columnName: String,
+    definition: String,
+) {
+    try {
+        db.execSQL("ALTER TABLE `$tableName` ADD COLUMN `$columnName` $definition")
+    } catch (e: android.database.sqlite.SQLiteException) {
+        if (!e.message.orEmpty().contains("duplicate column", ignoreCase = true)) throw e
+    }
+}
+
 public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -785,4 +1015,7 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_10_11,
     MIGRATION_11_12,
     MIGRATION_12_13,
+    MIGRATION_13_14,
+    MIGRATION_14_15,
+    MIGRATION_15_16,
 )

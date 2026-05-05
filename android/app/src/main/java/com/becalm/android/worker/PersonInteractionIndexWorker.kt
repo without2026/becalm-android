@@ -9,23 +9,18 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
-import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
-import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
-import com.becalm.android.data.local.db.entity.PersonAliasRuleEntity
-import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
-import com.becalm.android.data.local.db.entity.PersonManualMatchEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
-import com.becalm.android.domain.person.PersonIdentityResolution
 import com.becalm.android.domain.person.PersonIdentityResolver
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -37,6 +32,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
+private fun interactionKindFor(sourceType: String): String = when {
+    sourceType.contains("calendar") -> "calendar"
+    sourceType.contains("mail") || sourceType.contains("imap") || sourceType == "gmail" -> "email"
+    sourceType == "voice" || sourceType == "call_recording" -> "call"
+    else -> sourceType
+}
+
 @HiltWorker
 public class PersonInteractionIndexWorker @AssistedInject constructor(
     @Assisted appContext: Context,
@@ -44,7 +46,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private val databaseProvider: Provider<BeCalmDatabase>,
     private val rawDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
-    private val calendarDaoProvider: Provider<CalendarEventDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
@@ -60,31 +61,18 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         val rawEvents = rawDaoProvider.get().findAllForUser(userId)
         val commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId)
-        val calendarEvents = calendarDaoProvider.get().findAllForUser(userId)
-        val enrichmentRows = databaseProvider.get().personEnrichmentDao().observeAll().first()
-        val existingCandidates = personIndexDaoProvider.get().findCandidatesForUser(userId)
-        val manualMatches = personIndexDaoProvider.get().findManualMatchesForUser(userId)
-        val aliasRules = personIndexDaoProvider.get().findEnabledAliasRulesForUser(userId)
+        val sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId)
+        val commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId)
         val existingStates = personIndexDaoProvider.get().findSourceStatesForUser(userId)
         val blockedPersonRefs = userPrefsStore.observeBlockedPersonRefs().first()
 
-        val generatedAliasRules =
-            buildGeneratedContactAliasRules(userId, enrichmentRows, blockedPersonRefs) +
-                buildGeneratedAliasRules(userId, existingCandidates, blockedPersonRefs)
-        val resolverFingerprint = resolverFingerprint(
-            manualMatches = manualMatches,
-            aliasRules = aliasRules,
-            generatedAliasRules = generatedAliasRules,
-            candidates = existingCandidates,
-            blockedPersonRefs = blockedPersonRefs,
-        )
+        val suppressionFingerprint = suppressionFingerprint(blockedPersonRefs)
         val sourceRecords = buildSourceRecords(
-            userId = userId,
-            resolverFingerprint = resolverFingerprint,
+            suppressionFingerprint = suppressionFingerprint,
             rawEvents = rawEvents,
             commitments = commitments,
-            calendarEvents = calendarEvents,
-            candidates = existingCandidates,
+            sourceParticipants = sourceParticipants,
+            commitmentParticipants = commitmentParticipants,
         )
         val recordsByKey = sourceRecords.associateBy { it.key }
         val existingStateByKey = existingStates.associateBy { it.key() }
@@ -103,9 +91,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         val builder = PersonIndexBuild(
             userId = userId,
-            manualMatches = manualMatches,
-            aliasRules = aliasRules + generatedAliasRules,
-            sourceCandidates = existingCandidates,
             blockedPersonRefs = blockedPersonRefs,
         )
         changedRecords.forEach { it.applyTo(builder) }
@@ -139,7 +124,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 }
             if (snapshot.identities.isNotEmpty()) dao.upsertIdentities(snapshot.identities)
             if (snapshot.interactions.isNotEmpty()) dao.upsertInteractions(snapshot.interactions)
-            if (snapshot.candidates.isNotEmpty()) dao.upsertCandidates(snapshot.candidates)
             if (snapshot.unmatched.isNotEmpty()) dao.upsertUnmatchedInteractions(snapshot.unmatched)
             val sourceStates = changedRecords.map { it.toState(userId) }
             if (sourceStates.isNotEmpty()) dao.upsertSourceStates(sourceStates)
@@ -147,9 +131,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
         logger.d(
             TAG,
-            "indexed changedSources=${changedRecords.size} obsoleteSources=${obsoleteStates.size} " +
+                "indexed changedSources=${changedRecords.size} obsoleteSources=${obsoleteStates.size} " +
                 "identities=${snapshot.identities.size} interactions=${snapshot.interactions.size} " +
-                "candidates=${snapshot.candidates.size} unmatched=${snapshot.unmatched.size}",
+                "unmatched=${snapshot.unmatched.size}",
         )
         notifyMatchingState(userId)
         Result.success()
@@ -166,101 +150,85 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     }
 
     private fun buildSourceRecords(
-        userId: String,
-        resolverFingerprint: String,
+        suppressionFingerprint: String,
         rawEvents: List<RawIngestionEventEntity>,
         commitments: List<CommitmentEntity>,
-        calendarEvents: List<CalendarEventEntity>,
-        candidates: List<SourcePersonCandidateEntity>,
+        sourceParticipants: List<SourceEventParticipantEntity>,
+        commitmentParticipants: List<CommitmentParticipantEntity>,
     ): List<SourceRecord> {
         val records = mutableListOf<SourceRecord>()
-        rawEvents.forEach { row ->
-            val key = SourceKey(
-                sourceType = row.sourceType,
-                sourceRef = "raw:${row.id}",
-                interactionKind = interactionKindFor(row.sourceType),
-            )
-            records += SourceRecord(
-                key = key,
-                fingerprint = fingerprintOf(
-                    resolverFingerprint,
-                    row.personRef,
-                    row.eventTitle,
-                    row.eventSnippet,
-                    row.folder,
-                    row.timestamp.toString(),
-                ),
-                applyTo = { it.addRawEvent(row) },
-            )
-        }
-        commitments.forEach { row ->
-            val key = SourceKey(
-                sourceType = row.sourceType,
-                sourceRef = "commitment:${row.id}",
-                interactionKind = "commitment",
-            )
-            records += SourceRecord(
-                key = key,
-                fingerprint = fingerprintOf(
-                    resolverFingerprint,
-                    row.itemType,
-                    row.direction,
-                    row.scheduleStatus,
-                    row.decisionStatus,
-                    row.counterpartyRaw,
-                    row.personRef,
-                    row.title,
-                    row.description,
-                    row.quote,
-                    row.sourceEventOccurredAt.toString(),
-                    row.actionState,
-                    row.confidence.toString(),
-                    row.updatedAt.toString(),
-                    row.deletedAt?.toString(),
-                ),
-                applyTo = { it.addCommitment(row) },
-            )
-        }
-        calendarEvents.forEach { row ->
-            attendeeRefs(row.attendeesRaw).forEach { attendee ->
-                val provisional = PersonIdentityResolver.resolve(userId, attendee)
+        val rawById = rawEvents.associateBy { it.id }
+        val commitmentsById = commitments.associateBy { it.id }
+
+        sourceParticipants
+            .groupBy { it.sourceType to it.sourceEventId }
+            .forEach { (sourceKey, participants) ->
+                val raw = rawById[sourceKey.second]
                 val key = SourceKey(
-                    sourceType = row.sourceType,
-                    sourceRef = "calendar:${row.id}:${provisional?.identityKey ?: attendee.hashCode()}",
-                    interactionKind = "calendar",
+                    sourceType = sourceKey.first,
+                    sourceRef = "raw:${sourceKey.second}",
+                    interactionKind = interactionKindFor(sourceKey.first),
                 )
                 records += SourceRecord(
                     key = key,
                     fingerprint = fingerprintOf(
-                        resolverFingerprint,
-                        attendee,
-                        row.title,
-                        row.attendeesRaw,
-                        row.startAt.toString(),
-                        row.endAt.toString(),
+                        suppressionFingerprint,
+                        raw?.eventTitle,
+                        raw?.eventSnippet,
+                        raw?.timestamp?.toString(),
+                        *participants
+                            .map {
+                                "p|${it.id}|${it.personId}|${it.role}|${it.relationToUser}|${it.identityType}|" +
+                                    "${it.normalizedValue}|${it.displayNameRaw}|${it.emailRaw}|${it.phoneRaw}|" +
+                                    "${it.organizationRaw}|${it.resolutionStatus}|${it.confidence}|${it.createdAt}"
+                            }
+                            .sorted()
+                            .toTypedArray(),
                     ),
-                    applyTo = { it.addCalendarAttendee(row, attendee, key.sourceRef) },
+                    applyTo = { builder ->
+                        participants.forEach { participant ->
+                            builder.addSourceParticipant(participant, raw)
+                        }
+                    },
                 )
             }
-            if (!row.title.isNullOrBlank()) {
+
+        commitmentParticipants
+            .groupBy { it.commitmentId }
+            .forEach { (commitmentId, participants) ->
+                val commitment = commitmentsById[commitmentId] ?: return@forEach
                 val key = SourceKey(
-                    sourceType = row.sourceType,
-                    sourceRef = "calendar:${row.id}:title",
-                    interactionKind = "calendar",
+                    sourceType = commitment.sourceType,
+                    sourceRef = "commitment:$commitmentId",
+                    interactionKind = "commitment",
                 )
                 records += SourceRecord(
                     key = key,
                     fingerprint = fingerprintOf(
-                        resolverFingerprint,
-                        row.title,
-                        row.attendeesRaw,
-                        row.startAt.toString(),
-                        row.endAt.toString(),
+                        suppressionFingerprint,
+                        commitment.itemType,
+                        commitment.direction,
+                        commitment.scheduleStatus,
+                        commitment.decisionStatus,
+                        commitment.title,
+                        commitment.quote,
+                        commitment.sourceEventOccurredAt.toString(),
+                        commitment.actionState,
+                        commitment.confidence.toString(),
+                        commitment.updatedAt.toString(),
+                        commitment.deletedAt?.toString(),
+                        *participants
+                            .map { "cp|${it.id}|${it.personId}|${it.role}|${it.evidence}|${it.confidence}|${it.createdAt}" }
+                            .sorted()
+                            .toTypedArray(),
                     ),
-                    applyTo = { it.addCalendarTitle(row, key.sourceRef) },
+                    applyTo = { builder ->
+                        participants.forEach { participant ->
+                            builder.addCommitmentParticipant(participant, commitment)
+                        }
+                    },
                 )
             }
-        }
         return records
             .groupBy { it.key }
             .map { (key, grouped) ->
@@ -274,178 +242,81 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
     private class PersonIndexBuild(
         private val userId: String,
-        manualMatches: List<PersonManualMatchEntity>,
-        aliasRules: List<PersonAliasRuleEntity>,
-        sourceCandidates: List<SourcePersonCandidateEntity>,
         private val blockedPersonRefs: Set<String>,
     ) {
         private val now = Clock.System.now()
         private val identities = linkedMapOf<String, PersonIdentityEntity>()
         private val interactions = linkedMapOf<String, PersonInteractionEntity>()
-        private val candidates = linkedMapOf<String, SourcePersonCandidateEntity>()
         private val unmatched = linkedMapOf<String, UnmatchedPersonInteractionEntity>()
-        private val manualMatchesBySource = manualMatches.associateBy {
-            manualKey(it.sourceType, it.sourceRef, it.interactionKind)
-        }
-        private val aliasRules = aliasRules.filter { it.enabled && it.normalizedAlias.isNotBlank() }
-        private val candidatesBySource = sourceCandidates
-            .filter { it.confidence >= 0.8 }
-            .groupBy { candidateKey(it.sourceType, it.sourceRef) }
 
-        fun addRawEvent(row: RawIngestionEventEntity) {
-            if (shouldSuppress(row.personRef)) return
-            val sourceRef = "raw:${row.id}"
-            val candidateSourceRefs = candidateSourceRefs(sourceRef, row.sourceRef)
-            val kind = interactionKindFor(row.sourceType)
-            val resolved = resolveForSource(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = kind,
-                explicitAnchor = row.personRef ?: candidateAnchorFor(row.sourceType, candidateSourceRefs),
-                texts = listOf(row.personRef, row.eventTitle, row.eventSnippet),
-                lastSeenAt = row.timestamp,
-            ) ?: return upsertUnmatched(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = kind,
-                title = row.eventTitle,
-                snippet = row.eventSnippet,
-                suggestedLabel = row.personRef,
-                occurredAt = row.timestamp,
-            )
-            upsertCandidate(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                candidateRef = row.personRef,
-                role = "counterparty",
-                confidence = resolved.confidence,
-            )
-            upsertInteraction(
-                personId = resolved.personId,
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = kind,
-                role = "counterparty",
-                direction = folderDirection(row.folder),
-                status = null,
-                occurredAt = row.timestamp,
-                title = row.eventTitle,
-                snippet = row.eventSnippet,
-                confidence = resolved.confidence,
-            )
-        }
-
-        fun addCommitment(row: CommitmentEntity) {
-            val sourceRef = "commitment:${row.id}"
-            val candidateSourceRefs = candidateSourceRefs(sourceRef, row.sourceRef)
-            val candidateFallback = if (row.itemType == CommitmentItemType.DECISION) {
-                null
-            } else {
-                candidateAnchorFor(row.sourceType, candidateSourceRefs)
+        fun addSourceParticipant(
+            participant: SourceEventParticipantEntity,
+            raw: RawIngestionEventEntity?,
+        ) {
+            val sourceRef = "raw:${participant.sourceEventId}"
+            val kind = interactionKindFor(participant.sourceType)
+            val anchor = participant.emailRaw
+                ?: participant.phoneRaw
+                ?: participant.normalizedValue
+                ?: participant.displayNameRaw
+                ?: participant.organizationRaw
+            if (shouldSuppress(anchor)) return
+            val occurredAt = raw?.timestamp ?: participant.createdAt
+            if (participant.personId.isNullOrBlank()) {
+                if (participant.resolutionStatus == "unresolved") {
+                    upsertUnmatched(
+                        sourceType = participant.sourceType,
+                        sourceRef = sourceRef,
+                        kind = kind,
+                        title = raw?.eventTitle,
+                        snippet = raw?.eventSnippet ?: participant.evidence,
+                        suggestedLabel = participant.displayNameRaw
+                            ?: participant.emailRaw
+                            ?: participant.phoneRaw
+                            ?: participant.organizationRaw
+                            ?: participant.normalizedValue,
+                        occurredAt = occurredAt,
+                    )
+                }
+                return
             }
-            val resolved = resolveForSource(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "commitment",
-                explicitAnchor = row.personRef ?: row.counterpartyRaw ?: candidateFallback,
-                texts = listOf(row.personRef, row.counterpartyRaw, row.title, row.description, row.quote),
-                lastSeenAt = row.sourceEventOccurredAt,
-            ) ?: return upsertUnmatched(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "commitment",
-                title = row.title,
-                snippet = row.quote,
-                suggestedLabel = row.personRef ?: row.counterpartyRaw,
-                occurredAt = row.sourceEventOccurredAt,
-            )
-            upsertCandidate(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                candidateRef = row.personRef ?: row.counterpartyRaw,
-                role = "commitment_counterparty",
-                confidence = resolved.confidence,
-            )
+            upsertIdentity(participant, occurredAt)
             upsertInteraction(
-                personId = resolved.personId,
-                sourceType = row.sourceType,
+                personId = participant.personId,
+                sourceType = participant.sourceType,
                 sourceRef = sourceRef,
+                kind = kind,
+                role = participant.role,
+                direction = raw?.folder?.let(::folderDirection),
+                status = null,
+                occurredAt = occurredAt,
+                title = raw?.eventTitle,
+                snippet = raw?.eventSnippet ?: participant.evidence,
+                confidence = participant.confidence,
+            )
+        }
+
+        fun addCommitmentParticipant(
+            participant: CommitmentParticipantEntity,
+            commitment: CommitmentEntity,
+        ) {
+            if (participant.personId.isBlank()) return
+            upsertInteraction(
+                personId = participant.personId,
+                sourceType = commitment.sourceType,
+                sourceRef = "commitment:${commitment.id}",
                 kind = "commitment",
-                role = row.itemType,
-                direction = row.direction,
-                status = when (row.itemType) {
-                    CommitmentItemType.SCHEDULE -> row.scheduleStatus
-                    CommitmentItemType.DECISION -> row.decisionStatus
-                    else -> row.actionState
+                role = commitment.itemType,
+                direction = commitment.direction,
+                status = when (commitment.itemType) {
+                    CommitmentItemType.SCHEDULE -> commitment.scheduleStatus
+                    CommitmentItemType.DECISION -> commitment.decisionStatus
+                    else -> commitment.actionState
                 },
-                occurredAt = row.sourceEventOccurredAt,
-                title = row.title,
-                snippet = row.quote,
-                confidence = row.confidence.coerceAtLeast(resolved.confidence),
-            )
-        }
-
-        fun addCalendarAttendee(row: CalendarEventEntity, attendee: String, sourceRef: String) {
-            if (shouldSuppress(attendee)) return
-            val resolved = resolveForSource(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "calendar",
-                explicitAnchor = attendee,
-                texts = listOf(attendee, row.title, row.attendeesRaw),
-                lastSeenAt = row.startAt,
-            ) ?: return upsertUnmatched(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "calendar",
-                title = row.title,
-                snippet = row.attendeesRaw,
-                suggestedLabel = attendee,
-                occurredAt = row.startAt,
-            )
-            upsertCandidate(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                candidateRef = attendee,
-                role = "attendee",
-                confidence = resolved.confidence,
-            )
-            upsertInteraction(
-                personId = resolved.personId,
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "calendar",
-                role = "attendee",
-                direction = null,
-                status = null,
-                occurredAt = row.startAt,
-                title = row.title,
-                snippet = row.attendeesRaw,
-                confidence = resolved.confidence,
-            )
-        }
-
-        fun addCalendarTitle(row: CalendarEventEntity, sourceRef: String) {
-            val resolved = resolveForSource(
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "calendar",
-                explicitAnchor = null,
-                texts = listOf(row.title, row.attendeesRaw),
-                lastSeenAt = row.startAt,
-            ) ?: return
-            upsertInteraction(
-                personId = resolved.personId,
-                sourceType = row.sourceType,
-                sourceRef = sourceRef,
-                kind = "calendar",
-                role = "title_mention",
-                direction = null,
-                status = null,
-                occurredAt = row.startAt,
-                title = row.title,
-                snippet = row.attendeesRaw,
-                confidence = resolved.confidence,
+                occurredAt = commitment.sourceEventOccurredAt,
+                title = commitment.title,
+                snippet = commitment.quote,
+                confidence = commitment.confidence.coerceAtLeast(participant.confidence),
             )
         }
 
@@ -453,173 +324,50 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             Snapshot(
                 identities = identities.values.toList(),
                 interactions = interactions.values.toList(),
-                candidates = candidates.values.toList(),
                 unmatched = unmatched.values.toList(),
             )
 
-        private fun resolveForSource(
-            sourceType: String,
-            sourceRef: String,
-            kind: String,
-            explicitAnchor: String?,
-            texts: List<String?>,
-            lastSeenAt: kotlinx.datetime.Instant,
-        ): PersonIdentityResolution? {
-            manualMatchesBySource[manualKey(sourceType, sourceRef, kind)]?.let { match ->
-                if (match.matchedIdentityKey.substringAfter(':', missingDelimiterValue = match.matchedIdentityKey) in blockedPersonRefs) {
-                    return null
-                }
-                return upsertIdentityResolution(
-                    resolved = PersonIdentityResolver.resolveIdentityKey(
-                        userId = userId,
-                        identityKey = match.matchedIdentityKey,
-                        rawValue = match.nickname,
-                        displayNameHint = match.nickname,
-                        confidence = 1.0,
-                        verified = true,
-                    ) ?: return null,
-                    sourceType = sourceType,
-                    lastSeenAt = lastSeenAt,
-                )
-            }
-
-            resolveExactAlias(sourceType, explicitAnchor)?.let { resolved ->
-                return upsertIdentityResolution(resolved, sourceType, lastSeenAt)
-            }
-
-            upsertIdentity(explicitAnchor, sourceType, lastSeenAt)?.let { return it }
-
-            val aliasResolved = resolveAlias(sourceType, texts)
-            return if (aliasResolved != null) {
-                upsertIdentityResolution(aliasResolved, sourceType, lastSeenAt)
-            } else {
-                null
-            }
-        }
-
         private fun upsertIdentity(
-            raw: String?,
-            sourceType: String,
+            participant: SourceEventParticipantEntity,
             lastSeenAt: kotlinx.datetime.Instant,
-        ): PersonIdentityResolution? {
-            if (shouldSuppress(raw)) return null
-            val resolved = PersonIdentityResolver.resolve(userId, raw) ?: return null
-            return upsertIdentityResolution(resolved, sourceType, lastSeenAt)
-        }
-
-        private fun upsertIdentityResolution(
-            resolved: PersonIdentityResolution,
-            sourceType: String,
-            lastSeenAt: kotlinx.datetime.Instant,
-        ): PersonIdentityResolution {
-            val id = UUID.nameUUIDFromBytes("identity:$userId:${resolved.identityKey}".toByteArray(Charsets.UTF_8)).toString()
-            val previous = identities[resolved.identityKey]
-            identities[resolved.identityKey] = PersonIdentityEntity(
-                id = id,
+        ) {
+            val personId = participant.personId ?: return
+            val identityType = participant.identityType ?: return
+            val normalized = participant.normalizedValue ?: return
+            val identityKey = "$identityType:$normalized"
+            val rawValue = when (identityType) {
+                "email" -> participant.emailRaw ?: normalized
+                "phone" -> participant.phoneRaw ?: normalized
+                "organization" -> participant.organizationRaw ?: normalized
+                "name" -> participant.displayNameRaw ?: normalized
+                else -> normalized
+            }
+            val previous = identities[identityKey]
+            identities[identityKey] = PersonIdentityEntity(
+                id = PersonIdentityResolver.stableIdentityId(userId, identityKey),
                 userId = userId,
-                personId = resolved.personId,
-                identityKey = resolved.identityKey,
-                identityType = resolved.identityType,
-                rawValue = resolved.rawValue,
-                displayNameHint = resolved.displayNameHint,
-                sourceType = sourceType,
-                confidence = maxOf(previous?.confidence ?: 0.0, resolved.confidence),
-                verified = (previous?.verified == true) || resolved.verified,
+                personId = personId,
+                identityKey = identityKey,
+                identityType = identityType,
+                rawValue = rawValue,
+                displayNameHint = participant.displayNameRaw ?: participant.organizationRaw ?: rawValue,
+                identityValue = rawValue,
+                normalizedValue = normalized,
+                displayName = participant.displayNameRaw,
+                sourceType = participant.sourceType,
+                sourceRef = participant.sourceRef,
+                confidence = maxOf(previous?.confidence ?: 0.0, participant.confidence),
+                isPrimary = true,
+                verified = participant.resolutionStatus == "resolved",
                 lastSeenAt = maxOf(previous?.lastSeenAt ?: lastSeenAt, lastSeenAt),
-            )
-            return resolved
-        }
-
-        private fun resolveExactAlias(sourceType: String, raw: String?): PersonIdentityResolution? {
-            if (shouldSuppress(raw)) return null
-            val normalized = PersonIdentityResolver.normalizeAlias(raw) ?: return null
-            val rule = aliasRules.firstOrNull { rule ->
-                rule.identityKey.substringAfter(':', missingDelimiterValue = rule.identityKey) !in blockedPersonRefs &&
-                    (rule.sourceScope == null || rule.sourceScope == sourceType) &&
-                    rule.normalizedAlias == normalized
-            } ?: return null
-            return PersonIdentityResolver.resolveIdentityKey(
-                userId = userId,
-                identityKey = rule.identityKey,
-                rawValue = rule.alias,
-                displayNameHint = rule.alias,
-                confidence = 0.99,
-                verified = true,
+                createdAt = previous?.createdAt ?: participant.createdAt,
+                updatedAt = maxOf(previous?.updatedAt ?: participant.createdAt, participant.createdAt),
             )
         }
-
-        private fun resolveAlias(sourceType: String, texts: List<String?>): PersonIdentityResolution? {
-            val haystack = PersonIdentityResolver.normalizeAlias(
-                texts.mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }.joinToString(" "),
-            ) ?: return null
-            val rule = aliasRules.firstOrNull { rule ->
-                rule.identityKey.substringAfter(':', missingDelimiterValue = rule.identityKey) !in blockedPersonRefs &&
-                    (rule.sourceScope == null || rule.sourceScope == sourceType) &&
-                    haystack.contains(rule.normalizedAlias)
-            } ?: return null
-            return PersonIdentityResolver.resolveIdentityKey(
-                userId = userId,
-                identityKey = rule.identityKey,
-                rawValue = rule.alias,
-                displayNameHint = rule.alias,
-                confidence = 0.99,
-                verified = true,
-            )
-        }
-
-        private fun candidateAnchorFor(sourceType: String, vararg sourceRefs: String?): String? =
-            candidatesFor(sourceType, *sourceRefs)
-                .mapNotNull { it.email ?: it.phone ?: it.name }
-                .filterNot(::shouldSuppress)
-                .distinct()
-                .singleOrNull()
 
         private fun shouldSuppress(raw: String?): Boolean =
             PersonIdentityResolver.isLikelyAutomated(raw) ||
                 PersonIdentityResolver.isBlocked(raw, blockedPersonRefs)
-
-        private fun candidateAnchorFor(sourceType: String, sourceRefs: List<String?>): String? =
-            candidateAnchorFor(sourceType, *sourceRefs.toTypedArray())
-
-        private fun candidateSourceRefs(recordSourceRef: String, providerSourceRef: String?): List<String?> =
-            listOf(
-                recordSourceRef,
-                providerSourceRef,
-                providerSourceRef?.takeIf { !it.startsWith("raw:") }?.let { "raw:$it" },
-            )
-
-        private fun candidatesFor(sourceType: String, vararg sourceRefs: String?): List<SourcePersonCandidateEntity> =
-            sourceRefs
-                .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
-                .flatMap { ref -> candidatesBySource[candidateKey(sourceType, ref)].orEmpty() }
-                .distinctBy { it.id }
-
-        private fun upsertCandidate(
-            sourceType: String,
-            sourceRef: String,
-            candidateRef: String?,
-            role: String,
-            confidence: Double,
-        ) {
-            val ref = candidateRef?.trim()?.takeIf { it.isNotEmpty() } ?: return
-            val key = "$sourceType|$sourceRef|$role|$ref"
-            val id = UUID.nameUUIDFromBytes("candidate:$userId:$key".toByteArray(Charsets.UTF_8)).toString()
-            candidates[id] = SourcePersonCandidateEntity(
-                id = id,
-                userId = userId,
-                sourceType = sourceType,
-                sourceRef = sourceRef,
-                candidateRef = "$role:$ref",
-                role = role,
-                name = ref.takeUnless { it.contains('@') || it.any(Char::isDigit) },
-                email = ref.takeIf { it.contains('@') },
-                phone = ref.takeIf { it.any(Char::isDigit) && !it.contains('@') },
-                organization = null,
-                evidence = null,
-                confidence = confidence,
-                createdAt = now,
-            )
-        }
 
         private fun upsertInteraction(
             personId: String,
@@ -682,37 +430,17 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             )
         }
 
-        private fun interactionKindFor(sourceType: String): String = when {
-            sourceType.contains("calendar") -> "calendar"
-            sourceType.contains("mail") || sourceType.contains("imap") || sourceType == "gmail" -> "email"
-            sourceType == "voice" || sourceType == "call_recording" -> "call"
-            else -> sourceType
-        }
-
         private fun folderDirection(folder: String?): String? = when (folder?.uppercase()) {
             "INBOX" -> "received"
             "SENT" -> "sent"
             else -> null
         }
 
-        private fun attendeeRefs(raw: String?): List<String> =
-            raw
-                ?.split(',', ';', '\n')
-                ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-                ?.distinct()
-                ?: emptyList()
-
-        private fun manualKey(sourceType: String, sourceRef: String, kind: String): String =
-            "$sourceType|$sourceRef|$kind"
-
-        private fun candidateKey(sourceType: String, sourceRef: String): String =
-            "$sourceType|$sourceRef"
     }
 
     private data class Snapshot(
         val identities: List<PersonIdentityEntity>,
         val interactions: List<PersonInteractionEntity>,
-        val candidates: List<SourcePersonCandidateEntity>,
         val unmatched: List<UnmatchedPersonInteractionEntity>,
     )
 
@@ -751,135 +479,11 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             interactionKind = interactionKind,
         )
 
-    private fun resolverFingerprint(
-        manualMatches: List<PersonManualMatchEntity>,
-        aliasRules: List<PersonAliasRuleEntity>,
-        generatedAliasRules: List<PersonAliasRuleEntity>,
-        candidates: List<SourcePersonCandidateEntity>,
+    private fun suppressionFingerprint(
         blockedPersonRefs: Set<String>,
     ): String = fingerprintOf(
-        *(
-            manualMatches.map {
-                "m|${it.sourceType}|${it.sourceRef}|${it.interactionKind}|${it.matchedIdentityKey}|${it.nickname}|${it.updatedAt}"
-            } +
-                aliasRules.map {
-                    "a|${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}|${it.enabled}|${it.updatedAt}"
-                } +
-                generatedAliasRules.map {
-                    "g|${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}|${it.enabled}|${it.updatedAt}"
-                } +
-                candidates.map {
-                    "c|${it.sourceType}|${it.sourceRef}|${it.candidateRef}|${it.role}|${it.name}|${it.email}|${it.phone}|${it.evidence}|${it.confidence}|${it.createdAt}"
-                } +
-                blockedPersonRefs.sorted().map {
-                    "b|$it"
-                }
-            ).sorted().toTypedArray(),
+        *blockedPersonRefs.sorted().map { "b|$it" }.toTypedArray(),
     )
-
-    private fun buildGeneratedAliasRules(
-        userId: String,
-        candidates: List<SourcePersonCandidateEntity>,
-        blockedPersonRefs: Set<String>,
-    ): List<PersonAliasRuleEntity> =
-        candidates.mapNotNull { candidate ->
-            if (candidate.confidence < 0.8) return@mapNotNull null
-            val name = candidate.name?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-            val anchor = candidate.email ?: candidate.phone ?: return@mapNotNull null
-            if (PersonIdentityResolver.isLikelyAutomated(anchor)) return@mapNotNull null
-            if (PersonIdentityResolver.isBlocked(anchor, blockedPersonRefs)) return@mapNotNull null
-            val resolved = PersonIdentityResolver.resolve(userId, anchor) ?: return@mapNotNull null
-            val normalizedAlias = PersonIdentityResolver.normalizeAlias(name) ?: return@mapNotNull null
-            val id = UUID.nameUUIDFromBytes(
-                "generated-alias:$userId:$normalizedAlias:${resolved.identityKey}".toByteArray(Charsets.UTF_8),
-            ).toString()
-            PersonAliasRuleEntity(
-                id = id,
-                userId = userId,
-                alias = name,
-                normalizedAlias = normalizedAlias,
-                personId = resolved.personId,
-                identityKey = resolved.identityKey,
-                sourceScope = null,
-                enabled = true,
-                createdAt = candidate.createdAt,
-                updatedAt = candidate.createdAt,
-            )
-        }
-
-    private fun buildGeneratedContactAliasRules(
-        userId: String,
-        enrichmentRows: List<PersonEnrichmentEntity>,
-        blockedPersonRefs: Set<String>,
-    ): List<PersonAliasRuleEntity> {
-        val proposals = mutableListOf<PersonAliasRuleEntity>()
-        val contactGroups = enrichmentRows
-            .filter { !it.sourceContactId.isNullOrBlank() }
-            .groupBy { it.sourceContactId!!.trim() }
-
-        contactGroups.values.forEach { rows ->
-            val resolvedRows = rows.mapNotNull { row ->
-                PersonIdentityResolver.resolve(userId, row.personRef)?.let { resolved ->
-                    row to resolved
-                }
-            }
-            val canonical = resolvedRows
-                .filter { (_, resolved) -> resolved.identityType == "phone" || resolved.identityType == "email" }
-                .filterNot { (row, resolved) ->
-                    PersonIdentityResolver.isLikelyAutomated(row.personRef) ||
-                        PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
-                        PersonIdentityResolver.isBlocked(
-                            resolved.identityKey.substringAfter(':', missingDelimiterValue = resolved.identityKey),
-                            blockedPersonRefs,
-                        )
-                }
-                .minWithOrNull(
-                    compareBy<Pair<PersonEnrichmentEntity, PersonIdentityResolution>> {
-                        if (it.second.identityType == "phone") 0 else 1
-                    }.thenBy { it.second.identityKey },
-                )
-                ?: return@forEach
-
-            val (canonicalRow, canonicalResolution) = canonical
-            val updatedAt = rows.maxOfOrNull { it.lastSyncedAt } ?: canonicalRow.lastSyncedAt
-            val aliasTexts = resolvedRows.flatMap { (row, resolved) ->
-                listOfNotNull(
-                    row.displayName,
-                    row.nickname,
-                    row.personRef.takeUnless { resolved.identityKey == canonicalResolution.identityKey },
-                )
-            }
-
-            aliasTexts.forEach { alias ->
-                if (PersonIdentityResolver.isLikelyAutomated(alias)) return@forEach
-                if (PersonIdentityResolver.isBlocked(alias, blockedPersonRefs)) return@forEach
-                val normalizedAlias = PersonIdentityResolver.normalizeAlias(alias) ?: return@forEach
-                val id = UUID.nameUUIDFromBytes(
-                    "generated-contact-alias:$userId:$normalizedAlias:${canonicalResolution.identityKey}"
-                        .toByteArray(Charsets.UTF_8),
-                ).toString()
-                proposals += PersonAliasRuleEntity(
-                    id = id,
-                    userId = userId,
-                    alias = alias,
-                    normalizedAlias = normalizedAlias,
-                    personId = canonicalResolution.personId,
-                    identityKey = canonicalResolution.identityKey,
-                    sourceScope = null,
-                    enabled = true,
-                    createdAt = canonicalRow.lastSyncedAt,
-                    updatedAt = updatedAt,
-                )
-            }
-        }
-
-        return proposals
-            .distinctBy { "${it.normalizedAlias}|${it.identityKey}|${it.sourceScope}" }
-            .groupBy { "${it.normalizedAlias}|${it.sourceScope}" }
-            .values
-            .filter { rules -> rules.map { it.identityKey }.distinct().size == 1 }
-            .map { rules -> rules.maxBy { it.updatedAt } }
-    }
 
     private fun fingerprintOf(vararg parts: String?): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -894,20 +498,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             (byte.toInt() and 0xFF).toString(16).padStart(2, '0')
         }
     }
-
-    private fun interactionKindFor(sourceType: String): String = when {
-        sourceType.contains("calendar") -> "calendar"
-        sourceType.contains("mail") || sourceType.contains("imap") || sourceType == "gmail" -> "email"
-        sourceType == "voice" || sourceType == "call_recording" -> "call"
-        else -> sourceType
-    }
-
-    private fun attendeeRefs(raw: String?): List<String> =
-        raw
-            ?.split(',', ';', '\n')
-            ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-            ?.distinct()
-            ?: emptyList()
 
     private companion object {
         private const val TAG = "PersonIndexWorker"

@@ -1,6 +1,7 @@
 package com.becalm.android.worker
 
 import androidx.work.ListenableWorker.Result
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -11,8 +12,8 @@ internal class UploadWorkerCoordinator(
     private val authRepository: AuthRepository,
     private val rawEventUploader: RawEventUploader,
     private val commitmentUploader: CommitmentUploader,
+    private val relationRefreshCoordinator: SourceRelationRefreshCoordinator,
     private val sourceStatusRepository: SourceStatusRepository,
-    private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) {
 
@@ -53,10 +54,25 @@ internal class UploadWorkerCoordinator(
             is FlushOutcome.PermanentFailure -> return commitResult.result
         }
 
-        sourceStatusRepository.recordSyncSuccess(UploadWorker.SOURCE_TYPE, now)
-        if (rawCount > 0 || commitmentCount > 0) {
-            workScheduler.enqueuePersonInteractionIndex()
+        when (
+            val refresh = relationRefreshCoordinator.refresh(
+                userId = userId,
+                plan = SourceRelationRefreshPlan(
+                    sourceType = UploadWorker.SOURCE_TYPE,
+                    sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
+                    localWriteCount = rawCount + commitmentCount,
+                ),
+            )
+        ) {
+            is BecalmResult.Success -> logger.d(TAG, "relation refresh complete changed=${refresh.value.changedCount}")
+            is BecalmResult.Failure -> {
+                logger.w(TAG, "relation refresh failed after upload")
+                sourceStatusRepository.recordSyncError(UploadWorker.SOURCE_TYPE, "relation refresh failed", now)
+                return Result.retry()
+            }
         }
+
+        sourceStatusRepository.recordSyncSuccess(UploadWorker.SOURCE_TYPE, now)
         logger.i(
             TAG,
             "doWork complete rawUploaded=$rawCount commitUploaded=$commitmentCount attempt=$attempt",

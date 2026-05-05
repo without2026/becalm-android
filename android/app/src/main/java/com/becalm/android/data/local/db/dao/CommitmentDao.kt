@@ -147,7 +147,7 @@ public interface CommitmentDao {
     /**
      * Applies a user edit to the mutable fields of the commitment identified by [id]
      * (EDIT-003). Updates `title`, `due_at`, `due_hint`, `due_is_approximate`,
-     * `person_ref`, `direction` plus the audit columns `last_edited_by` /
+     * `counterparty_ref`, `direction` plus the audit columns `last_edited_by` /
      * `last_edited_at` (spec `.spec/commitment-edit.spec.yml` EDIT-003 invariant).
      *
      * Every successful write flips `sync_status='pending'` so the SP-29 UploadWorker
@@ -165,7 +165,7 @@ public interface CommitmentDao {
      * @param dueAt New deadline instant or null (EDIT-004 allows null).
      * @param dueHint New verbatim due-date expression, or null to clear.
      * @param approx New `due_is_approximate` flag (defaults false in the client form).
-     * @param personRef Canonicalized counterparty identifier, or null.
+     * @param counterpartyRef Canonicalized counterparty identifier, or null.
      * @param direction `"give"` or `"take"` (EDIT-004 enum).
      * @param actorId Supabase auth.users UUID of the editing user. Never blank —
      *   the repository fails fast with [com.becalm.android.core.result.BecalmError.Unauthorized]
@@ -181,7 +181,7 @@ public interface CommitmentDao {
             due_at = :dueAt,
             due_hint = :dueHint,
             due_is_approximate = :approx,
-            person_ref = :personRef,
+            counterparty_ref = :counterpartyRef,
             direction = :direction,
             last_edited_by = :actorId,
             last_edited_at = :editedAt,
@@ -196,7 +196,7 @@ public interface CommitmentDao {
         dueAt: Instant?,
         dueHint: String?,
         approx: Boolean,
-        personRef: String?,
+        counterpartyRef: String?,
         direction: String,
         actorId: String,
         editedAt: Instant,
@@ -448,7 +448,7 @@ public interface CommitmentDao {
                c.due_at AS dueAt,
                c.due_is_approximate AS dueIsApproximate,
                CASE
-                   WHEN c.person_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.person_ref)
+                   WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
                    ELSE SUBSTR(c.counterparty_raw, 1, 30)
                END AS counterpartyDisplayName,
                c.source_type AS sourceType,
@@ -456,7 +456,7 @@ public interface CommitmentDao {
                c.source_event_occurred_at AS sourceOccurredAt,
                c.due_hint AS dueHint
         FROM commitments AS c
-        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
+        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
         WHERE c.user_id = :userId
           AND c.deleted_at IS NULL
         ORDER BY
@@ -538,7 +538,7 @@ public interface CommitmentDao {
                c.direction AS direction,
                c.schedule_status AS scheduleStatus,
                CASE
-                   WHEN c.person_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.person_ref)
+                   WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
                    ELSE SUBSTR(c.counterparty_raw, 1, 30)
                END AS counterpartyDisplayName,
                c.source_type AS sourceType,
@@ -548,7 +548,7 @@ public interface CommitmentDao {
                c.due_hint AS dueHint,
                c.source_event_occurred_at AS sortKey
         FROM commitments AS c
-        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.person_ref
+        LEFT JOIN persons_enrichment AS p ON p.person_ref = c.counterparty_ref
         WHERE c.user_id      = :userId
           AND c.item_type    IN ('action', 'schedule')
           AND c.action_state = 'pending'
@@ -568,7 +568,7 @@ public interface CommitmentDao {
     ): Flow<List<TodayCommitmentRow>>
 
     /**
-     * Emits all live commitments for [userId] linked to [personRef], ordered by due date
+     * Emits all live commitments for [userId] linked to [counterpartyRef], ordered by due date
      * ascending (nulls last) then creation timestamp descending.
      *
      * Used by PersonDetailScreen to render the full commitment timeline for a contact.
@@ -576,19 +576,19 @@ public interface CommitmentDao {
      * `.spec/contracts/data-model.yml:204-205` MUST-invariant.
      *
      * @param userId Supabase auth.users UUID of the owning user.
-     * @param personRef Canonicalized counterparty identifier (matches [CommitmentEntity.personRef]).
+     * @param counterpartyRef Canonicalized counterparty identifier (matches [CommitmentEntity.counterpartyRef]).
      * @return A [Flow] that emits a list and re-emits on every qualifying table write.
      */
     @Query(
         """
         SELECT * FROM commitments
         WHERE user_id    = :userId
-          AND person_ref = :personRef
+          AND counterparty_ref = :counterpartyRef
           AND deleted_at IS NULL
         ORDER BY due_at IS NULL ASC, due_at ASC, created_at DESC
         """
     )
-    public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
+    public fun observeAllForPerson(userId: String, counterpartyRef: String): Flow<List<CommitmentEntity>>
 
     /**
      * Returns all live commitment quotes whose originating source event matches [sourceRef].

@@ -108,6 +108,10 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
+    override fun enqueueMeetingTranscriptUpload(rawEventId: String) {
+        oneShotEnqueuer.enqueueMeetingTranscriptUpload(rawEventId)
+    }
+
     override fun enqueueVoiceUploadWithDelay(
         rawEventId: String,
         audioUri: String,
@@ -146,6 +150,16 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
+    override fun cancelMeetingTranscriptUpload(rawEventId: String) {
+        val workKey = UniqueWorkKeys.meetingTranscriptUpload(rawEventId)
+        planRunner.run(
+            CancelUniqueWorkPlan(
+                uniqueKey = workKey,
+                logMessage = "cancelMeetingTranscriptUpload rawEventId_hash=${redact(rawEventId)} key=$workKey",
+            ),
+        )
+    }
+
     override fun scheduleRetentionSweep() {
         planRunner.run(WorkSchedulerRequests.retentionSweepPlan())
     }
@@ -171,6 +185,7 @@ public class WorkSchedulerImpl @Inject constructor(
             workManager.cancelUniqueWork(key)
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MEETING_TRANSCRIPT_UPLOAD)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,

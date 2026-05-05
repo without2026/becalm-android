@@ -217,7 +217,6 @@ public class ImapDaumWorker @AssistedInject constructor(
             sourceType = SourceType.DAUM_IMAP,
             at = Clock.System.now(),
         )
-        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "doWork complete")
         return Result.success()
     }
@@ -345,7 +344,7 @@ public class ImapDaumWorker @AssistedInject constructor(
      */
     private fun ImapMessage.toEntity(userId: String, mailboxKey: String): RawIngestionEventEntity {
         val folderLabel = folderLabelFor(mailboxKey)
-        val personRef = derivePersonRef(mailboxKey)
+        val counterpartyRef = deriveCounterpartyRef(mailboxKey)
         val sourceRefJson = sourceRefAdapter.toJson(
             SourceRefEnvelope(
                 messageId = providerMessageId(),
@@ -368,7 +367,7 @@ public class ImapDaumWorker @AssistedInject constructor(
             ),
             sourceType = SourceType.DAUM_IMAP,
             sourceRef = sourceRefJson,
-            personRef = personRef,
+            counterpartyRef = counterpartyRef,
             eventTitle = subject,
             eventSnippet = snippetResult.snippet,
             folder = folderLabel,
@@ -376,7 +375,7 @@ public class ImapDaumWorker @AssistedInject constructor(
         )
     }
 
-    private fun ImapMessage.derivePersonRef(mailboxKey: String): String? = when (mailboxKey) {
+    private fun ImapMessage.deriveCounterpartyRef(mailboxKey: String): String? = when (mailboxKey) {
         MAILBOX_DAUM_INBOX -> EmailPersonRef.forInbox(fromEmail)
         MAILBOX_DAUM_SENT -> EmailPersonRef.forSent(toAddresses)
         else -> null

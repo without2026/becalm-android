@@ -10,20 +10,11 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 
-public data class PersonInteractionAggregateRow(
-    val personRef: String,
-    val eventCount: Int,
-    val pendingCommitmentCount: Int,
-    val channelSources: String?,
-    val lastInteractionAt: Instant?,
-    val lastInteractionSnippet: String?,
-)
-
 /*
  * [DAO 인덱스/트랜잭션 규약]
  * - idx_raw_events_user_sync        (user_id, sync_status)            → sync_status 필터링 쿼리 전반
  * - idx_raw_events_user_time        (user_id, timestamp)              → timestamp 정렬/범위 쿼리
- * - idx_raw_events_user_person_time (user_id, person_ref, timestamp)  → person_ref 타임라인
+ * - idx_raw_events_user_counterparty_time (user_id, counterparty_ref, timestamp) → counterparty-scoped local queries
  * - @Transaction 메서드(release / park*AndReturnIds)는 select-then-update
  *   레이스(두 문장 사이에 새 행이 삽입되어 ID 반환에서 누락되는 경우)를 막기 위한 불변식 보장용이다.
  */
@@ -144,131 +135,43 @@ public interface RawIngestionEventDao {
     )
 
     /**
-     * Emits a live list of the most recent events associated with [personRef] for [userId],
+     * Emits a live list of the most recent events associated with [counterpartyRef] for [userId],
      * newest-first. Drives the PersonDetailScreen event timeline.
      */
     @Query(
         """
         SELECT * FROM raw_ingestion_events
         WHERE user_id = :userId
-          AND person_ref = :personRef
+          AND counterparty_ref = :counterpartyRef
         ORDER BY timestamp DESC
         LIMIT :limit
         """,
     )
     public fun observeRecentForPerson(
         userId: String,
-        personRef: String,
+        counterpartyRef: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>>
 
-    /**
-     * Emits every event with an identified counterparty for [userId], newest-first.
-     *
-     * Serves the persons-screen aggregate owner so person grouping and sort semantics can
-     * be implemented from Room state rather than from a placeholder enrichment-only list.
-     */
     @Query(
         """
-        SELECT * FROM raw_ingestion_events
-        WHERE user_id = :userId
-          AND person_ref IS NOT NULL
-        ORDER BY timestamp DESC
-        """,
-    )
-    public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
-
-    /**
-     * Emits a bounded persons-screen aggregate across raw events and commitments.
-     *
-     * The previous UI projection observed full entity lists from both tables and grouped them
-     * in the ViewModel path. This query keeps the same person-centric semantics while returning
-     * only the columns required by the list row, avoiding large object graphs during navigation.
-     */
-    @Query(
-        """
-        WITH interactions AS (
-            SELECT
-                person_ref AS personRef,
-                source_type AS sourceType,
-                timestamp AS interactionAt,
-                COALESCE(event_snippet, event_title) AS snippet,
-                1 AS eventCount,
-                0 AS pendingCommitmentCount
+        SELECT counterparty_ref FROM (
+            SELECT counterparty_ref, MAX(timestamp) AS last_seen_at
             FROM raw_ingestion_events
             WHERE user_id = :userId
-              AND person_ref IS NOT NULL
+              AND counterparty_ref IS NOT NULL
+            GROUP BY counterparty_ref
 
             UNION ALL
 
-            SELECT
-                person_ref AS personRef,
-                source_type AS sourceType,
-                source_event_occurred_at AS interactionAt,
-                COALESCE(source_event_title, title) AS snippet,
-                0 AS eventCount,
-                CASE
-                    WHEN item_type != 'action'
-                      OR LOWER(action_state) NOT IN ('completed', 'cancelled')
-                    THEN 1
-                    ELSE 0
-                END AS pendingCommitmentCount
+            SELECT counterparty_ref, MAX(source_event_occurred_at) AS last_seen_at
             FROM commitments
             WHERE user_id = :userId
-              AND person_ref IS NOT NULL
+              AND counterparty_ref IS NOT NULL
               AND deleted_at IS NULL
-        ),
-        ranked AS (
-            SELECT
-                personRef,
-                sourceType,
-                interactionAt,
-                snippet,
-                eventCount,
-                pendingCommitmentCount,
-                ROW_NUMBER() OVER (
-                    PARTITION BY personRef
-                    ORDER BY interactionAt DESC
-                ) AS interactionRank
-            FROM interactions
+            GROUP BY counterparty_ref
         )
-        SELECT
-            personRef,
-            SUM(eventCount) AS eventCount,
-            SUM(pendingCommitmentCount) AS pendingCommitmentCount,
-            GROUP_CONCAT(DISTINCT sourceType) AS channelSources,
-            MAX(interactionAt) AS lastInteractionAt,
-            MAX(CASE WHEN interactionRank = 1 THEN snippet END) AS lastInteractionSnippet
-        FROM ranked
-        GROUP BY personRef
-        ORDER BY lastInteractionAt DESC, personRef ASC
-        LIMIT :limit
-        """,
-    )
-    public fun observePersonInteractionAggregates(
-        userId: String,
-        limit: Int,
-    ): Flow<List<PersonInteractionAggregateRow>>
-
-    @Query(
-        """
-        SELECT person_ref FROM (
-            SELECT person_ref, MAX(timestamp) AS last_seen_at
-            FROM raw_ingestion_events
-            WHERE user_id = :userId
-              AND person_ref IS NOT NULL
-            GROUP BY person_ref
-
-            UNION ALL
-
-            SELECT person_ref, MAX(source_event_occurred_at) AS last_seen_at
-            FROM commitments
-            WHERE user_id = :userId
-              AND person_ref IS NOT NULL
-              AND deleted_at IS NULL
-            GROUP BY person_ref
-        )
-        GROUP BY person_ref
+        GROUP BY counterparty_ref
         ORDER BY MAX(last_seen_at) DESC
         LIMIT :limit
         """,
@@ -294,25 +197,6 @@ public interface RawIngestionEventDao {
     public fun observeRecentForSourceType(
         userId: String,
         sourceType: String,
-        limit: Int,
-    ): Flow<List<RawIngestionEventEntity>>
-
-    /**
-     * Emits a live list of the most recent events with no identified counterparty
-     * (person_ref IS NULL) for [userId], newest-first. Drives the "Unassigned" group
-     * in the main timeline.
-     */
-    @Query(
-        """
-        SELECT * FROM raw_ingestion_events
-        WHERE user_id = :userId
-          AND person_ref IS NULL
-        ORDER BY timestamp DESC
-        LIMIT :limit
-        """,
-    )
-    public fun observeUnassignedRecent(
-        userId: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>>
 
@@ -405,7 +289,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT * FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type = 'voice' " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun findVoiceAwaitingConsent(userId: String): List<RawIngestionEventEntity>
@@ -419,7 +303,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type = 'voice' " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun findAwaitingConsentVoiceIds(userId: String): List<String>
@@ -436,7 +320,7 @@ public interface RawIngestionEventDao {
         "UPDATE raw_ingestion_events " +
             "SET sync_status = 'pending' " +
             "WHERE user_id = :userId " +
-            "AND source_type = 'voice' " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun flipAwaitingConsentVoiceToPending(userId: String)
@@ -477,7 +361,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type = 'voice' " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
             "AND sync_status IN ('pending', 'queued', 'failed_retryable')",
     )
     public suspend fun findCancellableVoiceIds(userId: String): List<String>

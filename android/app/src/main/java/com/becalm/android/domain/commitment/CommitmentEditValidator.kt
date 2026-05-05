@@ -15,7 +15,7 @@ public data class CommitmentEditDraft(
     val dueAtMillis: Long?,
     val dueHint: String?,
     val dueIsApproximate: Boolean,
-    val personRef: String?,
+    val counterpartyRef: String?,
     val direction: String,
 )
 
@@ -27,7 +27,7 @@ public data class CommitmentEditDraft(
  * - `dueAt` may be null (the user can clear the deadline). When present, any
  *   instant is accepted — the spec allows past dates for late-logged
  *   commitments (EDIT-004).
- * - `personRef` is normalised by stripping whitespace and lowercasing. A blank
+ * - `counterpartyRef` is normalised by stripping whitespace and lowercasing. A blank
  *   result is acceptable (Unassigned). If the string looks phone-shaped (i.e.
  *   it is composed exclusively of the characters `+`, `-`, space, and digits,
  *   and contains at least one digit) it must match a strict E.164 regex —
@@ -76,8 +76,8 @@ public object CommitmentEditValidator {
         // dueAtMillis: null is allowed. Any non-null Long is a valid Instant — we
         // do not reject past dates per EDIT-004 ("past is OK").
 
-        val normalisedRef = PersonRefNormalizer.normalize(input.personRef)
-        if (normalisedRef != null && !PersonRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
+        val normalisedRef = CounterpartyRefNormalizer.normalize(input.counterpartyRef)
+        if (normalisedRef != null && !CounterpartyRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
             errors[Field.PERSON_REF] =
                 "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
         }
@@ -103,7 +103,7 @@ public object CommitmentEditValidator {
             dueAt = draft.dueAtMillis?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it) },
             dueHint = draft.dueHint?.trim()?.takeIf { it.isNotBlank() },
             dueIsApproximate = draft.dueIsApproximate,
-            personRef = PersonRefNormalizer.normalize(draft.personRef),
+            counterpartyRef = CounterpartyRefNormalizer.normalize(draft.counterpartyRef),
             direction = draft.direction,
         )
 }

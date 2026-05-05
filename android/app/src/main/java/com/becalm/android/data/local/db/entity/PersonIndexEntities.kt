@@ -7,6 +7,46 @@ import androidx.room.PrimaryKey
 import kotlinx.datetime.Instant
 
 /**
+ * Local mirror of backend `persons`.
+ *
+ * This is the canonical person node. Local-only enrichment and repair tables may add
+ * display data around it, but source/commitment relation rows should point here by
+ * `person_id` instead of grouping directly by legacy `person_ref`.
+ */
+@Entity(
+    tableName = "persons",
+    indices = [
+        Index(
+            name = "idx_persons_user_updated",
+            value = ["user_id", "updated_at"],
+        ),
+    ],
+)
+public data class PersonEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "display_name")
+    val displayName: String,
+    @ColumnInfo(name = "kind")
+    val kind: String,
+    @ColumnInfo(name = "primary_email")
+    val primaryEmail: String?,
+    @ColumnInfo(name = "primary_phone")
+    val primaryPhone: String?,
+    @ColumnInfo(name = "confidence")
+    val confidence: Double,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Instant,
+    @ColumnInfo(name = "archived_at")
+    val archivedAt: Instant?,
+)
+
+/**
  * Stable identity anchor resolved from source data.
  *
  * Identity keys are deterministic strings such as `email:a@example.com`,
@@ -19,6 +59,11 @@ import kotlinx.datetime.Instant
         Index(
             name = "ux_person_identities_user_identity_key",
             value = ["user_id", "identity_key"],
+            unique = true,
+        ),
+        Index(
+            name = "ux_person_identities_user_identity",
+            value = ["user_id", "identity_type", "normalized_value"],
             unique = true,
         ),
         Index(
@@ -43,14 +88,28 @@ public data class PersonIdentityEntity(
     val rawValue: String,
     @ColumnInfo(name = "display_name_hint")
     val displayNameHint: String?,
+    @ColumnInfo(name = "identity_value", defaultValue = "''")
+    val identityValue: String = rawValue,
+    @ColumnInfo(name = "normalized_value", defaultValue = "''")
+    val normalizedValue: String = identityKey.substringAfter(':', rawValue),
+    @ColumnInfo(name = "display_name")
+    val displayName: String? = displayNameHint,
     @ColumnInfo(name = "source_type")
     val sourceType: String,
+    @ColumnInfo(name = "source_ref")
+    val sourceRef: String? = null,
     @ColumnInfo(name = "confidence")
     val confidence: Double,
+    @ColumnInfo(name = "is_primary", defaultValue = "0")
+    val isPrimary: Boolean = false,
     @ColumnInfo(name = "verified")
     val verified: Boolean,
     @ColumnInfo(name = "last_seen_at")
     val lastSeenAt: Instant,
+    @ColumnInfo(name = "created_at", defaultValue = "0")
+    val createdAt: Instant = lastSeenAt,
+    @ColumnInfo(name = "updated_at", defaultValue = "0")
+    val updatedAt: Instant = lastSeenAt,
 )
 
 /**
@@ -65,7 +124,16 @@ public data class PersonIdentityEntity(
             unique = true,
         ),
         Index(
+            name = "ux_person_interactions_user_key",
+            value = ["user_id", "interaction_key"],
+            unique = true,
+        ),
+        Index(
             name = "idx_person_interactions_user_person_time",
+            value = ["user_id", "person_id", "occurred_at"],
+        ),
+        Index(
+            name = "idx_person_interactions_user_person_occurred",
             value = ["user_id", "person_id", "occurred_at"],
         ),
         Index(
@@ -88,6 +156,15 @@ public data class PersonInteractionEntity(
     val sourceRef: String,
     @ColumnInfo(name = "interaction_kind")
     val interactionKind: String,
+    @ColumnInfo(name = "source_event_id")
+    val sourceEventId: String? = sourceRef.removePrefix("raw:").takeIf { sourceRef.startsWith("raw:") },
+    @ColumnInfo(name = "commitment_id")
+    val commitmentId: String? = sourceRef.removePrefix("commitment:").takeIf { sourceRef.startsWith("commitment:") },
+    @ColumnInfo(name = "interaction_key", defaultValue = "''")
+    val interactionKey: String =
+        "$userId:$personId:${sourceEventId ?: sourceRef}:${commitmentId.orEmpty()}:$interactionKind",
+    @ColumnInfo(name = "interaction_type", defaultValue = "''")
+    val interactionType: String = interactionKind,
     @ColumnInfo(name = "role")
     val role: String,
     @ColumnInfo(name = "direction")
@@ -102,6 +179,109 @@ public data class PersonInteractionEntity(
     val snippet: String?,
     @ColumnInfo(name = "confidence")
     val confidence: Double,
+    @ColumnInfo(name = "created_at", defaultValue = "0")
+    val createdAt: Instant = occurredAt,
+)
+
+/**
+ * Local mirror of backend `source_event_participants`.
+ *
+ * This is the source-level participant table for sender/recipient/caller/attendee/
+ * mentioned/reference extraction. Person timeline indexing reads this table directly.
+ * Unresolved or user-confirmable people are surfaced directly from this table.
+ */
+@Entity(
+    tableName = "source_event_participants",
+    indices = [
+        Index(
+            name = "idx_source_event_participants_user_event",
+            value = ["user_id", "source_event_id"],
+        ),
+        Index(
+            name = "idx_source_event_participants_user_person",
+            value = ["user_id", "person_id", "created_at"],
+        ),
+        Index(
+            name = "idx_source_event_participants_unresolved",
+            value = ["user_id", "resolution_status", "created_at"],
+        ),
+    ],
+)
+public data class SourceEventParticipantEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "source_event_id")
+    val sourceEventId: String,
+    @ColumnInfo(name = "source_type")
+    val sourceType: String,
+    @ColumnInfo(name = "source_ref")
+    val sourceRef: String?,
+    @ColumnInfo(name = "person_id")
+    val personId: String?,
+    @ColumnInfo(name = "role")
+    val role: String,
+    @ColumnInfo(name = "relation_to_user")
+    val relationToUser: String,
+    @ColumnInfo(name = "identity_type")
+    val identityType: String?,
+    @ColumnInfo(name = "normalized_value")
+    val normalizedValue: String?,
+    @ColumnInfo(name = "display_name_raw")
+    val displayNameRaw: String?,
+    @ColumnInfo(name = "email_raw")
+    val emailRaw: String?,
+    @ColumnInfo(name = "phone_raw")
+    val phoneRaw: String?,
+    @ColumnInfo(name = "organization_raw")
+    val organizationRaw: String?,
+    @ColumnInfo(name = "evidence")
+    val evidence: String?,
+    @ColumnInfo(name = "confidence")
+    val confidence: Double,
+    @ColumnInfo(name = "resolution_status")
+    val resolutionStatus: String,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
+)
+
+/**
+ * Local mirror of backend `commitment_participants`.
+ */
+@Entity(
+    tableName = "commitment_participants",
+    indices = [
+        Index(
+            name = "ux_commitment_participants_user_commitment_person_role",
+            value = ["user_id", "commitment_id", "person_id", "role"],
+            unique = true,
+        ),
+        Index(
+            name = "idx_commitment_participants_user_person",
+            value = ["user_id", "person_id", "created_at"],
+        ),
+    ],
+)
+public data class CommitmentParticipantEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "commitment_id")
+    val commitmentId: String,
+    @ColumnInfo(name = "person_id")
+    val personId: String,
+    @ColumnInfo(name = "role")
+    val role: String,
+    @ColumnInfo(name = "evidence")
+    val evidence: String?,
+    @ColumnInfo(name = "confidence")
+    val confidence: Double,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
 )
 
 /**
@@ -268,55 +448,4 @@ public data class PersonIndexSourceStateEntity(
     val fingerprint: String,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Instant,
-)
-
-/**
- * Audit table for participant candidates emitted by AI or deterministic source parsing.
- *
- * The current first-pass worker writes deterministic candidates from source rows. Backend
- * Gemini `person_candidates` can be inserted into the same table without changing the
- * resolver contract.
- */
-@Entity(
-    tableName = "source_person_candidates",
-    indices = [
-        Index(
-            name = "ux_source_person_candidates_user_source_candidate",
-            value = ["user_id", "source_type", "source_ref", "candidate_ref"],
-            unique = true,
-        ),
-        Index(
-            name = "idx_source_person_candidates_user_source",
-            value = ["user_id", "source_type", "source_ref"],
-        ),
-    ],
-)
-public data class SourcePersonCandidateEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "user_id")
-    val userId: String,
-    @ColumnInfo(name = "source_type")
-    val sourceType: String,
-    @ColumnInfo(name = "source_ref")
-    val sourceRef: String,
-    @ColumnInfo(name = "candidate_ref")
-    val candidateRef: String,
-    @ColumnInfo(name = "role")
-    val role: String,
-    @ColumnInfo(name = "name")
-    val name: String?,
-    @ColumnInfo(name = "email")
-    val email: String?,
-    @ColumnInfo(name = "phone")
-    val phone: String?,
-    @ColumnInfo(name = "organization")
-    val organization: String?,
-    @ColumnInfo(name = "evidence")
-    val evidence: String?,
-    @ColumnInfo(name = "confidence")
-    val confidence: Double,
-    @ColumnInfo(name = "created_at")
-    val createdAt: Instant,
 )

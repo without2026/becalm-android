@@ -89,6 +89,8 @@ public interface WorkScheduler {
      */
     public fun enqueueVoiceUpload(rawEventId: String, audioUri: String)
 
+    public fun enqueueMeetingTranscriptUpload(rawEventId: String)
+
     /**
      * Enqueues a one-shot [VoiceUploadWorker] that waits at least [initialDelaySec] seconds
      * before its first run.
@@ -164,6 +166,8 @@ public interface WorkScheduler {
      * Spec refs: VOI-004.
      */
     public fun cancelVoiceUpload(rawEventId: String)
+
+    public fun cancelMeetingTranscriptUpload(rawEventId: String)
 
     /**
      * Cancels all uniquely-named work managed by this scheduler.

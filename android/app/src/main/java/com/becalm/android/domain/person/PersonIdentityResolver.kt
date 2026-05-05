@@ -1,6 +1,8 @@
 package com.becalm.android.domain.person
 
 import java.util.Locale
+import java.security.MessageDigest
+import java.nio.ByteBuffer
 import java.util.UUID
 
 public data class PersonIdentityResolution(
@@ -14,6 +16,7 @@ public data class PersonIdentityResolution(
 )
 
 public object PersonIdentityResolver {
+    private val PERSON_NAMESPACE: UUID = UUID.fromString("b69fa098-8289-46d4-857a-5e9a9c113c79")
     private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
     private val PHONE_CHARS = Regex("[^0-9+]")
     private val AUTOMATED_EMAIL_LOCALS = setOf(
@@ -146,6 +149,12 @@ public object PersonIdentityResolver {
         )
     }
 
+    public fun stableIdentityId(userId: String, identityKey: String): String {
+        val type = identityKey.substringBefore(':')
+        val normalizedValue = identityKey.substringAfter(':', missingDelimiterValue = "")
+        return uuid5(PERSON_NAMESPACE, "identity:$userId:$type:$normalizedValue").toString()
+    }
+
     public fun normalizeAlias(value: String?): String? =
         value
             ?.lowercase(Locale.ROOT)
@@ -189,7 +198,8 @@ public object PersonIdentityResolver {
         confidence: Double = 0.95,
         verified: Boolean = true,
     ): PersonIdentityResolution {
-        val personId = UUID.nameUUIDFromBytes("person:$userId:$identityKey".toByteArray(Charsets.UTF_8)).toString()
+        val normalizedValue = identityKey.substringAfter(':', missingDelimiterValue = rawValue)
+        val personId = uuid5(PERSON_NAMESPACE, "$userId:$identityType:$normalizedValue").toString()
         return PersonIdentityResolution(
             personId = personId,
             identityKey = identityKey,
@@ -199,5 +209,22 @@ public object PersonIdentityResolver {
             confidence = confidence,
             verified = verified,
         )
+    }
+
+    private fun uuid5(namespace: UUID, name: String): UUID {
+        val namespaceBytes = ByteBuffer.allocate(16)
+            .putLong(namespace.mostSignificantBits)
+            .putLong(namespace.leastSignificantBits)
+            .array()
+        val hash = MessageDigest.getInstance("SHA-1")
+            .apply {
+                update(namespaceBytes)
+                update(name.toByteArray(Charsets.UTF_8))
+            }
+            .digest()
+        hash[6] = ((hash[6].toInt() and 0x0f) or 0x50).toByte()
+        hash[8] = ((hash[8].toInt() and 0x3f) or 0x80).toByte()
+        val buffer = ByteBuffer.wrap(hash, 0, 16)
+        return UUID(buffer.long, buffer.long)
     }
 }

@@ -50,7 +50,7 @@ import kotlinx.datetime.Clock
  *    `OnConflictStrategy.IGNORE`. `source_type` is `"voice"` for files under
  *    `Recordings/Voice Recorder/` / `Recordings/` / legacy `VoiceRecorder/`, and
  *    `"call_recording"` for files under `Recordings/Call/`. For call_recording rows,
- *    `person_ref` is the E.164 normalization of the counterparty number extracted from
+ *    `counterparty_ref` is the E.164 normalization of the counterparty number extracted from
  *    the DISPLAY_NAME (null when no valid phone number can be parsed — per ING-001
  *    "없으면 null"). The `clientEventId` is deterministic
  *    (deterministic UUID derived from `"mediastore:voice:<mediaId>"` or
@@ -240,7 +240,6 @@ public class MediaStoreWorker @AssistedInject constructor(
             "doWork complete voiceInserted=$voiceInserted callRecordingInserted=$callInserted " +
                 "meetingInserted=$meetingInserted",
         )
-        workSchedulerProvider.get().enqueuePersonInteractionIndex()
         Result.success()
     }
 
@@ -269,6 +268,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             rawIngestionEventDao = rawIngestionEventDaoProvider.get(),
             sourceArtifactRepository = sourceArtifactRepositoryProvider.get(),
             userPrefsStore = userPrefsStore,
+            workScheduler = workSchedulerProvider.get(),
             logger = logger,
         )
 

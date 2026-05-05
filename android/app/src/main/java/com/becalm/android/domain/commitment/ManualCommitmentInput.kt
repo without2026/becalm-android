@@ -17,7 +17,7 @@ import kotlinx.datetime.Instant
  * @property quote User-written context, 1..500 chars. Distinct from the LLM
  *   pipeline's verbatim-source quote: here it is the user's own notes, but
  *   stored in the same legally-evidentiary column.
- * @property personRef Normalised counterparty reference (lowercase +
+ * @property counterpartyRef Normalised counterparty reference (lowercase +
  *   E.164 if phone-shaped). Null when the user did not supply one.
  * @property dueAt Optional deadline instant.
  * @property dueHint Optional verbatim due-date expression.
@@ -27,7 +27,7 @@ public data class ManualCommitmentInput(
     val title: String,
     val direction: String,
     val quote: String,
-    val personRef: String?,
+    val counterpartyRef: String?,
     val dueAt: Instant?,
     val dueHint: String?,
     val dueIsApproximate: Boolean,

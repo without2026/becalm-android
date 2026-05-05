@@ -55,7 +55,7 @@ public data class CommitmentDto(
      * Canonicalized counterparty identifier (same precedence rule as raw_ingestion_events).
      * Null when counterparty is not identifiable.
      */
-    @field:Json(name = "person_ref") val personRef: String? = null,
+    @field:Json(name = "counterparty_ref") val counterpartyRef: String? = null,
 
     /** Short title of the commitment, as extracted by the LLM. */
     @field:Json(name = "title") val title: String,

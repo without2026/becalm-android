@@ -73,8 +73,8 @@ public interface CommitmentRepository {
         startOfTodayEpochMs: Long = Long.MIN_VALUE,
     ): Flow<List<TodayCommitmentRow>>
 
-    /** Emits all commitments for [userId] linked to [personRef], re-emits on change. */
-    public fun observeAllForPerson(userId: String, personRef: String): Flow<List<CommitmentEntity>>
+    /** Emits all commitments for [userId] linked to [counterpartyRef], re-emits on change. */
+    public fun observeAllForPerson(userId: String, counterpartyRef: String): Flow<List<CommitmentEntity>>
 
     /**
      * Emits the live commitment identified by [id] and re-emits on every matching
@@ -117,7 +117,7 @@ public interface CommitmentRepository {
     public suspend fun refreshSince(
         userId: String,
         since: Instant?,
-        personRef: String? = null,
+        counterpartyRef: String? = null,
         direction: String? = null,
         actionState: String? = null,
     ): BecalmResult<RefreshStats>
@@ -274,7 +274,7 @@ public interface CommitmentRepository {
      * run — callers always see `Success(id)` when the local write succeeded.
      *
      * @param input Validated user input (title / direction / quote /
-     *   personRef / due_*). For supersede mode the caller ignores the draft's
+     *   counterpartyRef / due_*). For supersede mode the caller ignores the draft's
      *   quote and passes the old row's quote verbatim.
      * @param supersedeOf UUID of the row being superseded, or null for plain
      *   manual-create.

@@ -32,9 +32,9 @@ import java.util.UUID
  * semantics:
  * - [ingestVoiceRecordings] — Samsung One UI 6.x `Recordings/Voice Recorder/`, stock
  *   AOSP `Recordings/`, and legacy `VoiceRecorder/`. Inserts `source_type="voice"` rows
- *   with `person_ref=null`.
+ *   with `counterparty_ref=null`.
  * - [ingestCallRecordings] — Samsung One UI 6.x `Recordings/Call/`. Inserts
- *   `source_type="call_recording"` rows with `person_ref` set to the E.164 normalization
+ *   `source_type="call_recording"` rows with `counterparty_ref` set to the E.164 normalization
  *   of the counterparty number extracted from the MediaStore DISPLAY_NAME (null when no
  *   valid number can be parsed — per ING-001 "없으면 null").
  *
@@ -59,7 +59,7 @@ import java.util.UUID
  *
  * The voice branch's behaviour is byte-identical with the original
  * `MediaStoreWorker.ingestVoiceRecordings` body; the call branch reuses the same
- * cursor/insert/enqueue helpers via optional `sourceType` / `personRef` /
+ * cursor/insert/enqueue helpers via optional `sourceType` / `counterpartyRef` /
  * `clientEventIdPrefix` parameters. Both are exercised solely through
  * [MediaStoreWorker.doWork] tests.
  *
@@ -296,7 +296,7 @@ internal class VoiceMediaStoreProbe(
      *
      * For each discovered file:
      * - [sourceType] is [SourceType.CALL_RECORDING] (wire value `"call_recording"`).
-     * - [RawIngestionEventEntity.personRef] is set to the E.164-normalized counterparty
+     * - [RawIngestionEventEntity.counterpartyRef] is set to the E.164-normalized counterparty
      *   number extracted from the MediaStore DISPLAY_NAME via
      *   [PhoneNumberUtils.extractCounterpartyNumberFromDisplayName]. Null when no valid
      *   phone number can be parsed — per ING-001 "없으면 null", we never throw on
@@ -426,12 +426,12 @@ internal class VoiceMediaStoreProbe(
                     null
                 }
                 val filenamePersonRef = PhoneNumberUtils.extractCounterpartyNumberFromDisplayName(row.displayName)
-                val personRef = callLogMatch?.personRef ?: filenamePersonRef
+                val counterpartyRef = callLogMatch?.personRef ?: filenamePersonRef
 
                 logger.d(
                     TAG,
                     "call_recording row nameHash=${redact(row.displayName)} durationSec=${row.durationSec} " +
-                        "dateAddedSec=${row.dateAddedSec} personRefPresent=${personRef != null} " +
+                        "dateAddedSec=${row.dateAddedSec} counterpartyRefPresent=${counterpartyRef != null} " +
                         "callLogMatched=${callLogMatch != null}",
                 )
 
@@ -440,7 +440,7 @@ internal class VoiceMediaStoreProbe(
                     userId = userId,
                     pipaConsented = pipaConsented,
                     sourceType = SourceType.CALL_RECORDING,
-                    personRef = personRef,
+                    counterpartyRef = counterpartyRef,
                     // ING-001: event_title sourced from MediaStore TITLE. Samsung's
                     // call-recording files have a meaningful title (timestamp + number);
                     // null when the column is absent on older Android versions.
@@ -746,7 +746,7 @@ internal class VoiceMediaStoreProbe(
      * [pipaConsented] 는 배치 전체에 대해 호출부([ingestVoiceRecordings] / [ingestCallRecordings])
      * 가 1회 스냅샷한 값이며, cold-sync.spec:49 에 따라 insertion 시점의 sync_status 를 결정한다.
      *
-     * [sourceType] 과 [personRef] 는 분기별로 주입된다 — voice 분기는
+     * [sourceType] 과 [counterpartyRef] 는 분기별로 주입된다 — voice 분기는
      * ([SourceType.VOICE], null), call_recording 분기는
      * ([SourceType.CALL_RECORDING], E.164 또는 null).
      */
@@ -755,7 +755,7 @@ internal class VoiceMediaStoreProbe(
         userId: String,
         pipaConsented: Boolean,
         sourceType: String = SourceType.VOICE,
-        personRef: String? = null,
+        counterpartyRef: String? = null,
         eventTitle: String? = null,
     ): VoiceInsertResult {
         rawIngestionEventDao.findByClientEventId(userId, row.legacyClientEventId)?.let { legacy ->
@@ -768,7 +768,7 @@ internal class VoiceMediaStoreProbe(
             clientEventId = row.clientEventId,
             sourceType = sourceType,
             sourceRef = row.audioUri,
-            personRef = personRef,
+            counterpartyRef = counterpartyRef,
             eventTitle = eventTitle,
             durationSeconds = row.durationSec,
             timestamp = Instant.fromEpochSeconds(row.dateAddedSec),

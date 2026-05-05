@@ -4,12 +4,14 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthRepositoryImpl
 import com.becalm.android.data.repository.EmailBodyRepository
 import com.becalm.android.data.repository.EmailBodyRepositoryImpl
+import com.becalm.android.data.repository.CommitmentParticipantRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepositoryImpl
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
-import com.becalm.android.data.repository.SourcePersonCandidateRepository
-import com.becalm.android.data.repository.SourcePersonCandidateRepositoryImpl
+import com.becalm.android.data.repository.SourceEventParticipantRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepositoryImpl
 import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -42,9 +44,15 @@ public abstract class CoreRepositoryModule {
 
     @Binds
     @Singleton
-    public abstract fun bindSourcePersonCandidateRepository(
-        impl: SourcePersonCandidateRepositoryImpl,
-    ): SourcePersonCandidateRepository
+    public abstract fun bindSourceEventParticipantRepository(
+        impl: SourceEventParticipantRepositoryImpl,
+    ): SourceEventParticipantRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindCommitmentParticipantRepository(
+        impl: CommitmentParticipantRepositoryImpl,
+    ): CommitmentParticipantRepository
 
     @Binds
     @Singleton

@@ -5,7 +5,6 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.daoOp
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
-import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -13,11 +12,14 @@ import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventDto
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.dto.SourceEventParticipantInputDto
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
+import org.json.JSONArray
+import org.json.JSONObject
 import retrofit2.Response
 import java.io.IOException
 import java.util.UUID
@@ -59,39 +61,17 @@ public interface RawIngestionRepository {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     /**
-     * Emits a live list of the most recent unassigned-counterparty events for [userId],
-     * newest-first.
-     *
-     * Delegates directly to [RawIngestionEventDao.observeUnassignedRecent]; the former
-     * merge-and-sort implementation was redundant because the per-personRef branch always
-     * emitted empty (no entity carries a blank personRef). A future DAO query addition
-     * will widen this to include per-person events behind a covered index scan.
-     *
-     * @param limit Maximum list size per emission.
-     */
-    public fun observeTimelineForUser(userId: String, limit: Int = 200): Flow<List<RawIngestionEventEntity>>
-
-    /** Emits every event with a non-null `person_ref` for [userId], newest-first. */
-    public fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>>
-
-    /** Emits bounded person-list aggregate rows for the people screen. */
-    public fun observePersonInteractionAggregates(
-        userId: String,
-        limit: Int,
-    ): Flow<List<PersonInteractionAggregateRow>>
-
-    /**
      * Returns distinct non-null person refs recently seen in raw events or commitments.
      */
     public suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String>
 
     /**
-     * Emits a live list of the most recent events for a specific [personRef] owned by [userId],
+     * Emits a live list of the most recent events for a specific [counterpartyRef] owned by [userId],
      * newest-first.
      *
      * @param limit Maximum list size per emission.
      */
-    public fun observeForPerson(userId: String, personRef: String, limit: Int = 100): Flow<List<RawIngestionEventEntity>>
+    public fun observeForPerson(userId: String, counterpartyRef: String, limit: Int = 100): Flow<List<RawIngestionEventEntity>>
 
     /**
      * Emits a live list of the most recent events for a specific [sourceType] owned by [userId],
@@ -293,34 +273,15 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     // ── Read ──────────────────────────────────────────────────────────────────
 
-    override fun observeTimelineForUser(
-        userId: String,
-        limit: Int,
-    ): Flow<List<RawIngestionEventEntity>> =
-        // The placeholder empty-string personRef branch always returned an empty list
-        // (no entity carries a blank personRef), so combining it was a no-op. This
-        // direct delegation is behavior-identical and removes needless flow plumbing.
-        // A future DAO method backed by idx_raw_events_user_time will replace this path.
-        dao.observeUnassignedRecent(userId, limit)
-
-    override fun observeAssignedForUser(userId: String): Flow<List<RawIngestionEventEntity>> =
-        dao.observeAssignedForUser(userId)
-
-    override fun observePersonInteractionAggregates(
-        userId: String,
-        limit: Int,
-    ): Flow<List<PersonInteractionAggregateRow>> =
-        dao.observePersonInteractionAggregates(userId, limit)
-
     override suspend fun findDistinctPersonRefsForUser(userId: String, limit: Int): List<String> =
         dao.findDistinctPersonRefsForUser(userId, limit)
 
     override fun observeForPerson(
         userId: String,
-        personRef: String,
+        counterpartyRef: String,
         limit: Int,
     ): Flow<List<RawIngestionEventEntity>> =
-        dao.observeRecentForPerson(userId, personRef, limit)
+        dao.observeRecentForPerson(userId, counterpartyRef, limit)
 
     override fun observeForSourceType(
         userId: String,
@@ -370,7 +331,13 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     // ── Upload ────────────────────────────────────────────────────────────────
 
     override suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse> {
-        val dtos = events.map { it.toDto(emailBodyPlain = it.emailBodyPlainForExtraction()) }
+        val dtos = events.map { event ->
+            val extractionContext = event.extractionContext()
+            event.toDto(
+                emailBodyPlain = extractionContext.emailBodyPlain,
+                participants = extractionContext.participants,
+            )
+        }
         val request = BatchUploadRequest(events = dtos)
         return try {
             val response = api.batchUploadRawEvents(request = request)
@@ -494,33 +461,178 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         return dao.findByClientEventId(event.userId, event.clientEventId)?.id ?: event.id
     }
 
-    private suspend fun RawIngestionEventEntity.emailBodyPlainForExtraction(): String? {
-        if (sourceType !in EMAIL_SOURCE_TYPES) return null
-        val body = emailBodyRepositoryProvider.get().getByRawEventId(id) ?: return null
-        if (body.parseFailed || body.groupEmail) return null
-        return body.bodyPlain?.takeIf { it.isNotBlank() }
+    private suspend fun RawIngestionEventEntity.extractionContext(): SourceExtractionContext {
+        if (sourceType !in EMAIL_SOURCE_TYPES) {
+            return SourceExtractionContext(
+                emailBodyPlain = null,
+                participants = counterpartyRef?.let {
+                    listOf(counterpartyParticipant(it, evidenceSource = "metadata"))
+                }.orEmpty(),
+            )
+        }
+        val body = emailBodyRepositoryProvider.get().getByRawEventId(id)
+            ?: return SourceExtractionContext(
+                emailBodyPlain = null,
+                participants = counterpartyRef?.let {
+                    listOf(counterpartyParticipant(it, evidenceSource = "metadata"))
+                }.orEmpty(),
+            )
+        val participants = emailParticipants(body.folder, body.fromAddress, body.toAddresses)
+        if (body.parseFailed || body.groupEmail) {
+            return SourceExtractionContext(emailBodyPlain = null, participants = participants)
+        }
+        return SourceExtractionContext(
+            emailBodyPlain = body.bodyPlain?.takeIf { it.isNotBlank() },
+            participants = participants,
+        )
     }
 
-    private fun RawIngestionEventEntity.toDto(emailBodyPlain: String?): RawIngestionEventDto =
-        RawIngestionEventDto(
+    private fun RawIngestionEventEntity.toDto(
+        emailBodyPlain: String?,
+        participants: List<SourceEventParticipantInputDto>,
+    ): RawIngestionEventDto {
+        val emailHeaders = emailHeaderContext()
+        return RawIngestionEventDto(
             id = id,
             clientEventId = clientEventId,
             userId = userId,
             sourceType = sourceType,
             sourceRef = sourceRef,
-            personRef = personRef,
+            messageIdHeader = emailHeaders?.messageIdHeader,
+            inReplyToHeader = emailHeaders?.inReplyToHeader,
+            referencesHeader = emailHeaders?.referencesHeader,
+            counterpartyRef = counterpartyRef,
+            participants = participants.takeIf { it.isNotEmpty() },
             eventTitle = eventTitle,
             eventSnippet = eventSnippet,
             durationSeconds = durationSeconds,
             location = location,
             // EMAIL-001 direction hint (`.spec/email-pipeline.spec.yml:15-18`) — INBOX|SENT for
             // email source_types, null elsewhere. Must be propagated so Railway can drive the
-            // server-side person_ref derivation from the same raw-event metadata the client saw.
+            // server-side counterparty_ref derivation from the same raw-event metadata the client saw.
             folder = folder,
             commitmentsExtractedCount = commitmentsExtractedCount,
             emailBodyPlain = emailBodyPlain,
             timestamp = timestamp,
         )
+    }
+
+    private data class SourceExtractionContext(
+        val emailBodyPlain: String?,
+        val participants: List<SourceEventParticipantInputDto>,
+    )
+
+    private data class EmailHeaderContext(
+        val messageIdHeader: String?,
+        val inReplyToHeader: String?,
+        val referencesHeader: String?,
+    )
+
+    private fun RawIngestionEventEntity.emailHeaderContext(): EmailHeaderContext? {
+        if (sourceType !in EMAIL_SOURCE_TYPES) return null
+        val raw = sourceRef?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            val json = JSONObject(raw)
+            EmailHeaderContext(
+                messageIdHeader = json.optNonBlankString("message_id"),
+                inReplyToHeader = json.optNonBlankString("in_reply_to"),
+                referencesHeader = json.optNonBlankString("references"),
+            )
+        }.getOrNull()
+    }
+
+    private fun emailParticipants(
+        folder: String?,
+        fromAddress: String?,
+        toAddressesJson: String?,
+    ): List<SourceEventParticipantInputDto> {
+        val normalizedFolder = folder?.lowercase()
+        return buildList {
+            canonicalEmail(fromAddress)?.let { sender ->
+                add(
+                    emailParticipant(
+                        role = "sender",
+                        relationToUser = if (normalizedFolder == "sent") "self" else "counterparty",
+                        email = sender,
+                    ),
+                )
+            }
+            parseEmailArray(toAddressesJson).forEach { recipient ->
+                add(
+                    emailParticipant(
+                        role = "recipient",
+                        relationToUser = if (normalizedFolder == "sent") "counterparty" else "self",
+                        email = recipient,
+                    ),
+                )
+            }
+        }.distinctBy { "${it.role}:${it.relationToUser}:${it.email}" }
+    }
+
+    private fun parseEmailArray(value: String?): List<String> {
+        if (value.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(value)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val candidate = array.optJSONObject(index)?.optString("email")
+                        ?: array.optString(index)
+                    canonicalEmail(candidate)?.let(::add)
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun JSONObject.optNonBlankString(name: String): String? =
+        optString(name, "").takeIf { it.isNotBlank() }
+
+    private fun emailParticipant(
+        role: String,
+        relationToUser: String,
+        email: String,
+    ): SourceEventParticipantInputDto =
+        SourceEventParticipantInputDto(
+            role = role,
+            relationToUser = relationToUser,
+            identityType = "email",
+            rawValue = email,
+            normalizedValue = email,
+            email = email,
+            evidence = email,
+            confidence = 0.95,
+            evidenceSource = "metadata",
+        )
+
+    private fun counterpartyParticipant(value: String, evidenceSource: String): SourceEventParticipantInputDto {
+        val email = canonicalEmail(value)
+        val phone = value.takeIf { it.startsWith("+") && it.drop(1).all(Char::isDigit) }
+        return SourceEventParticipantInputDto(
+            role = "counterparty",
+            relationToUser = "counterparty",
+            identityType = when {
+                email != null -> "email"
+                phone != null -> "phone"
+                else -> "name"
+            },
+            rawValue = value,
+            normalizedValue = email ?: phone ?: value.trim().lowercase(),
+            displayName = if (email == null && phone == null) value else null,
+            email = email,
+            phone = phone,
+            evidence = value,
+            confidence = if (email != null || phone != null) 0.85 else 0.5,
+            evidenceSource = evidenceSource,
+        )
+    }
+
+    private fun canonicalEmail(value: String?): String? {
+        val text = value?.trim()?.lowercase() ?: return null
+        if (!text.contains("@")) return null
+        return text
+            .substringAfter("<", text)
+            .substringBefore(">")
+            .takeIf { it.contains("@") && it.contains(".") }
+    }
 
     private fun RawIngestionEventDto.toEntity(userId: String): RawIngestionEventEntity =
         RawIngestionEventEntity(
@@ -529,7 +641,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             clientEventId = clientEventId,
             sourceType = sourceType,
             sourceRef = sourceRef,
-            personRef = personRef,
+            counterpartyRef = counterpartyRef,
             eventTitle = eventTitle,
             eventSnippet = eventSnippet,
             durationSeconds = durationSeconds,

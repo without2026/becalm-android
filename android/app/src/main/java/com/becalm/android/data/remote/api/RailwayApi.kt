@@ -8,6 +8,7 @@ import com.becalm.android.data.remote.dto.CalendarOAuthStatusResponse
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
+import com.becalm.android.data.remote.dto.CommitmentParticipantsResponse
 import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PaginatedCommitmentsResponse
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
@@ -20,7 +21,7 @@ import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
-import com.becalm.android.data.remote.dto.SourcePersonCandidatesResponse
+import com.becalm.android.data.remote.dto.SourceEventParticipantsResponse
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -100,18 +101,34 @@ public interface RailwayApi {
     ): Response<RawIngestionEventsResponse>
 
     /**
-     * Lists backend-persisted AI person candidates for current user.
+     * Lists backend-persisted source participants for current user.
      *
-     * Android mirrors these rows into Room so backend-managed mail extraction and
-     * local voice/call extraction feed the same person-index worker contract.
+     * Android mirrors these rows into Room so backend-managed mail/calendar extraction
+     * feeds the same person-index worker contract as local source adapters.
      */
-    @GET("v1/source_person_candidates")
-    public suspend fun getSourcePersonCandidates(
+    @GET("v1/source_event_participants")
+    public suspend fun getSourceEventParticipants(
         @Query("cursor") cursor: String? = null,
         @Query("limit") limit: Int? = null,
         @Query("since") since: String? = null,
         @Query("source_type") sourceType: String? = null,
-    ): Response<SourcePersonCandidatesResponse>
+        @Query("resolution_status") resolutionStatus: String? = null,
+    ): Response<SourceEventParticipantsResponse>
+
+    /**
+     * Lists backend-persisted commitment/person edges for current user.
+     *
+     * Android mirrors these rows into Room so commitments extracted on Railway can be
+     * indexed into the same person timelines as locally extracted voice commitments.
+     */
+    @GET("v1/commitment_participants")
+    public suspend fun getCommitmentParticipants(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("person_id") personId: String? = null,
+        @Query("commitment_id") commitmentId: String? = null,
+    ): Response<CommitmentParticipantsResponse>
 
     // =========================================================================
     // COMMITMENTS
@@ -123,7 +140,7 @@ public interface RailwayApi {
      * @param cursor Opaque pagination cursor from the previous response; omit for first page.
      * @param limit Page size; server default is 20.
      * @param since ISO 8601 datetime — returns only commitments updated after this time.
-     * @param personRef Filter by canonicalized counterparty identifier.
+     * @param personId Filter by canonical person id.
      * @param direction Filter by direction: `"give"` or `"take"`.
      * @param actionState Filter by state: `"pending"` | `"reminded"` | `"followed_up"` | `"completed"`.
      *
@@ -134,7 +151,7 @@ public interface RailwayApi {
         @Query("cursor") cursor: String? = null,
         @Query("limit") limit: Int = 20,
         @Query("since") since: String? = null,
-        @Query("person_ref") personRef: String? = null,
+        @Query("person_id") personId: String? = null,
         @Query("direction") direction: String? = null,
         @Query("action_state") actionState: String? = null,
     ): Response<PaginatedCommitmentsResponse>
@@ -315,10 +332,10 @@ public interface RailwayApi {
     // =========================================================================
 
     /**
-     * Lists virtual person records derived from raw ingestion events and commitments.
+     * Lists first-class person records derived from backend relation intelligence.
      *
-     * Persons are not a first-class table in the MVP database; they are computed from
-     * the `person_ref` field of commitments and raw events.
+     * Backend aggregates `persons` with `person_interactions` and
+     * `commitment_participants`.
      *
      * @param cursor Opaque pagination cursor from the previous response.
      * @param limit Page size; server default is 20.
@@ -338,7 +355,7 @@ public interface RailwayApi {
      *
      * Returns 404 when [personId] is not found or belongs to a different user.
      *
-     * @param personId Canonicalized person reference (person_ref value).
+     * @param personId Canonical backend `persons.id` value.
      * @param cursor Opaque pagination cursor from the previous response.
      * @param limit Page size; server default applies when omitted.
      *
@@ -356,7 +373,7 @@ public interface RailwayApi {
      *
      * Returns 404 when [personId] is not found or belongs to a different user.
      *
-     * @param personId Canonicalized person reference (person_ref value).
+     * @param personId Canonical backend `persons.id` value.
      * @param cursor Opaque pagination cursor from the previous response.
      * @param limit Page size; server default applies when omitted.
      *

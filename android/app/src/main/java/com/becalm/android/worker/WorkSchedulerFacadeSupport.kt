@@ -59,4 +59,16 @@ internal class WorkSchedulerOneShotEnqueuer(
             ),
         )
     }
+
+    fun enqueueMeetingTranscriptUpload(rawEventId: String) {
+        planRunner.run(
+            UniqueOneTimeWorkPlan(
+                uniqueKey = UniqueWorkKeys.meetingTranscriptUpload(rawEventId),
+                policy = ExistingWorkPolicy.REPLACE,
+                request = WorkSchedulerRequests.meetingTranscriptUploadRequest(rawEventId),
+                logMessage = "enqueueMeetingTranscriptUpload rawEventId_hash=${redact(rawEventId)} " +
+                    "key=${UniqueWorkKeys.meetingTranscriptUpload(rawEventId)}",
+            ),
+        )
+    }
 }
