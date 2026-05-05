@@ -10,16 +10,11 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
-import com.becalm.android.data.remote.dto.RawIngestionEventDto
-import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.remote.dto.SourceEventParticipantInputDto
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
-import org.json.JSONArray
-import org.json.JSONObject
 import retrofit2.Response
 import java.io.IOException
 import java.util.UUID
@@ -331,13 +326,8 @@ public class RawIngestionRepositoryImpl @Inject constructor(
     // ── Upload ────────────────────────────────────────────────────────────────
 
     override suspend fun uploadBatch(events: List<RawIngestionEventEntity>): BecalmResult<BatchUploadResponse> {
-        val dtos = events.map { event ->
-            val extractionContext = event.extractionContext()
-            event.toDto(
-                emailBodyPlain = extractionContext.emailBodyPlain,
-                participants = extractionContext.participants,
-            )
-        }
+        val adapter = SourceExtractionInputAdapter(emailBodyRepositoryProvider.get())
+        val dtos = events.map { event -> adapter.toUploadDto(event) }
         val request = BatchUploadRequest(events = dtos)
         return try {
             val response = api.batchUploadRawEvents(request = request)
@@ -390,7 +380,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
                 ?: return@withContext BecalmResult.Failure(
                     BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
                 )
-            val entities = body.data.map { it.toEntity(userId) }
+            val entities = body.data.map { it.toRawIngestionEventEntity(userId) }
             dao.upsertSyncedFromServer(entities)
 
             totalFetched += body.data.size
@@ -461,197 +451,6 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         return dao.findByClientEventId(event.userId, event.clientEventId)?.id ?: event.id
     }
 
-    private suspend fun RawIngestionEventEntity.extractionContext(): SourceExtractionContext {
-        if (sourceType !in EMAIL_SOURCE_TYPES) {
-            return SourceExtractionContext(
-                emailBodyPlain = null,
-                participants = counterpartyRef?.let {
-                    listOf(counterpartyParticipant(it, evidenceSource = "metadata"))
-                }.orEmpty(),
-            )
-        }
-        val body = emailBodyRepositoryProvider.get().getByRawEventId(id)
-            ?: return SourceExtractionContext(
-                emailBodyPlain = null,
-                participants = counterpartyRef?.let {
-                    listOf(counterpartyParticipant(it, evidenceSource = "metadata"))
-                }.orEmpty(),
-            )
-        val participants = emailParticipants(body.folder, body.fromAddress, body.toAddresses)
-        if (body.parseFailed || body.groupEmail) {
-            return SourceExtractionContext(emailBodyPlain = null, participants = participants)
-        }
-        return SourceExtractionContext(
-            emailBodyPlain = body.bodyPlain?.takeIf { it.isNotBlank() },
-            participants = participants,
-        )
-    }
-
-    private fun RawIngestionEventEntity.toDto(
-        emailBodyPlain: String?,
-        participants: List<SourceEventParticipantInputDto>,
-    ): RawIngestionEventDto {
-        val emailHeaders = emailHeaderContext()
-        return RawIngestionEventDto(
-            id = id,
-            clientEventId = clientEventId,
-            userId = userId,
-            sourceType = sourceType,
-            sourceRef = sourceRef,
-            messageIdHeader = emailHeaders?.messageIdHeader,
-            inReplyToHeader = emailHeaders?.inReplyToHeader,
-            referencesHeader = emailHeaders?.referencesHeader,
-            counterpartyRef = counterpartyRef,
-            participants = participants.takeIf { it.isNotEmpty() },
-            eventTitle = eventTitle,
-            eventSnippet = eventSnippet,
-            durationSeconds = durationSeconds,
-            location = location,
-            // EMAIL-001 direction hint (`.spec/email-pipeline.spec.yml:15-18`) — INBOX|SENT for
-            // email source_types, null elsewhere. Must be propagated so Railway can drive the
-            // server-side counterparty_ref derivation from the same raw-event metadata the client saw.
-            folder = folder,
-            commitmentsExtractedCount = commitmentsExtractedCount,
-            emailBodyPlain = emailBodyPlain,
-            timestamp = timestamp,
-        )
-    }
-
-    private data class SourceExtractionContext(
-        val emailBodyPlain: String?,
-        val participants: List<SourceEventParticipantInputDto>,
-    )
-
-    private data class EmailHeaderContext(
-        val messageIdHeader: String?,
-        val inReplyToHeader: String?,
-        val referencesHeader: String?,
-    )
-
-    private fun RawIngestionEventEntity.emailHeaderContext(): EmailHeaderContext? {
-        if (sourceType !in EMAIL_SOURCE_TYPES) return null
-        val raw = sourceRef?.takeIf { it.isNotBlank() } ?: return null
-        return runCatching {
-            val json = JSONObject(raw)
-            EmailHeaderContext(
-                messageIdHeader = json.optNonBlankString("message_id"),
-                inReplyToHeader = json.optNonBlankString("in_reply_to"),
-                referencesHeader = json.optNonBlankString("references"),
-            )
-        }.getOrNull()
-    }
-
-    private fun emailParticipants(
-        folder: String?,
-        fromAddress: String?,
-        toAddressesJson: String?,
-    ): List<SourceEventParticipantInputDto> {
-        val normalizedFolder = folder?.lowercase()
-        return buildList {
-            canonicalEmail(fromAddress)?.let { sender ->
-                add(
-                    emailParticipant(
-                        role = "sender",
-                        relationToUser = if (normalizedFolder == "sent") "self" else "counterparty",
-                        email = sender,
-                    ),
-                )
-            }
-            parseEmailArray(toAddressesJson).forEach { recipient ->
-                add(
-                    emailParticipant(
-                        role = "recipient",
-                        relationToUser = if (normalizedFolder == "sent") "counterparty" else "self",
-                        email = recipient,
-                    ),
-                )
-            }
-        }.distinctBy { "${it.role}:${it.relationToUser}:${it.email}" }
-    }
-
-    private fun parseEmailArray(value: String?): List<String> {
-        if (value.isNullOrBlank()) return emptyList()
-        return runCatching {
-            val array = JSONArray(value)
-            buildList {
-                for (index in 0 until array.length()) {
-                    val candidate = array.optJSONObject(index)?.optString("email")
-                        ?: array.optString(index)
-                    canonicalEmail(candidate)?.let(::add)
-                }
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    private fun JSONObject.optNonBlankString(name: String): String? =
-        optString(name, "").takeIf { it.isNotBlank() }
-
-    private fun emailParticipant(
-        role: String,
-        relationToUser: String,
-        email: String,
-    ): SourceEventParticipantInputDto =
-        SourceEventParticipantInputDto(
-            role = role,
-            relationToUser = relationToUser,
-            identityType = "email",
-            rawValue = email,
-            normalizedValue = email,
-            email = email,
-            evidence = email,
-            confidence = 0.95,
-            evidenceSource = "metadata",
-        )
-
-    private fun counterpartyParticipant(value: String, evidenceSource: String): SourceEventParticipantInputDto {
-        val email = canonicalEmail(value)
-        val phone = value.takeIf { it.startsWith("+") && it.drop(1).all(Char::isDigit) }
-        return SourceEventParticipantInputDto(
-            role = "counterparty",
-            relationToUser = "counterparty",
-            identityType = when {
-                email != null -> "email"
-                phone != null -> "phone"
-                else -> "name"
-            },
-            rawValue = value,
-            normalizedValue = email ?: phone ?: value.trim().lowercase(),
-            displayName = if (email == null && phone == null) value else null,
-            email = email,
-            phone = phone,
-            evidence = value,
-            confidence = if (email != null || phone != null) 0.85 else 0.5,
-            evidenceSource = evidenceSource,
-        )
-    }
-
-    private fun canonicalEmail(value: String?): String? {
-        val text = value?.trim()?.lowercase() ?: return null
-        if (!text.contains("@")) return null
-        return text
-            .substringAfter("<", text)
-            .substringBefore(">")
-            .takeIf { it.contains("@") && it.contains(".") }
-    }
-
-    private fun RawIngestionEventDto.toEntity(userId: String): RawIngestionEventEntity =
-        RawIngestionEventEntity(
-            id = id ?: UUID.nameUUIDFromBytes("$userId:$sourceType:$clientEventId".toByteArray()).toString(),
-            userId = userId,
-            clientEventId = clientEventId,
-            sourceType = sourceType,
-            sourceRef = sourceRef,
-            counterpartyRef = counterpartyRef,
-            eventTitle = eventTitle,
-            eventSnippet = eventSnippet,
-            durationSeconds = durationSeconds,
-            location = location,
-            folder = folder,
-            commitmentsExtractedCount = commitmentsExtractedCount ?: 0,
-            timestamp = timestamp,
-            syncStatus = "synced",
-        )
-
     private fun <T> Response<T>.toRefreshError(): BecalmError = when (code()) {
         401 -> BecalmError.Unauthorized
         404 -> BecalmError.NotFound("raw_ingestion_events")
@@ -692,12 +491,6 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     private companion object {
         private const val PAGE_LIMIT = 100
-        private val EMAIL_SOURCE_TYPES = setOf(
-            SourceType.GMAIL,
-            SourceType.OUTLOOK_MAIL,
-            SourceType.NAVER_IMAP,
-            SourceType.DAUM_IMAP,
-        )
     }
 }
 

@@ -117,7 +117,13 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery {
-            voiceApi.transcribeExtract(
+            voiceApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any(),
@@ -167,7 +173,13 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery { rawIngestionEventDao.update(capture(updatedSlot)) } returns 1
         coEvery {
-            voiceApi.transcribeExtract(
+            voiceApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any(),

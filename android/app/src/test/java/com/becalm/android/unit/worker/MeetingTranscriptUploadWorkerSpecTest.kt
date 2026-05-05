@@ -96,7 +96,21 @@ class MeetingTranscriptUploadWorkerSpecTest {
         coEvery { rawIngestionEventDao.findById(RAW_ID, USER_ID) } returns entity
         coEvery { rawIngestionEventDao.update(capture(updated)) } returns 1
         coEvery {
-            voiceApi.transcriptExtract(any(), any(), any(), any(), any(), any())
+            voiceApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
         } returns Response.success(
             TranscribeExtractResponse(
                 rawEventId = RAW_ID,

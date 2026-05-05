@@ -4,8 +4,8 @@ version: 2
 # Boundary reference: docs/becalm-mvp-boundary.md
 
 # Architecture lock (2026-04-16):
-#   Android → Railway FastAPI `POST /v1/voice/transcribe_extract` → Vertex AI Gemini 2.5 Flash (audio multimodal, us-central1) → Android Room commitments 저장 → Railway commitments mirror.
-#   voice/transcribe_extract 는 draft extraction only endpoint다. Room이 source-of-truth이고, Supabase는 Room mirror다.
+#   Android → Railway FastAPI `POST /v1/extractions/commitments` → Vertex AI Gemini 2.5 Flash (audio multimodal, us-central1) → Android Room commitments 저장 → Railway commitments mirror.
+#   extractions/commitments 는 draft extraction only endpoint다. Room이 source-of-truth이고, Supabase는 Room mirror다.
 #   Legacy on-device STT + Gemini Nano stubs (AndroidSpeechRecognizerBackend, WhisperJni, GeminiNanoExtractor, SttBackendSelector, VoiceChunker) are removed.
 #   Audio bytes leave device ONLY when PIPA 제3자 제공 + 국외 이전 동의(ONB-PIPA)가 True. Transcript 중간 산출물은 어디에도 영속되지 않는다 — Railway 요청 lifetime 내 ephemeral.
 #   청크 분할하지 않음 — 전체 맥락 보존을 위해 오디오 전체를 단일 Gemini 호출로 처리 (최대 120분). 단일 호출 한도 초과 시 HTTP 422 quarantine, post-MVP에 overlap chunk + dedup 방안 재설계.
@@ -13,7 +13,7 @@ version: 2
 behaviors:
   - id: VOI-001
     type: lifecycle
-    description: "VoiceUploadWorker가 source_type IN ('voice','call_recording','meeting'), sync_status='pending'인 raw_ingestion_event에 대해 Railway `POST /v1/voice/transcribe_extract`로 오디오 파일을 multipart 업로드하고 structured items(action|schedule|decision)를 수신한다. Android는 이 items를 Room commitments(trackable items)로 INSERT하고, 전체 item count와 첫 quote를 raw event metadata에 보존한다. 음성 메모(voice), 통화 녹음(call_recording), 미팅 오디오(meeting)는 동일 파이프라인을 공유하며 source_type은 UI 배지·필터·증거성 표시 용도로 보존된다"
+    description: "VoiceUploadWorker가 source_type IN ('voice','call_recording','meeting'), sync_status='pending'인 raw_ingestion_event에 대해 Railway `POST /v1/extractions/commitments`로 오디오 파일을 multipart 업로드하고 structured items(action|schedule|decision)를 수신한다. Android는 이 items를 Room commitments(trackable items)로 INSERT하고, 전체 item count와 첫 quote를 raw event metadata에 보존한다. 음성 메모(voice), 통화 녹음(call_recording), 미팅 오디오(meeting)는 동일 파이프라인을 공유하며 source_type은 UI 배지·필터·증거성 표시 용도로 보존된다"
     trigger: "Room raw_ingestion_events에 source_type IN ('voice','call_recording','meeting'), sync_status='pending' 레코드 삽입됨"
     precondition: "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent=true), Supabase JWT 유효, READ_MEDIA_AUDIO 권한 부여, 오디오 파일 URI 접근 가능, Wi-Fi 또는 unmetered 네트워크 연결"
     expected: "Railway endpoint가 HTTP 200 + raw_event_id + items[] 반환. Android는 event_snippet(첫 item.quote) 를 로컬 갱신한 뒤, item_type in ('action','schedule','decision') trackable row를 Room commitments에 N건 INSERT한다 (N >= 0). action row는 direction in ('give','take'), schedule row는 schedule_status 필수, decision row는 decision_status 필수다. action row만 action_state lifecycle query 대상이며 schedule/decision row는 action_state 기본값 'pending' 를 storage sentinel로만 유지한다. raw_ingestion_events.commitments_extracted_count는 이 persisted item 전체 count를 기록한다. 모든 persisted item의 source_type은 원본 raw event의 source_type을 그대로 상속한다. 이후 CommitmentUploader가 /v1/commitments 계열 mirror를 수행한다. Vertex AI 응답 JSON은 Railway 요청 lifetime 외부로 전파되지 않음(DB·로그 저장 금지)."
@@ -22,7 +22,7 @@ behaviors:
 
   - id: VOI-002
     type: lifecycle
-    description: "Railway `/v1/voice/transcribe_extract`는 오디오 파일 전체를 분할 없이 단일 Gemini 2.5 Flash 호출로 처리한다 — cross-boundary commitment 손실과 화자/맥락 단절을 방지하기 위함"
+    description: "Railway `/v1/extractions/commitments`는 오디오 파일 전체를 분할 없이 단일 Gemini 2.5 Flash 호출로 처리한다 — cross-boundary commitment 손실과 화자/맥락 단절을 방지하기 위함"
     trigger: "Railway가 유효한 오디오 업로드 수신 (duration_seconds ≤ 7200)"
     precondition: "duration_seconds in [1, 7200], audio codec=.m4a/.mp4/.aac/.mp3/.wav 중 하나, Gemini 2.5 Flash audio multimodal 엔드포인트 가용"
     expected: "Vertex AI 호출 1회 (전체 오디오 + responseSchema = VoiceExtractItem[]). HTTP 200 + { items: [...], model: 'gemini-2.5-flash', region: 'us-central1' } 반환. Gemini 응답에 finish_reason='MAX_TOKENS'가 포함되거나 JSON이 잘린 경우(스키마 검증 실패) HTTP 502 + { error: 'output_truncated' } 반환 — 해당 raw_event는 quarantine되며 post-MVP overlap-chunk 경로로 재처리 예정. duration_seconds > 7200인 요청은 업스트림(api-contract 422)에서 차단되어 본 behavior에 도달하지 않음."
@@ -59,7 +59,7 @@ behaviors:
   - id: VOI-006
     type: resilience
     description: "VoiceUploadWorker는 네트워크/서버 오류 시 지수 백오프로 최대 3회 재시도한 후 quarantine으로 전이한다"
-    trigger: "Railway `/v1/voice/transcribe_extract` 호출이 HTTP 500/502/503 또는 IOException으로 실패"
+    trigger: "Railway `/v1/extractions/commitments` 호출이 HTTP 500/502/503 또는 IOException으로 실패"
     precondition: "VoiceUploadWorker 실행 중, max_attempts=3, initial_backoff=30s, multiplier=2"
     expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed', Sentry에 voice_upload_quarantined 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 즉시 failed(retry_count=0 유지). HTTP 413/422는 retryable=false로 즉시 quarantine."
     source: phase2-acceptance

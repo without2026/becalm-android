@@ -15,7 +15,7 @@ public enum class Direction {
 
 /**
  * A single action-commitment projection extracted from a voice recording via Railway
- * `POST /v1/voice/transcribe_extract`.
+ * `POST /v1/extractions/commitments`.
  *
  * The voice endpoint's source-of-truth contract is now `items[]` with `type=action|schedule|decision`.
  * [CommitmentDraft] remains the intermediate domain representation for the current action-only

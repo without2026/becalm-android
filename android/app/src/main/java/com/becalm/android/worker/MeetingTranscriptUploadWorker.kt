@@ -140,13 +140,20 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         val parts = entity.toRequestParts(rawEventId)
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing transcript with Gemini")
         val response = try {
-            voiceApi.transcriptExtract(
-                transcript = transcript.toPlainRequestBody(),
+            voiceApi.commitmentExtract(
+                audio = null,
+                inputModality = "transcript".toPlainRequestBody(),
+                sourceType = parts.sourceType,
                 clientEventId = parts.clientEventId,
                 rawEventId = parts.rawEventId,
+                durationSeconds = null,
                 timestamp = parts.timestamp,
                 counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
+                folder = null,
+                conversationRef = null,
+                previousThreadContext = null,
+                bodyText = transcript.toPlainRequestBody(),
             )
         } catch (e: IOException) {
             logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -255,8 +262,8 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         )
     }
 
-    private fun extractionPersister(): VoiceExtractionPersister =
-        VoiceExtractionPersister(
+    private fun extractionPersister(): StructuredExtractionPersister =
+        StructuredExtractionPersister(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
