@@ -69,7 +69,7 @@ public data class CreateUiState(
         title = "",
         direction = "give",
         quote = "",
-        personRef = null,
+        counterpartyRef = null,
         dueAtMillis = null,
         dueHint = null,
         dueIsApproximate = false,
@@ -180,10 +180,10 @@ public class CommitmentCreateViewModel @Inject constructor(
         }
     }
 
-    public fun onPersonRefChange(value: String) {
+    public fun onCounterpartyRefChange(value: String) {
         _uiState.update {
             it.copy(
-                draft = it.draft.copy(personRef = value.ifBlank { null }),
+                draft = it.draft.copy(counterpartyRef = value.ifBlank { null }),
                 fieldErrors = it.fieldErrors - Field.PERSON_REF,
             )
         }

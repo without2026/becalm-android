@@ -1,17 +1,17 @@
 /**
- * Modifier extension functions that replicate BeCalm v3's cosmic
- * glassmorphism panel recipes in Jetpack Compose.
+ * Modifier extension functions for BeCalm's light-first frosted glass panels.
  *
  * Each recipe is a precise port of a CSS pattern from v3 global.css:
  *   - translucent fill + hairline border + outer drop-shadow + inset highlight
  *
- * Compose [Modifier.blur] blurs the foreground layer, not the backdrop behind a
- * panel. These recipes therefore omit foreground blur and use the higher-opacity
- * fallback fills so text fields, buttons, and disclosures remain readable.
+ * Compose cannot reliably apply true backdrop blur to the content behind a
+ * panel. These recipes therefore use higher-opacity warm glass fills, hairline
+ * borders, and soft shadows to preserve the frosted hierarchy without blurring
+ * foreground content.
  *
  * The recipes:
- *   1. [glassPanel]         — default cards and list items (12 dp corners)
- *   2. [glassPanelElevated] — modals and bottom sheets (20 dp corners)
+ *   1. [glassPanel]         — relationship cards and list items (20 dp corners)
+ *   2. [glassPanelElevated] — modals and bottom sheets (28 dp corners)
  *
  * Source of truth: design token spec §3.
  */
@@ -22,9 +22,10 @@ import androidx.compose.foundation.border
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
@@ -34,7 +35,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Draws a soft outer drop-shadow behind the composable by painting a blurred
- * filled rounded-rect using [drawBehind].
+ * filled rounded-rect using [drawWithCache].
  *
  * Compose has no direct `box-shadow` equivalent, so we approximate it by
  * painting a semi-transparent filled shape at [yOffset] behind the content.
@@ -52,22 +53,26 @@ private fun Modifier.glassShadow(
     cornerRadius: Dp,
     yOffset: Dp = 4.dp,
     blur: Dp = 24.dp,
-): Modifier = this.drawBehind {
+): Modifier = this.drawWithCache {
     val blurPx = blur.toPx()
     val yOffsetPx = yOffset.toPx()
     val radiusPx = cornerRadius.toPx()
-
-    // Expand the shadow rect by the blur radius on all sides, then shift down.
-    drawRoundRect(
-        color = shadowColor,
-        topLeft = Offset(-blurPx, -blurPx + yOffsetPx),
-        size = androidx.compose.ui.geometry.Size(
-            width = size.width + blurPx * 2,
-            height = size.height + blurPx * 2,
-        ),
-        cornerRadius = CornerRadius(radiusPx + blurPx, radiusPx + blurPx),
-        alpha = shadowColor.alpha,
+    val shadowTopLeft = Offset(-blurPx, -blurPx + yOffsetPx)
+    val shadowSize = Size(
+        width = size.width + blurPx * 2,
+        height = size.height + blurPx * 2,
     )
+    val shadowCornerRadius = CornerRadius(radiusPx + blurPx, radiusPx + blurPx)
+
+    onDrawBehind {
+        drawRoundRect(
+            color = shadowColor,
+            topLeft = shadowTopLeft,
+            size = shadowSize,
+            cornerRadius = shadowCornerRadius,
+            alpha = shadowColor.alpha,
+        )
+    }
 }
 
 /**
@@ -78,19 +83,22 @@ private fun Modifier.glassShadow(
 private fun Modifier.glassInsetHighlight(
     highlightColor: Color,
     cornerRadius: Dp,
-): Modifier = this.drawBehind {
+): Modifier = this.drawWithCache {
     val radiusPx = cornerRadius.toPx()
     val lineHeightPx = 1.dp.toPx()
-
-    drawRoundRect(
-        color = highlightColor,
-        topLeft = Offset(0f, 0f),
-        size = androidx.compose.ui.geometry.Size(
-            width = size.width,
-            height = lineHeightPx,
-        ),
-        cornerRadius = CornerRadius(radiusPx, radiusPx),
+    val highlightSize = Size(
+        width = size.width,
+        height = lineHeightPx,
     )
+
+    onDrawBehind {
+        drawRoundRect(
+            color = highlightColor,
+            topLeft = Offset.Zero,
+            size = highlightSize,
+            cornerRadius = CornerRadius(radiusPx, radiusPx),
+        )
+    }
 }
 
 // ─── Public recipes ───────────────────────────────────────────────────────────
@@ -99,24 +107,24 @@ private fun Modifier.glassInsetHighlight(
  * Default glass surface recipe — cards and list items.
  *
  * Property stack (spec §3 `glassPanel`):
- * - Background fill: `0x1AFFFFFF` (α=0.10) to compensate for omitted backdrop blur
- * - Border: 1 dp `0x14FFFFFF` (α=0.08)
- * - Corner radius: 12 dp (matches [BecalmShapes.medium])
- * - Outer shadow: y-offset 4 dp, blur 24 dp, `rgba(0,0,0,0.30)`
+ * - Background fill: warm glass at high opacity to compensate for omitted backdrop blur
+ * - Border: 1 dp warm neutral hairline
+ * - Corner radius: 20 dp (matches [BecalmShapes.medium])
+ * - Outer shadow: y-offset 8 dp, blur 24 dp, warm neutral
  *
- * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (12 dp rounded).
+ * @param shape Override shape; defaults to [MaterialTheme.shapes.medium] (20 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modifier {
     val colors = MaterialTheme.becalmColors
     val fill = colors.glassPanelFillSdkLegacy
-    val cornerRadius = 12.dp
+    val cornerRadius = 20.dp
 
     return this
         .glassShadow(
             shadowColor = colors.glassOuterShadow,
             cornerRadius = cornerRadius,
-            yOffset = 4.dp,
+            yOffset = 8.dp,
             blur = 24.dp,
         )
         .background(fill, shape)
@@ -127,26 +135,26 @@ public fun Modifier.glassPanel(shape: Shape = MaterialTheme.shapes.medium): Modi
  * Elevated glass surface recipe — modals and bottom sheets.
  *
  * Property stack (spec §3 `glassPanelElevated`):
- * - Background fill: `0x26FFFFFF` (α=0.15) to compensate for omitted backdrop blur
- * - Border: 1 dp `0x14FFFFFF` (α=0.08)
- * - Corner radius: 20 dp (matches [BecalmShapes.large])
- * - Outer shadow: y-offset 8 dp, blur 32 dp, `rgba(0,0,0,0.40)`
- * - Inset highlight: 1 dp top-edge `0x0DFFFFFF` (α=0.05)
+ * - Background fill: stronger warm glass
+ * - Border: 1 dp warm neutral hairline
+ * - Corner radius: 28 dp (matches [BecalmShapes.large])
+ * - Outer shadow: y-offset 12 dp, blur 36 dp, warm neutral
+ * - Inset highlight: 1 dp top edge
  *
- * @param shape Override shape; defaults to [MaterialTheme.shapes.large] (20 dp rounded).
+ * @param shape Override shape; defaults to [MaterialTheme.shapes.large] (28 dp rounded).
  */
 @Composable
 public fun Modifier.glassPanelElevated(shape: Shape = MaterialTheme.shapes.large): Modifier {
     val colors = MaterialTheme.becalmColors
     val fill = colors.glassPanelFillElevatedLegacy
-    val cornerRadius = 20.dp
+    val cornerRadius = 28.dp
 
     return this
         .glassShadow(
             shadowColor = colors.glassOuterShadowElevated,
             cornerRadius = cornerRadius,
-            yOffset = 8.dp,
-            blur = 32.dp,
+            yOffset = 12.dp,
+            blur = 36.dp,
         )
         .glassInsetHighlight(
             highlightColor = colors.glassInsetElevated,

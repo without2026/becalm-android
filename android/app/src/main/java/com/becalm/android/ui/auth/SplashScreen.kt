@@ -115,7 +115,7 @@ internal fun SplashContent(showLoading: Boolean = true) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.becalmColors.cosmicBackground),
+            .background(MaterialTheme.becalmColors.canvasBackground),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

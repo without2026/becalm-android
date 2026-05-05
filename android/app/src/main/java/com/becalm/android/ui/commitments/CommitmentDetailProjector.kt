@@ -34,7 +34,7 @@ internal object CommitmentDetailProjector {
         commitment: CommitmentEntity,
         enrichment: Map<String, PersonEnrichmentEntity>,
     ): String? {
-        val ref = commitment.personRef
+        val ref = commitment.counterpartyRef
         return if (ref != null) {
             val hit = enrichment[ref]
             hit?.displayName ?: hit?.nickname ?: ref

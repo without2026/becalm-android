@@ -1,9 +1,13 @@
 package com.becalm.android.ui.commitments
 
+import com.becalm.android.core.util.KST
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
+import kotlinx.datetime.Instant
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.toLocalDateTime
 
 internal object CommitmentManagementProjector {
     fun buildUiState(
@@ -11,8 +15,9 @@ internal object CommitmentManagementProjector {
         rows: List<CommitmentManagementRow>,
         filter: CommitmentFilter = current.filter,
         loading: Boolean = current.loading,
+        now: Instant,
     ): CommitmentUiState {
-        val projectedRows = applyFilter(rows, filter)
+        val projectedRows = applyFilter(rows, filter, now)
         return current.copy(
             filter = filter,
             items = projectedRows,
@@ -34,6 +39,7 @@ internal object CommitmentManagementProjector {
     fun applyFilter(
         rows: List<CommitmentManagementRow>,
         filter: CommitmentFilter,
+        now: Instant,
     ): List<CommitmentRow> {
         val filtered = when (filter) {
             CommitmentFilter.ALL -> rows
@@ -48,16 +54,37 @@ internal object CommitmentManagementProjector {
             CommitmentFilter.DECISION -> rows.filter { it.itemType == CommitmentItemType.DECISION }
         }
         return filtered
-            .sortedForDisplay()
+            .sortedForDisplay(now)
             .map { row -> row.toUiRow() }
     }
 
-    private fun List<CommitmentManagementRow>.sortedForDisplay(): List<CommitmentManagementRow> =
+    private fun List<CommitmentManagementRow>.sortedForDisplay(now: Instant): List<CommitmentManagementRow> =
         sortedWith(
-            compareBy<CommitmentManagementRow> { it.dueAt == null || it.dueIsApproximate }
-                .thenBy { it.dueAt }
+            compareBy<CommitmentManagementRow> { it.exactDueSortGroup(now) }
+                .thenBy { it.exactDueDistance(now) }
+                .thenByDescending { row -> row.dueAt?.takeUnless { row.dueIsApproximate } }
                 .thenByDescending { it.sourceOccurredAt },
         )
+
+    private fun CommitmentManagementRow.exactDueSortGroup(now: Instant): Int {
+        val dayDelta = exactDueDayDelta(now) ?: return 3
+        return when {
+            dayDelta < 0 -> 0
+            dayDelta == 0 -> 1
+            else -> 2
+        }
+    }
+
+    private fun CommitmentManagementRow.exactDueDistance(now: Instant): Int =
+        exactDueDayDelta(now)?.let { kotlin.math.abs(it) } ?: Int.MAX_VALUE
+
+    private fun CommitmentManagementRow.exactDueDayDelta(now: Instant): Int? {
+        if (dueIsApproximate) return null
+        val due = dueAt ?: return null
+        val today = now.toLocalDateTime(KST).date
+        val dueDate = due.toLocalDateTime(KST).date
+        return today.daysUntil(dueDate)
+    }
 
     private fun CommitmentManagementRow.toUiRow(): CommitmentRow {
         val state = CommitmentState.fromWire(actionState)

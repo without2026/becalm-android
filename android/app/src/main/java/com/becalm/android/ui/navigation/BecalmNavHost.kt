@@ -25,9 +25,11 @@ import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
 import com.becalm.android.ui.onboarding.NotificationPermissionScreen
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen
+import com.becalm.android.ui.onboarding.OnboardingSourcesScreen
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.OutlookMailOAuthScreen
 import com.becalm.android.ui.onboarding.RecordingFolderScreen
+import com.becalm.android.ui.onboarding.SettingsSourceConnectionsScreen
 import com.becalm.android.ui.persons.PersonDetailScreen
 import com.becalm.android.ui.persons.PersonsScreen
 import com.becalm.android.ui.persons.RawEventDetailSheet
@@ -64,7 +66,7 @@ private fun NavBackStackEntry.stringArg(key: String): String? =
 /**
  * Root navigation host for the BeCalm Android app.
  *
- * Every route declared in `.spec/contracts/ui-map.yml` (version 1, 21 routes) is
+ * Every route declared in `.spec/contracts/ui-map.yml` (version 1, 24 routes) is
  * registered and wired to its screen composable.
  *
  * ## Usage
@@ -166,6 +168,15 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 ContactsPermissionScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.OnboardingSources.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSources.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSourcesScreen(navController = navController)
             }
         }
 
@@ -481,6 +492,15 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 SourcesListScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.SettingsSourceConnections.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.SettingsSourceConnections.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                SettingsSourceConnectionsScreen(navController = navController)
             }
         }
 

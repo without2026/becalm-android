@@ -29,13 +29,12 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Subtle visible color used for cold-start placeholder blocks. `onSurfaceVariant`
- * (muted-silver on dark, mid-gray on light) at α=0.14 reads as "loading"
- * over the cosmic-near-black ground without the process noise of motion.
+ * at alpha 0.14 reads as "loading" over the warm canvas without the process
+ * noise of motion.
  *
- * Earlier iterations used `outlineVariant` at α=0.32 — that token is `#1E1E1E`
- * on dark, near-invisible against the cosmic background. The fix is captured
- * in commit `10f73e3`; this helper is the canonical source so future skeletons
- * cannot regress to the wrong token.
+ * Earlier iterations used `outlineVariant` at alpha 0.32, which was too subtle
+ * against the old dark canvas. This helper is the canonical source so future
+ * skeletons cannot regress to the wrong token.
  */
 @Composable
 @ReadOnlyComposable

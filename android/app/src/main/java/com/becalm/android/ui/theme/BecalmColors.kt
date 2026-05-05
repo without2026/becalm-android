@@ -1,10 +1,10 @@
 /**
- * Semantic color extension for BeCalm's cosmic glassmorphism design language.
+ * Semantic color extension for BeCalm's warm frosted relationship design language.
  *
  * This file defines [BecalmColors], a data class that holds all tokens that do
- * not map cleanly to Material3 ColorScheme slots — glass surface primitives,
- * nebula ambient glows, commitment-state triples, direction cast colors, D-N
- * urgency badge colors, and source-status dot colors.
+ * not map cleanly to Material3 ColorScheme slots: glass surface primitives,
+ * canvas washes, commitment-state triples, direction cast colors, D-N urgency
+ * badge colors, and source-status dot colors.
  *
  * Consume via [MaterialTheme.becalmColors] extension property, backed by
  * [LocalBecalmColors] CompositionLocal. The theme provides the correct instance
@@ -56,9 +56,6 @@ public data class BecalmDirectionColors(
 
 /**
  * Complete set of semantic BeCalm color tokens that extend Material3.
- *
- * All hex values trace back to `BeCalmv3/desktop/src/renderer/styles/global.css`
- * via the design token spec (§2). Do not add tokens here without a spec entry.
  */
 @Immutable
 public data class BecalmColors(
@@ -81,22 +78,16 @@ public data class BecalmColors(
     /** Outer drop-shadow fill for elevated surfaces. */
     val glassOuterShadowElevated: Color,
 
-    // ── Ambient / nebula glows ────────────────────────────────────────────────
+    // ── Canvas warm washes ───────────────────────────────────────────────────
     /** Solid canvas background. Always pass as `containerColor` on root Scaffold. */
-    val cosmicBackground: Color,
-    /** Center stop of primary radial glow. `rgba(80,80,80,0.35)`. */
+    val canvasBackground: Color,
+    /** Center stop of primary warm wash. */
     val ambientGlowCore: Color,
-    /** Outer stop of primary glow at 70 % radius — transparent fade. */
+    /** Outer stop of primary wash. */
     val ambientGlowEdge: Color,
-    /** Secondary screen-corner glow. v3 `body::after rgba(60,60,60,0.30)`. */
-    val ambientGlowCool: Color,
-    /** Warm amber fog behind commitment-heavy screens. */
-    val ambientGlowWarm: Color,
-    /** Stronger center glow for full-screen modals (e.g. ColdSyncScreen). */
-    val ambientGlowStrong: Color,
 
     // ── Commitment action states ──────────────────────────────────────────────
-    /** Neutral / not-yet-acted-on state. White alpha hierarchy. */
+    /** Neutral / not-yet-acted-on state. */
     val actionStatePending: BecalmStateColors,
     /** Reminder has been sent. Amber cast signals attention. */
     val actionStateReminded: BecalmStateColors,
@@ -106,9 +97,9 @@ public data class BecalmColors(
     val actionStateCompleted: BecalmStateColors,
 
     // ── Direction cast ────────────────────────────────────────────────────────
-    /** Give commitment — warm amber cast (low chroma, reads as neutral in dim light). */
+    /** Give commitment, warm low-chroma cast. */
     val directionGive: BecalmDirectionColors,
-    /** Take commitment — cool slate cast. */
+    /** Take commitment, muted relationship-memory cast. */
     val directionTake: BecalmDirectionColors,
 
     // ── D-N urgency badges ────────────────────────────────────────────────────
@@ -116,13 +107,13 @@ public data class BecalmColors(
     val dayBadgeToday: BecalmStateColors,
     /** D-1..D-3: due soon — softer honey-gold. */
     val dayBadgeSoon: BecalmStateColors,
-    /** D-4+: upcoming — neutral / muted white. */
+    /** D-4+: upcoming neutral. */
     val dayBadgeUpcoming: BecalmStateColors,
     /** D+N: overdue — red danger signal. */
     val dayBadgeOverdue: BecalmStateColors,
 
     // ── Source status dots ────────────────────────────────────────────────────
-    /** Healthy source — off-white, no call to action. */
+    /** Healthy source, quiet neutral success. */
     val sourceStatusOk: Color,
     /** Stale source — amber, needs re-sync attention. */
     val sourceStatusStale: Color,
@@ -133,164 +124,145 @@ public data class BecalmColors(
 // ─── Dark instance ────────────────────────────────────────────────────────────
 
 internal val BecalmDarkColors = BecalmColors(
-    // Glass primitives
-    glassPanelFill = Color(0x0AFFFFFF),
-    glassPanelFillSdkLegacy = Color(0x1AFFFFFF),
-    glassPanelFillElevated = Color(0x0FFFFFFF),
-    glassPanelFillElevatedLegacy = Color(0x26FFFFFF),
-    glassBorder = Color(0x14FFFFFF),
-    glassInsetElevated = Color(0x0DFFFFFF),
-    glassOuterShadow = Color(0x4D000000),
-    glassOuterShadowElevated = Color(0x66000000),
+    glassPanelFill = Color(0x1FF8F1E8),
+    glassPanelFillSdkLegacy = Color(0x2EF8F1E8),
+    glassPanelFillElevated = Color(0x2EF8F1E8),
+    glassPanelFillElevatedLegacy = Color(0x40F8F1E8),
+    glassBorder = Color(0x24F8F1E8),
+    glassInsetElevated = Color(0x1AF8F1E8),
+    glassOuterShadow = Color(0x6619120B),
+    glassOuterShadowElevated = Color(0x8019120B),
 
-    // Nebula glows
-    cosmicBackground = Color(0xFF111111),
-    ambientGlowCore = Color(0x59505050),
+    canvasBackground = Color(0xFF17130F),
+    ambientGlowCore = Color(0x334C2F0F),
     ambientGlowEdge = Color.Transparent,
-    ambientGlowCool = Color(0x4D3C3C3C),
-    ambientGlowWarm = Color(0x33503818),
-    ambientGlowStrong = Color(0x66505050),
 
-    // Commitment action states — dark
     actionStatePending = BecalmStateColors(
-        fill = Color(0x1AFFFFFF),   // α=0.10
-        border = Color(0x40FFFFFF), // α=0.25
-        text = Color(0xEAEAEAEA),   // α=0.92
+        fill = Color(0x1FF8F1E8),
+        border = Color(0x40F8F1E8),
+        text = Color(0xFFEDE5D8),
     ),
     actionStateReminded = BecalmStateColors(
-        fill = Color(0x1AF5AD0B),   // α=0.10 amber
-        border = Color(0x59F5AD0B), // α=0.35 amber
-        text = Color(0xF2FFD282),   // honey-gold α=0.95
+        fill = Color(0x26D19138),
+        border = Color(0x66D19138),
+        text = Color(0xFFF1DEC2),
     ),
     actionStateFollowedUp = BecalmStateColors(
-        fill = Color(0x26FFFFFF),   // α=0.15
-        border = Color(0x40FFFFFF), // α=0.25
-        text = Color(0xD9D9D9D9),   // α=0.85
+        fill = Color(0x26F8F1E8),
+        border = Color(0x40F8F1E8),
+        text = Color(0xFFE8E1D7),
     ),
     actionStateCompleted = BecalmStateColors(
-        fill = Color(0x0DFFFFFF),   // α=0.05 — intentionally dim
-        border = Color(0x1AFFFFFF), // α=0.10
-        text = Color(0x99B2B2B2),   // α=0.60 dimmed muted
+        fill = Color(0x12F8F1E8),
+        border = Color(0x24F8F1E8),
+        text = Color(0x99C8BAAA),
     ),
 
-    // Direction cast — dark
     directionGive = BecalmDirectionColors(
-        fill = Color(0x1AF5C842),
-        border = Color(0x40F5C842),
+        fill = Color(0x1FD19138),
+        border = Color(0x4DD19138),
     ),
     directionTake = BecalmDirectionColors(
-        fill = Color(0x1AA0B4C8),
-        border = Color(0x40A0B4C8),
+        fill = Color(0x1F8AA07E),
+        border = Color(0x4D8AA07E),
     ),
 
-    // D-N badges — dark
     dayBadgeToday = BecalmStateColors(
-        fill = Color(0x33F5AD0B),   // α=0.20 amber
-        border = Color(0x59F5AD0B), // α=0.35 amber
-        text = Color(0xF2FFD282),   // honey-gold
+        fill = Color(0x33D19138),
+        border = Color(0x66D19138),
+        text = Color(0xFFF1DEC2),
     ),
     dayBadgeSoon = BecalmStateColors(
-        fill = Color(0x1AFFD282),   // α=0.10 honey-gold
-        border = Color(0x33FFD282), // α=0.20 honey-gold
-        text = Color(0xD9FFD282),   // α=0.85 honey-gold
+        fill = Color(0x26F1DEC2),
+        border = Color(0x40D19138),
+        text = Color(0xFFE8C894),
     ),
     dayBadgeUpcoming = BecalmStateColors(
-        fill = Color(0x0AFFFFFF),   // α=0.04 neutral
-        border = Color(0x14FFFFFF), // α=0.08 neutral
-        text = Color(0xB3B3B3B3),   // α=0.70 muted
+        fill = Color(0x12F8F1E8),
+        border = Color(0x24F8F1E8),
+        text = Color(0xB3C8BAAA),
     ),
     dayBadgeOverdue = BecalmStateColors(
-        fill = Color(0x33EF4444),   // α=0.20 red
-        border = Color(0x59EF4444), // α=0.35 red
-        text = Color(0xCCFF6464),   // α=0.80 red
+        fill = Color(0x33E08A80),
+        border = Color(0x66E08A80),
+        text = Color(0xFFFFB7AE),
     ),
 
-    // Source status dots — dark
-    sourceStatusOk = Color(0xCCFFFFFF),    // α=0.80 off-white
-    sourceStatusStale = Color(0xE6F5AD0B), // α=0.90 amber
-    sourceStatusError = Color(0xCCFF6464), // α=0.80 red
+    sourceStatusOk = Color(0xFFC8BAAA),
+    sourceStatusStale = Color(0xFFD19138),
+    sourceStatusError = Color(0xFFE08A80),
 )
 
 // ─── Light instance ───────────────────────────────────────────────────────────
 
 internal val BecalmLightColors = BecalmColors(
-    // Glass primitives — light uses dark-on-light fills
-    glassPanelFill = Color(0x0A000000),
-    glassPanelFillSdkLegacy = Color(0x1A000000),
-    glassPanelFillElevated = Color(0x0F000000),
-    glassPanelFillElevatedLegacy = Color(0x26000000),
-    glassBorder = Color(0x14000000),
-    glassInsetElevated = Color(0x0D000000),
-    glassOuterShadow = Color(0x33000000),
-    glassOuterShadowElevated = Color(0x4D000000),
+    glassPanelFill = Color(0xB8FCFAF5),
+    glassPanelFillSdkLegacy = Color(0xD1FCFAF5),
+    glassPanelFillElevated = Color(0xD1FCFAF5),
+    glassPanelFillElevatedLegacy = Color(0xE6FCFAF5),
+    glassBorder = Color(0x66B8AC9E),
+    glassInsetElevated = Color(0x80FCFAF5),
+    glassOuterShadow = Color(0x2419120B),
+    glassOuterShadowElevated = Color(0x3319120B),
 
-    // Nebula glows — muted on light bg
-    cosmicBackground = Color(0xFFF5F5F5),
-    ambientGlowCore = Color(0x33AAAAAA),
+    canvasBackground = Color(0xFFF4F0E9),
+    ambientGlowCore = Color(0x33F1DEC2),
     ambientGlowEdge = Color.Transparent,
-    ambientGlowCool = Color(0x26909090),
-    ambientGlowWarm = Color(0x1AC47D00),
-    ambientGlowStrong = Color(0x4DAAAAAA),
 
-    // Commitment action states — light (spec: invert alpha direction)
-    // borders rgba(0,0,0,0.12), fills rgba(0,0,0,0.04), text rgba(0,0,0,0.87)
     actionStatePending = BecalmStateColors(
-        fill = Color(0x0A000000),   // rgba(0,0,0,0.04)
-        border = Color(0x1F000000), // rgba(0,0,0,0.12)
-        text = Color(0xDE000000),   // rgba(0,0,0,0.87)
+        fill = Color(0x99FCFAF5),
+        border = Color(0x66B8AC9E),
+        text = Color(0xFF453D35),
     ),
     actionStateReminded = BecalmStateColors(
-        fill = Color(0x0DC47D00),
-        border = Color(0x26C47D00),
-        text = Color(0xFF7A4F00),   // dark amber text for light bg
+        fill = Color(0x66F1DEC2),
+        border = Color(0x80B87623),
+        text = Color(0xFF6B410F),
     ),
     actionStateFollowedUp = BecalmStateColors(
-        fill = Color(0x14000000),
-        border = Color(0x1F000000),
-        text = Color(0xCC000000),   // rgba(0,0,0,0.80)
+        fill = Color(0xB8FCFAF5),
+        border = Color(0x66C8BAAA),
+        text = Color(0xFF5C534A),
     ),
     actionStateCompleted = BecalmStateColors(
-        fill = Color(0x05000000),
-        border = Color(0x0A000000),
-        text = Color(0x66555555),   // dimmed on light
+        fill = Color(0x73FCFAF5),
+        border = Color(0x4DB8AC9E),
+        text = Color(0x998B8379),
     ),
 
-    // Direction cast — light
     directionGive = BecalmDirectionColors(
-        fill = Color(0x0DC47D00),
-        border = Color(0x26C47D00),
+        fill = Color(0x4DF1DEC2),
+        border = Color(0x80B87623),
     ),
     directionTake = BecalmDirectionColors(
-        fill = Color(0x0D7090A8),
-        border = Color(0x267090A8),
+        fill = Color(0x4DE2E6DD),
+        border = Color(0x805F7F69),
     ),
 
-    // D-N badges — light
     dayBadgeToday = BecalmStateColors(
-        fill = Color(0x1FC47D00),
-        border = Color(0x33C47D00),
-        text = Color(0xFF7A4F00),
+        fill = Color(0x80F1DEC2),
+        border = Color(0x99B87623),
+        text = Color(0xFF6B410F),
     ),
     dayBadgeSoon = BecalmStateColors(
-        fill = Color(0x14C47D00),
-        border = Color(0x1FC47D00),
-        text = Color(0xCC8C5A00),
+        fill = Color(0x59F1DEC2),
+        border = Color(0x66B87623),
+        text = Color(0xCC6B410F),
     ),
     dayBadgeUpcoming = BecalmStateColors(
-        fill = Color(0x0A000000),
-        border = Color(0x14000000),
-        text = Color(0x99555555),
+        fill = Color(0x99FCFAF5),
+        border = Color(0x66B8AC9E),
+        text = Color(0x99696158),
     ),
     dayBadgeOverdue = BecalmStateColors(
-        fill = Color(0x1FC62828),
-        border = Color(0x33C62828),
-        text = Color(0xFF7F0000),
+        fill = Color(0x66F1D9D5),
+        border = Color(0x80B84A3E),
+        text = Color(0xFF7A281F),
     ),
 
-    // Source status dots — light
-    sourceStatusOk = Color(0xFF555555),    // dark-neutral on light bg
-    sourceStatusStale = Color(0xFFC47D00), // dark amber
-    sourceStatusError = Color(0xFFC62828), // dark red
+    sourceStatusOk = Color(0xFF5F7F69),
+    sourceStatusStale = Color(0xFFB87623),
+    sourceStatusError = Color(0xFFB84A3E),
 )
 
 // ─── CompositionLocal ─────────────────────────────────────────────────────────
@@ -298,11 +270,11 @@ internal val BecalmLightColors = BecalmColors(
 /**
  * Provides the current [BecalmColors] instance down the composition tree.
  * [BecalmTheme] calls `CompositionLocalProvider(LocalBecalmColors provides ...)`.
- * Defaults to [BecalmDarkColors] so previews render correctly without a theme
+ * Defaults to [BecalmLightColors] so previews render correctly without a theme
  * wrapper.
  */
 public val LocalBecalmColors: ProvidableCompositionLocal<BecalmColors> =
-    staticCompositionLocalOf { BecalmDarkColors }
+    staticCompositionLocalOf { BecalmLightColors }
 
 // ─── MaterialTheme extension ──────────────────────────────────────────────────
 

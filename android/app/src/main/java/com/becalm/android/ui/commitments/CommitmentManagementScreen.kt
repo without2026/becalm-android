@@ -24,6 +24,7 @@ import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -183,6 +184,9 @@ public fun CommitmentManagementScreenContent(
             ExtendedFloatingActionButton(
                 onClick = onOpenCreate,
                 modifier = Modifier.testTag("commitment-fab-add"),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
                 icon = {
                     Icon(
                         imageVector = Icons.Filled.Add,

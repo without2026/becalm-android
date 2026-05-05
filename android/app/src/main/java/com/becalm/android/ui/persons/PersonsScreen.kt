@@ -85,8 +85,8 @@ public fun PersonsScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         onQueryChange = viewModel::onQueryChange,
-        onPersonClick = { personRef ->
-            navController.navigate(BecalmRoute.PersonDetail(personRef).path)
+        onPersonClick = { personId ->
+            navController.navigate(BecalmRoute.PersonDetail(personId).path)
         },
         onBlockPerson = viewModel::onBlockPerson,
         onOpenUnassigned = {
@@ -318,10 +318,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
     item(key = "$key-header") {
         PersonListSectionHeader(text = stringResource(titleRes))
     }
-    items(items = people, key = { "$key-${it.personRef}" }) { person ->
+    items(items = people, key = { "$key-${it.personId}" }) { person ->
         PersonRowItem(
             person = person,
-            onClick = { onPersonClick(person.personRef) },
+            onClick = { onPersonClick(person.personId) },
             onBlockClick = { onBlockPerson(person) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -351,16 +351,16 @@ private fun PersonRowItem(
         modifier = modifier
             .glassPanel(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
-            .padding(12.dp)
+            .padding(16.dp)
             .semantics { role = Role.Button },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PersonAvatar(person = person)
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = buildDisplayHeadline(person),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -393,7 +393,7 @@ private fun PersonRowItem(
 
 @Composable
 private fun PersonAvatar(person: PersonRow) {
-    val seed = person.displayLabel.ifBlank { person.personRef }
+    val seed = person.displayLabel.ifBlank { person.personId }
     val colors = listOf(
         MaterialTheme.colorScheme.primaryContainer,
         MaterialTheme.colorScheme.secondaryContainer,
@@ -402,7 +402,7 @@ private fun PersonAvatar(person: PersonRow) {
     val index = (seed.hashCode() and Int.MAX_VALUE) % colors.size
     Box(
         modifier = Modifier
-            .size(42.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(colors[index])
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
@@ -523,19 +523,19 @@ private fun PreviewPersonsScreenPopulated() {
                     items(
                         listOf(
                             PersonRow(
-                                personRef = "ref1",
+                                personId = "ref1",
                                 displayName = "Alice Kim",
                                 lastInteractionAt = null,
                                 interactionCount = 12,
                             ),
                             PersonRow(
-                                personRef = "ref2",
+                                personId = "ref2",
                                 displayName = "Bob Lee",
                                 lastInteractionAt = null,
                                 interactionCount = 5,
                             ),
                             PersonRow(
-                                personRef = "ref3",
+                                personId = "ref3",
                                 displayName = "Carol Park",
                                 lastInteractionAt = null,
                                 interactionCount = 3,

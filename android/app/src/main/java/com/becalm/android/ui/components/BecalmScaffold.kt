@@ -1,7 +1,7 @@
 /**
  * SP-51: Root scaffold wrapper for BeCalm Android screens.
  *
- * Provides the cosmic background canvas, top ambient radial glow, and a centered
+ * Provides the warm frosted canvas, subtle ambient wash, and a centered
  * [TopAppBar] pattern that all screens in the app share. Delegates all slot
  * forwarding (bottom bar, FAB, snackbar) to Material3 [Scaffold].
  */
@@ -37,13 +37,13 @@ import com.becalm.android.ui.theme.becalmColors
 // ─── BecalmScaffold ───────────────────────────────────────────────────────────
 
 /**
- * Root scaffold that composes the cosmic background canvas, top-half ambient
- * radial glow, and a transparent [CenterAlignedTopAppBar] over a Material3
+ * Root scaffold that composes the warm background canvas, top-half ambient
+ * wash, and a transparent [CenterAlignedTopAppBar] over a Material3
  * [Scaffold] with a transparent container.
  *
- * The ambient glow is drawn with [drawBehind] using a radial gradient from
+ * The ambient wash is drawn with [drawWithCache] using a radial gradient from
  * [becalmColors.ambientGlowCore] to [becalmColors.ambientGlowEdge], centered at
- * the top-half of the screen (Y offset = -height * 0.3f) per design token spec §1.
+ * the top-half of the screen.
  *
  * @param title           Title string shown in the centered top app bar.
  * @param modifier        Optional [Modifier] applied to the root [Box].
@@ -72,7 +72,7 @@ public fun BecalmScaffold(
     val becalmColors = MaterialTheme.becalmColors
     val glowCore = becalmColors.ambientGlowCore
     val glowEdge = becalmColors.ambientGlowEdge
-    val bgColor = becalmColors.cosmicBackground
+    val bgColor = becalmColors.canvasBackground
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Box(
@@ -82,10 +82,10 @@ public fun BecalmScaffold(
                 // Build the radial-gradient brush once per layout-size change
                 // (drawWithCache re-runs only when [size] or input state
                 // invalidates) instead of allocating a fresh Brush every frame
-                // inside drawBehind.
+                // inside the draw scope.
                 val centerX = size.width / 2f
-                val centerY = -size.height * 0.3f
-                val glowRadius = size.width * 0.9f
+                val centerY = -size.height * 0.18f
+                val glowRadius = size.width * 1.05f
                 val ambientBrush = Brush.radialGradient(
                     colors = listOf(glowCore, glowEdge),
                     center = Offset(centerX, centerY),

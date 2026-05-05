@@ -28,9 +28,8 @@ import com.becalm.android.ui.theme.glassPanel
  * Top header composable for [PersonDetailScreen] — renders the person's display
  * name plus an optional role/company subtitle.
  *
- * Respects ENR-006 fallback: when [displayName] is null / blank the raw
- * [personRef] (email / phone / display string) is shown verbatim so a contact
- * still has a human handle before enrichment has run.
+ * Respects ENR-006 fallback: when [displayName] is null / blank the canonical
+ * [personId] is shown so the screen remains stable before enrichment has run.
  *
  * The subtitle composes [jobTitle] and [companyName] into one of four shapes:
  * both → `"Engineer · Acme"`, job only → `"Engineer"`, company only → `"Acme"`,
@@ -46,7 +45,7 @@ internal fun PersonHeader(
     nickname: String?,
     companyName: String?,
     jobTitle: String?,
-    personRef: String,
+    personId: String,
     eventCount: Int = 0,
     emailInteractionCount: Int = 0,
     callInteractionCount: Int = 0,
@@ -54,7 +53,7 @@ internal fun PersonHeader(
     pendingCommitmentCount: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personRef
+    val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personId
     val subtitle = composeSubtitle(jobTitle = jobTitle, companyName = companyName)
     val metaLine = composeMetaLine(
         nickname = nickname,
@@ -156,11 +155,7 @@ private fun HeaderAvatar(seed: String) {
 private fun StatTile(label: String, count: Int, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .background(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                shape = MaterialTheme.shapes.medium,
-            )
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

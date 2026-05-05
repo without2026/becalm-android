@@ -4,14 +4,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
+import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.SystemClock
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
+import com.becalm.android.worker.SourceRelationRefreshCoordinator
+import com.becalm.android.worker.SourceRelationRefreshPlan
+import com.becalm.android.worker.SourceParticipantRefreshScope
+import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +37,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
 
@@ -64,7 +71,7 @@ public enum class CommitmentFilter {
  * Display-safe projection of a [CommitmentEntity] with a human-readable [derivedStatus] string
  * computed from [CommitmentEntity.actionState] at observation time.
  *
- * Only fields required by the UI are exposed; raw PII such as quote, personRef, and the full
+ * Only fields required by the UI are exposed; raw PII such as quote, counterpartyRef, and the full
  * counterpartyRef are kept inside the ViewModel and are never handed to the composable layer.
  * [counterpartyDisplayName] is already truncated to the UI display length.
  *
@@ -105,7 +112,7 @@ public data class CommitmentRow(
 
 /**
  * Display-only grouping for the commitments list. The group key is intentionally
- * the already-resolved display name rather than raw personRef, because the UI
+ * the already-resolved display name rather than raw counterpartyRef, because the UI
  * layer must not receive canonical identifiers that may contain PII.
  */
 public data class CommitmentPersonGroup(
@@ -212,6 +219,7 @@ public sealed interface CommitmentManagementNavigation {
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "CommitmentMgmtVM"
+private const val PULL_REFRESH_SOURCE = "commitments_pull_refresh"
 
 /**
  * ViewModel for CommitmentManagementScreen.
@@ -236,9 +244,13 @@ private const val TAG = "CommitmentMgmtVM"
 @HiltViewModel
 public class CommitmentManagementViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository,
+    private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val workScheduler: WorkScheduler,
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
+    private val clock: Clock = SystemClock,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
@@ -321,6 +333,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                             current = _uiState.value,
                             rows = rows,
                             loading = false,
+                            now = clock.nowInstant(),
                         )
                     }
                     allRows.value = rows
@@ -351,6 +364,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                     current = _uiState.value,
                     rows = allRows.value,
                     filter = filter,
+                    now = clock.nowInstant(),
                 )
             }
             _uiState.value = projectedState
@@ -387,10 +401,10 @@ public class CommitmentManagementViewModel @Inject constructor(
     /**
      * Handles pull-to-refresh from [CommitmentManagementScreen] (CMT-010).
      *
-     * Calls [CommitmentRepository.refreshSince] with `since = null` (full refresh)
-     * for the current user; Room upsert then triggers the reactive subscription
-     * that re-renders the list. The active filter is preserved in the UI state,
-     * so the user sees the refreshed data under whichever tab they were on.
+     * Uses the common relation refresh path for the current user. It pulls commitment,
+     * source participant, and commitment participant mirrors, then enqueues the person
+     * index rebuild so refreshed cards resolve through the same person graph as source
+     * sync workers.
      *
      * Network failures surface via [CommitmentUiState.error]; the operation is
      * idempotent and safe to retry. Concurrent presses are deduplicated by an
@@ -406,7 +420,15 @@ public class CommitmentManagementViewModel @Inject constructor(
                 _uiState.update { it.copy(refreshing = false) }
                 return@launch
             }
-            when (val result = commitmentRepository.refreshSince(userId, since = null)) {
+            when (
+                val result = relationRefreshCoordinator().refresh(
+                    userId = userId,
+                    plan = SourceRelationRefreshPlan(
+                        sourceType = PULL_REFRESH_SOURCE,
+                        sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
+                    ),
+                )
+            ) {
                 is BecalmResult.Success ->
                     _uiState.update { it.copy(refreshing = false, error = null) }
                 is BecalmResult.Failure -> {
@@ -418,6 +440,15 @@ public class CommitmentManagementViewModel @Inject constructor(
             }
         }
     }
+
+    private fun relationRefreshCoordinator(): SourceRelationRefreshCoordinator =
+        SourceRelationRefreshCoordinator(
+            commitmentRepository = commitmentRepository,
+            sourceEventParticipantRepository = sourceEventParticipantRepository,
+            commitmentParticipantRepository = commitmentParticipantRepository,
+            workScheduler = workScheduler,
+            logger = logger,
+        )
 
     /**
      * Records that the user pressed [리마인드] on the commitment (CMT-005).
@@ -530,7 +561,7 @@ public class CommitmentManagementViewModel @Inject constructor(
             val result = commitmentRepository.updateActionState(
                 id = snapshot.commitmentId,
                 newState = snapshot.priorState.wireValue,
-                updatedAt = Clock.System.now(),
+                updatedAt = clock.nowInstant(),
             )
             when (result) {
                 is BecalmResult.Success -> {

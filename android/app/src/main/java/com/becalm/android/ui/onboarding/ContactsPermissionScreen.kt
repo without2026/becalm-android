@@ -37,8 +37,8 @@ import kotlinx.coroutines.flow.Flow
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingContacts]
- * Navigation exit: [BecalmRoute.OnboardingEmailPipa] (gmail slug) — per S6-D the email
- *   PIPA disclosure is shown before the OAuth screen.
+ * Navigation exit: [BecalmRoute.OnboardingSources]. Email-source PIPA disclosures are
+ * shown inline before each OAuth connection starts.
  */
 @Composable
 public fun ContactsPermissionScreen(
@@ -48,7 +48,7 @@ public fun ContactsPermissionScreen(
     onGrant: (() -> Unit)? = null,
     onSkip: (() -> Unit)? = null,
     onLaunchSystemPermission: (() -> Unit)? = null,
-    onNavigateToEmailPipa: ((String) -> Unit)? = null,
+    onNavigateToSources: (() -> Unit)? = null,
 ) {
     val onboardingViewModel = if (
         effectsOverride == null || onGrant == null || onSkip == null || onLaunchSystemPermission == null
@@ -63,15 +63,15 @@ public fun ContactsPermissionScreen(
     val requestSystemPermission = onLaunchSystemPermission ?: {
         launcher.launch(Manifest.permission.READ_CONTACTS)
     }
-    val navigateToEmailPipa = onNavigateToEmailPipa ?: { providerSlug ->
-        navController.navigate(BecalmRoute.OnboardingEmailPipa(providerSlug).path)
+    val navigateToSources = onNavigateToSources ?: {
+        navController.navigate(BecalmRoute.OnboardingSources.path)
     }
 
     LaunchedEffect(effectsOverride, onboardingViewModel) {
         (effectsOverride ?: requireNotNull(onboardingViewModel).contactsPermissionEffects).collect { effect ->
             when (effect) {
                 ContactsPermissionEffect.RequestSystemPermission -> requestSystemPermission()
-                is ContactsPermissionEffect.NavigateToEmailPipa -> navigateToEmailPipa(effect.provider.storageKey)
+                ContactsPermissionEffect.NavigateToSources -> navigateToSources()
             }
         }
     }

@@ -72,7 +72,7 @@ public data class EditUiState(
     val dueAtMillis: Long? = null,
     val dueIsApproximate: Boolean = false,
     val dueHint: String = "",
-    val personRef: String = "",
+    val counterpartyRef: String = "",
     val direction: String = "give",
     val fieldErrors: Map<Field, String> = emptyMap(),
     val saveError: String? = null,
@@ -180,9 +180,9 @@ public class CommitmentEditViewModel @Inject constructor(
         _uiState.update { it.copy(dueHint = value) }
     }
 
-    public fun onPersonRefChange(value: String) {
+    public fun onCounterpartyRefChange(value: String) {
         _uiState.update {
-            it.copy(personRef = value, fieldErrors = it.fieldErrors - Field.PERSON_REF)
+            it.copy(counterpartyRef = value, fieldErrors = it.fieldErrors - Field.PERSON_REF)
         }
     }
 

@@ -8,14 +8,14 @@
  *   - [LocalBecalmColors] (semantic glass / state / glow tokens)
  *   - [LocalBecalmDimens] (spacing and component-slot dimensions)
  *
- * MVP default: [useDarkTheme] = `true` — the canonical brand experience is dark.
- * Do NOT toggle via [androidx.compose.foundation.isSystemInDarkTheme] until a
- * user-facing settings toggle is wired (design token spec §8, BecalmTheme note).
+ * Default: [useDarkTheme] = `false`. The canonical Android experience is the
+ * light-first frosted relationship theme from DESIGN.md. Dark remains an
+ * alternate user-preference / accessibility path.
  *
  * Usage:
  * ```kotlin
  * BecalmTheme {
- *     Scaffold(containerColor = MaterialTheme.becalmColors.cosmicBackground) {
+ *     Scaffold(containerColor = MaterialTheme.becalmColors.canvasBackground) {
  *         // content
  *     }
  * }
@@ -30,14 +30,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 /**
  * BeCalm theme wrapper.
  *
- * @param useDarkTheme `true` to use the dark cosmic palette (MVP default).
- *   Set to `false` to use the light scheme.  Do NOT drive this from
- *   `isSystemInDarkTheme()` until a settings toggle is implemented.
+ * @param useDarkTheme `false` uses the canonical light frosted palette.
+ *   `true` uses the warm dark alternate.
  * @param content Composable content rendered inside the theme.
  */
 @Composable
 public fun BecalmTheme(
-    useDarkTheme: Boolean = true,
+    useDarkTheme: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (useDarkTheme) BecalmDarkColorScheme else BecalmLightColorScheme

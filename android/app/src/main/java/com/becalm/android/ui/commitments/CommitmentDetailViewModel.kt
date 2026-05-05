@@ -69,7 +69,7 @@ public sealed interface CommitmentDetailEffect {
  *
  * @property entity Backing commitment row, or null while loading / on soft-delete.
  * @property counterpartyDisplayName Resolved display name for the counterparty (CMT-001
- *   fallback chain: `enrichment.displayName` → `nickname` → `personRef` →
+ *   fallback chain: `enrichment.displayName` → `nickname` → `counterpartyRef` →
  *   `counterpartyRaw`). Null when nothing resolves.
  * @property actionState Typed enum mirror of [entity.actionState]; exposed so the
  *   composable can drive button enable/disable state without parsing wire strings.

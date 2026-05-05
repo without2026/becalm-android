@@ -1,7 +1,5 @@
 package com.becalm.android.ui.persons
 
-import com.becalm.android.data.local.db.entity.CalendarEventEntity
-import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
@@ -13,71 +11,32 @@ internal object PersonDetailProjector {
     private const val ACTION_STATE_CANCELLED: String = "cancelled"
     private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
 
-    fun buildState(
-        personRef: String,
-        enrichment: PersonEnrichmentEntity?,
-        rawEvents: List<RawIngestionEventEntity>,
-        commitments: List<CommitmentEntity>,
-        calendarEvents: List<CalendarEventEntity>,
-        completedExpanded: Boolean,
-    ): PersonDetailUiState {
-        val sections = buildInteractions(rawEvents, commitments, calendarEvents)
-        val resolvedDisplayName = enrichment?.displayName
-            ?: enrichment?.nickname
-            ?: personRef
-        return PersonDetailUiState(
-            personRef = personRef,
-            displayName = resolvedDisplayName,
-            nickname = enrichment?.nickname,
-            companyName = enrichment?.company,
-            jobTitle = enrichment?.title,
-            eventCount = rawEvents.size,
-            emailInteractionCount = rawEvents.count { it.sourceType.isEmailSource() },
-            callInteractionCount = rawEvents.count { it.sourceType.isCallSource() },
-            meetingCount = calendarEvents.size,
-            pendingCommitmentCount = sections.pendingCommitments.size,
-            channelSources = (rawEvents.map { it.sourceType } + calendarEvents.map { it.sourceType }).toSet(),
-            completedExpanded = completedExpanded,
-            pendingCommitments = sections.pendingCommitments,
-            completedCommitments = sections.completedCommitments,
-            interactionHistory = sections.interactionHistory,
-            loading = false,
-            error = null,
-        )
-    }
-
     fun buildIndexedState(
         personId: String,
         identities: List<PersonIdentityEntity>,
         enrichmentRows: List<PersonEnrichmentEntity>,
         interactions: List<PersonInteractionEntity>,
         rawEvents: List<RawIngestionEventEntity>,
-        completedExpanded: Boolean,
     ): PersonDetailUiState {
         val enrichment = findEnrichment(identities, enrichmentRows)
         val displayFallback = identities.firstOrNull { !it.displayNameHint.isNullOrBlank() }?.displayNameHint
             ?: identities.firstOrNull()?.rawValue
             ?: personId
-        val rawEventIds = rawEvents.mapTo(mutableSetOf()) { it.id }
         val commitmentRows = interactions
             .filter { it.interactionKind == "commitment" }
             .map(::toIndexedCommitmentRow)
-        val (completed, pending) = commitmentRows.partition { row ->
-            row.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true) ||
-                row.actionState.equals(ACTION_STATE_CANCELLED, ignoreCase = true)
-        }
         val history = interactions
             .filterNot { it.interactionKind == "commitment" }
-            .map { toIndexedHistoryRow(it, rawEventIds) }
-            .sortedByDescending { row ->
-                when (row) {
-                    is InteractionRow.Event -> row.timestamp
-                    is InteractionRow.CalendarMeeting -> row.timestamp
-                    is InteractionRow.Commitment -> row.timestamp
-                }
-            }
+            .collapseDuplicateHistoryInteractions()
+            .map(::toIndexedHistoryRow)
+        val timeline = (commitmentRows + history)
+            .sortedByDescending { it.timestamp() }
+        val sourceEventCards = buildIndexedSourceEventCards(
+            interactions = interactions,
+            rawEvents = rawEvents,
+        )
         return PersonDetailUiState(
-            personRef = personId,
+            personId = personId,
             displayName = enrichment?.displayName ?: enrichment?.nickname ?: displayFallback,
             nickname = enrichment?.nickname,
             companyName = enrichment?.company,
@@ -86,71 +45,14 @@ internal object PersonDetailProjector {
             emailInteractionCount = interactions.count { it.interactionKind == "email" },
             callInteractionCount = interactions.count { it.interactionKind == "call" },
             meetingCount = interactions.count { it.interactionKind == "calendar" },
-            pendingCommitmentCount = pending.size,
+            pendingCommitmentCount = commitmentRows.count { !it.isTerminalCommitment() },
             channelSources = interactions.map { it.sourceType }.toSet(),
-            completedExpanded = completedExpanded,
-            pendingCommitments = pending.sortedByDescending { it.timestamp },
-            completedCommitments = completed.sortedByDescending { it.timestamp },
-            interactionHistory = history,
+            timeline = timeline,
+            sourceEventCards = sourceEventCards,
             loading = false,
             error = null,
         )
     }
-
-    private fun buildInteractions(
-        rawEvents: List<RawIngestionEventEntity>,
-        commitments: List<CommitmentEntity>,
-        calendarEvents: List<CalendarEventEntity>,
-    ): InteractionSections {
-        val eventRows: List<InteractionRow> = rawEvents.map(::toEventRow)
-        val commitmentRows: List<InteractionRow.Commitment> = commitments.map(::toCommitmentRow)
-        val calendarRows: List<InteractionRow> = calendarEvents.map(::toCalendarMeetingRow)
-        val (completed, pending) = commitmentRows.partition { commitment ->
-            commitment.itemType == CommitmentItemType.ACTION &&
-                commitment.actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true)
-        }
-        val history = (eventRows + calendarRows)
-            .sortedByDescending { row ->
-                when (row) {
-                    is InteractionRow.Event -> row.timestamp
-                    is InteractionRow.CalendarMeeting -> row.timestamp
-                    else -> error("history must not contain ${row::class.simpleName}")
-                }
-            }
-        return InteractionSections(
-            pendingCommitments = pending.sortedByDescending { it.timestamp },
-            completedCommitments = completed.sortedByDescending { it.timestamp },
-            interactionHistory = history,
-        )
-    }
-
-    private fun toEventRow(event: RawIngestionEventEntity): InteractionRow.Event =
-        InteractionRow.Event(
-            id = event.id,
-            rawEventId = event.id,
-            timestamp = event.timestamp,
-            source = event.sourceType,
-            summary = event.eventTitle,
-            snippet = event.eventSnippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
-            commitmentsExtractedCount = event.commitmentsExtractedCount,
-        )
-
-    private fun toCommitmentRow(commitment: CommitmentEntity): InteractionRow.Commitment =
-        InteractionRow.Commitment(
-            timestamp = commitment.sourceEventOccurredAt,
-            title = commitment.title,
-            itemType = commitment.itemType,
-            direction = commitment.direction,
-            actionState = commitment.actionState,
-            scheduleStatus = commitment.scheduleStatus,
-            decisionStatus = commitment.decisionStatus,
-        )
-
-    private fun toCalendarMeetingRow(meeting: CalendarEventEntity): InteractionRow.CalendarMeeting =
-        InteractionRow.CalendarMeeting(
-            timestamp = meeting.startAt,
-            title = meeting.title,
-        )
 
     private fun toIndexedCommitmentRow(interaction: PersonInteractionEntity): InteractionRow.Commitment =
         InteractionRow.Commitment(
@@ -163,10 +65,7 @@ internal object PersonDetailProjector {
             decisionStatus = interaction.status.takeIf { interaction.role == CommitmentItemType.DECISION },
         )
 
-    private fun toIndexedHistoryRow(
-        interaction: PersonInteractionEntity,
-        rawEventIds: Set<String>,
-    ): InteractionRow =
+    private fun toIndexedHistoryRow(interaction: PersonInteractionEntity): InteractionRow =
         if (interaction.interactionKind == "calendar") {
             InteractionRow.CalendarMeeting(
                 timestamp = interaction.occurredAt,
@@ -176,7 +75,6 @@ internal object PersonDetailProjector {
             val rawEventId = interaction.sourceRef
                 .takeIf { it.startsWith("raw:") }
                 ?.removePrefix("raw:")
-                ?.takeIf { it in rawEventIds }
             InteractionRow.Event(
                 id = interaction.sourceRef,
                 rawEventId = rawEventId,
@@ -187,6 +85,166 @@ internal object PersonDetailProjector {
                 commitmentsExtractedCount = 0,
             )
         }
+
+    private fun buildIndexedSourceEventCards(
+        interactions: List<PersonInteractionEntity>,
+        rawEvents: List<RawIngestionEventEntity>,
+    ): List<SourceEventCardProjection> {
+        val rawById = rawEvents.associateBy { it.id }
+        val buckets = linkedMapOf<String, MutableSourceEventCard>()
+        interactions.forEach { interaction ->
+            val key = interaction.sourceEventKey()
+            val raw = interaction.sourceEventId?.let(rawById::get)
+                ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }
+                    ?.removePrefix("raw:")
+                    ?.let(rawById::get)
+            val bucket = buckets.getOrPut(key) {
+                MutableSourceEventCard(
+                    sourceEventKey = key,
+                    sourceType = interaction.sourceType,
+                    rawEventId = raw?.id,
+                    occurredAt = interaction.occurredAt,
+                    title = interaction.title ?: raw?.eventTitle,
+                    snippet = interaction.snippet ?: raw?.eventSnippet?.take(SNIPPET_PREVIEW_CHAR_LIMIT),
+                    commitmentsExtractedCount = raw?.commitmentsExtractedCount ?: 0,
+                    sourceRef = interaction.sourceRef,
+                )
+            }
+            if (interaction.interactionKind == "commitment") {
+                bucket.addCommitment(interaction.toSummary())
+            }
+        }
+        return buckets.values
+            .map(MutableSourceEventCard::toProjection)
+            .sortedByDescending { it.occurredAt }
+            .withNextActions()
+    }
+
+    private fun PersonInteractionEntity.toSummary(): PersonDetailCommitmentSummary =
+        PersonDetailCommitmentSummary(
+            title = title.orEmpty(),
+            itemType = role,
+            direction = direction,
+            status = status,
+        )
+
+    private fun PersonInteractionEntity.sourceEventKey(): String =
+        sourceEventId?.let { "raw:$it" }
+            ?: sourceRef.takeIf { it.startsWith("raw:") || it.startsWith("calendar:") }
+            ?: "$sourceType:$sourceRef"
+
+    private fun List<SourceEventCardProjection>.withNextActions(): List<SourceEventCardProjection> {
+        val ascending = sortedBy { it.occurredAt }
+        val nextByKey = mutableMapOf<String, PersonDetailNextAction>()
+        ascending.zipWithNext { current, next ->
+            inferNextAction(current, next)?.let { nextByKey[current.sourceEventKey] = it }
+        }
+        return map { card -> card.copy(nextAction = nextByKey[card.sourceEventKey]) }
+    }
+
+    private fun inferNextAction(
+        current: SourceEventCardProjection,
+        next: SourceEventCardProjection,
+    ): PersonDetailNextAction? {
+        val text = listOfNotNull(current.title, current.snippet)
+            .joinToString(" ")
+            .lowercase()
+        val nextLabel = when {
+            next.sourceType.isCallSource() && (text.contains("전화") || text.contains("call")) -> "전화"
+            next.sourceType.isEmailSource() && (
+                text.contains("답장") ||
+                    text.contains("답신") ||
+                    text.contains("메일") ||
+                    text.contains("email") ||
+                    text.contains("reply")
+                ) -> "이메일 답신"
+            next.sourceType.isCalendarSource() && (
+                text.contains("미팅") ||
+                    text.contains("회의") ||
+                    text.contains("일정") ||
+                    text.contains("meeting") ||
+                    text.contains("schedule")
+                ) -> "일정"
+            else -> null
+        } ?: return null
+        return PersonDetailNextAction(label = nextLabel, nextSourceEventKey = next.sourceEventKey)
+    }
+
+    private data class MutableSourceEventCard(
+        val sourceEventKey: String,
+        val sourceType: String,
+        val rawEventId: String?,
+        val occurredAt: kotlinx.datetime.Instant,
+        val title: String?,
+        val snippet: String?,
+        val commitmentsExtractedCount: Int = 0,
+        val sourceRef: String?,
+        val myActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
+        val theirActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
+        val schedules: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
+    ) {
+        fun addCommitment(summary: PersonDetailCommitmentSummary) {
+            when {
+                summary.itemType == CommitmentItemType.SCHEDULE -> schedules += summary
+                summary.direction == "take" -> theirActions += summary
+                else -> myActions += summary
+            }
+        }
+
+        fun toProjection(): SourceEventCardProjection =
+            SourceEventCardProjection(
+                sourceEventKey = sourceEventKey,
+                sourceType = sourceType,
+                rawEventId = rawEventId,
+                occurredAt = occurredAt,
+                title = title,
+                snippet = snippet,
+                commitmentsExtractedCount = commitmentsExtractedCount,
+                myActions = myActions.toList(),
+                theirActions = theirActions.toList(),
+                schedules = schedules.toList(),
+            )
+    }
+
+    private fun List<PersonInteractionEntity>.collapseDuplicateHistoryInteractions(): List<PersonInteractionEntity> =
+        groupBy { it.timelineDedupeKey() ?: "unique:${it.id}" }
+            .values
+            .map { group ->
+                group.minWith(
+                    compareBy<PersonInteractionEntity> { it.isCalendarLikeInteraction() }
+                        .thenByDescending { it.confidence }
+                        .thenByDescending { it.occurredAt },
+                )
+            }
+
+    private fun PersonInteractionEntity.timelineDedupeKey(): String? {
+        val normalizedTitle = title
+            ?.trim()
+            ?.lowercase()
+            ?.replace(Regex("\\s+"), " ")
+            ?.takeIf { it.isNotBlank() }
+        val sourceEventKey = sourceRef
+            .takeIf { it.startsWith("raw:") }
+            ?: sourceRef.takeIf { it.startsWith("calendar:") }
+        return when {
+            normalizedTitle != null -> "title:$normalizedTitle:${occurredAt.toEpochMilliseconds() / 60_000L}"
+            sourceEventKey != null -> "source:$sourceEventKey"
+            else -> null
+        }
+    }
+
+    private fun PersonInteractionEntity.isCalendarLikeInteraction(): Boolean =
+        interactionKind == "calendar" || sourceType.isCalendarSource()
+
+    private fun InteractionRow.timestamp(): kotlinx.datetime.Instant = when (this) {
+        is InteractionRow.Event -> timestamp
+        is InteractionRow.Commitment -> timestamp
+        is InteractionRow.CalendarMeeting -> timestamp
+    }
+
+    private fun InteractionRow.Commitment.isTerminalCommitment(): Boolean =
+        actionState.equals(ACTION_STATE_COMPLETED, ignoreCase = true) ||
+            actionState.equals(ACTION_STATE_CANCELLED, ignoreCase = true)
 
     private fun findEnrichment(
         identities: List<PersonIdentityEntity>,
@@ -213,9 +271,9 @@ internal object PersonDetailProjector {
         equals("call_recording", ignoreCase = true) ||
             contains("call", ignoreCase = true)
 
-    private data class InteractionSections(
-        val pendingCommitments: List<InteractionRow.Commitment>,
-        val completedCommitments: List<InteractionRow.Commitment>,
-        val interactionHistory: List<InteractionRow>,
-    )
+    private fun String.isCalendarSource(): Boolean =
+        equals("google_calendar", ignoreCase = true) ||
+            equals("outlook_calendar", ignoreCase = true) ||
+            contains("calendar", ignoreCase = true)
+
 }

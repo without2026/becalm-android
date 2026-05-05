@@ -1,10 +1,9 @@
 /**
  * Spacing and component dimension tokens for BeCalm Android.
  *
- * All values follow an 8 dp grid inherited from v3 desktop
- * (`--panel-padding: 24px`, nav `gap: 12px`, card `border-radius: 24px`).
- * Mobile-specific adjustments are noted inline (e.g. [panelPaddingHorizontal]
- * is 16 dp rather than v3's 24 dp to fit narrower screens).
+ * All values follow the 4 dp / 8 dp family in DESIGN.md. The system keeps
+ * mobile scanning dense enough for frequent checks while giving relationship
+ * cards enough air to feel human.
  *
  * Consume via [MaterialTheme.dimens] extension property, backed by
  * [LocalBecalmDimens] CompositionLocal. The theme provides the default instance
@@ -62,17 +61,17 @@ public data class BecalmDimens(
     val avatarSize: Dp,
     /** 28 dp — filter tabs (전체/내가 한/상대가 한), source status chips. */
     val chipHeight: Dp,
-    /** 12 dp — [glassPanel] default corner radius (mirrors [BecalmShapes.medium]). */
+    /** 20 dp — [glassPanel] default corner radius (mirrors [BecalmShapes.medium]). */
     val cardCornerRadius: Dp,
-    /** 20 dp — [glassPanelElevated] corner radius (mirrors [BecalmShapes.large]). */
+    /** 28 dp — [glassPanelElevated] corner radius (mirrors [BecalmShapes.large]). */
     val cardCornerRadiusLarge: Dp,
     /** 48 dp — primary / ghost buttons. One UI touch-target minimum. */
     val buttonHeight: Dp,
-    /** 8 dp — button corner radius. v3 `.nav-button { border-radius: 8px }`. */
+    /** 12 dp — button corner radius. */
     val buttonCornerRadius: Dp,
     /** 52 dp — text input fields. */
     val inputHeight: Dp,
-    /** 8 dp — input corner radius. v3 `input { border-radius: 8px }`. */
+    /** 12 dp — input corner radius. */
     val inputCornerRadius: Dp,
     /** 64 dp — bottom navigation bar. */
     val bottomNavHeight: Dp,
@@ -101,12 +100,12 @@ public val BecalmDimensDefault: BecalmDimens = BecalmDimens(
     iconSizeLarge = 32.dp,
     avatarSize = 36.dp,
     chipHeight = 28.dp,
-    cardCornerRadius = 12.dp,
-    cardCornerRadiusLarge = 20.dp,
+    cardCornerRadius = 20.dp,
+    cardCornerRadiusLarge = 28.dp,
     buttonHeight = 48.dp,
-    buttonCornerRadius = 8.dp,
+    buttonCornerRadius = 12.dp,
     inputHeight = 52.dp,
-    inputCornerRadius = 8.dp,
+    inputCornerRadius = 12.dp,
     bottomNavHeight = 64.dp,
     panelPaddingHorizontal = 16.dp,
     panelPaddingVertical = 12.dp,

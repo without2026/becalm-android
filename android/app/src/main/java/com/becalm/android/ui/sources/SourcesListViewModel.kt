@@ -3,6 +3,8 @@ package com.becalm.android.ui.sources
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,7 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.Instant
 import javax.inject.Inject
@@ -77,6 +80,7 @@ private const val TAG = "SourcesListViewModel"
  */
 @HiltViewModel
 public class SourcesListViewModel @Inject constructor(
+    private val authRepository: AuthRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val contactsPermissionChecker: ContactsPermissionChecker,
@@ -92,16 +96,22 @@ public class SourcesListViewModel @Inject constructor(
     /**
      * Observable state consumed by the sources list composable.
      */
-    public val state: StateFlow<SourcesListUiState> = combine(
-        sourceStatusRepository.observeAll(),
-        personEnrichmentRepository.observeSummary(),
-        contactsPermissionChecker.observeGrantState(),
-    ) { statuses, enrichmentSummary, permissionGranted ->
-            SourcesListProjector.buildState(
-                statuses = statuses,
-                enrichmentSummary = enrichmentSummary,
-                permissionGranted = permissionGranted,
-            )
+    public val state: StateFlow<SourcesListUiState> = authRepository.observeAuthState()
+        .flatMapLatest { authState ->
+            if (authState !is AuthState.Authenticated) {
+                return@flatMapLatest flowOf(SourcesListUiState())
+            }
+            combine(
+                sourceStatusRepository.observeAll(),
+                personEnrichmentRepository.observeSummary(),
+                contactsPermissionChecker.observeGrantState(),
+            ) { statuses, enrichmentSummary, permissionGranted ->
+                SourcesListProjector.buildState(
+                    statuses = statuses,
+                    enrichmentSummary = enrichmentSummary,
+                    permissionGranted = permissionGranted,
+                )
+            }
         }
         .catch { e ->
             logger.e(TAG, "observeAll failed", e as? Exception ?: Exception(e))

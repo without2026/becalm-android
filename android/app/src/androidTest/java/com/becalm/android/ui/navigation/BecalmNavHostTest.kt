@@ -157,6 +157,11 @@ class BecalmNavHostTest {
             "contacts-screen",
         )
         assertStaticRouteResolves(
+            BecalmRoute.OnboardingSources.path,
+            BecalmRoute.OnboardingSources.path,
+            "sources-screen",
+        )
+        assertStaticRouteResolves(
             BecalmRoute.OnboardingGmail.path,
             BecalmRoute.OnboardingGmail.path,
             "gmail-screen",
@@ -230,6 +235,11 @@ class BecalmNavHostTest {
             BecalmRoute.SettingsSources.path,
             BecalmRoute.SettingsSources.path,
             "sources-screen",
+        )
+        assertStaticRouteResolves(
+            BecalmRoute.SettingsSourceConnections.path,
+            BecalmRoute.SettingsSourceConnections.path,
+            "source-connections-screen",
         )
         assertStaticRouteResolves(
             BecalmRoute.ContactsSourceDetail.path,

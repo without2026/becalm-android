@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -531,7 +532,7 @@ class OnboardingScreenTest {
     fun contacts_permission_screen_consumes_permission_effects() {
         val effects = MutableSharedFlow<ContactsPermissionEffect>(extraBufferCapacity = 2)
         var permissionRequests = 0
-        var providerSlug: String? = null
+        var navigateSourcesCount = 0
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -541,20 +542,20 @@ class OnboardingScreenTest {
                     onGrant = {},
                     onSkip = {},
                     onLaunchSystemPermission = { permissionRequests += 1 },
-                    onNavigateToEmailPipa = { providerSlug = it },
+                    onNavigateToSources = { navigateSourcesCount += 1 },
                 )
             }
         }
 
         composeTestRule.runOnIdle {
             effects.tryEmit(ContactsPermissionEffect.RequestSystemPermission)
-            effects.tryEmit(ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL))
+            effects.tryEmit(ContactsPermissionEffect.NavigateToSources)
         }
 
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {
             assertEquals(1, permissionRequests)
-            assertEquals("gmail", providerSlug)
+            assertEquals(1, navigateSourcesCount)
         }
     }
 
@@ -572,7 +573,7 @@ class OnboardingScreenTest {
                     onGrant = { grantClicks += 1 },
                     onSkip = { skipClicks += 1 },
                     onLaunchSystemPermission = {},
-                    onNavigateToEmailPipa = {},
+                    onNavigateToSources = {},
                 )
             }
         }
@@ -583,6 +584,148 @@ class OnboardingScreenTest {
         composeTestRule.runOnIdle {
             assertEquals(1, grantClicks)
             assertEquals(1, skipClicks)
+        }
+    }
+
+    @Test
+    fun source_connections_content_groups_sources_and_continues() {
+        var continueClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GMAIL,
+                            category = SourceConnectionCategory.Mail,
+                            title = "Gmail",
+                            description = "Mail copy",
+                            consentCopy = "Consent copy",
+                            state = SourceConnectionState.ConsentRequired,
+                        ),
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+                            category = SourceConnectionCategory.Calendar,
+                            title = "Google Calendar",
+                            description = "Calendar copy",
+                            consentCopy = null,
+                            state = SourceConnectionState.Idle,
+                        ),
+                    ),
+                    continueLabel = string(R.string.onb_sources_skip_remaining),
+                    onConnect = {},
+                    onSkip = {},
+                    onContinue = { continueClicks += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.onb_sources_mail_section)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.onb_sources_calendar_section)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Google Calendar").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Consent copy").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.onb_sources_skip_remaining)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, continueClicks)
+        }
+    }
+
+    @Test
+    fun source_connections_content_dispatches_connect_and_skip_for_source_row() {
+        var connectedProvider: OnboardingSourceProvider? = null
+        var skippedProvider: OnboardingSourceProvider? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+                            category = SourceConnectionCategory.Calendar,
+                            title = "Google Calendar",
+                            description = "Calendar copy",
+                            consentCopy = null,
+                            state = SourceConnectionState.Idle,
+                        ),
+                    ),
+                    continueLabel = string(R.string.onb_sources_continue),
+                    onConnect = { connectedProvider = it },
+                    onSkip = { skippedProvider = it },
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.action_connect)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.action_skip)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(OnboardingSourceProvider.GOOGLE_CALENDAR, connectedProvider)
+            assertEquals(OnboardingSourceProvider.GOOGLE_CALENDAR, skippedProvider)
+        }
+    }
+
+    @Test
+    fun source_connections_content_disables_terminal_source_actions() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.OUTLOOK_CALENDAR,
+                            category = SourceConnectionCategory.Calendar,
+                            title = "Outlook Calendar",
+                            description = "Calendar copy",
+                            consentCopy = null,
+                            state = SourceConnectionState.Connected,
+                        ),
+                    ),
+                    continueLabel = string(R.string.onb_sources_continue),
+                    onConnect = {},
+                    onSkip = {},
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.action_connect)).assertIsNotEnabled()
+        composeTestRule.onAllNodesWithText(string(R.string.action_skip)).onFirst().assertIsNotEnabled()
+    }
+
+    @Test
+    fun settings_source_connections_screen_uses_settings_copy_and_done_action() {
+        val emailEvents = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        val calendarEvents = MutableSharedFlow<CalendarConnectEvent>(extraBufferCapacity = 1)
+        var doneClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SettingsSourceConnectionsScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emailEvents,
+                    calendarEventsOverride = calendarEvents,
+                    stateOverride = OnboardingUiState(
+                        stepStates = mapOf(OnboardingStep.LINK_GMAIL to StepStatus.SKIPPED),
+                    ),
+                    onConnectSource = { _, _ -> },
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onNavigateDone = { doneClicks += 1 },
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.settings_source_connections_headline)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.onb_sources_connect_with_consent)).onFirst()
+            .assertIsEnabled()
+        composeTestRule.onAllNodesWithText(string(R.string.onb_sources_skip_remaining)).assertCountEquals(0)
+        composeTestRule.onNodeWithText(string(R.string.settings_source_connections_done)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, doneClicks)
         }
     }
 
