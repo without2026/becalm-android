@@ -14,7 +14,7 @@ class CommitmentEditValidatorSpecTest {
         val draft = validDraft(
             title = "  분기 보고서 전달  ",
             dueAtMillis = null,
-            personRef = "  김철수 팀장  ",
+            counterpartyRef = "  김철수 팀장  ",
         )
 
         assertEquals(CommitmentEditValidator.ValidationResult.Ok, CommitmentEditValidator.validate(draft))
@@ -24,7 +24,7 @@ class CommitmentEditValidatorSpecTest {
                 dueAt = null,
                 dueHint = null,
                 dueIsApproximate = false,
-                personRef = "김철수 팀장",
+                counterpartyRef = "김철수 팀장",
                 direction = "give",
             ),
             CommitmentEditValidator.normalise(draft),
@@ -81,25 +81,25 @@ class CommitmentEditValidatorSpecTest {
     fun `EDIT-004 lowercases email person ref and nulls blank person ref`() {
         assertEquals(
             "lee@corp.com",
-            CommitmentEditValidator.normalise(validDraft(personRef = "  LEE@CORP.COM  ")).personRef,
+            CommitmentEditValidator.normalise(validDraft(counterpartyRef = "  LEE@CORP.COM  ")).counterpartyRef,
         )
         assertEquals(
             null,
-            CommitmentEditValidator.normalise(validDraft(personRef = "   ")).personRef,
+            CommitmentEditValidator.normalise(validDraft(counterpartyRef = "   ")).counterpartyRef,
         )
     }
 
     @Test
     fun `EDIT-004 accepts phone-shaped E164 after whitespace and hyphen compaction`() {
-        val draft = validDraft(personRef = " +82 10-1234-5678 ")
+        val draft = validDraft(counterpartyRef = " +82 10-1234-5678 ")
 
         assertEquals(CommitmentEditValidator.ValidationResult.Ok, CommitmentEditValidator.validate(draft))
-        assertEquals("+82 10-1234-5678", CommitmentEditValidator.normalise(draft).personRef)
+        assertEquals("+82 10-1234-5678", CommitmentEditValidator.normalise(draft).counterpartyRef)
     }
 
     @Test
     fun `EDIT-004 rejects phone-shaped refs that are not valid E164`() {
-        val result = CommitmentEditValidator.validate(validDraft(personRef = "010-1234-5678"))
+        val result = CommitmentEditValidator.validate(validDraft(counterpartyRef = "010-1234-5678"))
 
         assertEquals(
             CommitmentEditValidator.ValidationResult.Err(
@@ -129,14 +129,14 @@ class CommitmentEditValidatorSpecTest {
         dueAtMillis: Long? = 1_710_000_000_000L,
         dueHint: String? = null,
         dueIsApproximate: Boolean = false,
-        personRef: String? = "lee@corp.com",
+        counterpartyRef: String? = "lee@corp.com",
         direction: String = "give",
     ): CommitmentEditDraft = CommitmentEditDraft(
         title = title,
         dueAtMillis = dueAtMillis,
         dueHint = dueHint,
         dueIsApproximate = dueIsApproximate,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         direction = direction,
     )
 }

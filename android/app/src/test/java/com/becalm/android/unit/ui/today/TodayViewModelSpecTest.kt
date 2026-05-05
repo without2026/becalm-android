@@ -16,16 +16,20 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.today.TimelineItem
+import com.becalm.android.ui.today.TodayCommitmentRowTreatment
 import com.becalm.android.ui.today.TodayEffect
 import com.becalm.android.ui.today.TodayViewModel
 import com.becalm.android.worker.ForegroundCatchUpScheduler
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -57,6 +61,9 @@ class TodayViewModelSpecTest {
     private val clock = FakeClock(nowInstant = now)
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
+    private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
@@ -75,6 +82,24 @@ class TodayViewModelSpecTest {
         )
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
+        coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
+            BecalmResult.Success(
+                SourceEventParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
+        coEvery { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) } returns
+            BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
     }
 
     @After
@@ -90,7 +115,7 @@ class TodayViewModelSpecTest {
                 commitment(
                     id = "c1",
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                 ),
                 commitment(
                     id = "s1",
@@ -98,7 +123,7 @@ class TodayViewModelSpecTest {
                     direction = null,
                     scheduleStatus = CommitmentScheduleStatus.CHANGED,
                     occurredAt = Instant.parse("2026-04-18T01:30:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                 ),
                 enrichment = mapOf("lee@corp.com" to "이대리"),
             ),
@@ -136,6 +161,14 @@ class TodayViewModelSpecTest {
                 CommitmentItemType.SCHEDULE,
                 (emission.timeline[2] as TimelineItem.Commitment).itemType,
             )
+            assertEquals(
+                TodayCommitmentRowTreatment.ACTION,
+                (emission.timeline[1] as TimelineItem.Commitment).rowTreatment,
+            )
+            assertEquals(
+                TodayCommitmentRowTreatment.SCHEDULE,
+                (emission.timeline[2] as TimelineItem.Commitment).rowTreatment,
+            )
             assertEquals(1, emission.personFocus.size)
             assertEquals("이대리", emission.personFocus.single().displayName)
             assertEquals(2, emission.personFocus.single().commitmentCount)
@@ -154,7 +187,7 @@ class TodayViewModelSpecTest {
                     direction = null,
                     scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                     sourceType = SourceType.GOOGLE_CALENDAR,
                     sourceRef = "event-1",
                 ),
@@ -189,13 +222,13 @@ class TodayViewModelSpecTest {
                 commitment(
                     id = "untimed",
                     occurredAt = Instant.parse("2026-04-18T00:30:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                     dueAt = null,
                 ),
                 commitment(
                     id = "timed",
                     occurredAt = Instant.parse("2026-04-18T00:00:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                     dueAt = Instant.parse("2026-04-18T02:00:00Z"),
                 ),
             ),
@@ -279,7 +312,7 @@ class TodayViewModelSpecTest {
                 commitment(
                     id = "c-kst",
                     occurredAt = Instant.parse("2026-04-18T04:00:00Z"),
-                    personRef = "lee@corp.com",
+                    counterpartyRef = "lee@corp.com",
                 ),
             )
 
@@ -364,14 +397,14 @@ class TodayViewModelSpecTest {
     }
 
     @Test
-    fun `TDY counterparty display falls back to personRef when enrichment is missing`() = runTest {
+    fun `TDY counterparty display falls back to counterpartyRef when enrichment is missing`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
             todayRows(
                 commitment(
                     id = "c2",
                     occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
-                    personRef = "raw@example.com",
+                    counterpartyRef = "raw@example.com",
                 ),
             ),
         )
@@ -486,7 +519,7 @@ class TodayViewModelSpecTest {
             commitmentRepository.refreshSince(
                 userId = "user-1",
                 since = null,
-                personRef = null,
+                counterpartyRef = null,
                 direction = null,
                 actionState = null,
             )
@@ -520,12 +553,23 @@ class TodayViewModelSpecTest {
             commitmentRepository.refreshSince(
                 userId = "user-1",
                 since = null,
-                personRef = null,
+                counterpartyRef = null,
                 direction = null,
                 actionState = null,
             )
         }
         coVerify(exactly = 1) { calendarEventRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) {
+            sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = null, since = null)
+        }
+        coVerify(exactly = 1) {
+            commitmentParticipantRepository.refreshSince(
+                userId = "user-1",
+                since = null,
+                personId = null,
+                commitmentId = null,
+            )
+        }
         assertEquals(false, viewModel.state.value.refreshing)
     }
 
@@ -592,12 +636,17 @@ class TodayViewModelSpecTest {
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 0) { commitmentRepository.refreshSince(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { calendarEventRepository.refreshSince(any(), any()) }
+        coVerify(exactly = 0) { sourceEventParticipantRepository.refreshSince(any(), any(), any()) }
+        coVerify(exactly = 0) { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) }
         assertEquals(false, viewModel.state.value.refreshing)
     }
 
     private fun buildViewModel(): TodayViewModel = TodayViewModel(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
+        sourceEventParticipantRepository = sourceEventParticipantRepository,
+        commitmentParticipantRepository = commitmentParticipantRepository,
+        workScheduler = workScheduler,
         sourceStatusRepository = sourceStatusRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
@@ -614,8 +663,8 @@ class TodayViewModelSpecTest {
         expiresAt = Instant.parse("2026-04-19T00:00:00Z"),
     )
 
-    private fun enrichment(personRef: String, displayName: String): PersonEnrichmentEntity = PersonEnrichmentEntity(
-        personRef = personRef,
+    private fun enrichment(counterpartyRef: String, displayName: String): PersonEnrichmentEntity = PersonEnrichmentEntity(
+        personRef = counterpartyRef,
         displayName = displayName,
         nickname = null,
         company = null,
@@ -627,7 +676,7 @@ class TodayViewModelSpecTest {
     private fun commitment(
         id: String,
         occurredAt: Instant,
-        personRef: String?,
+        counterpartyRef: String?,
         itemType: String = CommitmentItemType.ACTION,
         direction: String? = "give",
         scheduleStatus: String? = null,
@@ -642,7 +691,7 @@ class TodayViewModelSpecTest {
         direction = direction,
         scheduleStatus = scheduleStatus,
         counterpartyRaw = null,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         title = "title-$id",
         description = null,
         quote = "quote",
@@ -672,7 +721,7 @@ class TodayViewModelSpecTest {
                 title = commitment.title,
                 direction = commitment.direction,
                 scheduleStatus = commitment.scheduleStatus,
-                counterpartyDisplayName = commitment.personRef?.let { ref ->
+                counterpartyDisplayName = commitment.counterpartyRef?.let { ref ->
                     enrichment[ref] ?: ref
                 } ?: commitment.counterpartyRaw?.take(30),
                 sourceType = commitment.sourceType,

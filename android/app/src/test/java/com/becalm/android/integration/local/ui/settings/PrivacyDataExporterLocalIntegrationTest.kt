@@ -96,7 +96,7 @@ class PrivacyDataExporterLocalIntegrationTest {
         sourceType = "gmail",
         sourceRef = "msg-1",
         eventTitle = "Mail subject",
-        personRef = "person@example.com",
+        counterpartyRef = "person@example.com",
         timestamp = Instant.parse("2026-04-23T00:00:00Z"),
     )
 
@@ -105,7 +105,7 @@ class PrivacyDataExporterLocalIntegrationTest {
         userId = USER_ID,
         direction = "give",
         counterpartyRaw = "person@example.com",
-        personRef = "person@example.com",
+        counterpartyRef = "person@example.com",
         title = "Follow up",
         description = null,
         quote = "I will send it tomorrow",

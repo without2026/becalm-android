@@ -209,7 +209,7 @@ class CommitmentDetailViewModelSpecTest {
         scheduleStatus = null,
         decisionStatus = null,
         counterpartyRaw = null,
-        personRef = "lee@corp.com",
+        counterpartyRef = "lee@corp.com",
         title = "Title",
         description = null,
         quote = quote,

@@ -9,13 +9,16 @@ import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.commitments.CommitmentDetailViewModel
 import com.becalm.android.ui.commitments.CommitmentManagementViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,6 +64,9 @@ class CommitmentLocalIntegrationTest {
         dao = db.personEnrichmentDao(),
         logger = logger,
     )
+    private val sourceEventParticipantRepository = mockk<SourceEventParticipantRepository>(relaxed = true)
+    private val commitmentParticipantRepository = mockk<CommitmentParticipantRepository>(relaxed = true)
+    private val workScheduler = mockk<WorkScheduler>(relaxed = true)
     private val reminderScheduler = mockk<ReminderScheduler>(relaxed = true)
 
     @Before
@@ -112,6 +118,9 @@ class CommitmentLocalIntegrationTest {
 
         val viewModel = CommitmentManagementViewModel(
             commitmentRepository = commitmentRepository,
+            sourceEventParticipantRepository = sourceEventParticipantRepository,
+            commitmentParticipantRepository = commitmentParticipantRepository,
+            workScheduler = workScheduler,
             reminderScheduler = reminderScheduler,
             userPrefsStore = userPrefsStore,
             logger = logger,
@@ -254,7 +263,7 @@ class CommitmentLocalIntegrationTest {
         userId = USER_ID,
         direction = "give",
         counterpartyRaw = PERSON_REF,
-        personRef = PERSON_REF,
+        counterpartyRef = PERSON_REF,
         title = title,
         description = null,
         quote = "quote-$id",

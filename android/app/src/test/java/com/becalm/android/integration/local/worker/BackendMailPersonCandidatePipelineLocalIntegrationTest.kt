@@ -9,7 +9,8 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.repository.SourcePersonCandidateRepositoryImpl
+import com.becalm.android.data.repository.CommitmentParticipantRepositoryImpl
+import com.becalm.android.data.repository.SourceEventParticipantRepositoryImpl
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
@@ -56,7 +57,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
     }
 
     @Test
-    fun `backend mail AI candidates are pulled as references and index source commitments for same person`() = runTest {
+    fun `backend mail source participants are pulled as references and index source commitments for same person`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.commitmentDao().insertAll(listOf(scheduleCommitment()))
         server.enqueue(
@@ -67,17 +68,22 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
                     {
                       "data": [
                         {
-                          "id": "candidate-mail-1",
+                          "id": "11111111-1111-4111-8111-111111111111",
+                          "source_event_id": "gmail-message-1",
                           "source_type": "gmail",
-                          "source_ref": "raw:gmail-message-1",
-                          "candidate_ref": "sender:customer@example.com",
+                          "source_ref": "gmail-message-1",
+                          "person_id": "28d6aa3a-bf40-5f85-9f00-4a08263036bd",
                           "role": "sender",
-                          "name": "김고객",
-                          "email": "customer@example.com",
-                          "phone": null,
-                          "organization": "Acme",
+                          "relation_to_user": "counterparty",
+                          "identity_type": "email",
+                          "normalized_value": "customer@example.com",
+                          "display_name_raw": "김고객",
+                          "email_raw": "customer@example.com",
+                          "phone_raw": null,
+                          "organization_raw": "Acme",
                           "evidence": "김고객 <customer@example.com>",
                           "confidence": 0.95,
+                          "resolution_status": "resolved",
                           "created_at": "2026-04-29T00:00:05Z"
                         }
                       ],
@@ -87,22 +93,61 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
                     """.trimIndent(),
                 ),
         )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "data": [
+                        {
+                          "id": "commitment-participant-mail-schedule-1",
+                          "commitment_id": "commitment-mail-schedule-1",
+                          "person_id": "28d6aa3a-bf40-5f85-9f00-4a08263036bd",
+                          "role": "attendee",
+                          "evidence": "2026년 5월 1일 오전 10시에 데모 미팅을 확정하겠습니다.",
+                          "confidence": 0.95,
+                          "created_at": "2026-04-29T00:00:10Z"
+                        }
+                      ],
+                      "cursor": "1",
+                      "has_more": false
+                    }
+                    """.trimIndent(),
+                ),
+        )
 
-        val refresh = SourcePersonCandidateRepositoryImpl(
+        val refresh = SourceEventParticipantRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             api = LocalIntegrationSupport.railwayApi(server),
             logger = logger,
         ).refreshSince(userId = USER_ID, sourceType = SourceType.GMAIL, since = null)
 
         assertTrue(refresh is BecalmResult.Success)
-        assertEquals("/v1/source_person_candidates?limit=100&source_type=gmail", server.takeRequest().path)
-        val storedCandidate = db.personIndexDao().findCandidatesForUser(USER_ID).single()
-        assertEquals(CUSTOMER_EMAIL, storedCandidate.email)
+        assertEquals("/v1/source_event_participants?limit=100&source_type=gmail", server.takeRequest().path)
+        val storedParticipant = db.personIndexDao().findSourceEventParticipantsForUser(USER_ID).single()
+        assertEquals(CUSTOMER_EMAIL, storedParticipant.emailRaw)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        assertEquals(personId, storedParticipant.personId)
+        val storedIdentity = db.personIndexDao().observeIdentitiesForPerson(USER_ID, personId).first().single()
+        assertEquals("email:$CUSTOMER_EMAIL", storedIdentity.identityKey)
+        assertEquals("김고객", storedIdentity.displayNameHint)
+
+        val commitmentParticipantRefresh = CommitmentParticipantRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            api = LocalIntegrationSupport.railwayApi(server),
+            logger = logger,
+        ).refreshSince(userId = USER_ID, since = null)
+
+        assertTrue(commitmentParticipantRefresh is BecalmResult.Success)
+        assertEquals("/v1/commitment_participants?limit=100", server.takeRequest().path)
+        val storedCommitmentParticipant = db.personIndexDao().findCommitmentParticipantsForUser(USER_ID).single()
+        assertEquals("commitment-mail-schedule-1", storedCommitmentParticipant.commitmentId)
+        assertEquals(personId, storedCommitmentParticipant.personId)
 
         val indexResult = newPersonIndexWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, indexResult.javaClass)
-        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
         val aggregate = db.personIndexDao().observeAggregates(USER_ID, limit = 10).first()
             .single { it.personId == personId }
         assertEquals(1, aggregate.pendingCommitmentCount)
@@ -111,7 +156,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
         val interactions = db.personIndexDao()
             .observeInteractionsForPerson(USER_ID, personId, limit = 10)
             .first()
-        assertTrue(interactions.none { it.interactionKind == "email" && it.sourceRef == "raw:gmail-message-1" })
+        assertTrue(interactions.any { it.interactionKind == "email" && it.sourceRef == "raw:gmail-message-1" })
         assertTrue(
             interactions.any {
                 it.interactionKind == "commitment" &&
@@ -128,7 +173,6 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
             databaseProvider = Provider { db },
             rawDaoProvider = Provider { db.rawIngestionEventDao() },
             commitmentDaoProvider = Provider { db.commitmentDao() },
-            calendarDaoProvider = Provider { db.calendarEventDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
             logger = logger,
@@ -144,7 +188,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
             scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
             decisionStatus = null,
             counterpartyRaw = null,
-            personRef = null,
+            counterpartyRef = null,
             title = "데모 미팅 확정",
             description = null,
             quote = "2026년 5월 1일 오전 10시에 데모 미팅을 확정하겠습니다.",

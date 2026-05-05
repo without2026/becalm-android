@@ -5,6 +5,9 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
@@ -16,6 +19,7 @@ import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +41,7 @@ import org.junit.Test
 class SourcesListViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
+    private val authRepository: AuthRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk()
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk()
     private val contactsPermissionChecker = FakeContactsPermissionChecker()
@@ -45,6 +50,7 @@ class SourcesListViewModelSpecTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session()))
     }
 
     @After
@@ -186,23 +192,46 @@ class SourcesListViewModelSpecTest {
         }
     }
 
+    @Test
+    fun `AUTH-005 unauthenticated sources list does not touch user scoped repositories`() = runTest {
+        every { authRepository.observeAuthState() } returns flowOf(AuthState.Unauthenticated)
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.state.test {
+            assertEquals(emptyList<com.becalm.android.ui.sources.SourceStatusRow>(), awaitItem().items)
+            verify(exactly = 0) { sourceStatusRepository.observeAll() }
+            verify(exactly = 0) { personEnrichmentRepository.observeSummary() }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun buildSourcesListViewModel(): SourcesListViewModel = SourcesListViewModel(
+        authRepository = authRepository,
         sourceStatusRepository = sourceStatusRepository,
         personEnrichmentRepository = personEnrichmentRepository,
         contactsPermissionChecker = contactsPermissionChecker,
         logger = logger,
     )
 
+    private fun session(): SupabaseSession = SupabaseSession(
+        accessToken = "access",
+        refreshToken = "refresh",
+        userId = "user-1",
+        email = "user@example.com",
+        expiresAt = Instant.parse("2026-05-04T00:00:00Z"),
+    )
+
     private fun enrichment(
-        personRef: String,
+        counterpartyRef: String,
         lastSyncedAt: Instant,
     ): PersonEnrichmentEntity = PersonEnrichmentEntity(
-        personRef = personRef,
+        personRef = counterpartyRef,
         displayName = "Kim",
         nickname = null,
         company = null,
         title = null,
-        sourceContactId = "contact-$personRef",
+        sourceContactId = "contact-$counterpartyRef",
         lastSyncedAt = lastSyncedAt,
     )
 }
@@ -306,15 +335,15 @@ class ContactsSourceDetailContractSpecTest {
     }
 
     private fun enrichment(
-        personRef: String,
+        counterpartyRef: String,
         lastSyncedAt: Instant,
     ): PersonEnrichmentEntity = PersonEnrichmentEntity(
-        personRef = personRef,
+        personRef = counterpartyRef,
         displayName = "Kim",
         nickname = null,
         company = null,
         title = null,
-        sourceContactId = "contact-$personRef",
+        sourceContactId = "contact-$counterpartyRef",
         lastSyncedAt = lastSyncedAt,
     )
 }

@@ -2,12 +2,9 @@ package com.becalm.android.integration.local.ui.persons
 
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
@@ -47,7 +44,7 @@ class PersonsUiTest {
                     state = PersonsUiState(
                         people = listOf(
                             PersonRow(
-                                personRef = "+821012345678",
+                                personId = "+821012345678",
                                 displayName = "김철수",
                                 companyName = "ABC Corp",
                                 jobTitle = "팀장",
@@ -100,7 +97,7 @@ class PersonsUiTest {
                     state = PersonsUiState(
                         people = listOf(
                             PersonRow(
-                                personRef = "kim@example.com",
+                                personId = "kim@example.com",
                                 displayName = "김철수",
                                 lastInteractionAt = Instant.parse("2026-04-24T01:00:00Z"),
                                 interactionCount = 1,
@@ -122,36 +119,19 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `person detail shows sections while completed rows stay collapsed`() {
+    fun `person detail shows source filters and unified timeline`() {
         composeRule.setContent {
             BecalmTheme {
                 PersonDetailScreenContent(
                     state = PersonDetailUiState(
-                        personRef = "+821012345678",
+                        personId = "+821012345678",
                         displayName = "김철수",
                         nickname = "철수",
                         companyName = "ABC Corp",
                         jobTitle = "팀장",
                         eventCount = 2,
                         pendingCommitmentCount = 1,
-                        completedExpanded = false,
-                        pendingCommitments = listOf(
-                            InteractionRow.Commitment(
-                                timestamp = Instant.parse("2026-04-24T00:00:00Z"),
-                                title = "제안서 보내기",
-                                direction = "give",
-                                actionState = "pending",
-                            ),
-                        ),
-                        completedCommitments = listOf(
-                            InteractionRow.Commitment(
-                                timestamp = Instant.parse("2026-04-23T00:00:00Z"),
-                                title = "완료된 약속",
-                                direction = "take",
-                                actionState = "completed",
-                            ),
-                        ),
-                        interactionHistory = listOf(
+                        timeline = listOf(
                             InteractionRow.Event(
                                 id = "event-7",
                                 timestamp = Instant.parse("2026-04-24T01:00:00Z"),
@@ -160,6 +140,18 @@ class PersonsUiTest {
                                 snippet = "금요일까지 회신",
                                 commitmentsExtractedCount = 1,
                             ),
+                            InteractionRow.Commitment(
+                                timestamp = Instant.parse("2026-04-24T00:00:00Z"),
+                                title = "제안서 보내기",
+                                direction = "give",
+                                actionState = "pending",
+                            ),
+                            InteractionRow.Commitment(
+                                timestamp = Instant.parse("2026-04-23T00:00:00Z"),
+                                title = "완료된 약속",
+                                direction = "take",
+                                actionState = "completed",
+                            ),
                         ),
                         loading = false,
                     ),
@@ -167,16 +159,22 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
                     onEventTap = {},
-                    onToggleCompletedExpanded = {},
                 )
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.person_detail_section_pending_fmt, 1)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_filter_all)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 3)).assertIsDisplayed()
         composeRule.onNodeWithTag("person-detail-list")
-            .performScrollToNode(hasText(string(R.string.person_detail_section_completed_fmt, 1)))
-        composeRule.onNodeWithText(string(R.string.person_detail_section_completed_fmt, 1)).assertExists()
-        composeRule.onAllNodesWithText("완료된 약속").assertCountEquals(0)
+            .performScrollToNode(hasText("제안서 보내기"))
+        composeRule.onNodeWithText("제안서 보내기").assertExists()
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText("완료된 약속"))
+        composeRule.onNodeWithText("완료된 약속").assertExists()
+        composeRule.onNodeWithTag("person-detail-list")
+            .performScrollToNode(hasText(string(R.string.person_detail_filter_email)))
+        composeRule.onNodeWithTag("person-detail-filter-email").performClick()
+        composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 0)).assertExists()
     }
 
     @Test

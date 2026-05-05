@@ -122,7 +122,7 @@ class OverdueSweepWorkerSpecTest {
         userId = "user-1",
         direction = "give",
         counterpartyRaw = null,
-        personRef = "lee@corp.com",
+        counterpartyRef = "lee@corp.com",
         title = "Title",
         description = null,
         quote = "quote body",

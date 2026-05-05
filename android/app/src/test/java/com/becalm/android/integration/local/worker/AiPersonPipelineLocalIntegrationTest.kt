@@ -106,7 +106,7 @@ class AiPersonPipelineLocalIntegrationTest {
                 rawEventId = any(),
                 durationSeconds = any(),
                 timestamp = any(),
-                personRef = any(),
+                counterpartyRef = any(),
                 eventTitle = any(),
             )
         } returns Response.success(aiVoiceResponse())
@@ -122,11 +122,11 @@ class AiPersonPipelineLocalIntegrationTest {
         assertEquals(2, commitments.size)
         assertTrue(commitments.any { it.itemType == CommitmentItemType.SCHEDULE && it.scheduleStatus == ScheduleStatus.CONFIRMED })
         assertTrue(commitments.any { it.itemType == CommitmentItemType.ACTION && it.direction == "give" })
-        assertTrue(commitments.all { it.personRef == CUSTOMER_EMAIL })
+        assertTrue(commitments.all { it.counterpartyRef == CUSTOMER_EMAIL })
 
-        val candidates = db.personIndexDao().findCandidatesForUser(USER_ID)
-        assertEquals(1, candidates.size)
-        assertEquals(CUSTOMER_EMAIL, candidates.single().email)
+        val participants = db.personIndexDao().findSourceEventParticipantsForUser(USER_ID)
+        assertEquals(1, participants.size)
+        assertEquals(CUSTOMER_EMAIL, participants.single().emailRaw)
 
         val indexResult = newPersonIndexWorker().doWork()
 
@@ -190,7 +190,6 @@ class AiPersonPipelineLocalIntegrationTest {
             databaseProvider = Provider { db },
             rawDaoProvider = Provider { db.rawIngestionEventDao() },
             commitmentDaoProvider = Provider { db.commitmentDao() },
-            calendarDaoProvider = Provider { db.calendarEventDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
             logger = logger,
@@ -204,7 +203,7 @@ class AiPersonPipelineLocalIntegrationTest {
             clientEventId = "client-$RAW_ID",
             sourceType = SourceType.VOICE,
             sourceRef = "content://voice/$RAW_ID",
-            personRef = null,
+            counterpartyRef = null,
             eventTitle = "고객 통화",
             durationSeconds = 60,
             timestamp = Instant.parse("2026-04-29T00:00:00Z"),
@@ -219,7 +218,7 @@ class AiPersonPipelineLocalIntegrationTest {
                     type = VoiceItemType.SCHEDULE,
                     text = "내일 오전 10시 데모 미팅을 확정한다",
                     quote = "내일 오전 10시 데모 미팅 확정입니다.",
-                    personRef = CUSTOMER_EMAIL,
+                    counterpartyRef = CUSTOMER_EMAIL,
                     dueAt = Instant.parse("2026-04-30T01:00:00Z"),
                     dueHint = "내일 오전 10시",
                     dueIsApproximate = false,
@@ -230,7 +229,7 @@ class AiPersonPipelineLocalIntegrationTest {
                     type = VoiceItemType.ACTION,
                     text = "오늘 견적서를 보낸다",
                     quote = "견적서는 오늘 보내드리겠습니다.",
-                    personRef = CUSTOMER_EMAIL,
+                    counterpartyRef = CUSTOMER_EMAIL,
                     dueAt = Instant.parse("2026-04-29T14:59:59Z"),
                     dueHint = "오늘",
                     dueIsApproximate = true,

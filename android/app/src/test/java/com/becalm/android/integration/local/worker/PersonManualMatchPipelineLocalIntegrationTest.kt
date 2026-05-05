@@ -1,13 +1,11 @@
 package com.becalm.android.integration.local.worker
 
-import androidx.work.ListenableWorker
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
-import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
 import com.becalm.android.worker.WorkScheduler
@@ -44,18 +42,15 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
-    fun `manual match turns unmatched row into interaction and nickname resolves future rows`() = runTest {
+    fun `manual match no longer promotes legacy raw rows without relation participants`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(rawEvent(id = "raw-unmatched-1", snippet = "예약 시간이 확정되었습니다."))
 
-        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
-        assertEquals(
-            listOf("raw:raw-unmatched-1"),
-            db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).map { it.sourceRef },
-        )
+        newWorker().doWork()
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
         logger.clear()
-        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
-        assertTrue(logger.entries.any { "person index unchanged sources=1" in it.message })
+        newWorker().doWork()
+        assertTrue(logger.entries.any { "person index unchanged sources=0" in it.message })
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
@@ -74,25 +69,12 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertTrue(result is BecalmResult.Success)
         assertEquals(1, scheduler.personIndexEnqueueCount)
 
-        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
+        newWorker().doWork()
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
 
-        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, NAVER_EMAIL)).personId
-        val firstInteractions = db.personIndexDao()
-            .observeInteractionsForPerson(USER_ID, personId, limit = 10)
-            .first()
-        assertEquals(listOf("raw:raw-unmatched-1"), firstInteractions.map { it.sourceRef })
-
         db.rawIngestionEventDao().insert(rawEvent(id = "raw-future-1", snippet = "$NAVER_NICKNAME 확인 메일입니다."))
-        assertEquals(ListenableWorker.Result.success().javaClass, newWorker().doWork().javaClass)
-
-        val futureInteractions = db.personIndexDao()
-            .observeInteractionsForPerson(USER_ID, personId, limit = 10)
-            .first()
-        assertEquals(
-            setOf("raw:raw-unmatched-1", "raw:raw-future-1"),
-            futureInteractions.map { it.sourceRef }.toSet(),
-        )
+        newWorker().doWork()
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
     }
 
     private fun newWorker(): PersonInteractionIndexWorker =
@@ -102,7 +84,6 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             databaseProvider = Provider { db },
             rawDaoProvider = Provider { db.rawIngestionEventDao() },
             commitmentDaoProvider = Provider { db.commitmentDao() },
-            calendarDaoProvider = Provider { db.calendarEventDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
             logger = logger,
@@ -116,7 +97,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             clientEventId = "client-$id",
             sourceType = SourceType.GMAIL,
             sourceRef = "gmail-$id",
-            personRef = null,
+            counterpartyRef = null,
             eventTitle = "예약 알림",
             eventSnippet = snippet,
             folder = "INBOX",
@@ -141,6 +122,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
+        override fun enqueueMeetingTranscriptUpload(rawEventId: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -153,6 +135,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun enqueueColdSyncStage2() = Unit
         override fun cancelColdSyncStage2() = Unit
         override fun cancelVoiceUpload(rawEventId: String) = Unit
+        override fun cancelMeetingTranscriptUpload(rawEventId: String) = Unit
         override fun cancelAll() = Unit
         override fun cleanupLegacyWorkNames() = Unit
     }

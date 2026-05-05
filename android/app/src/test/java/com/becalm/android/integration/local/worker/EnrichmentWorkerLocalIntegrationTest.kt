@@ -110,7 +110,7 @@ class EnrichmentWorkerLocalIntegrationTest {
                 clientEventId = "client-1",
                 sourceType = SourceType.GMAIL,
                 sourceRef = "ref-1",
-                personRef = "friend@example.com",
+                counterpartyRef = "friend@example.com",
                 eventTitle = "hello",
                 eventSnippet = "hi",
                 timestamp = Instant.parse("2026-04-23T01:00:00Z"),

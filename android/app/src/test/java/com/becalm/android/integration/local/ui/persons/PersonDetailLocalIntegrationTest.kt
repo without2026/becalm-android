@@ -7,9 +7,12 @@ import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonIdentityEntity
+import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
@@ -20,9 +23,10 @@ import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourceArchiveStore
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.persons.ARG_EVENT_ID
-import com.becalm.android.ui.persons.ARG_PERSON_REF
+import com.becalm.android.ui.persons.ARG_PERSON_ID
 import com.becalm.android.ui.persons.InteractionRow
 import com.becalm.android.ui.persons.PersonDetailViewModel
 import com.becalm.android.ui.persons.RawEventDetailViewModel
@@ -36,10 +40,9 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
+import java.util.UUID
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -106,7 +109,7 @@ class PersonDetailLocalIntegrationTest {
     }
 
     @Test
-    fun `SRC-002 SRC-004 and SRC-008 person detail projects room timeline sections with enrichment`() = runTest {
+    fun `SRC-002 SRC-004 and SRC-008 person detail projects room source timeline with enrichment`() = runTest {
         enrichmentRepository.upsert(
             PersonEnrichmentEntity(
                 personRef = PERSON_REF,
@@ -168,15 +171,39 @@ class PersonDetailLocalIntegrationTest {
                 ),
             ),
         )
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, PERSON_REF)).personId
+        db.personIndexDao().upsertIdentities(
+            listOf(
+                PersonIdentityEntity(
+                    id = PersonIdentityResolver.stableIdentityId(USER_ID, "email:$PERSON_REF"),
+                    userId = USER_ID,
+                    personId = personId,
+                    identityKey = "email:$PERSON_REF",
+                    identityType = "email",
+                    rawValue = PERSON_REF,
+                    displayNameHint = "김영희",
+                    sourceType = SourceType.GMAIL,
+                    confidence = 1.0,
+                    verified = true,
+                    lastSeenAt = Instant.parse("2026-04-23T03:00:00Z"),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                indexedInteraction(personId, SourceType.GMAIL, "raw:event-1", "email", "counterparty", null, null, Instant.parse("2026-04-23T03:00:00Z"), "메일 제목", "메일 미리보기"),
+                indexedInteraction(personId, SourceType.GOOGLE_CALENDAR, "calendar:meeting-1", "calendar", "attendee", null, null, Instant.parse("2026-04-23T02:30:00Z"), "캘린더 미팅", PERSON_REF),
+                indexedInteraction(personId, SourceType.VOICE, "raw:event-2", "call", "counterparty", null, null, Instant.parse("2026-04-23T02:00:00Z"), "음성 메모", "음성 메모 미리보기"),
+                indexedInteraction(personId, SourceType.GMAIL, "commitment:c-pending", "commitment", CommitmentItemType.ACTION, "give", "pending", Instant.parse("2026-04-23T03:00:00Z"), "미완료 약속", "quote"),
+                indexedInteraction(personId, SourceType.VOICE, "commitment:c-completed", "commitment", CommitmentItemType.ACTION, "give", "completed", Instant.parse("2026-04-23T01:00:00Z"), "완료된 약속", "quote"),
+            ),
+        )
 
         val viewModel = PersonDetailViewModel(
             personEnrichmentRepository = enrichmentRepository,
-            rawIngestionRepository = rawIngestionRepository,
-            commitmentRepository = commitmentRepository,
-            calendarEventRepository = calendarRepository,
             personIndexDao = db.personIndexDao(),
             userPrefsStore = userPrefsStore,
-            savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_REF to PERSON_REF)),
+            savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
             clock = FakeClock(Instant.parse("2026-04-23T03:00:00Z")),
         )
@@ -191,14 +218,12 @@ class PersonDetailLocalIntegrationTest {
             assertEquals("영희", state.nickname)
             assertEquals("ABC", state.companyName)
             assertEquals("리드", state.jobTitle)
-            assertEquals(2, state.eventCount)
+            assertEquals(3, state.eventCount)
             assertEquals(1, state.pendingCommitmentCount)
             assertEquals(setOf(SourceType.GMAIL, SourceType.VOICE, SourceType.GOOGLE_CALENDAR), state.channelSources)
-            assertEquals(listOf("미완료 약속"), state.pendingCommitments.map { it.title })
-            assertEquals(listOf("완료된 약속"), state.completedCommitments.map { it.title })
             assertEquals(
-                listOf("메일 제목", "캘린더 미팅", "음성 메모"),
-                state.interactionHistory.map { row ->
+                listOf("미완료 약속", "메일 제목", "캘린더 미팅", "음성 메모", "완료된 약속"),
+                state.timeline.map { row ->
                     when (row) {
                         is InteractionRow.Event -> row.summary
                         is InteractionRow.CalendarMeeting -> row.title
@@ -206,11 +231,6 @@ class PersonDetailLocalIntegrationTest {
                     }
                 },
             )
-            assertFalse(state.completedExpanded)
-
-            viewModel.onToggleCompletedExpanded()
-            val expanded = awaitItem()
-            assertTrue(expanded.completedExpanded)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -361,7 +381,7 @@ class PersonDetailLocalIntegrationTest {
         clientEventId = "client-$id",
         sourceType = sourceType,
         sourceRef = "ref-$id",
-        personRef = PERSON_REF,
+        counterpartyRef = PERSON_REF,
         eventTitle = title,
         eventSnippet = snippet,
         commitmentsExtractedCount = 1,
@@ -380,7 +400,7 @@ class PersonDetailLocalIntegrationTest {
         userId = USER_ID,
         direction = "give",
         counterpartyRaw = PERSON_REF,
-        personRef = PERSON_REF,
+        counterpartyRef = PERSON_REF,
         title = title,
         description = null,
         quote = "quote-$id",
@@ -396,6 +416,33 @@ class PersonDetailLocalIntegrationTest {
         syncStatus = "synced",
         createdAt = sourceEventOccurredAt,
         updatedAt = sourceEventOccurredAt,
+    )
+
+    private fun indexedInteraction(
+        personId: String,
+        sourceType: String,
+        sourceRef: String,
+        kind: String,
+        role: String,
+        direction: String?,
+        status: String?,
+        occurredAt: Instant,
+        title: String?,
+        snippet: String?,
+    ): PersonInteractionEntity = PersonInteractionEntity(
+        id = UUID.nameUUIDFromBytes("detail-test:$sourceRef:$kind".toByteArray()).toString(),
+        userId = USER_ID,
+        personId = personId,
+        sourceType = sourceType,
+        sourceRef = sourceRef,
+        interactionKind = kind,
+        role = role,
+        direction = direction,
+        status = status,
+        occurredAt = occurredAt,
+        title = title,
+        snippet = snippet,
+        confidence = 1.0,
     )
 
     private companion object {

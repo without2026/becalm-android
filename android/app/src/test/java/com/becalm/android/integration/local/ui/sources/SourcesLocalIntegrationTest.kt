@@ -13,6 +13,9 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.supabase.SupabaseSession
+import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.MeetingImportRepository
@@ -32,6 +35,7 @@ import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
 import com.becalm.android.worker.ingestion.ImapNaverWorker
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -65,6 +69,7 @@ class SourcesLocalIntegrationTest {
     private val db = LocalIntegrationSupport.inMemoryDatabase()
     private val logger = RecordingLogger()
     private val api = mockk<RailwayApi>(relaxed = true)
+    private val authRepository = mockk<AuthRepository>(relaxed = true)
     private val userPrefsStore = UserPrefsStoreImpl(
         dataStore = LocalIntegrationSupport.prefsDataStore("sources-user-prefs"),
     )
@@ -99,6 +104,17 @@ class SourcesLocalIntegrationTest {
     fun setUp() = runTest {
         Dispatchers.setMain(dispatcher)
         userPrefsStore.setCurrentUserId(USER_ID)
+        every { authRepository.observeAuthState() } returns flowOf(
+            AuthState.Authenticated(
+                SupabaseSession(
+                    accessToken = "access",
+                    refreshToken = "refresh",
+                    userId = USER_ID,
+                    email = "user@example.com",
+                    expiresAt = Instant.parse("2026-05-04T00:00:00Z"),
+                ),
+            ),
+        )
     }
 
     @After
@@ -139,6 +155,7 @@ class SourcesLocalIntegrationTest {
         )
 
         val viewModel = SourcesListViewModel(
+            authRepository = authRepository,
             sourceStatusRepository = sourceStatusRepository,
             personEnrichmentRepository = enrichmentRepository,
             contactsPermissionChecker = contactsPermissionChecker,
@@ -344,7 +361,7 @@ class SourcesLocalIntegrationTest {
         clientEventId = "client-$id",
         sourceType = sourceType,
         sourceRef = "ref-$id",
-        personRef = "person-$id",
+        counterpartyRef = "person-$id",
         eventTitle = title,
         eventSnippet = "snippet-$id",
         commitmentsExtractedCount = 0,
