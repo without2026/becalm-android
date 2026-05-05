@@ -17,10 +17,10 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.api.VoiceApi
+import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.remote.dto.TranscribeExtractResponse
-import com.becalm.android.data.remote.dto.VoiceExtractItemDto
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
+import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.MeetingTranscriptUploadWorker
@@ -51,7 +51,7 @@ class MeetingTranscriptUploadWorkerSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
-    private val voiceApi: VoiceApi = mockk()
+    private val sourceExtractionApi: SourceExtractionApi = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -96,7 +96,7 @@ class MeetingTranscriptUploadWorkerSpecTest {
         coEvery { rawIngestionEventDao.findById(RAW_ID, USER_ID) } returns entity
         coEvery { rawIngestionEventDao.update(capture(updated)) } returns 1
         coEvery {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 any(),
                 any(),
                 any(),
@@ -112,10 +112,10 @@ class MeetingTranscriptUploadWorkerSpecTest {
                 any(),
             )
         } returns Response.success(
-            TranscribeExtractResponse(
+            SourceExtractionResponse(
                 rawEventId = RAW_ID,
                 items = listOf(
-                    VoiceExtractItemDto(
+                    SourceExtractedItemDto(
                         type = "schedule",
                         text = "내일 3시 회의 확정",
                         quote = "내일 3시에 회의합시다",
@@ -151,7 +151,7 @@ class MeetingTranscriptUploadWorkerSpecTest {
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
-            voiceApi = voiceApi,
+            sourceExtractionApi = sourceExtractionApi,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,

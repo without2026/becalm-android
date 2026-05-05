@@ -15,8 +15,8 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.api.VoiceApi
-import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
+import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.squareup.moshi.Moshi
@@ -33,7 +33,7 @@ import okhttp3.RequestBody
 import okio.BufferedSink
 import java.io.IOException
 
-// sync_status 리터럴. STATUS_PENDING 은 [VoiceUploadMappers] 와 공유하기 위해 그쪽에 internal 로 두고
+// sync_status 리터럴. STATUS_PENDING 은 [SourceExtractionMappers] 와 공유하기 위해 그쪽에 internal 로 두고
 // STATUS_AWAITING_CONSENT 는 이 파일에서만 쓰이므로 file-private 으로 유지한다.
 private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 
@@ -59,7 +59,7 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
  * 5a. **PIPA gate — second check (VOI-004)**: immediately before the network call, re-check consent.
  *    If consent was withdrawn after step 4 passed (in-flight race), park entity as
  *    `awaiting_consent` and return [Result.success].
- * 6. Call [VoiceApi.commitmentExtract]. On success: insert [CommitmentEntity] rows for each
+ * 6. Call [SourceExtractionApi.commitmentExtract]. On success: insert [CommitmentEntity] rows for each
  *    extracted action item (deterministic IDs keyed on rawEventId+index), update raw-event
  *    action count and snippet, record sync success.
  * 7. Error handling per VOI-006:
@@ -90,7 +90,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
-    private val voiceApiProvider: Provider<VoiceApi>,
+    private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -108,7 +108,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         rawIngestionEventDao: RawIngestionEventDao,
         commitmentDao: CommitmentDao,
         personIndexDao: PersonIndexDao,
-        voiceApi: VoiceApi,
+        sourceExtractionApi: SourceExtractionApi,
         userPrefsStore: UserPrefsStore,
         sourceStatusRepository: SourceStatusRepository,
         processingStatusRepository: ProcessingStatusRepository,
@@ -124,7 +124,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
         personIndexDaoProvider = Provider { personIndexDao },
-        voiceApiProvider = Provider { voiceApi },
+        sourceExtractionApiProvider = Provider { sourceExtractionApi },
         userPrefsStore = userPrefsStore,
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
         processingStatusRepository = processingStatusRepository,
@@ -145,8 +145,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
 
-    private val voiceApi: VoiceApi
-        get() = voiceApiProvider.get()
+    private val sourceExtractionApi: SourceExtractionApi
+        get() = sourceExtractionApiProvider.get()
 
     private val sourceStatusRepository: SourceStatusRepository
         get() = sourceStatusRepositoryProvider.get()
@@ -226,24 +226,24 @@ public class VoiceUploadWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        val parts = entity.toRequestParts(rawEventId)
+        val parts = entity.toSourceExtractionRequestParts(rawEventId)
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing audio with Gemini")
 
         val response = try {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 audio = audioPart,
                 inputModality = "audio".toPlainRequestBody(),
                 sourceType = parts.sourceType,
                 clientEventId = parts.clientEventId,
                 rawEventId = parts.rawEventId,
-                durationSeconds = parts.durationSeconds,
+                durationSeconds = parts.durationSeconds ?: "0".toPlainRequestBody(),
                 timestamp = parts.timestamp,
                 counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
-                folder = null,
+                folder = parts.folder,
                 conversationRef = null,
                 previousThreadContext = null,
-                bodyText = null,
+                bodyText = parts.bodyText,
             )
         } catch (e: IOException) {
             logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -357,7 +357,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     /**
      * Handles an HTTP 502 response by parsing the error envelope and dispatching via
-     * [VoiceUploadStateMachine.decide502Action]. Finding #4 fix.
+     * [SourceExtractionUploadStateMachine.decide502Action]. Finding #4 fix.
      */
     private suspend fun handleVoice502(
         errorBodyString: String?,
@@ -370,7 +370,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             op = "HTTP 502 — failed to parse error envelope id=${redact(rawEventId)}",
             block = {
                 errorBodyString?.let {
-                    moshi.adapter(VoiceErrorEnvelope::class.java).fromJson(it)
+                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
                 }
             },
             onFailure = { null },
@@ -379,15 +379,15 @@ public class VoiceUploadWorker @AssistedInject constructor(
         val errorCode = envelope?.error
         logger.w(TAG, "HTTP 502 id=${redact(rawEventId)} error=$errorCode attempt=$runAttemptCount")
 
-        return when (VoiceUploadStateMachine.decide502Action(errorCode)) {
-            Voice502Action.Quarantine -> {
+        return when (SourceExtractionUploadStateMachine.decide502Action(errorCode)) {
+            SourceExtraction502Action.Quarantine -> {
                 // Deterministic server-side failure — no point retrying.
                 logger.w(TAG, "HTTP 502 non-retryable ($errorCode) id=${redact(rawEventId)} — quarantining")
                 processingStatusRepository.recordError(entity.sourceType, errorCode ?: "Voice extraction failed")
                 markFailed(entity, reasonCode = errorCode ?: "vertex_502_unknown")
                 Result.success()
             }
-            Voice502Action.HandleAsTransient -> {
+            SourceExtraction502Action.HandleAsTransient -> {
                 // vertex_upstream_error or unparseable — treat as transient.
                 handleFailure(entity)
             }
@@ -427,11 +427,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
     }
 
     /**
-     * Handles a transient failure by dispatching via [VoiceUploadStateMachine.decideRetryAction]
+     * Handles a transient failure by dispatching via [SourceExtractionUploadStateMachine.decideRetryAction]
      * (spec VOI-006).
      */
     private suspend fun handleFailure(entity: RawIngestionEventEntity): Result {
-        return when (VoiceUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
+        return when (SourceExtractionUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
             RetryAction.Quarantine -> {
                 logger.w(TAG, "exhausted retries id=${redact(entity.id)} — marking failed")
                 markFailed(entity, reasonCode = "retry_exhausted")

@@ -5,7 +5,7 @@ package com.becalm.android.data.remote.api
  *
  * Two standard configurations are provided as constants:
  * - [Default] for normal API calls.
- * - [Voice] for audio upload calls with extended read/write windows.
+ * - [SourceExtraction] for source extraction calls with extended read/write windows.
  *
  * @property connectSeconds Timeout in seconds for establishing a TCP connection.
  * @property readSeconds Timeout in seconds for reading the response from the server.
@@ -27,7 +27,7 @@ public data class HttpTimeouts(
          * connect=30s, read=180s, write=180s to accommodate slow upload links and long model
          * inference on the server side (api-contract.yml; VOI-006).
          */
-        public val Voice: HttpTimeouts = HttpTimeouts(
+        public val SourceExtraction: HttpTimeouts = HttpTimeouts(
             connectSeconds = 30L,
             readSeconds = 180L,
             writeSeconds = 180L,

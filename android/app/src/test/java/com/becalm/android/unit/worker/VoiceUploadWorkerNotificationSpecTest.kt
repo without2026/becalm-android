@@ -18,9 +18,9 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.api.VoiceApi
+import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.SourceType
-import com.becalm.android.data.remote.dto.TranscribeExtractResponse
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
@@ -58,7 +58,7 @@ class VoiceUploadWorkerNotificationSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
-    private val voiceApi: VoiceApi = mockk()
+    private val sourceExtractionApi: SourceExtractionApi = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -117,7 +117,7 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 any(),
                 any(),
                 any(),
@@ -173,7 +173,7 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery { rawIngestionEventDao.update(capture(updatedSlot)) } returns 1
         coEvery {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 any(),
                 any(),
                 any(),
@@ -189,7 +189,7 @@ class VoiceUploadWorkerNotificationSpecTest {
                 any(),
             )
         } returns Response.success(
-            TranscribeExtractResponse(
+            SourceExtractionResponse(
                 rawEventId = "raw-1",
                 items = emptyList(),
                 personCandidates = emptyList(),
@@ -214,7 +214,7 @@ class VoiceUploadWorkerNotificationSpecTest {
         rawIngestionEventDao = rawIngestionEventDao,
         commitmentDao = commitmentDao,
         personIndexDao = personIndexDao,
-        voiceApi = voiceApi,
+        sourceExtractionApi = sourceExtractionApi,
         userPrefsStore = userPrefsStore,
         sourceStatusRepository = sourceStatusRepository,
         processingStatusRepository = processingStatusRepository,

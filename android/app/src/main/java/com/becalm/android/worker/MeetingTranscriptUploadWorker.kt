@@ -13,8 +13,8 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.remote.api.VoiceApi
-import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
+import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.squareup.moshi.Moshi
@@ -34,7 +34,7 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
-    private val voiceApiProvider: Provider<VoiceApi>,
+    private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -51,7 +51,7 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         rawIngestionEventDao: RawIngestionEventDao,
         commitmentDao: CommitmentDao,
         personIndexDao: PersonIndexDao,
-        voiceApi: VoiceApi,
+        sourceExtractionApi: SourceExtractionApi,
         userPrefsStore: UserPrefsStore,
         sourceStatusRepository: SourceStatusRepository,
         processingStatusRepository: ProcessingStatusRepository,
@@ -66,7 +66,7 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
         personIndexDaoProvider = Provider { personIndexDao },
-        voiceApiProvider = Provider { voiceApi },
+        sourceExtractionApiProvider = Provider { sourceExtractionApi },
         userPrefsStore = userPrefsStore,
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
         processingStatusRepository = processingStatusRepository,
@@ -86,8 +86,8 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
 
-    private val voiceApi: VoiceApi
-        get() = voiceApiProvider.get()
+    private val sourceExtractionApi: SourceExtractionApi
+        get() = sourceExtractionApiProvider.get()
 
     private val sourceStatusRepository: SourceStatusRepository
         get() = sourceStatusRepositoryProvider.get()
@@ -137,10 +137,10 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        val parts = entity.toRequestParts(rawEventId)
+        val parts = entity.toSourceExtractionRequestParts(rawEventId, bodyText = transcript)
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing transcript with Gemini")
         val response = try {
-            voiceApi.commitmentExtract(
+            sourceExtractionApi.commitmentExtract(
                 audio = null,
                 inputModality = "transcript".toPlainRequestBody(),
                 sourceType = parts.sourceType,
@@ -150,10 +150,10 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
                 timestamp = parts.timestamp,
                 counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
-                folder = null,
+                folder = parts.folder,
                 conversationRef = null,
                 previousThreadContext = null,
-                bodyText = transcript.toPlainRequestBody(),
+                bodyText = parts.bodyText,
             )
         } catch (e: IOException) {
             logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -227,23 +227,23 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
             op = "HTTP 502 parse failed id=${redact(entity.id)}",
             block = {
                 errorBodyString?.let {
-                    moshi.adapter(VoiceErrorEnvelope::class.java).fromJson(it)
+                    moshi.adapter(SourceExtractionErrorEnvelope::class.java).fromJson(it)
                 }
             },
             onFailure = { null },
         )
-        return when (VoiceUploadStateMachine.decide502Action(envelope?.error)) {
-            Voice502Action.Quarantine -> {
+        return when (SourceExtractionUploadStateMachine.decide502Action(envelope?.error)) {
+            SourceExtraction502Action.Quarantine -> {
                 processingStatusRepository.recordError(entity.sourceType, envelope?.error ?: "Transcript extraction failed")
                 markFailed(entity, reasonCode = envelope?.error ?: "vertex_502_unknown")
                 Result.success()
             }
-            Voice502Action.HandleAsTransient -> handleTransientFailure(entity)
+            SourceExtraction502Action.HandleAsTransient -> handleTransientFailure(entity)
         }
     }
 
     private suspend fun handleTransientFailure(entity: RawIngestionEventEntity): Result =
-        when (VoiceUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
+        when (SourceExtractionUploadStateMachine.decideRetryAction(runAttemptCount, MAX_ATTEMPTS)) {
             RetryAction.Quarantine -> {
                 markFailed(entity, reasonCode = "retry_exhausted")
                 Result.success()
