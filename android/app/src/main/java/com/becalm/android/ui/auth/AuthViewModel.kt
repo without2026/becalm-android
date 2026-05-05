@@ -7,7 +7,6 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
-import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.remote.supabase.SupabaseSession
@@ -361,10 +360,7 @@ public class AuthViewModel @Inject constructor(
             termsAccepted = userPrefsStore.observeTermsAccepted().first(),
             signedIn = true,
         )
-        val emailConsents = EmailPipaProvider.entries.associateWith { provider ->
-            userPrefsStore.observeEmailPipaConsent(provider).first()
-        }
-        return OnboardingProgressResolver.resumeRoute(stepStates, emailConsents)
+        return OnboardingProgressResolver.resumeRoute(stepStates)
     }
 
     private fun authRepository(): AuthRepository = authRepositoryProvider.get()

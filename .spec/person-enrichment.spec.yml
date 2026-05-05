@@ -86,4 +86,6 @@ invariants:
   - "CONTACTS 권한 거부 시 앱 기능에 영향 없음 — persons_enrichment 없이 person_ref 원본값으로 fallback"
   - "EnrichmentWorker는 ContactsContract.Data만 읽는다 — SMS, 통화 기록, 기타 민감 데이터 접근 없음"
   - "persons_enrichment UPSERT 키는 person_ref (TEXT PRIMARY KEY) — 동일 person_ref의 연락처 정보는 항상 최신으로 덮어씀"
+  - "동일 source_contact_id에서 나온 email/phone/name alias는 PersonInteractionIndexWorker의 공통 resolver에서 하나의 canonical person으로 병합된다 — People tab은 person_ref별 중복 연락처 행을 직접 렌더링하지 않는다"
+  - "연락처 alias는 verified identity anchor(email/phone/contact)에 연결될 때만 자동 승격된다 — display-name-only alias가 여러 연락처에 걸치면 자동 승격하지 않는다"
   - "일반 로그아웃은 persons_enrichment를 삭제하지 않는다 — user-scoped DB 격리가 전제된다. 완전 삭제는 계정 삭제 또는 앱 삭제 경로만 수행한다"

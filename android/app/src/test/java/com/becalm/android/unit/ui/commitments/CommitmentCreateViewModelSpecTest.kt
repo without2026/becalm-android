@@ -86,7 +86,7 @@ class CommitmentCreateViewModelSpecTest {
         viewModel.onTitleChange("Send proposal")
         viewModel.onDirectionChange("take")
         viewModel.onQuoteChange("Please send me the proposal by Friday.")
-        viewModel.onPersonRefChange("  alice@example.com  ")
+        viewModel.onCounterpartyRefChange("  alice@example.com  ")
         viewModel.onDueHintChange("Friday afternoon")
         viewModel.onApproxChange(true)
 
@@ -102,7 +102,7 @@ class CommitmentCreateViewModelSpecTest {
         assertEquals("Send proposal", input.captured.title)
         assertEquals("take", input.captured.direction)
         assertEquals("Please send me the proposal by Friday.", input.captured.quote)
-        assertEquals("alice@example.com", input.captured.personRef)
+        assertEquals("alice@example.com", input.captured.counterpartyRef)
         assertEquals("Friday afternoon", input.captured.dueHint)
         assertTrue(input.captured.dueIsApproximate)
         assertTrue(viewModel.uiState.value.saved)
@@ -193,7 +193,7 @@ class CommitmentCreateViewModelSpecTest {
         userId = "user-1",
         direction = "give",
         counterpartyRaw = null,
-        personRef = "alice@example.com",
+        counterpartyRef = "alice@example.com",
         title = "Old title",
         description = null,
         quote = quote,

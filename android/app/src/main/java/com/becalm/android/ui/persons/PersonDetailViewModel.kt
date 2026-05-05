@@ -9,14 +9,9 @@ import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
-import com.becalm.android.data.local.db.entity.CalendarEventEntity
-import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
-import com.becalm.android.data.repository.CalendarEventRepository
-import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
-import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.remote.dto.SourceType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -104,21 +99,51 @@ public sealed class InteractionRow {
     ) : InteractionRow()
 }
 
+/** Compact commitment summary rendered inside one source-event card. */
+public data class PersonDetailCommitmentSummary(
+    val title: String,
+    val itemType: String,
+    val direction: String? = null,
+    val status: String? = null,
+)
+
+/** Projection-only connector from one source-event card to the next interaction. */
+public data class PersonDetailNextAction(
+    val label: String,
+    val nextSourceEventKey: String,
+)
+
+/**
+ * A PersonDetail timeline card. One card represents one source event, and the
+ * extracted give/take/schedule items from that source render inside it.
+ */
+public data class SourceEventCardProjection(
+    val sourceEventKey: String,
+    val sourceType: String,
+    val rawEventId: String?,
+    val occurredAt: Instant,
+    val title: String?,
+    val snippet: String?,
+    val commitmentsExtractedCount: Int = 0,
+    val myActions: List<PersonDetailCommitmentSummary> = emptyList(),
+    val theirActions: List<PersonDetailCommitmentSummary> = emptyList(),
+    val schedules: List<PersonDetailCommitmentSummary> = emptyList(),
+    val nextAction: PersonDetailNextAction? = null,
+)
+
 /**
  * Immutable snapshot of the PersonDetailScreen UI.
  *
- * @property personRef Canonicalized counterparty identifier for this screen.
+ * @property personId Canonical relation person id for this screen.
  * @property displayName Display-safe contact name from on-device enrichment, or null.
  * @property companyName Display-safe company name from on-device enrichment, or null.
  * @property jobTitle Display-safe job title from on-device enrichment, or null.
- * @property pendingCommitments Commitments that are not yet completed.
- * @property completedCommitments Commitments that have been completed/done.
- * @property interactionHistory Non-commitment interactions (events, meetings) sorted newest-first.
+ * @property timeline Commitments, raw events, and meetings sorted newest-first.
  * @property loading True while the initial flow collection is in progress.
  * @property error Non-null when an error should be surfaced to the user.
  */
 public data class PersonDetailUiState(
-    val personRef: String = "",
+    val personId: String = "",
     val displayName: String? = null,
     val nickname: String? = null,
     val companyName: String? = null,
@@ -129,10 +154,8 @@ public data class PersonDetailUiState(
     val meetingCount: Int = 0,
     val pendingCommitmentCount: Int = 0,
     val channelSources: Set<String> = emptySet(),
-    val completedExpanded: Boolean = false,
-    val pendingCommitments: List<InteractionRow.Commitment> = emptyList(),
-    val completedCommitments: List<InteractionRow.Commitment> = emptyList(),
-    val interactionHistory: List<InteractionRow> = emptyList(),
+    val timeline: List<InteractionRow> = emptyList(),
+    val sourceEventCards: List<SourceEventCardProjection> = emptyList(),
     val loading: Boolean = true,
     val error: String? = null,
 )
@@ -140,30 +163,24 @@ public data class PersonDetailUiState(
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "PersonDetailViewModel"
-internal const val ARG_PERSON_REF = "person_id"
-private const val RAW_EVENTS_LIMIT = 100
-private const val CALENDAR_EVENTS_LIMIT = 50
+internal const val ARG_PERSON_ID = "person_id"
+private const val PERSON_INTERACTIONS_LIMIT = 150
 
 /**
  * ViewModel for PersonDetailScreen (SRC-003, SRC-004, SRC-005).
  *
- * Combines four reactive sources:
- * 1. [PersonEnrichmentRepository.observeByPersonRef] — on-device contact metadata.
- * 2. [RawIngestionRepository.observeForPerson] — raw ingestion events linked to this person.
- * 3. [CommitmentRepository.observeAllForPerson] — commitments with this person as counterparty.
- * 4. [CalendarEventRepository.observeForPerson] — calendar meetings where this person attended.
+ * Primary detail data comes from the person index projection:
+ * [PersonIndexDao.observeIdentitiesForPerson] and
+ * [PersonIndexDao.observeInteractionsForPerson].
  *
  * The current user ID is sourced reactively from [UserPrefsStore.observeCurrentUserId].
  * When no user is signed in, an empty non-loading state is emitted.
  *
- * @param savedStateHandle navigation argument; expects key [ARG_PERSON_REF].
+ * @param savedStateHandle navigation argument; expects key [ARG_PERSON_ID].
  */
 @HiltViewModel
 public class PersonDetailViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
-    private val rawIngestionRepository: RawIngestionRepository,
-    private val commitmentRepository: CommitmentRepository,
-    private val calendarEventRepository: CalendarEventRepository,
     private val personIndexDao: PersonIndexDao,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
@@ -172,15 +189,14 @@ public class PersonDetailViewModel @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
-    private val personRef: String = savedStateHandle[ARG_PERSON_REF] ?: ""
+    private val personId: String = savedStateHandle[ARG_PERSON_ID] ?: ""
 
     private val _uiState: MutableStateFlow<PersonDetailUiState> =
-        MutableStateFlow(PersonDetailUiState(personRef = personRef))
+        MutableStateFlow(PersonDetailUiState(personId = personId))
     public val uiState: StateFlow<PersonDetailUiState> = _uiState.asStateFlow()
-    private val _completedExpanded: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     init {
-        if (personRef.isEmpty()) {
+        if (personId.isEmpty()) {
             _uiState.update { it.copy(loading = false, error = "Person ID missing") }
         } else {
             observeDetail()
@@ -196,11 +212,6 @@ public class PersonDetailViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** Toggles the completed-commitments section expansion state (SRC-008). */
-    public fun onToggleCompletedExpanded() {
-        _completedExpanded.update { !it }
-    }
-
     // ─── Private ──────────────────────────────────────────────────────────────
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -209,42 +220,28 @@ public class PersonDetailViewModel @Inject constructor(
             userPrefsStore.observeCurrentUserId()
                 .flatMapLatest { userId ->
                     if (userId == null) {
-                        flowOf(PersonDetailUiState(personRef = personRef, loading = false))
+                        flowOf(PersonDetailUiState(personId = personId, loading = false))
                     } else {
                         val calendarCutoff = calendarHistoryCutoff()
                         combine(
-                            personIndexDao.observeIdentitiesForPerson(userId, personRef),
+                            personIndexDao.observeIdentitiesForPerson(userId, personId),
                             personEnrichmentRepository.observeAll(),
-                            personIndexDao.observeInteractionsForPerson(userId, personRef, RAW_EVENTS_LIMIT + CALENDAR_EVENTS_LIMIT),
-                            legacyDetailFlow(userId),
-                            _completedExpanded,
-                        ) { identities, enrichmentRows, interactions, legacy, completedExpanded ->
+                            personIndexDao.observeInteractionsForPerson(userId, personId, PERSON_INTERACTIONS_LIMIT),
+                        ) { identities, enrichmentRows, interactions ->
                             withContext(ioDispatcher) {
-                                if (interactions.isNotEmpty()) {
-                                    PersonDetailProjector.buildIndexedState(
-                                        personId = personRef,
-                                        identities = identities,
-                                        enrichmentRows = enrichmentRows,
-                                        interactions = interactions.filterRecentCalendarHistory(calendarCutoff),
-                                        rawEvents = legacy.rawEvents,
-                                        completedExpanded = completedExpanded,
-                                    )
-                                } else {
-                                    PersonDetailProjector.buildState(
-                                        personRef = personRef,
-                                        enrichment = legacy.enrichment,
-                                        rawEvents = legacy.rawEvents,
-                                        commitments = legacy.commitments.filterRecentCalendarCommitments(calendarCutoff),
-                                        calendarEvents = legacy.calendarEvents.filterRecentCalendarEvents(calendarCutoff),
-                                        completedExpanded = completedExpanded,
-                                    )
-                                }
+                                PersonDetailProjector.buildIndexedState(
+                                    personId = personId,
+                                    identities = identities,
+                                    enrichmentRows = enrichmentRows,
+                                    interactions = interactions.filterRecentCalendarHistory(calendarCutoff),
+                                    rawEvents = emptyList(),
+                                )
                             }
                         }.catch { e ->
                             logger.e(TAG, "observeDetail failed", e)
                             emit(
                                 PersonDetailUiState(
-                                    personRef = personRef,
+                                    personId = personId,
                                     loading = false,
                                     error = e.message ?: "observe failed",
                                 ),
@@ -258,21 +255,6 @@ public class PersonDetailViewModel @Inject constructor(
         }
     }
 
-    private fun legacyDetailFlow(userId: String) =
-        combine(
-            personEnrichmentRepository.observeByPersonRef(personRef),
-            rawIngestionRepository.observeForPerson(userId, personRef, RAW_EVENTS_LIMIT),
-            commitmentRepository.observeAllForPerson(userId, personRef),
-            calendarEventRepository.observeForPerson(userId, personRef, CALENDAR_EVENTS_LIMIT),
-        ) { enrichment, rawEvents, commitments, calendarEvents ->
-            LegacyDetailSnapshot(
-                enrichment = enrichment,
-                rawEvents = rawEvents,
-                commitments = commitments,
-                calendarEvents = calendarEvents,
-            )
-        }
-
     private fun calendarHistoryCutoff(): Instant =
         clock.today(KST).plus(DatePeriod(days = -1)).atStartOfDayIn(KST)
 
@@ -281,19 +263,6 @@ public class PersonDetailViewModel @Inject constructor(
     ): List<PersonInteractionEntity> =
         filterNot { interaction ->
             interaction.isCalendarLike() && interaction.occurredAt < cutoff
-        }
-
-    private fun List<CalendarEventEntity>.filterRecentCalendarEvents(
-        cutoff: Instant,
-    ): List<CalendarEventEntity> =
-        filterNot { event -> event.startAt < cutoff }
-
-    private fun List<CommitmentEntity>.filterRecentCalendarCommitments(
-        cutoff: Instant,
-    ): List<CommitmentEntity> =
-        filterNot { commitment ->
-            commitment.sourceType in CALENDAR_SOURCE_TYPES &&
-                (commitment.dueAt ?: commitment.sourceEventOccurredAt) < cutoff
         }
 
     private fun PersonInteractionEntity.isCalendarLike(): Boolean =
@@ -305,12 +274,4 @@ public class PersonDetailViewModel @Inject constructor(
             SourceType.OUTLOOK_CALENDAR,
         )
     }
-
-    private data class LegacyDetailSnapshot(
-        val enrichment: com.becalm.android.data.local.db.entity.PersonEnrichmentEntity?,
-        val rawEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
-        val commitments: List<com.becalm.android.data.local.db.entity.CommitmentEntity>,
-        val calendarEvents: List<com.becalm.android.data.local.db.entity.CalendarEventEntity>,
-    )
-
 }

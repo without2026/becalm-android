@@ -55,7 +55,7 @@ public object CommitmentDecisionStatus {
  * @property decisionStatus Decision subtype. Non-null only when [itemType] is "decision".
  * @property counterpartyRaw Raw uncanonized counterparty identifier as extracted
  *   from the source event (phone number, email, or display name). Null when absent.
- * @property personRef Canonicalized counterparty identifier following the precedence
+ * @property counterpartyRef Canonicalized counterparty identifier following the precedence
  *   rule: E.164 phone > lowercase email > normalized display name. Null when the
  *   counterparty is not identifiable.
  * @property title Short commitment title as extracted by the LLM pipeline.
@@ -107,7 +107,7 @@ public object CommitmentDecisionStatus {
  * @property updatedAt Server-assigned last-update timestamp. Refreshed on every Railway
  *   PATCH and mirrored locally by [CommitmentDao.updateActionState].
  * @property lastEditedBy Supabase auth.users UUID of the user who most recently edited
- *   this commitment's mutable fields (title / description / due_at / person_ref /
+ *   this commitment's mutable fields (title / description / due_at / counterparty_ref /
  *   direction). Null when the row has never been user-edited — i.e. values are
  *   exactly as the LLM extractor or manual-create flow first produced them. Populated
  *   by the Stage-5 edit UI (EDIT-001..008) and by MAN-001..006 manual-create flows.
@@ -153,8 +153,8 @@ public object CommitmentDecisionStatus {
         Index(value = ["user_id", "item_type", "action_state", "due_at"], name = "idx_commitments_user_action_due"),
         // Supports SyncWorker pending-sync batch reads
         Index(value = ["user_id", "sync_status"]),
-        // idx_commitments_user_person_due — supports PersonDetailScreen and /v1/persons/{id}/commitments
-        Index(value = ["user_id", "person_ref", "due_at"], name = "idx_commitments_user_person_due"),
+        // idx_commitments_user_counterparty_due — supports counterparty-scoped local searches.
+        Index(value = ["user_id", "counterparty_ref", "due_at"], name = "idx_commitments_user_counterparty_due"),
         // idx_commitments_user_deleted — backs the `AND deleted_at IS NULL` filter applied to
         // every per-user SELECT query. Covers the common "live rows for this user" scan so the
         // planner avoids a full-table sweep on large histories. Spec: data-model.yml:219-225.
@@ -189,8 +189,8 @@ public data class CommitmentEntity(
     @ColumnInfo(name = "counterparty_raw")
     val counterpartyRaw: String?,
 
-    @ColumnInfo(name = "person_ref")
-    val personRef: String?,
+    @ColumnInfo(name = "counterparty_ref")
+    val counterpartyRef: String?,
 
     @ColumnInfo(name = "title")
     val title: String,

@@ -12,7 +12,7 @@ import kotlinx.datetime.Instant
  * - [dueAt] may be null (EDIT-004 allows no-deadline commitments).
  * - [dueHint] is a verbatim LLM expression preserved as-is; may be null.
  * - [dueIsApproximate] defaults to `false` in the edit form.
- * - [personRef] is already canonicalized (lowercase / E.164) or null/blank.
+ * - [counterpartyRef] is already canonicalized (lowercase / E.164) or null/blank.
  * - [direction] is exactly `"give"` or `"take"`.
  *
  * ## Intentionally not in this class
@@ -31,6 +31,6 @@ public data class CommitmentEditPatch(
     val dueAt: Instant?,
     val dueHint: String?,
     val dueIsApproximate: Boolean,
-    val personRef: String?,
+    val counterpartyRef: String?,
     val direction: String,
 )

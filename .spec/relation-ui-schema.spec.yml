@@ -1,0 +1,482 @@
+id: relation-ui-schema
+title: Relation UI Schema Contract
+status: draft
+owner: android
+updated_at: 2026-05-04
+
+purpose: >
+  Align BeCalm Android UI with the backend relation-intelligence schema. The UI
+  must render person-centered relationship memory from canonical person/relation
+  tables instead of legacy person_ref grouping, while preserving local-first
+  behavior and source evidence inspection.
+
+canonical_tables:
+  persons:
+    ui_role: "Top-level relationship node"
+    primary_key: person_id
+    rendered_as:
+      - "Person list row/card"
+      - "Person detail header"
+      - "Navigation argument"
+    primary_fields:
+      - id
+      - display_name
+      - kind
+      - primary_email
+      - primary_phone
+      - confidence
+      - archived_at
+    ui_rules:
+      - "Use display_name as the primary label."
+      - "Never show raw UUID person_id in normal UI."
+      - "Use primary_email/primary_phone only as secondary disambiguation when display names collide or are missing."
+      - "kind='organization' may render with an organization icon/label, but must still live in the same People surface."
+
+  person_identities:
+    ui_role: "Aliases and merge evidence for a person"
+    primary_key: identity_id
+    rendered_as:
+      - "Person detail identity row"
+      - "Merge confidence/debug affordance"
+      - "Manual match candidate detail"
+    primary_fields:
+      - person_id
+      - identity_type
+      - identity_value
+      - normalized_value
+      - confidence
+      - is_primary
+    ui_rules:
+      - "Primary identity appears first in detail."
+      - "Email/phone/contact_id identities are trusted merge anchors."
+      - "Name-only identities are weaker and should not silently merge two people without another anchor."
+      - "Identity management is not a first-screen concern. Keep it behind detail/repair affordances."
+
+  source_event_participants:
+    ui_role: "Who appeared in each source event"
+    primary_key: participant_id
+    rendered_as:
+      - "Person timeline event attribution"
+      - "Unmatched/review candidate"
+      - "Source evidence participant list"
+    primary_fields:
+      - source_event_id
+      - source_type
+      - source_ref
+      - person_id
+      - role
+      - relation_to_user
+      - identity_type
+      - normalized_value
+      - display_name_raw
+      - email_raw
+      - phone_raw
+      - organization_raw
+      - evidence
+      - confidence
+      - resolution_status
+    ui_rules:
+      - "Resolved participants can feed person timelines."
+      - "Unresolved participants appear in Review/Unassigned, not as full People rows."
+      - "role decides label language: sender/recipient/caller/receiver/attendee/mentioned/referenced."
+      - "relation_to_user decides visual prominence: counterparty > participant > referenced > unknown."
+      - "Referenced people may appear in detail timeline with a quieter treatment, but should not inflate open-loop counts unless linked to a commitment."
+
+  commitment_participants:
+    ui_role: "N:M person links for actions, schedules, and decisions"
+    primary_key: commitment_participant_id
+    rendered_as:
+      - "Open-loop count on Person list"
+      - "Commitment rows inside Person detail"
+      - "Commitment detail participant chips"
+    primary_fields:
+      - commitment_id
+      - person_id
+      - role
+      - evidence
+      - confidence
+    ui_rules:
+      - "A single commitment may belong to multiple people."
+      - "Commitment cards should resolve people through commitment_participants, not commitment.person_ref."
+      - "role maps to readable labels such as requester, responsible, attendee, decision maker."
+      - "If multiple participants exist, show the primary counterparty first and collapse the rest behind compact chips."
+
+  person_interactions:
+    ui_role: "Person detail timeline projection"
+    primary_key: interaction_id
+    rendered_as:
+      - "Person detail timeline row"
+      - "Person list latest interaction summary"
+      - "Channel/source counts"
+    primary_fields:
+      - person_id
+      - source_event_id
+      - commitment_id
+      - interaction_key
+      - interaction_type
+      - source_type
+      - occurred_at
+      - title
+      - snippet
+      - direction
+      - confidence
+    ui_rules:
+      - "This is the primary UI feed for Person detail."
+      - "interaction_type controls row component: email, call, meeting, calendar, commitment, manual."
+      - "Rows are sorted occurred_at descending."
+      - "Duplicate evidence is collapsed before rendering. Prefer original email/call/meeting over duplicate calendar evidence when overlap is strong."
+      - "source_event_id opens raw/source detail when available. commitment_id opens commitment detail when available."
+
+screen_contracts:
+  persons_list:
+    data_source: "Room person_interactions aggregate joined with persons/person_identities/persons_enrichment"
+    key: person_id
+    scope:
+      default: "Only resolved persons with at least one interaction are shown."
+      search: "Search includes resolved persons plus full local contacts when READ_CONTACTS is granted."
+      contact_only_rows: "Contact-only rows may appear in search results but not in the default People list until an interaction or manual note exists."
+    sections:
+      - id: needs_attention
+        show_when: "open_commitments_count > 0 OR unresolved_review_count > 0 OR recommended_next_action exists"
+        sort: "attention_rank desc, last_interaction_at desc"
+      - id: recent_relationships
+        show_when: "all remaining resolved persons"
+        sort: "last_interaction_at desc"
+    row_content:
+      - "display_name"
+      - "secondary identity or company/title if available"
+      - "latest interaction snippet"
+      - "channel/source marks"
+      - "open loop count"
+      - "last interaction time"
+    empty_state:
+      title: "아직 관계 기록이 없어요"
+      body: "메일, 통화, 미팅이 연결되면 사람별 기억이 여기에 쌓입니다."
+    invariants:
+      - "The list does not render unresolved participants as people."
+      - "The list does not group by raw person_ref."
+      - "Raw UUIDs, source refs, and table names are never visible."
+      - "Contacts without interactions are searchable, not listed by default."
+
+  person_detail:
+    data_source: "Room person_interactions by person_id plus persons/person_identities/commitment_participants/source_event_participants"
+    key: person_id
+    header:
+      fields:
+        - display_name
+        - primary identity
+        - relationship freshness
+        - open loop count
+      actions:
+        - "Review open loops"
+        - "Add note/manual commitment"
+        - "Manage match/aliases"
+    timeline:
+      card_unit: "source_event"
+      row_types:
+        email:
+          primary: "subject/title"
+          secondary: "snippet"
+          evidence_action: "Open source"
+        call:
+          primary: "call title or participant"
+          secondary: "commitment/evidence snippet"
+          evidence_action: "Open source"
+        meeting:
+          primary: "meeting title"
+          secondary: "summary/snippet"
+          evidence_action: "Open source"
+        calendar:
+          primary: "calendar event title"
+          secondary: "time and attendees"
+          treatment: "quieter than email/call/meeting when duplicate evidence exists"
+        commitment:
+          primary: "commitment title"
+          secondary: "quote or evidence"
+          action: "state transition or detail"
+    filters:
+      - all
+      - email
+      - call
+      - meeting
+      - commitment
+    invariants:
+      - "Timeline is built from person_interactions first."
+      - "Legacy raw/commitment/calendar person_ref fallback queries are not part of the PersonDetail primary path."
+      - "Referenced-only interactions are visually quieter and clearly labeled."
+      - "Each primary card represents one source event. Commitments extracted from that source render inside the card."
+      - "Source counts in the header are source-type counts only, not open/done status counts."
+
+  next_action_connector:
+    purpose: "Show that one source event led to a simple next interaction."
+    scope: "Lightweight source-to-source continuity, not a complex workflow graph."
+    examples:
+      - "Email asks for a reply, next_action='이메일 답신'."
+      - "Email says '전화로 자세히 얘기하자', and a later call with the same person is linked as the next action."
+      - "Meeting creates a follow-up email, the email appears as the next card link."
+    data_requirements:
+      - "source_event_id"
+      - "next_source_event_id when a real following source exists"
+      - "next_action_type: email_reply | call | meeting | schedule | manual_follow_up | none"
+      - "confidence"
+    storage_rule: "Do not add a next_action table in MVP. Compute next action connectors in the UI projection from adjacent source-event cards and lightweight source/commitment overlap."
+    ui_rules:
+      - "Render connector text between cards, not as a large card."
+      - "If no next action exists, end the interaction turn quietly."
+      - "Do not imply that BeCalm performed the action unless the user explicitly approved it."
+
+  review_matching:
+    data_source: "source_event_participants where resolution_status='unresolved' plus unmatched_person_interactions"
+    key: participant_id
+    purpose: "Let the user resolve uncertain people without polluting the main People list."
+    layout:
+      - "Source event preview"
+      - "Detected participant role"
+      - "Suggested identity candidates"
+      - "Create new person"
+      - "Ignore as not relevant"
+    actions:
+      match_existing:
+        writes:
+          - person_manual_matches
+          - person_alias_rules optional
+        followup: "enqueue PersonInteractionIndexWorker"
+      create_person:
+        writes:
+          - persons
+          - person_identities
+          - person_manual_matches
+        followup: "enqueue PersonInteractionIndexWorker"
+      ignore:
+        writes:
+          - "local resolution/blocked state"
+        followup: "hide from Review unless source changes"
+    invariants:
+      - "Review uses role/relation_to_user/confidence to rank candidates."
+      - "Bot/notify/service emails should be suppressed before reaching this UI when possible."
+      - "Ignore is reversible from a repair/settings surface."
+
+  commitment_detail:
+    data_source: "commitments joined with commitment_participants and source evidence"
+    key: commitment_id
+    participant_rendering:
+      - "Show linked people as chips."
+      - "If one person is primary, show their display name near the title."
+      - "If multiple people are linked, show compact participant chips below evidence."
+    edit_rules:
+      - "Title, due_at, due_hint, due_is_approximate, direction, action_state remain commitment fields."
+      - "Person reassignment is not PATCH /commitments.person_ref."
+      - "Person reassignment opens the matching/participant flow and updates relation rows or local manual match state."
+
+  commitments_feed:
+    data_source: "Open commitments joined with commitment_participants, persons, and source evidence"
+    key: commitment_id
+    scope:
+      default: "Open only. Completed/cancelled hidden by default."
+      completed_filter: "A filter may include completed/cancelled history."
+    sort:
+      primary: "Due proximity from today"
+      order:
+        - "Recently overdue first: D+1, D+2, ..."
+        - "Today: D-day"
+        - "Upcoming: D-1, D-2, D-5, ..."
+        - "No due date: latest source interaction first"
+    card_unit: "commitment with source-event context"
+    card_content:
+      - "person display name"
+      - "source event title/source type"
+      - "내가 해야 할 일 or 상대가 해야 할 일 or schedule label"
+      - "commitment title"
+      - "due label"
+      - "evidence quote"
+    invariants:
+      - "This feed is not grouped by person."
+      - "The card remains relationship-aware by showing linked people."
+      - "Completed items do not appear unless the user selects the completed/history filter."
+
+  today:
+    data_source: "Today-relevant open commitments and today's schedule interactions"
+    key: "timeline row id"
+    scope:
+      - "오늘 처리해야 할 내가 해야 할 일"
+      - "오늘 확인해야 할 상대가 해야 할 일"
+      - "오늘 일정"
+    row_treatment:
+      schedule: "Thin timeline row"
+      give: "Stronger action row labeled 내가 해야 할 일"
+      take: "Stronger action row labeled 상대가 해야 할 일"
+    invariants:
+      - "Today is a compact action timeline, not a relationship detail screen."
+      - "Rows link back to person detail or commitment/source detail."
+
+navigation_contract:
+  person_route:
+    argument: person_id
+    rule: "Accept and render canonical person_id only. Do not expose a legacy person_ref argument."
+  source_detail_route:
+    argument: source_event_id
+    fallback_argument: raw_event_id
+  commitment_route:
+    argument: commitment_id
+
+copy_contract:
+  labels:
+    sender: "보낸 사람"
+    recipient: "받은 사람"
+    caller: "전화 건 사람"
+    receiver: "전화 받은 사람"
+    attendee: "참석자"
+    organizer: "주최자"
+    mentioned: "언급됨"
+    referenced: "참조됨"
+    requester: "요청한 사람"
+    responsible: "해야 할 사람"
+    decision_maker: "결정에 참여"
+    give: "내가 해야 할 일"
+    take: "상대가 해야 할 일"
+  principles:
+    - "Use relationship language, not schema language."
+    - "Never show 'source_event_participants', 'person_interactions', or 'commitment_participants' in UI copy."
+    - "Korean copy should be short, business-native, and calm."
+
+migration_strategy:
+  phase_1_completed:
+    description: "Room mirrors backend relation schema directly. Runtime code does not derive compatibility source_person_candidates."
+    allowed:
+      - "source_event_participants mirror"
+      - "commitment_participants mirror"
+    blocked:
+      - "New backend API calls to v1/source_person_candidates"
+      - "Commitment PATCH body containing person_ref"
+      - "source_person_candidates cache"
+      - "person_ref fallback queries as a primary person UI path"
+  phase_2_completed:
+    description: "PersonInteractionIndexWorker reads source_event_participants and commitment_participants directly."
+    removed:
+      - "source_person_candidates as backend-managed bridge"
+      - "raw/commitment/calendar person_ref detail fallback as primary path"
+  phase_3:
+    description: "UI exposes relation repair and participant reassignment explicitly."
+    add:
+      - "Manage match from Person detail"
+      - "Participant chips in Commitment detail"
+      - "Review queue grouped by source event and participant role"
+
+matching_engine_contract:
+  purpose: >
+    During initial email sync, BeCalm must match sender/recipient/mentioned
+    participants to local contacts and existing persons before polluting the
+    People list. The engine creates candidate relation rows, resolves confident
+    email/phone/contact anchors automatically, and sends uncertain cases to Review.
+  inputs:
+    source_participants:
+      table: source_event_participants
+      fields:
+        - source_event_id
+        - source_type
+        - role
+        - relation_to_user
+        - identity_type
+        - normalized_value
+        - display_name_raw
+        - email_raw
+        - phone_raw
+        - organization_raw
+        - evidence
+        - confidence
+    contacts:
+      source: "Android ContactsContract, local only"
+      fields:
+        - contact_id
+        - display_name
+        - emails
+        - phones
+        - organization
+        - title
+    existing_persons:
+      tables:
+        - persons
+        - person_identities
+        - persons_enrichment
+    manual_state:
+      tables:
+        - person_manual_matches
+        - person_alias_rules
+        - blocked/ignored identity state
+  resolution_order:
+    - step: manual_match
+      rule: "Exact source tuple manual match wins."
+      confidence: 1.0
+    - step: contact_id
+      rule: "If participant maps to a known contact_id, merge into that contact-backed person."
+      confidence: 1.0
+    - step: exact_email
+      rule: "Lowercase email exact match against person_identities and contact emails."
+      confidence: 0.98
+    - step: exact_phone
+      rule: "E.164 phone exact match against person_identities and contact phones."
+      confidence: 0.98
+    - step: alias_rule
+      rule: "User-confirmed alias resolves when source scope allows it."
+      confidence: 0.95
+    - step: name_plus_domain_or_context
+      rule: "Name-only may suggest a candidate when domain/source context agrees, but should not auto-merge by itself."
+      confidence: 0.55
+    - step: unresolved
+      rule: "Create unresolved participant/review item."
+      confidence: 0.0
+  auto_resolution_policy:
+    auto_create_person_when:
+      - "email or phone exists and is not automated/bot/notify/service"
+      - "contact_id exists"
+      - "manual match explicitly creates a person"
+    do_not_auto_create_when:
+      - "name-only identity"
+      - "role is mentioned/referenced and no email/phone/contact anchor exists"
+      - "identity appears automated, noreply, notification, newsletter, receipt, support bot, or bulk sender"
+    contacts_search_policy:
+      - "Full contacts are searchable in People search."
+      - "Full contacts are not default People rows until they have an interaction, manual note, or manual commitment."
+  review_queue_policy:
+    include:
+      - "Unresolved counterparty/participant with useful evidence."
+      - "Conflicting email/phone/contact matches."
+      - "Name-only participant with repeated appearances."
+    exclude:
+      - "Suppressed bot/notify/service senders."
+      - "Bulk newsletters and generic marketing senders."
+      - "Referenced names with no actionable or relationship context."
+    grouping:
+      - "Group by source_event_id first."
+      - "Within source event, group participants by role and confidence."
+  initial_sync_behavior:
+    batch_strategy:
+      - "Process source_event_participants incrementally as email pages arrive."
+      - "Run matching in bounded chunks to avoid blocking main thread."
+      - "Persist resolved rows before indexing person_interactions."
+    user_experience:
+      - "People list can populate progressively."
+      - "Review count may appear after initial sync completes a chunk."
+      - "Do not show raw sync pipeline progress as the main screen."
+    failure_behavior:
+      - "If contact permission is absent, exact email/phone still resolves."
+      - "If contacts load later, enqueue matching/index rebuild."
+      - "If matching fails for a chunk, keep source_event_participants and retry without duplicating people."
+
+test_contract:
+  required_unit_tests:
+    - "Person list projection uses person_id as navigation key."
+    - "Person detail reads indexed person_interactions without legacy person_ref fallback."
+    - "Commitment edit does not serialize person_ref in PATCH."
+    - "Source participant refresh writes source_event_participants only; no compatibility candidate cache is created."
+  required_integration_tests:
+    - "Backend mail sync pulls raw events, source_event_participants, commitments, commitment_participants, then indexes a person row."
+    - "Backend calendar sync pulls calendar events, source_event_participants, commitments, commitment_participants, then indexes attendee timeline rows."
+    - "Unresolved participant appears in Review but not in People list."
+    - "A commitment linked to two people appears in both person detail timelines without duplicating the original source event."
+
+non_goals:
+  - "Do not expose schema/table names in user-facing UI."
+  - "Do not build a CRM-style table-first People screen."
+  - "Do not make source pages the primary relationship memory surface."
+  - "Do not silently merge name-only identities without another anchor."

@@ -55,7 +55,7 @@ public interface VoiceApi {
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
      * @param durationSeconds Duration of the audio file in seconds (integer, voice only).
      * @param timestamp      ISO-8601 timestamp of when the recording occurred.
-     * @param personRef      Optional canonicalized counterparty identifier.
+     * @param counterpartyRef      Optional canonicalized counterparty identifier.
      * @param eventTitle     Optional MediaStore TITLE of the recording.
      *
      * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
@@ -68,7 +68,18 @@ public interface VoiceApi {
         @Part("raw_event_id") rawEventId: RequestBody,
         @Part("duration_seconds") durationSeconds: RequestBody,
         @Part("timestamp") timestamp: RequestBody,
-        @Part("person_ref") personRef: RequestBody?,
+        @Part("counterparty_ref") counterpartyRef: RequestBody?,
+        @Part("event_title") eventTitle: RequestBody?,
+    ): Response<TranscribeExtractResponse>
+
+    @Multipart
+    @POST("v1/voice/transcript_extract")
+    public suspend fun transcriptExtract(
+        @Part("transcript") transcript: RequestBody,
+        @Part("client_event_id") clientEventId: RequestBody,
+        @Part("raw_event_id") rawEventId: RequestBody,
+        @Part("timestamp") timestamp: RequestBody,
+        @Part("counterparty_ref") counterpartyRef: RequestBody?,
         @Part("event_title") eventTitle: RequestBody?,
     ): Response<TranscribeExtractResponse>
 }

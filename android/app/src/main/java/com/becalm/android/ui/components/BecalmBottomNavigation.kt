@@ -1,6 +1,8 @@
 package com.becalm.android.ui.components
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Group
@@ -21,6 +23,7 @@ import com.becalm.android.R
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.becalmColors
 import com.becalm.android.ui.theme.becalmFocusRing
+import com.becalm.android.ui.theme.glassPanelElevated
 
 /**
  * Bottom navigation bar for the three main tabs: Today, Persons, Commitments.
@@ -38,11 +41,15 @@ public fun BecalmBottomNavigation(
     val becalmColors = MaterialTheme.becalmColors
 
     NavigationBar(
-        containerColor = becalmColors.glassPanelFill,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .glassPanelElevated(MaterialTheme.shapes.large),
+        containerColor = becalmColors.glassPanelFillElevated,
         tonalElevation = 0.dp,
     ) {
         val itemColors = NavigationBarItemDefaults.colors(
-            indicatorColor = becalmColors.glassPanelFillElevated,
+            indicatorColor = MaterialTheme.colorScheme.tertiaryContainer,
             selectedIconColor = MaterialTheme.colorScheme.onSurface,
             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             selectedTextColor = MaterialTheme.colorScheme.onSurface,

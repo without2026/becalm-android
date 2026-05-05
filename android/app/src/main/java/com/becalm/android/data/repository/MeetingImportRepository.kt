@@ -145,6 +145,9 @@ public class MeetingImportRepository @Inject constructor(
                             ),
                         )
                     }
+                    if (rawEvent.syncStatus == "pending") {
+                        workScheduler.enqueueMeetingTranscriptUpload(rawEvent.id)
+                    }
                 } else if (rawEvent.syncStatus == "pending") {
                     workScheduler.enqueueVoiceUpload(rawEvent.id, savedFile.uri.toString())
                 }

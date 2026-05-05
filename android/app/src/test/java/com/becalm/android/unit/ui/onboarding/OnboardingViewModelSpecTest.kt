@@ -18,6 +18,7 @@ import com.becalm.android.ui.onboarding.EmailOAuthConnector
 import com.becalm.android.ui.onboarding.EmailOAuthProvider
 import com.becalm.android.ui.onboarding.EmailOAuthResult
 import com.becalm.android.ui.onboarding.OnboardingStep
+import com.becalm.android.ui.onboarding.OnboardingSourceProvider
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.PipaConsentEvent
 import com.becalm.android.ui.onboarding.StepStatus
@@ -219,6 +220,55 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
+    fun `source connection continue skips unfinished source steps including IMAP`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onMarkStepStatus(OnboardingStep.LINK_GMAIL, StepStatus.COMPLETE)
+        viewModel.onSkipRemainingSourceConnections()
+        advanceUntilIdle()
+
+        assertEquals(
+            StepStatus.COMPLETE,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
+        )
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_OUTLOOK_MAIL),
+        )
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_IMAP),
+        )
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GOOGLE_CALENDAR),
+        )
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_OUTLOOK_CALENDAR),
+        )
+    }
+
+    @Test
+    fun `source connection skip disables calendar provider and marks step skipped`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onSkipSourceProvider(OnboardingSourceProvider.GOOGLE_CALENDAR)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userPrefsStore.setSourceEnabled(
+                com.becalm.android.data.remote.dto.SourceType.GOOGLE_CALENDAR,
+                false,
+            )
+        }
+        assertEquals(
+            StepStatus.SKIPPED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GOOGLE_CALENDAR),
+        )
+    }
+
+    @Test
     fun `ONB email PIPA batch failure returns false and leaves IMAP step untouched`() = runTest {
         coEvery { userPrefsStore.setEmailPipaConsents(EmailPipaProvider.IMAP_GROUP, true) } throws
             java.io.IOException("disk full")
@@ -322,14 +372,14 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ENR-002 denied contacts permission marks contacts denied and navigates to Gmail email PIPA`() = runTest {
+    fun `ENR-002 denied contacts permission marks contacts denied and navigates to sources`() = runTest {
         val viewModel = buildViewModel()
 
         viewModel.contactsPermissionEffects.test {
             viewModel.onContactsPermissionResult(granted = false)
 
             assertEquals(
-                ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
+                ContactsPermissionEffect.NavigateToSources,
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -342,7 +392,7 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ENR-002 skipping contacts marks contacts skipped and navigates to Gmail email PIPA`() = runTest {
+    fun `ENR-002 skipping contacts marks contacts skipped and navigates to sources`() = runTest {
         val viewModel = buildViewModel()
 
         viewModel.contactsPermissionEffects.test {
@@ -350,7 +400,7 @@ class OnboardingViewModelSpecTest {
             advanceUntilIdle()
 
             assertEquals(
-                ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
+                ContactsPermissionEffect.NavigateToSources,
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()

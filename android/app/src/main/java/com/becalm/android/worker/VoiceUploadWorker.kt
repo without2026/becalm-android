@@ -14,13 +14,11 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
-import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.VoiceApi
 import com.becalm.android.data.remote.dto.VoiceErrorEnvelope
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
-import com.becalm.android.domain.voice.Direction
 import com.squareup.moshi.Moshi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -238,7 +236,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 rawEventId = parts.rawEventId,
                 durationSeconds = parts.durationSeconds,
                 timestamp = parts.timestamp,
-                personRef = parts.personRef,
+                counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
             )
         } catch (e: IOException) {
@@ -256,53 +254,12 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
                 val now = Clock.System.now()
 
-                // Insert extracted trackable items into Room.
-                // IDs are deterministic (UUID v5 keyed on rawEventId+index) so that a
-                // replayed successful response produces an upsert on the same PK rather than
-                // a duplicate row (CommitmentDao uses OnConflictStrategy.REPLACE — finding #2 fix).
-                val commitmentEntities = body.items.mapIndexed { index, dto ->
-                    dto.toTrackableCommitmentEntity(
-                        rawEventId = rawEventId,
-                        index = index,
-                        userId = userId,
-                        sourceRef = entity.sourceRef,
-                        sourceType = entity.sourceType,
-                        sourceEventTitle = entity.eventTitle,
-                        sourceEventOccurredAt = entity.timestamp,
-                        now = now,
-                    )
-                }
-                if (commitmentEntities.isNotEmpty()) {
-                    commitmentDao.insertAll(commitmentEntities)
-                }
-                val candidateEntities = body.personCandidates.mapIndexed { index, dto ->
-                    dto.toSourcePersonCandidateEntity(
-                        userId = userId,
-                        sourceType = entity.sourceType,
-                        sourceRef = "raw:$rawEventId",
-                        index = index,
-                        now = now,
-                    )
-                }
-                if (candidateEntities.isNotEmpty()) {
-                    personIndexDao.upsertCandidates(candidateEntities)
-                }
-
-                // Update raw event metadata:
-                // - commitmentsExtractedCount now mirrors the persisted trackable-item count.
-                // - eventSnippet uses the first extracted item's quote for recall.
-                val snippet = body.items.firstOrNull()?.quote?.take(SNIPPET_MAX_CHARS)
-                val updated = entity.copy(
-                    commitmentsExtractedCount = body.items.size,
-                    eventSnippet = snippet,
-                    lastAttemptAt = now,
-                    syncStatus = STATUS_PENDING,
+                extractionPersister().persist(
+                    userId = userId,
+                    entity = entity,
+                    body = body,
+                    now = now,
                 )
-                rawIngestionEventDao.update(updated)
-
-                sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
-                processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
-                workScheduler.enqueuePersonInteractionIndex()
                 logger.d(
                     TAG,
                     "upload success id=${redact(rawEventId)} items=${body.items.size}",
@@ -359,6 +316,17 @@ public class VoiceUploadWorker @AssistedInject constructor(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun extractionPersister(): VoiceExtractionPersister =
+        VoiceExtractionPersister(
+            rawIngestionEventDao = rawIngestionEventDao,
+            commitmentDao = commitmentDao,
+            personIndexDao = personIndexDao,
+            sourceStatusRepository = sourceStatusRepository,
+            processingStatusRepository = processingStatusRepository,
+            workScheduler = workScheduler,
+            logger = logger,
+        )
 
     /**
      * VOI-004 PIPA consent gate 구현 — pre-upload, post-upload 두 번 호출된다.
@@ -563,7 +531,6 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     public companion object {
         private const val TAG = "VoiceUploadWorker"
-        private const val SNIPPET_MAX_CHARS = 200
         private const val MAX_ATTEMPTS = 3
 
         /**

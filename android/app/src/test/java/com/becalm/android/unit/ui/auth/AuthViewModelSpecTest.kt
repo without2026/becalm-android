@@ -257,7 +257,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(
                 userId = "user-123",
                 onboardingCompleted = false,
-                onboardingResumeRoute = BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path,
+                onboardingResumeRoute = BecalmRoute.OnboardingSources.path,
             ),
             viewModel.uiState.value,
         )

@@ -65,7 +65,7 @@ public data class CommitmentBatchPayloadDto(
     @field:Json(name = "counterparty_raw") val counterpartyRaw: String? = null,
 
     /** Canonicalized counterparty identifier; null when unidentifiable. */
-    @field:Json(name = "person_ref") val personRef: String? = null,
+    @field:Json(name = "counterparty_ref") val counterpartyRef: String? = null,
 
     /** Short title as extracted by the LLM. */
     @field:Json(name = "title") val title: String,

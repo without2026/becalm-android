@@ -22,16 +22,22 @@ internal object PersonsUiProjector {
     fun authenticatedState(
         query: String,
         peoplePage: PersonsListPageProjection,
+        searchableContacts: List<PersonListProjection> = emptyList(),
         unassigned: List<UnassignedEventSummary>,
         offlineStatus: PersonsOfflineStatus,
         pageSize: Int,
     ): PersonsUiState {
-        val rows = peoplePage.rows
+        val sourceRows = if (query.isBlank()) {
+            peoplePage.rows
+        } else {
+            (peoplePage.rows + searchableContacts).distinctBy(PersonListProjection::personId)
+        }
+        val rows = sourceRows
             .filter { projection ->
                 query.isBlank() ||
                     projection.displayName?.contains(query, ignoreCase = true) == true ||
                     projection.nickname?.contains(query, ignoreCase = true) == true ||
-                    projection.personRef.contains(query, ignoreCase = true)
+                    projection.personId.contains(query, ignoreCase = true)
             }
             .map(PersonsUiProjector::toPersonRow)
         return PersonsUiState(
@@ -50,7 +56,7 @@ internal object PersonsUiProjector {
     }
 
     private fun toPersonRow(projection: PersonListProjection): PersonRow = PersonRow(
-        personRef = projection.personRef,
+        personId = projection.personId,
         displayName = projection.displayName,
         nickname = projection.nickname,
         companyName = projection.companyName,

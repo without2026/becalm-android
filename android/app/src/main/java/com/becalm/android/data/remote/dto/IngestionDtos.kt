@@ -50,12 +50,29 @@ public data class RawIngestionEventDto(
      */
     @field:Json(name = "source_ref") val sourceRef: String? = null,
 
+    /** Email RFC 5322 Message-ID header, when available. */
+    @field:Json(name = "message_id_header") val messageIdHeader: String? = null,
+
+    /** Email RFC 5322 In-Reply-To header, when available. */
+    @field:Json(name = "in_reply_to_header") val inReplyToHeader: String? = null,
+
+    /** Email RFC 5322 References header, when available. */
+    @field:Json(name = "references_header") val referencesHeader: String? = null,
+
     /**
      * Canonicalized counterparty identifier.
      * Precedence: E.164 phone > lowercase email > normalized display name.
      * Null for events with no identifiable counterparty (self-dictated notes).
      */
-    @field:Json(name = "person_ref") val personRef: String? = null,
+    @field:Json(name = "counterparty_ref") val counterpartyRef: String? = null,
+
+    /**
+     * Canonical participant input for person/relation intelligence.
+     *
+     * New source adapters must populate this instead of relying on [counterpartyRef].
+     * `counterparty_ref` remains a compatibility hint for extraction prompts and old rows.
+     */
+    @field:Json(name = "participants") val participants: List<SourceEventParticipantInputDto>? = null,
 
     /**
      * Voice: MediaStore TITLE; email: subject; calendar: event title.
@@ -82,8 +99,8 @@ public data class RawIngestionEventDto(
      * (`gmail` / `outlook_mail` / `naver_imap` / `daum_imap`). Null for every other
      * source type (`voice`, `google_calendar`, `outlook_calendar`, etc.).
      *
-     * Forwarded to Railway so that the server-side `person_ref` resolver in the
-     * extraction pipeline can replay the same `INBOX → From` / `SENT → To[0]`
+     * Forwarded to Railway so that the server-side counterparty resolver in the
+     * extraction pipeline can replay the same `INBOX -> From` / `SENT -> To[0]`
      * decision the client already made locally — this keeps server re-derivation
      * idempotent with [com.becalm.android.data.local.db.entity.RawIngestionEventEntity.folder].
      * Spec: `.spec/email-pipeline.spec.yml:15-18`.
@@ -105,6 +122,22 @@ public data class RawIngestionEventDto(
 
     /** ISO 8601 timestamp of when the event occurred (not upload time). */
     @field:Json(name = "timestamp") val timestamp: Instant,
+)
+
+@JsonClass(generateAdapter = true)
+public data class SourceEventParticipantInputDto(
+    @field:Json(name = "role") val role: String,
+    @field:Json(name = "relation_to_user") val relationToUser: String,
+    @field:Json(name = "identity_type") val identityType: String? = null,
+    @field:Json(name = "raw_value") val rawValue: String? = null,
+    @field:Json(name = "normalized_value") val normalizedValue: String? = null,
+    @field:Json(name = "display_name") val displayName: String? = null,
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "phone") val phone: String? = null,
+    @field:Json(name = "organization") val organization: String? = null,
+    @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
+    @field:Json(name = "evidence_source") val evidenceSource: String = "metadata",
 )
 
 /**
@@ -133,36 +166,67 @@ public data class RawIngestionEventsResponse(
 )
 
 /**
- * Person candidate emitted by backend AI extraction for backend-managed sources.
+ * Source participant emitted by backend relation intelligence.
  *
- * Voice/call candidates are stored directly from the `TranscribeExtractResponse`.
- * Gmail/Outlook candidates are generated on Railway during backend-managed mail sync
- * and mirrored through this DTO into the same local Room table.
+ * This mirrors `source_event_participants` and is the canonical server contract for
+ * sender/recipient/caller/attendee/mentioned person references.
  */
 @JsonClass(generateAdapter = true)
-public data class SourcePersonCandidateDto(
+public data class SourceEventParticipantDto(
     @field:Json(name = "id") val id: String,
+    @field:Json(name = "source_event_id") val sourceEventId: String,
     @field:Json(name = "source_type") val sourceType: String,
-    @field:Json(name = "source_ref") val sourceRef: String,
-    @field:Json(name = "candidate_ref") val candidateRef: String,
+    @field:Json(name = "source_ref") val sourceRef: String? = null,
+    @field:Json(name = "person_id") val personId: String? = null,
     @field:Json(name = "role") val role: String,
-    @field:Json(name = "name") val name: String? = null,
-    @field:Json(name = "email") val email: String? = null,
-    @field:Json(name = "phone") val phone: String? = null,
-    @field:Json(name = "organization") val organization: String? = null,
+    @field:Json(name = "relation_to_user") val relationToUser: String,
+    @field:Json(name = "identity_type") val identityType: String? = null,
+    @field:Json(name = "normalized_value") val normalizedValue: String? = null,
+    @field:Json(name = "display_name_raw") val displayNameRaw: String? = null,
+    @field:Json(name = "email_raw") val emailRaw: String? = null,
+    @field:Json(name = "phone_raw") val phoneRaw: String? = null,
+    @field:Json(name = "organization_raw") val organizationRaw: String? = null,
+    @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
+    @field:Json(name = "resolution_status") val resolutionStatus: String,
+    @field:Json(name = "created_at") val createdAt: Instant,
+)
+
+/**
+ * Paginated response for GET /v1/source_event_participants.
+ *
+ * Mirrored into Room so backend-managed source types feed the same person index.
+ */
+@JsonClass(generateAdapter = true)
+public data class SourceEventParticipantsResponse(
+    @field:Json(name = "data") val data: List<SourceEventParticipantDto>,
+    @field:Json(name = "cursor") val cursor: String,
+    @field:Json(name = "has_more") val hasMore: Boolean,
+)
+
+/**
+ * Commitment-person edge emitted by backend relation intelligence.
+ *
+ * This mirrors `commitment_participants`; PersonInteractionIndexWorker uses it to attach
+ * give/take/schedule/decision rows to canonical person timelines.
+ */
+@JsonClass(generateAdapter = true)
+public data class CommitmentParticipantDto(
+    @field:Json(name = "id") val id: String,
+    @field:Json(name = "commitment_id") val commitmentId: String,
+    @field:Json(name = "person_id") val personId: String,
+    @field:Json(name = "role") val role: String,
     @field:Json(name = "evidence") val evidence: String? = null,
     @field:Json(name = "confidence") val confidence: Double = 0.0,
     @field:Json(name = "created_at") val createdAt: Instant,
 )
 
 /**
- * Paginated response for GET /v1/source_person_candidates.
- *
- * Mirrored into Room so all source types feed the same PersonInteractionIndexWorker.
+ * Paginated response for GET /v1/commitment_participants.
  */
 @JsonClass(generateAdapter = true)
-public data class SourcePersonCandidatesResponse(
-    @field:Json(name = "data") val data: List<SourcePersonCandidateDto>,
+public data class CommitmentParticipantsResponse(
+    @field:Json(name = "data") val data: List<CommitmentParticipantDto>,
     @field:Json(name = "cursor") val cursor: String,
     @field:Json(name = "has_more") val hasMore: Boolean,
 )

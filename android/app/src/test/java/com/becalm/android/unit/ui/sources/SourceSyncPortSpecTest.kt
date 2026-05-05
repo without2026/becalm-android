@@ -9,9 +9,10 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
-import com.becalm.android.data.repository.SourcePersonCandidateRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.DefaultSourceSyncPort
 import com.becalm.android.worker.WorkScheduler
@@ -31,8 +32,9 @@ class SourceSyncPortSpecTest {
     private val api: RailwayApi = mockk()
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val commitmentRepository: CommitmentRepository = mockk()
+    private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
-    private val sourcePersonCandidateRepository: SourcePersonCandidateRepository = mockk()
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -42,8 +44,9 @@ class SourceSyncPortSpecTest {
         apiProvider = Provider { api },
         calendarEventRepository = calendarEventRepository,
         commitmentRepository = commitmentRepository,
+        commitmentParticipantRepository = commitmentParticipantRepository,
         rawIngestionRepository = rawIngestionRepository,
-        sourcePersonCandidateRepository = sourcePersonCandidateRepository,
+        sourceEventParticipantRepository = sourceEventParticipantRepository,
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = workScheduler,
         logger = logger,
@@ -64,9 +67,9 @@ class SourceSyncPortSpecTest {
                     nextCursor = "raw-cursor-1",
                 ),
             )
-        coEvery { sourcePersonCandidateRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
+        coEvery { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) } returns
             BecalmResult.Success(
-                SourcePersonCandidateRepository.RefreshStats(
+                SourceEventParticipantRepository.RefreshStats(
                     fetched = 1,
                     upserted = 1,
                     hasMore = false,
@@ -82,6 +85,15 @@ class SourceSyncPortSpecTest {
                     nextCursor = "cursor-1",
                 ),
             )
+        coEvery { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) } returns
+            BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "commitment-participant-cursor-1",
+                ),
+            )
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GMAIL)
@@ -89,8 +101,9 @@ class SourceSyncPortSpecTest {
         assertTrue(result is BecalmResult.Success)
         coVerify(exactly = 1) { api.syncMailSource(provider = SourceType.GMAIL) }
         coVerify(exactly = 1) { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
-        coVerify(exactly = 1) { sourcePersonCandidateRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
+        coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
@@ -119,6 +132,24 @@ class SourceSyncPortSpecTest {
                     nextCursor = "commitment-cursor-1",
                 ),
             )
+        coEvery { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GOOGLE_CALENDAR, since = null) } returns
+            BecalmResult.Success(
+                SourceEventParticipantRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "participant-cursor-1",
+                ),
+            )
+        coEvery { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) } returns
+            BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 1,
+                    upserted = 1,
+                    hasMore = false,
+                    nextCursor = "commitment-participant-cursor-1",
+                ),
+            )
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GOOGLE_CALENDAR)
@@ -126,7 +157,9 @@ class SourceSyncPortSpecTest {
         assertTrue(result is BecalmResult.Success)
         coVerify(exactly = 1) { calendarEventRepository.triggerServerSync() }
         coVerify(exactly = 1) { calendarEventRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GOOGLE_CALENDAR, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }

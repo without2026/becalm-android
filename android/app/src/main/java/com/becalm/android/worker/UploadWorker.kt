@@ -8,7 +8,9 @@ import androidx.work.WorkerParameters
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -66,6 +68,8 @@ public class UploadWorker @AssistedInject constructor(
     private val authRepositoryProvider: Provider<AuthRepository>,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
+    private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
+    private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val workSchedulerProvider: Provider<WorkScheduler>,
     private val processingPauseGate: ProcessingPauseGate,
@@ -78,6 +82,8 @@ public class UploadWorker @AssistedInject constructor(
         authRepository: AuthRepository,
         rawIngestionRepository: RawIngestionRepository,
         commitmentRepository: CommitmentRepository,
+        sourceEventParticipantRepository: SourceEventParticipantRepository,
+        commitmentParticipantRepository: CommitmentParticipantRepository,
         sourceStatusRepository: SourceStatusRepository,
         workScheduler: WorkScheduler,
         processingPauseGate: ProcessingPauseGate,
@@ -88,6 +94,8 @@ public class UploadWorker @AssistedInject constructor(
         authRepositoryProvider = Provider { authRepository },
         rawIngestionRepositoryProvider = Provider { rawIngestionRepository },
         commitmentRepositoryProvider = Provider { commitmentRepository },
+        sourceEventParticipantRepositoryProvider = Provider { sourceEventParticipantRepository },
+        commitmentParticipantRepositoryProvider = Provider { commitmentParticipantRepository },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
         workSchedulerProvider = Provider { workScheduler },
         processingPauseGate = processingPauseGate,
@@ -116,8 +124,14 @@ public class UploadWorker @AssistedInject constructor(
                 commitmentRepository = commitmentRepositoryProvider.get(),
                 logger = logger,
             ),
+            relationRefreshCoordinator = SourceRelationRefreshCoordinator(
+                commitmentRepository = commitmentRepositoryProvider.get(),
+                sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
+                commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+                workScheduler = workSchedulerProvider.get(),
+                logger = logger,
+            ),
             sourceStatusRepository = sourceStatusRepositoryProvider.get(),
-            workScheduler = workSchedulerProvider.get(),
             logger = logger,
         )
 

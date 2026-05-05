@@ -8,10 +8,14 @@ import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
-import com.becalm.android.data.repository.SourcePersonCandidateRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.worker.CalendarRelationRefresh
+import com.becalm.android.worker.SourceRelationRefreshCoordinator
+import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
 import dagger.Module
@@ -43,8 +47,9 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val apiProvider: Provider<RailwayApi>,
     private val calendarEventRepository: CalendarEventRepository,
     private val commitmentRepository: CommitmentRepository,
+    private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val rawIngestionRepository: RawIngestionRepository,
-    private val sourcePersonCandidateRepository: SourcePersonCandidateRepository,
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
@@ -90,31 +95,21 @@ public class DefaultSourceSyncPort @Inject constructor(
         if (!response.isSuccessful) {
             return onBackendSyncFailure(sourceType, response.toSyncError())
         }
-        when (val refresh = rawIngestionRepository.refreshSince(userId = userId, sourceType = sourceType, since = null)) {
+        when (
+            val refresh = relationRefreshCoordinator().refresh(
+                userId = userId,
+                plan = SourceRelationRefreshPlan(
+                    sourceType = sourceType,
+                    rawSourceType = sourceType,
+                ),
+            )
+        ) {
             is BecalmResult.Success -> logger.d(
                 TAG,
-                "raw event refresh after backend mail sync sourceType=$sourceType " +
-                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
+                "relation refresh after backend mail sync sourceType=$sourceType changed=${refresh.value.changedCount}",
             )
             is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
         }
-        when (val refresh = sourcePersonCandidateRepository.refreshSince(userId = userId, sourceType = sourceType, since = null)) {
-            is BecalmResult.Success -> logger.d(
-                TAG,
-                "person candidate refresh after backend mail sync sourceType=$sourceType " +
-                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
-            )
-            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
-        }
-        when (val refresh = commitmentRepository.refreshSince(userId = userId, since = null)) {
-            is BecalmResult.Success -> logger.d(
-                TAG,
-                "commitment refresh after backend mail sync sourceType=$sourceType " +
-                    "fetched=${refresh.value.fetched} upserted=${refresh.value.upserted}",
-            )
-            is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
-        }
-        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "manual sync delegated to backend mail sourceType=$sourceType")
         return finalizeBackendSyncSuccess(sourceType)
     }
@@ -128,28 +123,37 @@ public class DefaultSourceSyncPort @Inject constructor(
         when (val result = calendarEventRepository.triggerServerSync()) {
             is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, result.error)
             is BecalmResult.Success -> {
-                when (val calendarRefresh = calendarEventRepository.refreshSince(userId = userId, since = null)) {
-                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, calendarRefresh.error)
+                when (
+                    val refresh = relationRefreshCoordinator().refresh(
+                        userId = userId,
+                        plan = SourceRelationRefreshPlan(
+                            sourceType = sourceType,
+                            calendarRefresh = CalendarRelationRefresh(),
+                        ),
+                    )
+                ) {
+                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
                     is BecalmResult.Success -> logger.d(
                         TAG,
-                        "calendar refresh after backend calendar sync sourceType=$sourceType " +
-                            "fetched=${calendarRefresh.value.fetched} upserted=${calendarRefresh.value.upserted}",
+                        "relation refresh after backend calendar sync sourceType=$sourceType changed=${refresh.value.changedCount}",
                     )
                 }
-                when (val commitmentRefresh = commitmentRepository.refreshSince(userId = userId, since = null)) {
-                    is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, commitmentRefresh.error)
-                    is BecalmResult.Success -> logger.d(
-                        TAG,
-                        "commitment refresh after backend calendar sync sourceType=$sourceType " +
-                            "fetched=${commitmentRefresh.value.fetched} upserted=${commitmentRefresh.value.upserted}",
-                    )
-                }
-                workScheduler.enqueuePersonInteractionIndex()
                 logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
                 return finalizeBackendSyncSuccess(sourceType)
             }
         }
     }
+
+    private fun relationRefreshCoordinator(): SourceRelationRefreshCoordinator =
+        SourceRelationRefreshCoordinator(
+            rawIngestionRepository = rawIngestionRepository,
+            calendarEventRepository = calendarEventRepository,
+            commitmentRepository = commitmentRepository,
+            sourceEventParticipantRepository = sourceEventParticipantRepository,
+            commitmentParticipantRepository = commitmentParticipantRepository,
+            workScheduler = workScheduler,
+            logger = logger,
+        )
 
     private suspend fun finalizeBackendSyncSuccess(sourceType: String): BecalmResult<Unit> {
         return when (val refresh = sourceStatusRepository.refreshFromServer()) {

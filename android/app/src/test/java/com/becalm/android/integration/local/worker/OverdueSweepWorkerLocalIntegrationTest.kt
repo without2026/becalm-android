@@ -121,7 +121,7 @@ class OverdueSweepWorkerLocalIntegrationTest {
         userId = session.userId,
         direction = "give",
         counterpartyRaw = "counterparty",
-        personRef = "counterparty@example.com",
+        counterpartyRef = "counterparty@example.com",
         title = id,
         description = null,
         quote = "quote-$id",

@@ -130,7 +130,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
         userId = userId,
         direction = "give",
         counterpartyRaw = null,
-        personRef = null,
+        counterpartyRef = null,
         title = "Call back",
         description = null,
         quote = "Please call me back.",

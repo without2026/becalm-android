@@ -42,8 +42,7 @@ import kotlinx.datetime.Clock
  *
  * ```
  * 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 통화기록매칭 → 연락처
- *      → Gmail → Outlook메일 → IMAP
- *      → Google캘린더 → Outlook캘린더
+ *      → 소스 연결(Gmail, Outlook메일, Google캘린더, Outlook캘린더)
  *      → 배터리최적화 → ColdSync
  * ```
  *
@@ -64,15 +63,15 @@ public enum class OnboardingStep {
     CALL_LOG_MATCHING,
     /** Step 5 — [ContactsPermissionScreen] (ONB-CONTACTS). */
     CONTACTS_PERM,
-    /** Step 6 — [GmailOAuthScreen]. */
+    /** Source connection page item: Gmail OAuth. */
     LINK_GMAIL,
-    /** Step 7 — [OutlookMailOAuthScreen]. */
+    /** Source connection page item: Outlook Mail OAuth. */
     LINK_OUTLOOK_MAIL,
-    /** Step 8 — [ImapSetupScreen]. */
+    /** Compatibility/manual source step. Skipped in first-run source connection. */
     LINK_IMAP,
-    /** Step 9 — [GoogleCalendarOAuthScreen]. */
+    /** Source connection page item: Google Calendar OAuth. */
     LINK_GOOGLE_CALENDAR,
-    /** Step 10 — [OutlookCalendarOAuthScreen]. */
+    /** Source connection page item: Outlook Calendar OAuth. */
     LINK_OUTLOOK_CALENDAR,
     /**
      * Step 11 — [NotificationPermissionScreen] (S6-E).
@@ -170,7 +169,7 @@ public sealed class CalendarConnectEvent {
 /** One-shot effects for the contacts permission step (ENR-001 / ENR-002). */
 public sealed interface ContactsPermissionEffect {
     public data object RequestSystemPermission : ContactsPermissionEffect
-    public data class NavigateToEmailPipa(val provider: EmailPipaProvider) : ContactsPermissionEffect
+    public data object NavigateToSources : ContactsPermissionEffect
 }
 
 // ─── UI State ─────────────────────────────────────────────────────────────────
@@ -408,6 +407,72 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    /** Starts the OAuth flow for a source on the unified source-connection screen. */
+    public fun onConnectSourceProvider(provider: OnboardingSourceProvider, activity: Activity) {
+        provider.emailProvider?.let { emailProvider ->
+            onConnectEmailProvider(emailProvider, activity)
+            return
+        }
+        provider.calendarProvider?.let { calendarProvider ->
+            onConnectCalendarProvider(calendarProvider, activity)
+        }
+    }
+
+    /** Re-checks backend OAuth state after the unified source screen resumes. */
+    public fun refreshSourceProviderConnection(provider: OnboardingSourceProvider) {
+        provider.emailProvider?.let { emailProvider ->
+            refreshEmailProviderConnection(emailProvider)
+            return
+        }
+        provider.calendarProvider?.let { calendarProvider ->
+            refreshCalendarProviderConnection(calendarProvider)
+        }
+    }
+
+    /** Gracefully skips a source on the unified source-connection screen. */
+    public fun onSkipSourceProvider(provider: OnboardingSourceProvider) {
+        viewModelScope.launch {
+            val emailProvider = provider.emailProvider
+            val calendarProvider = provider.calendarProvider
+            when {
+                emailProvider != null -> {
+                    userPrefsStore.setEmailSourceConnected(emailProvider, false)
+                    userPrefsStore.setEmailSourceManagedByBackend(emailProvider, false)
+                }
+                calendarProvider != null -> userPrefsStore.setSourceEnabled(calendarProvider.sourceType, false)
+            }
+            onSkipStep(provider.step)
+        }
+    }
+
+    /**
+     * Marks every unfinished source step terminal before leaving the unified source page.
+     * IMAP stays available from Settings but is skipped in first-run onboarding.
+     */
+    public fun onSkipRemainingSourceConnections() {
+        val sourceSteps = setOf(
+            OnboardingStep.LINK_GMAIL,
+            OnboardingStep.LINK_OUTLOOK_MAIL,
+            OnboardingStep.LINK_IMAP,
+            OnboardingStep.LINK_GOOGLE_CALENDAR,
+            OnboardingStep.LINK_OUTLOOK_CALENDAR,
+        )
+        val terminal = setOf(
+            StepStatus.GRANTED,
+            StepStatus.COMPLETE,
+            StepStatus.SKIPPED,
+            StepStatus.DENIED,
+        )
+        val updates = sourceSteps
+            .filter { step -> (_uiState.value.stepStates[step] ?: StepStatus.NOT_STARTED) !in terminal }
+            .associateWith { StepStatus.SKIPPED }
+        if (updates.isEmpty()) return
+        _uiState.update { state ->
+            state.copy(stepStates = state.stepStates + updates)
+        }
+        persistStepStatuses(updates)
+    }
+
     /**
      * Initiates an interactive calendar OAuth sign-in for [provider].
      *
@@ -471,23 +536,19 @@ public class OnboardingViewModel @Inject constructor(
         _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.RequestSystemPermission)
     }
 
-    /** Records the system permission result and advances to the email PIPA step. */
+    /** Records the system permission result and advances to the source connection step. */
     public fun onContactsPermissionResult(granted: Boolean) {
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
         onMarkStepStatus(OnboardingStep.CONTACTS_PERM, status)
         appRuntimeSyncCoordinator.refresh()
-        _contactsPermissionEffects.tryEmit(
-            ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
-        )
+        _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.NavigateToSources)
     }
 
     /** Explicit graceful-skip branch for contacts permission. */
     public fun onSkipContacts() {
         onSkipStep(OnboardingStep.CONTACTS_PERM)
         appRuntimeSyncCoordinator.refresh()
-        _contactsPermissionEffects.tryEmit(
-            ContactsPermissionEffect.NavigateToEmailPipa(EmailPipaProvider.GMAIL),
-        )
+        _contactsPermissionEffects.tryEmit(ContactsPermissionEffect.NavigateToSources)
     }
 
     // spec: ONB-PIPA per-provider (S6-D) + PIPA Article 17

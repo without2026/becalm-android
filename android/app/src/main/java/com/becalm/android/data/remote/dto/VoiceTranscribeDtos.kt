@@ -118,7 +118,7 @@ public data class VoiceExtractItemDto(
     @field:Json(name = "type") val type: String,
     @field:Json(name = "text") val text: String,
     @field:Json(name = "quote") val quote: String,
-    @field:Json(name = "person_ref") val personRef: String?,
+    @field:Json(name = "person_ref") val counterpartyRef: String?,
     @field:KstInstant @field:Json(name = "due_at") val dueAt: Instant?,
     @field:Json(name = "due_hint") val dueHint: String? = null,
     @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean = false,
@@ -141,7 +141,7 @@ public data class VoiceExtractItemDto(
             direction = resolvedDirection,
             text = text,
             quote = quote,
-            personRef = personRef,
+            counterpartyRef = counterpartyRef,
             dueAt = dueAt,
             dueHint = dueHint,
             dueIsApproximate = dueIsApproximate,
@@ -173,7 +173,7 @@ public data class PersonCandidateDto(
  * @property direction Commitment direction: "give" (user owes) or "take" (counterparty owes).
  * @property text Short summary of the commitment (1–2 sentences).
  * @property quote Verbatim audio fragment used as evidentiary source. Never edited.
- * @property personRef Canonicalized counterparty identifier or null.
+ * @property counterpartyRef Canonicalized counterparty identifier or null.
  * @property dueAt ISO-8601 due date/time or null when not mentioned.
  * @property dueHint Verbatim due-date expression as surfaced by the LLM (e.g. "다음주",
  *   "월말"). Preserved even when [dueAt] is non-null. Null when the LLM did not output a
@@ -204,7 +204,7 @@ public data class CommitmentDraftDto(
      * Precedence: E.164 phone > lowercase email > normalized display name.
      * Null when no identifiable counterparty.
      */
-    @field:Json(name = "person_ref") val personRef: String?,
+    @field:Json(name = "person_ref") val counterpartyRef: String?,
 
     /**
      * ISO-8601 due instant, or null when no deadline was mentioned.
@@ -247,7 +247,7 @@ public data class CommitmentDraftDto(
         },
         text = text,
         quote = quote,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         dueAt = dueAt,
         dueHint = dueHint,
         dueIsApproximate = dueIsApproximate,

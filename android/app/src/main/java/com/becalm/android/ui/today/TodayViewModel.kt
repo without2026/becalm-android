@@ -8,11 +8,18 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
+import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.ForegroundCatchUpScheduler
+import com.becalm.android.worker.SourceRelationRefreshCoordinator
+import com.becalm.android.worker.SourceRelationRefreshPlan
+import com.becalm.android.worker.SourceParticipantRefreshScope
+import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +60,7 @@ public sealed class TimelineItem {
         override val title: String,
         val direction: String?,
         val scheduleStatus: String?,
+        val rowTreatment: TodayCommitmentRowTreatment,
         val counterpartyDisplayName: String?,
         val dueAt: Instant?,
         val dueIsApproximate: Boolean,
@@ -88,6 +96,11 @@ public sealed class TimelineItem {
         override val timelineAt: Instant = sortKey,
         override val isTimed: Boolean = true,
     ) : TimelineItem()
+}
+
+public enum class TodayCommitmentRowTreatment {
+    ACTION,
+    SCHEDULE,
 }
 
 public data class TodayPersonFocus(
@@ -174,6 +187,9 @@ private const val TAG = "TodayViewModel"
 public class TodayViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository,
+    private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val workScheduler: WorkScheduler,
     private val sourceStatusRepository: SourceStatusRepository,
     private val authRepository: AuthRepository,
     userPrefsStore: UserPrefsStore,
@@ -234,16 +250,10 @@ public class TodayViewModel @Inject constructor(
     /**
      * Pull-to-refresh handler (TDY-006 / TDY-009).
      *
-     * Per TDY-009 the pull gesture both:
-     * 1. Refreshes Room-backed state from Railway for all three repositories so the
-     *    timeline reflects the server truth once the round-trip completes.
-     * 2. Fires [ForegroundCatchUpScheduler.triggerCatchUp] to enqueue the ING-011
-     *    parallel 6-source catch-up + SYNC-006 immediate upload pass without waiting
-     *    for the next foreground transition.
-     *
-     * The timeline itself is driven by Room (offline-first), so the user sees cached data
-     * immediately while the server refresh and catch-up run in the background. Failures do
-     * not clobber local state.
+     * Per TDY-009 the pull gesture still fires [ForegroundCatchUpScheduler.triggerCatchUp].
+     * The direct server mirror pull uses the same relation refresh path as source workers:
+     * calendar/commitment mirrors, source participants, commitment participants, then the
+     * person-index rebuild that feeds People, Today, and Commitments cards.
      */
     public fun onPullRefresh() {
         // TDY-009: tap-driven catch-up on the strip is explicitly prohibited ("칩 탭
@@ -255,8 +265,14 @@ public class TodayViewModel @Inject constructor(
             try {
                 sourceStatusRepository.refreshFromServer()
                 if (userId != null) {
-                    commitmentRepository.refreshSince(userId = userId, since = null)
-                    calendarEventRepository.refreshSince(userId = userId, since = null)
+                    relationRefreshCoordinator().refresh(
+                        userId = userId,
+                        plan = SourceRelationRefreshPlan(
+                            sourceType = PULL_REFRESH_SOURCE,
+                            calendarRefresh = CalendarRelationRefresh(),
+                            sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
+                        ),
+                    )
                 }
             } finally {
                 refreshingFlow.value = false
@@ -264,9 +280,23 @@ public class TodayViewModel @Inject constructor(
         }
     }
 
+    private fun relationRefreshCoordinator(): SourceRelationRefreshCoordinator =
+        SourceRelationRefreshCoordinator(
+            calendarEventRepository = calendarEventRepository,
+            commitmentRepository = commitmentRepository,
+            sourceEventParticipantRepository = sourceEventParticipantRepository,
+            commitmentParticipantRepository = commitmentParticipantRepository,
+            workScheduler = workScheduler,
+            logger = logger,
+        )
+
     /** TDY-007 settings entry from the top-right icon. */
     public fun onOpenSettings() {
         _effects.tryEmit(TodayEffect.NavigateToSettings)
+    }
+
+    private companion object {
+        private const val PULL_REFRESH_SOURCE = "today_pull_refresh"
     }
 
 }

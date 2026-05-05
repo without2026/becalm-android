@@ -243,7 +243,6 @@ public class ImapNaverWorker @AssistedInject constructor(
             sourceType = SourceType.NAVER_IMAP,
             at = Clock.System.now(),
         )
-        workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "doWork complete")
         return Result.success()
     }
@@ -393,7 +392,7 @@ public class ImapNaverWorker @AssistedInject constructor(
      */
     private fun ImapMessage.toEntity(userId: String, mailboxKey: String): RawIngestionEventEntity {
         val folderLabel = folderLabelFor(mailboxKey)
-        val personRef = derivePersonRef(mailboxKey)
+        val counterpartyRef = deriveCounterpartyRef(mailboxKey)
         val sourceRefJson = sourceRefAdapter.toJson(
             SourceRefEnvelope(
                 messageId = providerMessageId(),
@@ -416,7 +415,7 @@ public class ImapNaverWorker @AssistedInject constructor(
             ),
             sourceType = SourceType.NAVER_IMAP,
             sourceRef = sourceRefJson,
-            personRef = personRef,
+            counterpartyRef = counterpartyRef,
             eventTitle = subject,
             eventSnippet = snippetResult.snippet,
             folder = folderLabel,
@@ -425,11 +424,11 @@ public class ImapNaverWorker @AssistedInject constructor(
     }
 
     /**
-     * Returns the EMAIL-002 person_ref for this message given the [mailboxKey]
+     * Returns the EMAIL-002 counterparty seed for this message given the [mailboxKey]
      * it was fetched under. Delegates to the shared [EmailPersonRef] helper
      * (used by every email ingestion worker).
      */
-    private fun ImapMessage.derivePersonRef(mailboxKey: String): String? = when (mailboxKey) {
+    private fun ImapMessage.deriveCounterpartyRef(mailboxKey: String): String? = when (mailboxKey) {
         MAILBOX_NAVER_INBOX -> EmailPersonRef.forInbox(fromEmail)
         MAILBOX_NAVER_SENT -> EmailPersonRef.forSent(toAddresses)
         else -> null

@@ -36,12 +36,14 @@ internal class PersonsScreenStateSource @Inject constructor(
         } else {
             combine(
                 projectionPort.observePeople(userId),
+                projectionPort.observeSearchableContacts(userId),
                 projectionPort.observeUnassigned(userId, limit = pageSize),
-            ) { peoplePage, unassigned ->
+            ) { peoplePage, searchableContacts, unassigned ->
                 PersonsUiProjector.authenticatedState(
                     query = query,
                     pageSize = pageSize,
                     peoplePage = peoplePage,
+                    searchableContacts = searchableContacts,
                     unassigned = unassigned,
                     offlineStatus = offlineStatus,
                 )

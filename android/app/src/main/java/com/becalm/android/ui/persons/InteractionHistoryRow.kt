@@ -69,6 +69,88 @@ internal fun InteractionHistoryRow(
     }
 }
 
+@Composable
+internal fun SourceEventCardRow(
+    card: SourceEventCardProjection,
+    onEventTap: (eventId: String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val clickableModifier = card.rawEventId?.let { rawEventId ->
+        modifier.clickable { onEventTap(rawEventId) }
+    } ?: modifier
+    Column(
+        modifier = clickableModifier
+            .testTag("person-detail-source-card-${card.sourceEventKey}")
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            EventSourceBadge(sourceType = card.sourceType)
+            IngestionTimestamp(timestamp = card.occurredAt)
+        }
+        Text(
+            text = card.title ?: stringResource(R.string.raw_event_detail_no_title),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (!card.snippet.isNullOrBlank()) {
+            Text(
+                text = card.snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        CommitmentBucket(label = "내가 해야 할 일", items = card.myActions)
+        CommitmentBucket(label = "상대가 해야 할 일", items = card.theirActions)
+        CommitmentBucket(label = stringResource(R.string.commitment_item_type_schedule), items = card.schedules)
+        if (card.commitmentsExtractedCount > 0) {
+            CommitmentsExtractedBadge(count = card.commitmentsExtractedCount)
+        }
+        card.nextAction?.let { nextAction ->
+            Text(
+                text = "다음: ${nextAction.label}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommitmentBucket(
+    label: String,
+    items: List<PersonDetailCommitmentSummary>,
+) {
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        items.forEach { item ->
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 // ─── Branches ─────────────────────────────────────────────────────────────────
 
 @Composable

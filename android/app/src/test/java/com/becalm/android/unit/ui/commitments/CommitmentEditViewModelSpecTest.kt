@@ -57,7 +57,7 @@ class CommitmentEditViewModelSpecTest {
             entity(
                 id = "c1",
                 direction = "take",
-                personRef = "alice@example.com",
+                counterpartyRef = "alice@example.com",
                 dueAt = dueAt,
                 dueHint = "내일 오전",
                 dueIsApproximate = true,
@@ -72,7 +72,7 @@ class CommitmentEditViewModelSpecTest {
         assertEquals(false, state.loading)
         assertEquals("Title", state.title)
         assertEquals("take", state.direction)
-        assertEquals("alice@example.com", state.personRef)
+        assertEquals("alice@example.com", state.counterpartyRef)
         assertEquals(dueAt.toEpochMilliseconds(), state.dueAtMillis)
         assertEquals("내일 오전", state.dueHint)
         assertEquals(true, state.dueIsApproximate)
@@ -183,7 +183,7 @@ class CommitmentEditViewModelSpecTest {
     private fun entity(
         id: String,
         direction: String = "give",
-        personRef: String? = "lee@corp.com",
+        counterpartyRef: String? = "lee@corp.com",
         dueAt: Instant? = null,
         dueHint: String? = null,
         dueIsApproximate: Boolean = false,
@@ -193,7 +193,7 @@ class CommitmentEditViewModelSpecTest {
         userId = "user-1",
         direction = direction,
         counterpartyRaw = null,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         title = "Title",
         description = null,
         quote = "quote body",

@@ -87,8 +87,8 @@ private fun MainTabSourceAttentionBanner(
             stringResource(R.string.today_source_attention_disconnected_fmt, disconnectedCount)
     }
     // Color is not the only carrier of information: a leading 8dp error dot
-    // signals the alert state, body text reads in onSurface (higher contrast
-    // than error-red on glass-panel α=0.10 over cosmic dark).
+    // signals the alert state, body text reads in onSurface with stable
+    // contrast on the warm glass panel.
     //
     // The Text takes Modifier.weight(1f) so long messages wrap inside the Row
     // instead of being clipped — preserving the original Text(fillMaxWidth)

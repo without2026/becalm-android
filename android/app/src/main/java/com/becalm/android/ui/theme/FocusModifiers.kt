@@ -1,12 +1,10 @@
 /**
  * Focus-state modifiers for BeCalm Android.
  *
- * The project's `glassPanel` surface (translucent fill α=0.10 over the cosmic
- * near-black ground) leaves Material3's default ripple-only focus indication
- * too subtle for keyboard-driven navigation (Samsung DeX, external keyboards,
- * accessibility switches). [becalmFocusRing] overlays an explicit 2dp amber
- * border on the focused state so the Focus Visible WCAG 2.4.7 contract holds
- * across dark surfaces.
+ * The project's frosted glass surfaces need a visible keyboard focus state
+ * beyond Material3's ripple. [becalmFocusRing] overlays an explicit 2dp warm
+ * accent border so the Focus Visible WCAG 2.4.7 contract holds across light
+ * glass and the dark alternate.
  *
  * Apply to the OUTER modifier of the interactive composable and thread the
  * same [InteractionSource] to the underlying primitive (Button / TextButton /

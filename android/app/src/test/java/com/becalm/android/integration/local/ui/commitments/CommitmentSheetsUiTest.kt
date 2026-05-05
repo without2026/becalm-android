@@ -147,7 +147,7 @@ class CommitmentSheetsUiTest {
     fun `commitment create content shows required inputs direction and save`() {
         var title: String? = null
         var quote: String? = null
-        var personRef: String? = null
+        var counterpartyRef: String? = null
         var dueHint: String? = null
         var direction: String? = null
         var saveClicks = 0
@@ -160,7 +160,7 @@ class CommitmentSheetsUiTest {
                             title = "",
                             direction = "give",
                             quote = "",
-                            personRef = null,
+                            counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
                             dueIsApproximate = false,
@@ -184,9 +184,9 @@ class CommitmentSheetsUiTest {
                         quote = it
                         draft = draft.copy(quote = it)
                     },
-                    onPersonRefChange = {
-                        personRef = it
-                        draft = draft.copy(personRef = it)
+                    onCounterpartyRefChange = {
+                        counterpartyRef = it
+                        draft = draft.copy(counterpartyRef = it)
                     },
                     onDueAtMillisChange = {},
                     onDueHintChange = {
@@ -217,7 +217,7 @@ class CommitmentSheetsUiTest {
         composeRule.runOnIdle {
             assertEquals("새 약속", title)
             assertEquals("자료 보내주세요", quote)
-            assertEquals("kim@example.com", personRef)
+            assertEquals("kim@example.com", counterpartyRef)
             assertEquals("금요일 오후", dueHint)
             assertEquals("take", direction)
             assertEquals(1, saveClicks)
@@ -228,7 +228,7 @@ class CommitmentSheetsUiTest {
     fun `commitment edit content routes text field changes`() {
         var title: String? = null
         var dueHint: String? = null
-        var personRef: String? = null
+        var counterpartyRef: String? = null
 
         composeRule.setContent {
             BecalmTheme {
@@ -245,7 +245,7 @@ class CommitmentSheetsUiTest {
                             dueAtMillis = null,
                             dueIsApproximate = false,
                             dueHint = "",
-                            personRef = "person-1",
+                            counterpartyRef = "person-1",
                             direction = "give",
                         ),
                     )
@@ -262,9 +262,9 @@ class CommitmentSheetsUiTest {
                         dueHint = it
                         state = state.copy(dueHint = it)
                     },
-                    onPersonRefChange = {
-                        personRef = it
-                        state = state.copy(personRef = it)
+                    onCounterpartyRefChange = {
+                        counterpartyRef = it
+                        state = state.copy(counterpartyRef = it)
                     },
                     onDirectionChange = {},
                     onToggleDispute = {},
@@ -282,7 +282,7 @@ class CommitmentSheetsUiTest {
         composeRule.runOnIdle {
             assertEquals("수정된 약속", title)
             assertEquals("내일 오전", dueHint)
-            assertEquals("lee@example.com", personRef)
+            assertEquals("lee@example.com", counterpartyRef)
         }
     }
 
@@ -305,7 +305,7 @@ class CommitmentSheetsUiTest {
                         dueAtMillis = null,
                         dueIsApproximate = false,
                         dueHint = "",
-                        personRef = "person-1",
+                        counterpartyRef = "person-1",
                         direction = "give",
                         fieldErrors = mapOf(CommitmentEditValidator.Field.TITLE to "제목 필요"),
                     ),
@@ -313,7 +313,7 @@ class CommitmentSheetsUiTest {
                     onDueAtMillisChange = {},
                     onDueIsApproximateChange = {},
                     onDueHintChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDirectionChange = {},
                     onToggleDispute = {},
                     onSave = { saved += 1 },
@@ -350,7 +350,7 @@ class CommitmentSheetsUiTest {
         scheduleStatus = scheduleStatus,
         decisionStatus = decisionStatus,
         counterpartyRaw = "김철수",
-        personRef = "person-1",
+        counterpartyRef = "person-1",
         title = "제안서 보내기",
         description = null,
         quote = "금요일까지 보내겠습니다",

@@ -6,9 +6,8 @@
  * network font loading).  The `res/font/pretendard_variable.ttf` binary is
  * added in R10; this file only declares the [FontFamily] reference.
  *
- * Every slot follows the size / weight / line-height table in design token spec
- * §4.  Hangul minimum readable size is 12 sp on OLED; [labelSmall] (11 sp) must
- * not be used for critical text — see spec note.
+ * The scale follows DESIGN.md: light product UI, one Korean-first family,
+ * no oversized app-surface hero type, and 0 sp letter spacing by default.
  */
 package com.becalm.android.ui.theme
 
@@ -49,45 +48,21 @@ internal val PretendardFontFamily: FontFamily = FontFamily(
 internal val BecalmTypography = Typography(
 
     // ── Display ──────────────────────────────────────────────────────────────
-    // Not used for Korean body text — display / hero surfaces only.
     displayLarge = TextStyle(
-        fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.Light,
-        fontSize = 57.sp,
-        lineHeight = 64.sp,
-        letterSpacing = (-0.25).sp,
-    ),
-    displayMedium = TextStyle(
-        fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.Light,
-        fontSize = 45.sp,
-        lineHeight = 52.sp,
-        letterSpacing = 0.sp,
-    ),
-    displaySmall = TextStyle(
-        fontFamily = PretendardFontFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize = 36.sp,
-        lineHeight = 44.sp,
-        letterSpacing = 0.sp,
-    ),
-
-    // ── Headline ─────────────────────────────────────────────────────────────
-    headlineLarge = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = 0.sp,
     ),
-    headlineMedium = TextStyle(
+    displayMedium = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         letterSpacing = 0.sp,
     ),
-    headlineSmall = TextStyle(
+    displaySmall = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 24.sp,
@@ -95,53 +70,73 @@ internal val BecalmTypography = Typography(
         letterSpacing = 0.sp,
     ),
 
-    // ── Title ─────────────────────────────────────────────────────────────────
-    titleLarge = TextStyle(
+    // ── Headline ─────────────────────────────────────────────────────────────
+    headlineLarge = TextStyle(
+        fontFamily = PretendardFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+        letterSpacing = 0.sp,
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = PretendardFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp,
+    ),
+    headlineSmall = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp,
     ),
+
+    // ── Title ─────────────────────────────────────────────────────────────────
+    titleLarge = TextStyle(
+        fontFamily = PretendardFontFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp,
+    ),
     titleMedium = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
+        fontSize = 18.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.15.sp,
+        letterSpacing = 0.sp,
     ),
     titleSmall = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp,
+        letterSpacing = 0.sp,
     ),
 
     // ── Body ──────────────────────────────────────────────────────────────────
-    // bodyLarge: used for quote full-text (CMT-003) — needs adequate Hangul line-height.
     bodyLarge = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.5.sp,
+        letterSpacing = 0.sp,
     ),
     bodyMedium = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.25.sp,
+        letterSpacing = 0.sp,
     ),
-    // bodySmall: timestamps, metadata (HH:mm, D-N badge). Verify Hangul legibility
-    // at 12 sp on Galaxy S24 before release.
     bodySmall = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.4.sp,
+        letterSpacing = 0.sp,
     ),
 
     // ── Label ─────────────────────────────────────────────────────────────────
@@ -150,22 +145,20 @@ internal val BecalmTypography = Typography(
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.1.sp,
+        letterSpacing = 0.sp,
     ),
     labelMedium = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp,
+        letterSpacing = 0.sp,
     ),
-    // labelSmall (11 sp): do NOT use for critical information.
-    // Hangul minimum readable: 12 sp on OLED.  Error messages must use bodySmall minimum.
     labelSmall = TextStyle(
         fontFamily = PretendardFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
+        fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp,
+        letterSpacing = 0.sp,
     ),
 )

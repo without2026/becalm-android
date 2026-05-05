@@ -538,7 +538,16 @@ private fun TimelineCard(
         modifier = modifier
             .then(clickModifier)
             .glassPanel(MaterialTheme.shapes.medium)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(
+                horizontal = 12.dp,
+                vertical = if (item is TimelineItem.Commitment &&
+                    item.rowTreatment == TodayCommitmentRowTreatment.SCHEDULE
+                ) {
+                    8.dp
+                } else {
+                    10.dp
+                },
+            ),
     ) {
         Text(
             text = typeLabelFor(item),
@@ -548,7 +557,13 @@ private fun TimelineCard(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = item.title,
-            style = MaterialTheme.typography.bodyMedium,
+            style = if (item is TimelineItem.Commitment &&
+                item.rowTreatment == TodayCommitmentRowTreatment.SCHEDULE
+            ) {
+                MaterialTheme.typography.bodySmall
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
             color = MaterialTheme.colorScheme.onSurface,
         )
         if (item is TimelineItem.Commitment) {

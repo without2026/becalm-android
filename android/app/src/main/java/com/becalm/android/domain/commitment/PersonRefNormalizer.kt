@@ -1,10 +1,10 @@
 package com.becalm.android.domain.commitment
 
 /**
- * Shared normalization + validation helpers for the `person_ref` column used across
+ * Shared normalization + validation helpers for the `counterparty_ref` column used across
  * the commitment edit (EDIT-004) and manual-create (MAN-005) flows.
  *
- * A [CommitmentEntity.personRef][com.becalm.android.data.local.db.entity.CommitmentEntity.personRef]
+ * A [CommitmentEntity.counterpartyRef][com.becalm.android.data.local.db.entity.CommitmentEntity.counterpartyRef]
  * is a canonicalized counterparty identifier following the precedence rule:
  * E.164 phone > lowercase email > normalized display name. This object pins the
  * normalize + phone-shape validation rules in one place so MAN-005 and EDIT-004
@@ -13,7 +13,7 @@ package com.becalm.android.domain.commitment
  * Both [CommitmentEditValidator] and [CommitmentManualValidator] delegate here
  * so the phone-shape rules stay in one place.
  */
-public object PersonRefNormalizer {
+public object CounterpartyRefNormalizer {
 
     /** Strict E.164 per ITU-T recommendation: leading `+`, 8..15 digits, no spaces. */
     private val E164_REGEX: Regex = Regex("""^\+[1-9]\d{7,14}$""")

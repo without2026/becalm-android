@@ -17,6 +17,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.domain.meeting.MeetingImportFolders
+import com.becalm.android.worker.WorkScheduler
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,7 @@ internal class MeetingDocumentTreeProbe(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val sourceArtifactRepository: SourceArtifactRepository,
     private val userPrefsStore: UserPrefsStore,
+    private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) {
     suspend fun ingestMeetingTranscripts(now: Instant, lookbackDays: Int? = null): MeetingIngestOutcome {
@@ -137,12 +139,18 @@ internal class MeetingDocumentTreeProbe(
                             displayName = candidate.displayName,
                             documentUri = candidate.documentUri,
                         )
+                        if (candidate.syncStatus == "pending") {
+                            workScheduler.enqueueMeetingTranscriptUpload(result.id)
+                        }
                     }
                     if (candidate.lastModifiedMs > maxLastModifiedMs) {
                         maxLastModifiedMs = candidate.lastModifiedMs
                     }
                 }
                 is InsertResult.Dedup -> {
+                    if (candidate.isText && candidate.syncStatus == "pending") {
+                        workScheduler.enqueueMeetingTranscriptUpload(result.id)
+                    }
                     if (candidate.lastModifiedMs > maxLastModifiedMs) {
                         maxLastModifiedMs = candidate.lastModifiedMs
                     }

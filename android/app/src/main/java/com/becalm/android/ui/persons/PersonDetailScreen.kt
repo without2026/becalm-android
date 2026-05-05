@@ -1,15 +1,16 @@
 package com.becalm.android.ui.persons
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -18,7 +19,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -33,24 +37,13 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
-import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import kotlinx.coroutines.launch
 
 /**
- * Navigates from the person detail screen to a raw event drill-down. Scoped to
- * this file so the per-branch plumbing through `interactionSection` stays
- * readable; passed in as a parameter rather than closed-over so the recomposition
- * key is stable.
- */
-private typealias OnEventTap = (eventId: String) -> Unit
-
-/**
- * Person detail screen — renders a [PersonHeader] plus a 3-section body
- * (pending commitments / completed commitments / interaction history) per
- * `.spec/contracts/ui-map.yml:106-111`.
+ * Person detail screen — renders a [PersonHeader] plus a source-filtered unified
+ * timeline built from commitments, raw events, and meetings.
  *
  * spec: SRC-003, SRC-004, SRC-005, SRC-008, ENR-006
  *
@@ -68,7 +61,7 @@ public fun PersonDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
 
-    val onEventTap: OnEventTap = { eventId ->
+    val onEventTap: (String) -> Unit = { eventId ->
         navController.navigate(
             BecalmRoute.RawEventDetail(personId = personId, eventId = eventId).path,
         )
@@ -80,7 +73,6 @@ public fun PersonDetailScreen(
         snackbarHostState = snackbarHostState,
         onBack = navController::popBackStack,
         onEventTap = onEventTap,
-        onToggleCompletedExpanded = viewModel::onToggleCompletedExpanded,
     )
 }
 
@@ -91,7 +83,6 @@ public fun PersonDetailScreenContent(
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onEventTap: (String) -> Unit,
-    onToggleCompletedExpanded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BecalmScaffold(
@@ -107,9 +98,7 @@ public fun PersonDetailScreenContent(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        val hasAnyInteractions = state.pendingCommitments.isNotEmpty() ||
-            state.completedCommitments.isNotEmpty() ||
-            state.interactionHistory.isNotEmpty()
+        val hasAnyInteractions = state.sourceEventCards.isNotEmpty() || state.timeline.isNotEmpty()
         when {
             state.loading -> {
                 BecalmSheetSkeleton(modifier = Modifier.padding(padding))
@@ -126,7 +115,6 @@ public fun PersonDetailScreenContent(
                 state = state,
                 padding = padding,
                 onEventTap = onEventTap,
-                onToggleCompletedExpanded = onToggleCompletedExpanded,
             )
         }
     }
@@ -148,7 +136,7 @@ private fun PersonDetailEmpty(state: PersonDetailUiState, padding: PaddingValues
                 nickname = state.nickname,
                 companyName = state.companyName,
                 jobTitle = state.jobTitle,
-                personRef = state.personRef,
+                personId = state.personId,
                 eventCount = state.eventCount,
                 emailInteractionCount = state.emailInteractionCount,
                 callInteractionCount = state.callInteractionCount,
@@ -167,17 +155,18 @@ private fun PersonDetailList(
     state: PersonDetailUiState,
     padding: PaddingValues,
     onEventTap: (String) -> Unit,
-    onToggleCompletedExpanded: () -> Unit,
 ) {
-    val pendingHeader = stringResource(
-        R.string.person_detail_section_pending_fmt,
-        state.pendingCommitments.size,
+    var selectedFilter by rememberSaveable { mutableStateOf(PersonTimelineFilter.ALL) }
+    val sourceCards = remember(selectedFilter, state.sourceEventCards) {
+        state.sourceEventCards.filter(selectedFilter::matches)
+    }
+    val filteredRows = remember(selectedFilter, state.timeline) {
+        state.timeline.filter(selectedFilter::matches)
+    }
+    val timelineHeader = stringResource(
+        R.string.person_detail_timeline_section_fmt,
+        sourceCards.takeIf { it.isNotEmpty() }?.size ?: filteredRows.size,
     )
-    val completedHeader = stringResource(
-        R.string.person_detail_section_completed_fmt,
-        state.completedCommitments.size,
-    )
-    val historyHeader = stringResource(R.string.person_detail_history_section)
 
     LazyColumn(
         contentPadding = padding,
@@ -191,7 +180,7 @@ private fun PersonDetailList(
                 nickname = state.nickname,
                 companyName = state.companyName,
                 jobTitle = state.jobTitle,
-                personRef = state.personRef,
+                personId = state.personId,
                 eventCount = state.eventCount,
                 emailInteractionCount = state.emailInteractionCount,
                 callInteractionCount = state.callInteractionCount,
@@ -199,117 +188,133 @@ private fun PersonDetailList(
                 pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
-        pendingCommitmentsSection(
-            header = pendingHeader,
-            rows = state.pendingCommitments,
-            onEventTap = onEventTap,
-        )
-        completedCommitmentsSection(
-            header = completedHeader,
-            rows = state.completedCommitments,
-            expanded = state.completedExpanded,
-            onToggleExpanded = onToggleCompletedExpanded,
-            onEventTap = onEventTap,
-        )
-        historySection(
-            header = historyHeader,
-            rows = state.interactionHistory,
-            onEventTap = onEventTap,
-        )
-    }
-}
-
-// ─── LazyListScope section builders ───────────────────────────────────────────
-
-/**
- * Section 1 — pending commitments. Eagerly visible. No-op when empty.
- */
-private fun LazyListScope.pendingCommitmentsSection(
-    header: String,
-    rows: List<InteractionRow.Commitment>,
-    onEventTap: OnEventTap,
-) {
-    if (rows.isEmpty()) return
-    item(key = "header-pending") { SectionHeader(text = header) }
-    items(
-        items = rows,
-        key = { row -> "cp-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
-    ) { row ->
-        InteractionHistoryRow(
-            row = row,
-            onEventTap = onEventTap,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-        )
-    }
-}
-
-/**
- * Section 2 — completed commitments. Rendered as [ExpandableSectionHeader] and
- * default-collapsed per SRC-008 "접힌 상태 기본. 탭 시 … 펼쳐짐". No-op when empty.
- */
-private fun LazyListScope.completedCommitmentsSection(
-    header: String,
-    rows: List<InteractionRow.Commitment>,
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    onEventTap: OnEventTap,
-) {
-    if (rows.isEmpty()) return
-    item(key = "header-completed") {
-        ExpandableSectionHeader(
-            title = header,
-            expanded = expanded,
-            onToggle = onToggleExpanded,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-    }
-    if (!expanded) return
-    items(
-        items = rows,
-        key = { row -> "cd-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}" },
-    ) { row ->
-        InteractionHistoryRow(
-            row = row,
-            onEventTap = onEventTap,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-        )
-    }
-}
-
-/**
- * Section 3 — interaction history (raw events + calendar meetings, newest first).
- * Always visible. No-op when empty.
- */
-private fun LazyListScope.historySection(
-    header: String,
-    rows: List<InteractionRow>,
-    onEventTap: OnEventTap,
-) {
-    if (rows.isEmpty()) return
-    item(key = "header-history") { SectionHeader(text = header) }
-    items(
-        items = rows,
-        key = { row ->
-            when (row) {
-                is InteractionRow.Event -> "e-${row.id}"
-                is InteractionRow.Commitment -> "c-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
-                is InteractionRow.CalendarMeeting -> "m-${row.timestamp.toEpochMilliseconds()}-${row.title.hashCode()}"
+        item(key = "timeline-filters") {
+            TimelineFilterRow(
+                selectedFilter = selectedFilter,
+                onFilterSelect = { selectedFilter = it },
+            )
+        }
+        item(key = "header-timeline") { SectionHeader(text = timelineHeader) }
+        if (sourceCards.isNotEmpty()) {
+            items(
+                items = sourceCards,
+                key = { card -> card.sourceEventKey },
+            ) { card ->
+                SourceEventCardRow(
+                    card = card,
+                    onEventTap = onEventTap,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
-        },
-    ) { row ->
-        InteractionHistoryRow(
-            row = row,
-            onEventTap = onEventTap,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-        )
+        } else if (filteredRows.isEmpty()) {
+            item(key = "timeline-empty") {
+                EmptyState(title = stringResource(R.string.person_detail_timeline_filter_empty))
+            }
+        } else {
+            items(
+                items = filteredRows,
+                key = { row -> row.stableTimelineKey() },
+            ) { row ->
+                InteractionHistoryRow(
+                    row = row,
+                    onEventTap = onEventTap,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
     }
 }
+
+// ─── Timeline helpers ─────────────────────────────────────────────────────────
+
+private enum class PersonTimelineFilter {
+    ALL,
+    EMAIL,
+    CALL,
+    MEETING,
+    COMMITMENT,
+}
+
+@Composable
+private fun TimelineFilterRow(
+    selectedFilter: PersonTimelineFilter,
+    onFilterSelect: (PersonTimelineFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val filters = listOf(
+        PersonTimelineFilter.ALL to stringResource(R.string.person_detail_filter_all),
+        PersonTimelineFilter.EMAIL to stringResource(R.string.person_detail_filter_email),
+        PersonTimelineFilter.CALL to stringResource(R.string.person_detail_filter_call),
+        PersonTimelineFilter.MEETING to stringResource(R.string.person_detail_filter_meeting),
+        PersonTimelineFilter.COMMITMENT to stringResource(R.string.person_detail_filter_commitment),
+    )
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("person-detail-source-filters"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(filters) { (filter, label) ->
+            FilterChip(
+                selected = selectedFilter == filter,
+                onClick = { onFilterSelect(filter) },
+                label = {
+                    Text(text = label, style = MaterialTheme.typography.labelMedium)
+                },
+                modifier = Modifier.testTag("person-detail-filter-${filter.name.lowercase()}"),
+            )
+        }
+    }
+}
+
+private fun InteractionRow.stableTimelineKey(): String = when (this) {
+    is InteractionRow.Event -> "event-$id"
+    is InteractionRow.Commitment ->
+        "commitment-${timestamp.toEpochMilliseconds()}-${title.hashCode()}-$itemType-$actionState-$direction"
+    is InteractionRow.CalendarMeeting -> "meeting-${timestamp.toEpochMilliseconds()}-${title.hashCode()}"
+}
+
+private fun PersonTimelineFilter.matches(row: InteractionRow): Boolean = when (this) {
+    PersonTimelineFilter.ALL -> true
+    PersonTimelineFilter.EMAIL -> row is InteractionRow.Event && row.source.isEmailSource()
+    PersonTimelineFilter.CALL -> row is InteractionRow.Event && row.source.isCallSource()
+    PersonTimelineFilter.MEETING ->
+        row is InteractionRow.CalendarMeeting ||
+            (row is InteractionRow.Event && row.source.isCalendarSource())
+    PersonTimelineFilter.COMMITMENT -> row is InteractionRow.Commitment
+}
+
+private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boolean = when (this) {
+    PersonTimelineFilter.ALL -> true
+    PersonTimelineFilter.EMAIL -> card.sourceType.isEmailSource()
+    PersonTimelineFilter.CALL -> card.sourceType.isCallSource()
+    PersonTimelineFilter.MEETING -> card.sourceType.isCalendarSource()
+    PersonTimelineFilter.COMMITMENT ->
+        card.myActions.isNotEmpty() || card.theirActions.isNotEmpty() || card.schedules.isNotEmpty()
+}
+
+private fun String.isEmailSource(): Boolean =
+    equals("gmail", ignoreCase = true) ||
+        equals("outlook_mail", ignoreCase = true) ||
+        equals("naver_imap", ignoreCase = true) ||
+        equals("daum_imap", ignoreCase = true) ||
+        contains("mail", ignoreCase = true) ||
+        contains("imap", ignoreCase = true)
+
+private fun String.isCallSource(): Boolean =
+    equals("voice", ignoreCase = true) ||
+        equals("call_recording", ignoreCase = true) ||
+        contains("call", ignoreCase = true)
+
+private fun String.isCalendarSource(): Boolean =
+    equals("google_calendar", ignoreCase = true) ||
+        equals("outlook_calendar", ignoreCase = true) ||
+        contains("calendar", ignoreCase = true)
 
 @Composable
 private fun SectionHeader(text: String) {
@@ -346,7 +351,7 @@ private fun PreviewPersonDetailScreenWithHistory() {
                         nickname = "Alice",
                         companyName = "Acme Corp",
                         jobTitle = "Product Lead",
-                        personRef = "alice@acme.com",
+                        personId = "person-alice",
                         eventCount = 2,
                         emailInteractionCount = 1,
                         callInteractionCount = 0,

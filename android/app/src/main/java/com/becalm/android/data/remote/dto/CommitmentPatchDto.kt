@@ -12,7 +12,7 @@ import kotlinx.datetime.Instant
  *
  * Unlike the legacy [PatchCommitmentRequest] which ships exactly one field
  * ([PatchCommitmentRequest.actionState]), this DTO mirrors every user-writable
- * column in the `commitments` table and marks each one nullable so the client can
+ * mutable backend column and marks each one nullable so the client can
  * send just the fields that changed. Moshi serialises Kotlin `null` as a JSON
  * `null`; the server's Pydantic model treats `null` as "field omitted / retain
  * the existing value" for these columns (see
@@ -60,9 +60,6 @@ public data class CommitmentPatchDto(
 
     /** New `due_is_approximate` flag, or null to leave unchanged. */
     @field:Json(name = "due_is_approximate") val dueIsApproximate: Boolean? = null,
-
-    /** Canonicalized counterparty identifier, or null to leave unchanged / clear. */
-    @field:Json(name = "person_ref") val personRef: String? = null,
 
     /** `"give"` | `"take"`, or null to leave unchanged. */
     @field:Json(name = "direction") val direction: String? = null,

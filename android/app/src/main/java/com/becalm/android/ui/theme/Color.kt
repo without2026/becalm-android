@@ -1,14 +1,10 @@
 /**
- * Dark-first cosmic palette ported from BeCalmv3 desktop.
+ * Light-first warm relationship palette for BeCalm Android.
  *
- * Raw color constants (prefixed `Cosmic*` / `Glass*`) are module-internal and
- * should never be referenced directly outside this package. All consumer code
- * should go through [BecalmDarkColorScheme] / [BecalmLightColorScheme] (M3
- * slots) or [BecalmColors] (semantic extension — see BecalmColors.kt).
- *
- * Source of truth: `BeCalmv3/desktop/src/renderer/styles/global.css`, extracted
- * 2026-04-16.  Every hex value in this file traces back to a CSS variable in
- * that stylesheet — deviations are noted inline.
+ * PRODUCT.md defines BeCalm as a person-centered relationship intelligence
+ * assistant. DESIGN.md now sets the canonical Android theme as warm, light,
+ * restrained, and frosted. This file maps those OKLCH source tokens into
+ * Compose ARGB values for Material3.
  */
 package com.becalm.android.ui.theme
 
@@ -16,109 +12,94 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-// ─── Material3 ColorScheme — Dark (canonical) ────────────────────────────────
+// ─── Material3 ColorScheme — Light (canonical) ───────────────────────────────
 
 /**
- * BeCalm dark color scheme. This is the canonical brand expression for MVP.
- * [surfaceTint] is explicitly [Color.Transparent] to disable M3 tonal elevation
- * tinting, which would corrupt the cosmic-black aesthetic on all elevated surfaces.
+ * BeCalm light color scheme. This is the canonical product expression: warm
+ * light canvas, dark neutral actions, and a restrained warm accent.
  */
-internal val BecalmDarkColorScheme = darkColorScheme(
-    // Primary — near-white monochrome.  v3 `--accent: rgba(255,255,255,0.85)`
-    // mapped to M3 primary.  Off-white 0xEA avoids pure-white harshness on OLED.
-    primary = Color(0xFFEAEAEA),
-    onPrimary = Color(0xFF111111),
-    primaryContainer = Color(0xFF1A1A1A),
-    onPrimaryContainer = Color(0xFFD9D9D9),
+internal val BecalmLightColorScheme = lightColorScheme(
+    primary = Color(0xFF342E27),
+    onPrimary = Color(0xFFF4F0E9),
+    primaryContainer = Color(0xFFECE3D5),
+    onPrimaryContainer = Color(0xFF342E27),
 
-    // Secondary — muted interactive elements.
-    secondary = Color(0xB2B2B2B2),
-    onSecondary = Color(0xFF111111),
-    secondaryContainer = Color(0xFF1C1C1C),
-    onSecondaryContainer = Color(0xFFC2C2C2),
+    secondary = Color(0xFF696158),
+    onSecondary = Color(0xFFF4F0E9),
+    secondaryContainer = Color(0xFFE8E1D7),
+    onSecondaryContainer = Color(0xFF453D35),
 
-    // Tertiary — amber only; the single sanctioned hue for D-0 / warning states.
-    tertiary = Color(0xFFF5AD0B),
-    onTertiary = Color(0xFF111111),
-    tertiaryContainer = Color(0xFF1C1600),
-    onTertiaryContainer = Color(0xF2FFD282),
+    tertiary = Color(0xFFB87623),
+    onTertiary = Color(0xFFF8F1E8),
+    tertiaryContainer = Color(0xFFF1DEC2),
+    onTertiaryContainer = Color(0xFF4C2F0F),
 
-    // Error
-    error = Color(0xFFFF6464),
-    onError = Color(0xFF111111),
-    errorContainer = Color(0xFF3D0000),
-    onErrorContainer = Color(0xFFFF9090),
+    error = Color(0xFFB84A3E),
+    onError = Color(0xFFF8F1E8),
+    errorContainer = Color(0xFFF1D9D5),
+    onErrorContainer = Color(0xFF5A1F19),
 
-    // Background / surface — flat cosmic field.
-    background = Color(0xFF111111),
-    onBackground = Color(0xEAEAEAEA),
-    surface = Color(0xFF111111),
-    onSurface = Color(0xEAEAEAEA),
-    surfaceVariant = Color(0xFF1A1A1A),
-    onSurfaceVariant = Color(0xB2B2B2B2),
+    background = Color(0xFFF4F0E9),
+    onBackground = Color(0xFF342E27),
+    surface = Color(0xFFF8F5EF),
+    onSurface = Color(0xFF342E27),
+    surfaceVariant = Color(0xFFEAE2D6),
+    onSurfaceVariant = Color(0xFF696158),
 
-    // Outlines
-    outline = Color(0xFF3D3D3D),
-    outlineVariant = Color(0xFF1E1E1E),
+    outline = Color(0xFFB8AC9E),
+    outlineVariant = Color(0xFFD7CEC1),
 
-    // Inverse
-    inverseSurface = Color(0xFFE5E5E5),
-    inverseOnSurface = Color(0xFF111111),
-    inversePrimary = Color(0xFF333333),
+    inverseSurface = Color(0xFF342E27),
+    inverseOnSurface = Color(0xFFF4F0E9),
+    inversePrimary = Color(0xFFECE3D5),
 
-    // Scrim — full black for modal overlays.
-    scrim = Color(0xFF000000),
+    scrim = Color(0xCC19120B),
 
-    // CRITICAL: must be Transparent to suppress M3 tonal elevation tinting.
     surfaceTint = Color.Transparent,
 )
 
-// ─── Material3 ColorScheme — Light ───────────────────────────────────────────
+// ─── Material3 ColorScheme — Dark (alternate) ────────────────────────────────
 
 /**
- * BeCalm light color scheme. Provided for accessibility / user preference.
- * The brand expression is dark; light is a supported alternative, not the default.
- * [surfaceTint] remains [Color.Transparent] for the same reason as the dark scheme.
+ * Dark is an alternate accessibility/user-preference theme. It keeps the same
+ * warm neutral family instead of reviving the previous dark-first palette.
  */
-internal val BecalmLightColorScheme = lightColorScheme(
-    primary = Color(0xFF1A1A1A),
-    onPrimary = Color(0xFFF5F5F5),
-    primaryContainer = Color(0xFFE8E8E8),
-    onPrimaryContainer = Color(0xFF1A1A1A),
+internal val BecalmDarkColorScheme = darkColorScheme(
+    primary = Color(0xFFF1DEC2),
+    onPrimary = Color(0xFF231D18),
+    primaryContainer = Color(0xFF3C3229),
+    onPrimaryContainer = Color(0xFFF1DEC2),
 
-    secondary = Color(0xFF555555),
-    onSecondary = Color(0xFFF5F5F5),
-    secondaryContainer = Color(0xFFEBEBEB),
-    onSecondaryContainer = Color(0xFF333333),
+    secondary = Color(0xFFC8BAAA),
+    onSecondary = Color(0xFF231D18),
+    secondaryContainer = Color(0xFF352D26),
+    onSecondaryContainer = Color(0xFFE8E1D7),
 
-    // Amber darkened for adequate contrast on light background.
-    tertiary = Color(0xFFC47D00),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFFDEFC8),
-    onTertiaryContainer = Color(0xFF3D2700),
+    tertiary = Color(0xFFD19138),
+    onTertiary = Color(0xFF231D18),
+    tertiaryContainer = Color(0xFF4C2F0F),
+    onTertiaryContainer = Color(0xFFF1DEC2),
 
-    error = Color(0xFFC62828),
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFDECEA),
-    onErrorContainer = Color(0xFF7F0000),
+    error = Color(0xFFE08A80),
+    onError = Color(0xFF231D18),
+    errorContainer = Color(0xFF5A1F19),
+    onErrorContainer = Color(0xFFF1D9D5),
 
-    // Warm off-white — not pure white.
-    background = Color(0xFFF5F5F5),
-    onBackground = Color(0xFF1A1A1A),
-    surface = Color(0xFFF5F5F5),
-    onSurface = Color(0xFF1A1A1A),
-    surfaceVariant = Color(0xFFE8E8E8),
-    onSurfaceVariant = Color(0xFF555555),
+    background = Color(0xFF17130F),
+    onBackground = Color(0xFFEDE5D8),
+    surface = Color(0xFF1D1813),
+    onSurface = Color(0xFFEDE5D8),
+    surfaceVariant = Color(0xFF2B241D),
+    onSurfaceVariant = Color(0xFFC8BAAA),
 
-    outline = Color(0xFFAFAFAF),
-    outlineVariant = Color(0xFFDDDDDD),
+    outline = Color(0xFF74695D),
+    outlineVariant = Color(0xFF3F362D),
 
-    inverseSurface = Color(0xFF2A2A2A),
-    inverseOnSurface = Color(0xFFF5F5F5),
-    inversePrimary = Color(0xFFC8C8C8),
+    inverseSurface = Color(0xFFEDE5D8),
+    inverseOnSurface = Color(0xFF231D18),
+    inversePrimary = Color(0xFF342E27),
 
-    scrim = Color(0xFF000000),
+    scrim = Color(0xCC19120B),
 
-    // CRITICAL: suppress tonal elevation tinting on light scheme too.
     surfaceTint = Color.Transparent,
 )

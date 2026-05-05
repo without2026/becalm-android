@@ -41,6 +41,7 @@ import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 
 /**
@@ -239,7 +240,9 @@ internal fun LoginForm(
         modifier = Modifier
             .fillMaxWidth()
             .widthIn(max = LoginFormMaxContentWidth)
-            .padding(horizontal = 16.dp, vertical = 32.dp),
+            .padding(horizontal = 16.dp, vertical = 32.dp)
+            .glassPanel()
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         BecalmTextField(

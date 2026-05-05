@@ -26,7 +26,7 @@ internal object CommitmentEditProjector {
         dueAtMillis = entity.dueAt?.toEpochMilliseconds(),
         dueIsApproximate = entity.dueIsApproximate,
         dueHint = entity.dueHint.orEmpty(),
-        personRef = entity.personRef.orEmpty(),
+        counterpartyRef = entity.counterpartyRef.orEmpty(),
         direction = requireNotNull(entity.direction) { "Action commitment edit requires direction" },
         fieldErrors = emptyMap(),
         saveError = null,
@@ -37,7 +37,7 @@ internal object CommitmentEditProjector {
         dueAtMillis = state.dueAtMillis,
         dueHint = state.dueHint.ifBlank { null },
         dueIsApproximate = state.dueIsApproximate,
-        personRef = state.personRef.ifBlank { null },
+        counterpartyRef = state.counterpartyRef.ifBlank { null },
         direction = state.direction,
     )
 

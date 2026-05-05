@@ -26,6 +26,19 @@ class PersonIdentityResolverSpecTest {
     }
 
     @Test
+    fun `email and phone person ids match backend relation namespace`() {
+        val email = requireNotNull(PersonIdentityResolver.resolve("user-1", "Alice <ALICE@Example.COM>"))
+        val phone = requireNotNull(PersonIdentityResolver.resolve("user-1", "+82 10-1234-5678"))
+
+        assertEquals("3f018abf-7e16-589a-a038-85eb55b60afb", email.personId)
+        assertEquals("5bc62dec-5327-5fe8-a826-cbd9ff0b7419", phone.personId)
+        assertEquals(
+            "cae26e8a-ee05-51e5-991f-e2c3d21fd2b1",
+            PersonIdentityResolver.stableIdentityId("user-1", email.identityKey),
+        )
+    }
+
+    @Test
     fun `name only identity is low confidence and unverified`() {
         val result = requireNotNull(PersonIdentityResolver.resolve("user-1", "김민수"))
 

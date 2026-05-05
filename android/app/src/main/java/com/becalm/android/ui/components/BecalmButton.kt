@@ -39,15 +39,14 @@ import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmFocusRing
 import com.becalm.android.ui.theme.dimens
 import com.becalm.android.ui.theme.glassPanel
-import com.becalm.android.ui.theme.glassPanelElevated
 
 // ─── Variant enum ──────────────────────────────────────────────────────────────
 
 /**
  * Defines the three visual variants of [BecalmButton].
  *
- * - [Primary]: filled button with `colorScheme.primary` background and glass-elevated shape.
- * - [Secondary]: outlined glass-panel button for secondary actions.
+ * - [Primary]: dark neutral approval button with a soft elevated shadow.
+ * - [Secondary]: frosted glass button for secondary actions.
  * - [Text]: no-background text-only button for tertiary / inline actions.
  */
 public enum class BecalmButtonVariant {
@@ -93,8 +92,7 @@ public fun BecalmButton(
             Button(
                 onClick = { if (isInteractive) onClick() },
                 modifier = effectiveModifier
-                    .glassPanelElevated(MaterialTheme.shapes.medium)
-                    .becalmFocusRing(MaterialTheme.shapes.medium, interactionSource),
+                    .becalmFocusRing(MaterialTheme.shapes.small, interactionSource),
                 enabled = isInteractive,
                 interactionSource = interactionSource,
                 colors = ButtonDefaults.buttonColors(
@@ -103,6 +101,14 @@ public fun BecalmButton(
                     disabledContainerColor = MaterialTheme.colorScheme.primary,
                     disabledContentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 1.dp,
+                    pressedElevation = 0.dp,
+                    focusedElevation = 2.dp,
+                    hoveredElevation = 2.dp,
+                    disabledElevation = 0.dp,
+                ),
+                shape = MaterialTheme.shapes.small,
                 contentPadding = PaddingValues(horizontal = ButtonHorizontalPaddingPrimary, vertical = 0.dp),
             ) {
                 ButtonContent(text = text, leadingIcon = leadingIcon, loading = loading)
@@ -123,6 +129,7 @@ public fun BecalmButton(
                     disabledContainerColor = Color.Transparent,
                     disabledContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
+                shape = MaterialTheme.shapes.small,
                 contentPadding = PaddingValues(horizontal = ButtonHorizontalPaddingPrimary, vertical = 0.dp),
             ) {
                 ButtonContent(text = text, leadingIcon = leadingIcon, loading = loading)

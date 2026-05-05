@@ -85,7 +85,7 @@ class PersonsViewModelSpecTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
-        val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personRef)
+        val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personId)
         val primary = rowsByRef.getValue("display@example.com")
         assertEquals("Display Name", primary.displayLabel)
         assertEquals("Nick", primary.nickname)
@@ -99,11 +99,11 @@ class PersonsViewModelSpecTest {
         val sections = viewModel.uiState.value.personSections.associateBy { it.kind }
         assertEquals(
             listOf("display@example.com"),
-            sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.map { it.personRef },
+            sections.getValue(PersonSectionKind.PENDING_COMMITMENTS).people.map { it.personId },
         )
         assertEquals(
             listOf("nick@example.com", "+821012345678"),
-            sections.getValue(PersonSectionKind.RECENT_CONTACTS).people.map { it.personRef },
+            sections.getValue(PersonSectionKind.RECENT_CONTACTS).people.map { it.personId },
         )
     }
 
@@ -125,7 +125,7 @@ class PersonsViewModelSpecTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
 
-        val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personRef)
+        val rowsByRef = viewModel.uiState.value.people.associateBy(PersonRow::personId)
         assertEquals("Nick Only", rowsByRef.getValue("nick@example.com").displayLabel)
         assertEquals("+821012345678", rowsByRef.getValue("+821012345678").displayLabel)
     }
@@ -144,18 +144,39 @@ class PersonsViewModelSpecTest {
         viewModel.onQueryChange("lee")
         advanceTimeBy(300)
         advanceUntilIdle()
-        assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personRef })
+        assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("1234")
         advanceTimeBy(300)
         advanceUntilIdle()
-        assertEquals(listOf("+821012345678"), viewModel.uiState.value.people.map { it.personRef })
+        assertEquals(listOf("+821012345678"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("")
         advanceTimeBy(300)
         advanceUntilIdle()
         assertEquals("", viewModel.uiState.value.query)
         assertEquals(2, viewModel.uiState.value.people.size)
+    }
+
+    @Test
+    fun `people search includes contact-only rows without showing them by default`() = runTest {
+        projectionPort.people.value = pageOf(
+            person(ref = "lee@corp.com", displayName = "Minji Lee"),
+        )
+        projectionPort.searchableContacts.value = listOf(
+            person(ref = "+82109998888", displayName = "Kim Contact", eventCount = 0),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
+
+        viewModel.onQueryChange("Kim")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        assertEquals(listOf("+82109998888"), viewModel.uiState.value.people.map { it.personId })
+        assertEquals(0, viewModel.uiState.value.people.single().interactionCount)
     }
 
     @Test
@@ -170,7 +191,7 @@ class PersonsViewModelSpecTest {
 
         assertEquals(
             listOf("+821012345678", "kim@corp.com"),
-            viewModel.uiState.value.people.map { it.personRef }.sorted(),
+            viewModel.uiState.value.people.map { it.personId }.sorted(),
         )
 
         viewModel.onQueryChange("Kim Chulsoo")
@@ -212,7 +233,7 @@ class PersonsViewModelSpecTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertEquals(listOf("alpha@example.com", "beta@example.com"), state.people.map { it.personRef })
+        assertEquals(listOf("alpha@example.com", "beta@example.com"), state.people.map { it.personId })
         assertTrue(state.hasMorePages)
         assertEquals("cursor-2", state.nextCursor)
         assertEquals(PersonsSortOrder.MOST_RECENT_EVENT_DESC, state.sortOrder)
@@ -275,7 +296,7 @@ class PersonsViewModelSpecTest {
         channelSources: Set<String> = emptySet(),
         lastInteractionSnippet: String? = null,
     ): PersonListProjection = PersonListProjection(
-        personRef = ref,
+        personId = ref,
         displayName = displayName,
         nickname = nickname,
         companyName = companyName,
@@ -320,6 +341,7 @@ class PersonsViewModelSpecTest {
             ),
         )
         val unassigned = MutableStateFlow<List<UnassignedEventSummary>>(emptyList())
+        val searchableContacts = MutableStateFlow<List<PersonListProjection>>(emptyList())
         val offline = MutableStateFlow(PersonsOfflineStatus(isOffline = false, lastSyncAt = null))
         var lastUserId: String? = null
         var lastUnassignedLimit: Int? = null
@@ -327,6 +349,11 @@ class PersonsViewModelSpecTest {
         override fun observePeople(userId: String): Flow<PersonsListPageProjection> {
             lastUserId = userId
             return people
+        }
+
+        override fun observeSearchableContacts(userId: String): Flow<List<PersonListProjection>> {
+            lastUserId = userId
+            return searchableContacts
         }
 
         override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> {

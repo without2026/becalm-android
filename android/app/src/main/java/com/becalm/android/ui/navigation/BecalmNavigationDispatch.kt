@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.navigation.NavHostController
-import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.commitments.CommitmentManagementNavigation
 import com.becalm.android.ui.sources.ContactsSourceDetailEffect
 import com.becalm.android.ui.sources.SourceDetailEffect
@@ -32,19 +31,18 @@ internal fun NavHostController.dispatchSourcesListNavigation(target: SourcesList
 internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEffect) {
     when (effect) {
         is SourceDetailEffect.OpenReconnect -> {
-            currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
-            navigate(
-                when (effect.destination) {
+            val destinationRoute = when (effect.destination) {
                 SourceReconnectDestination.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
-                SourceReconnectDestination.GMAIL -> BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path
-                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.OnboardingEmailPipa(
-                    EmailPipaProvider.OUTLOOK_MAIL.storageKey,
-                ).path
+                SourceReconnectDestination.GMAIL -> BecalmRoute.SettingsSourceConnections.path
+                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.SettingsSourceConnections.path
                 SourceReconnectDestination.IMAP -> BecalmRoute.OnboardingEmailPipa("imap").path
-                SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.OnboardingGoogleCalendar.path
-                SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.OnboardingOutlookCalendar.path
-                },
-            )
+                SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
+                SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
+            }
+            if (destinationRoute != BecalmRoute.SettingsSourceConnections.path) {
+                currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
+            }
+            navigate(destinationRoute)
         }
     }
 }

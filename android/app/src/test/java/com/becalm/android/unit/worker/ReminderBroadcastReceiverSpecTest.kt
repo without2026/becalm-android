@@ -122,7 +122,7 @@ class ReminderBroadcastReceiverSpecTest {
         userId = "user-1",
         direction = "give",
         counterpartyRaw = null,
-        personRef = "lee@corp.com",
+        counterpartyRef = "lee@corp.com",
         title = "보고서 전달",
         description = null,
         quote = "quote body",

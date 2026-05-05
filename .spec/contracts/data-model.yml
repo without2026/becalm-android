@@ -36,11 +36,13 @@ tables:
         type: text
         nullable: true
         # email message_id, file URI, calendar event id, etc.
-      - name: person_ref
+      - name: counterparty_ref
         type: text
         nullable: true
-        # Canonicalized counterparty identifier. Precedence: phone (E.164) > email (lowercase) > display_name (normalized).
-        # NULL for events with no identifiable counterparty (e.g., self-dictated note). Groups under "Unassigned" in UI.
+        # Android Room + Railway API compatibility seed. Backend strips it before durable
+        # Supabase raw_ingestion_events persistence. New source adapters MUST populate
+        # source_event_participants via the batch API participants[] contract; this field
+        # is not a canonical person/relation input.
       - name: event_title
         type: text
         nullable: true
@@ -89,9 +91,6 @@ tables:
         type: btree
       - columns: [user_id, timestamp]
         type: btree
-      - columns: [user_id, person_ref, timestamp]
-        type: btree
-        # idx_raw_events_user_person_time — supports PersonDetailScreen timeline query
     rls: true
 
   - name: commitments
@@ -128,15 +127,11 @@ tables:
         nullable: true
         # enum: approved | rejected | chosen | deferred | ongoing
         # Required only when item_type='decision'. NULL for action / schedule rows.
-      - name: counterparty_raw
+      - name: counterparty_ref
         type: text
         nullable: true
-        # phone# | email | attendee name — raw, uncanonized
-      - name: person_ref
-        type: text
-        nullable: true
-        # Canonicalized counterparty identifier. Same precedence rule as raw_ingestion_events.person_ref.
-        # NULL for commitments where counterparty is not identifiable.
+        # Android Room + Railway API seed input. Backend strips it before durable Supabase commitments persistence.
+        # Commitment-person linking is stored in commitment_participants.
       - name: title
         type: text
         nullable: false
@@ -245,9 +240,9 @@ tables:
         # idx_commitments_user_action_due — supports action-only CommitmentManagementScreen / Today queries. Queries MUST still filter `deleted_at IS NULL` at application level.
       - columns: [user_id, sync_status]
         type: btree
-      - columns: [user_id, person_ref, due_at]
+      - columns: [user_id, counterparty_ref, due_at]
         type: btree
-        # idx_commitments_user_person_due — supports /v1/persons/{id}/commitments
+        # idx_commitments_user_counterparty_due — supports local counterparty-scoped edit/search paths only. Person UI uses commitment_participants/person_id.
       - columns: [user_id, deleted_at]
         type: btree
         # idx_commitments_user_deleted — supports fast exclusion of soft-deleted rows across all list screens. Postgres partial index `WHERE deleted_at IS NULL` is optional perf optimization (post-MVP).
@@ -581,10 +576,12 @@ migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
   - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
   - "Today/Settings의 source status는 별도 Room 테이블이 아니라 로컬 파생 projection이다. source status row/chip을 서버 API 또는 단일 DB row에서 직접 읽는 계약은 없다"
-  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase 테이블과 1:1 mirror. sync_status·retry_count·last_attempt_at는 Room-side tracking 컬럼으로 Supabase에는 존재하지 않음"
+  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase row shape를 기본 mirror하되, sync_status·retry_count·last_attempt_at와 counterparty_ref는 Android-side tracking/seed 컬럼으로 Supabase durable table에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
   - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
-  - "person_ref 컬럼: MVP는 별도 persons 테이블 없이 raw_ingestion_events·commitments의 person_ref TEXT로 가상 그룹핑. 정규화 우선순위: 전화번호(E.164) > 이메일(소문자) > 표시이름(정규화). 동일 연락처가 채널별 다른 식별자를 가질 경우 중복 그룹핑 위험 있음 — post-MVP에서 persons 테이블 + 수동 병합 UI로 해결"
+  - "relation intelligence 전환: Supabase와 Android Room은 canonical person/relation mirror(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 공유한다. Android-only sync/projection/cache 컬럼은 허용하지만 backend-managed source wiring의 기준 key는 `person_id`다"
+  - "raw_ingestion_events / commitments의 상대방 seed 필드는 `counterparty_ref`로 통일한다. Android Room, DTO 내부 모델, Railway API input 모두 이 이름을 사용한다. People/PersonDetail UI 모델과 route argument는 `person_id`만 사용한다."
+  - "`person_ref`는 Vertex/LLM item output schema와 Android local contacts enrichment cache(`persons_enrichment.person_ref`)의 legacy-compatible anchor 이름으로만 허용된다. raw/commitment durable schema나 People/PersonDetail primary projection에서 `person_ref` grouping/fallback은 제거됐다."
   - "commitments.status 컬럼 → action_state 컬럼으로 대체: enum이 pending|done|overdue에서 pending|reminded|followed_up|completed로 변경. Room 마이그레이션: ALTER TABLE commitments RENAME COLUMN status TO action_state; UPDATE commitments SET action_state='pending' WHERE action_state='done' OR action_state='overdue'"
   - "calendar_events.status 컬럼 (confirmed|cancelled) 신설: 취소된 캘린더 이벤트의 soft-keep을 위해. Room 마이그레이션: ALTER TABLE calendar_events ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'; Supabase 미러는 Railway migration에서 동일 컬럼 추가. 기존 row는 default 'confirmed'로 backfill됨. ING-009/010에서 deletedEvent/isCancelled 감지 시 DELETE 대신 UPDATE status='cancelled'"
   - "commitments.due_date(date) → due_at(timestamptz) + due_hint(text) + due_is_approximate(bool) 세 컬럼으로 확장: (1) due_at은 ISO8601 KST(+09:00) 시점 — 기존 due_date의 00:00 KST 값으로 backfill, (2) due_hint는 LLM이 추출한 원문 시점 표현 ('다음주'·'월말' 등), (3) due_is_approximate는 due_at이 명시적 날짜 아닌 hint 추론 여부. Room 마이그레이션: ALTER TABLE commitments ADD COLUMN due_at INTEGER; UPDATE commitments SET due_at = strftime('%s', due_date || ' 00:00:00', '-9 hours') * 1000 WHERE due_date IS NOT NULL; ALTER TABLE commitments ADD COLUMN due_hint TEXT; ALTER TABLE commitments ADD COLUMN due_is_approximate INTEGER NOT NULL DEFAULT 0; ALTER TABLE commitments DROP COLUMN due_date. Supabase Postgres: 동일 DDL(ADD COLUMN + backfill + DROP COLUMN). 기존 index `idx_commitments_user_action_due`와 `idx_commitments_user_person_due`는 due_at 기준으로 재생성"

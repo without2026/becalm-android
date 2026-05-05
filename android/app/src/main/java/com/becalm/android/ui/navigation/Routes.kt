@@ -18,9 +18,9 @@ package com.becalm.android.ui.navigation
  *   and `ARG_<NAME>` string constants for `navArgument(...)` bindings.
  *
  * ## Source of truth
- * Route paths are derived from `.spec/contracts/ui-map.yml` (version 1, 21 entries).
- * The spec header claims 22 routes; the actual entry count in that file is 21 —
- * this implementation matches the 21 declared entries exactly.
+ * Route paths are derived from `.spec/contracts/ui-map.yml` (version 1, 24 entries).
+ * This implementation keeps the declared routes registered, including compatibility
+ * routes retained for legacy onboarding source deep links.
  *
  * ## Leading-slash divergence (R1-03)
  * The spec lists every route with a leading `/` (e.g. `/today`, `/persons/{person_id}`)
@@ -70,6 +70,9 @@ public sealed class BecalmRoute(public val path: String) {
      * Graceful skip — refusal does not block app functionality.
      */
     public data object OnboardingContacts : BecalmRoute("onboarding/contacts")
+
+    /** Onboarding step: connect optional mail and calendar OAuth sources in one page. */
+    public data object OnboardingSources : BecalmRoute("onboarding/sources")
 
     /**
      * PIPA 제3자 제공 disclosure shown immediately before the email-provider OAuth /
@@ -278,6 +281,9 @@ public sealed class BecalmRoute(public val path: String) {
 
     /** Sources list: 6-source adapter status rows + contacts pseudo-source (ENR-008, SMG-001). */
     public data object SettingsSources : BecalmRoute("settings/sources")
+
+    /** Settings source connection hub shared with onboarding source OAuth rows. */
+    public data object SettingsSourceConnections : BecalmRoute("settings/sources/connect")
 
     /**
      * Contacts pseudo-source detail under Settings.

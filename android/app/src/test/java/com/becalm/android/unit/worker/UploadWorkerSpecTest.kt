@@ -20,7 +20,9 @@ import com.becalm.android.data.remote.dto.FailedEventDto
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.UploadWorker
@@ -102,8 +104,24 @@ class UploadWorkerSpecTest {
         assertTrue(state.commitmentFindPendingCalls >= 1)
         assertEquals(1, state.commitmentUploadCalls)
         assertEquals(1, state.commitmentMarkSyncedCalls)
+        assertEquals(1, state.personIndexEnqueueCalls)
         assertEquals(1, state.recordSyncSuccessCalls)
         assertEquals(0, state.recordSyncErrorCalls)
+    }
+
+    @Test
+    fun `source participant refresh upsert enqueues person index even without pending uploads`() = runTest {
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        val state = FakeState(
+            session = fakeSession,
+            sourceParticipantUpserted = 2,
+        )
+
+        val result = state.buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(1, state.sourceParticipantRefreshCalls)
+        assertEquals(1, state.personIndexEnqueueCalls)
     }
 
     @Test
@@ -147,6 +165,7 @@ class UploadWorkerSpecTest {
         val commitmentUploadResult: BecalmResult<CommitmentRepository.BatchResponse> = BecalmResult.Success(
             CommitmentRepository.BatchResponse(acknowledged = 0, failed = emptyList()),
         ),
+        val sourceParticipantUpserted: Int = 0,
     ) {
         var rawFindPendingCalls = 0
         var rawUploadCalls = 0
@@ -154,6 +173,9 @@ class UploadWorkerSpecTest {
         var commitmentFindPendingCalls = 0
         var commitmentUploadCalls = 0
         var commitmentMarkSyncedCalls = 0
+        var sourceParticipantRefreshCalls = 0
+        var commitmentParticipantRefreshCalls = 0
+        var personIndexEnqueueCalls = 0
         var recordSyncStartCalls = 0
         var recordSyncSuccessCalls = 0
         var recordSyncErrorCalls = 0
@@ -169,8 +191,10 @@ class UploadWorkerSpecTest {
             authRepository(),
             rawRepository(),
             commitmentRepository(),
+            sourceEventParticipantRepository(),
+            commitmentParticipantRepository(),
             sourceStatusRepository(),
-            mockk<WorkScheduler>(relaxed = true),
+            workScheduler(),
             processingPauseGate,
             logger,
         )
@@ -224,9 +248,53 @@ class UploadWorkerSpecTest {
                     commitmentRemaining = emptyList()
                     BecalmResult.Success(Unit)
                 }
+                "refreshSince" -> BecalmResult.Success(
+                    CommitmentRepository.RefreshStats(
+                        fetched = 0,
+                        upserted = 0,
+                        hasMore = false,
+                        nextCursor = null,
+                    ),
+                )
                 else -> unsupported(name, args)
             }
         }
+
+        private fun sourceEventParticipantRepository(): SourceEventParticipantRepository =
+            proxy(SourceEventParticipantRepository::class.java) { name, _ ->
+                when (name) {
+                    "refreshSince" -> {
+                        sourceParticipantRefreshCalls += 1
+                        BecalmResult.Success(
+                            SourceEventParticipantRepository.RefreshStats(
+                                fetched = 0,
+                                upserted = sourceParticipantUpserted,
+                                hasMore = false,
+                                nextCursor = null,
+                            ),
+                        )
+                    }
+                    else -> unsupported(name)
+                }
+            }
+
+        private fun commitmentParticipantRepository(): CommitmentParticipantRepository =
+            proxy(CommitmentParticipantRepository::class.java) { name, _ ->
+                when (name) {
+                    "refreshSince" -> {
+                        commitmentParticipantRefreshCalls += 1
+                        BecalmResult.Success(
+                            CommitmentParticipantRepository.RefreshStats(
+                                fetched = 0,
+                                upserted = 0,
+                                hasMore = false,
+                                nextCursor = null,
+                            ),
+                        )
+                    }
+                    else -> unsupported(name)
+                }
+            }
 
         private fun sourceStatusRepository(): SourceStatusRepository = proxy(SourceStatusRepository::class.java) { name, _ ->
             when (name) {
@@ -243,6 +311,16 @@ class UploadWorkerSpecTest {
                     BecalmResult.Success(Unit)
                 }
                 else -> unsupported(name)
+            }
+        }
+
+        private fun workScheduler(): WorkScheduler = proxy(WorkScheduler::class.java) { name, _ ->
+            when (name) {
+                "enqueuePersonInteractionIndex" -> {
+                    personIndexEnqueueCalls += 1
+                    Unit
+                }
+                else -> Unit
             }
         }
 
@@ -279,7 +357,7 @@ class UploadWorkerSpecTest {
         userId = "user-1",
         direction = "give",
         counterpartyRaw = null,
-        personRef = null,
+        counterpartyRef = null,
         title = "title-$id",
         description = null,
         quote = "quote-$id",

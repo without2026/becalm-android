@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.commitments
 
 import app.cash.turbine.test
+import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -8,13 +9,16 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.commitments.CommitmentFilter
 import com.becalm.android.ui.commitments.CommitmentManagementViewModel
 import com.becalm.android.ui.commitments.CommitmentUndoSnapshot
+import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -44,15 +48,37 @@ class CommitmentManagementViewModelSpecTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
+    private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
+    private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val clock = FakeClock(Instant.parse("2026-05-04T03:00:00Z"))
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(emptyList())
+        coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
+            BecalmResult.Success(
+                SourceEventParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
+        coEvery { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) } returns
+            BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
     }
 
     @After
@@ -65,22 +91,22 @@ class CommitmentManagementViewModelSpecTest {
         val displayNameEntity = entity(
             id = "a",
             direction = "give",
-            personRef = "lee@corp.com",
+            counterpartyRef = "lee@corp.com",
             sourceType = "gmail",
             sourceEventTitle = "Kickoff mail",
             sourceEventOccurredAt = Instant.parse("2026-04-24T01:00:00Z"),
         )
-        val samePersonEntity = entity(id = "a2", direction = "take", personRef = "lee@corp.com")
-        val nicknameEntity = entity(id = "b", direction = "take", personRef = "kim@corp.com")
-        val fallbackPersonRefEntity = entity(id = "c", direction = "give", personRef = "park@corp.com")
-        val legacyRawEntity = entity(id = "d", direction = "take", personRef = null, counterpartyRaw = "Legacy Raw Name")
+        val samePersonEntity = entity(id = "a2", direction = "take", counterpartyRef = "lee@corp.com")
+        val nicknameEntity = entity(id = "b", direction = "take", counterpartyRef = "kim@corp.com")
+        val fallbackCounterpartyRefEntity = entity(id = "c", direction = "give", counterpartyRef = "park@corp.com")
+        val legacyRawEntity = entity(id = "d", direction = "take", counterpartyRef = null, counterpartyRaw = "Legacy Raw Name")
 
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 displayNameEntity,
                 samePersonEntity,
                 nicknameEntity,
-                fallbackPersonRefEntity,
+                fallbackCounterpartyRefEntity,
                 legacyRawEntity,
                 enrichment = mapOf(
                     "lee@corp.com" to "이대리",
@@ -223,7 +249,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `commitment rows render nearest exact due date first`() = runTest {
+    fun `commitment feed sorts open rows by due proximity from today`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(
@@ -233,18 +259,23 @@ class CommitmentManagementViewModelSpecTest {
                 ),
                 entity(
                     id = "late-exact",
-                    dueAt = Instant.parse("2026-04-25T01:00:00Z"),
+                    dueAt = Instant.parse("2026-05-04T01:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-29T03:00:00Z"),
                 ),
                 entity(
                     id = "approx",
-                    dueAt = Instant.parse("2026-04-23T01:00:00Z"),
+                    dueAt = Instant.parse("2026-05-02T01:00:00Z"),
                     dueIsApproximate = true,
                     sourceEventOccurredAt = Instant.parse("2026-04-29T02:00:00Z"),
                 ),
                 entity(
                     id = "early-exact",
-                    dueAt = Instant.parse("2026-04-24T01:00:00Z"),
+                    dueAt = Instant.parse("2026-05-03T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
+                ),
+                entity(
+                    id = "future-exact",
+                    dueAt = Instant.parse("2026-05-05T01:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
                 ),
             ),
@@ -256,8 +287,12 @@ class CommitmentManagementViewModelSpecTest {
             awaitItem()
             val settled = awaitItem()
             assertEquals(
-                listOf("early-exact", "late-exact", "no-due", "approx"),
+                listOf("early-exact", "late-exact", "future-exact", "no-due", "approx"),
                 settled.items.map { it.id },
+            )
+            assertEquals(
+                listOf("early-exact", "late-exact", "future-exact", "no-due", "approx"),
+                settled.activeItems.map { it.id },
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -336,19 +371,19 @@ class CommitmentManagementViewModelSpecTest {
     fun `CMT-001 rows preserve type subtype and counterparty display`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
-                entity(id = "action-1", direction = "give", personRef = "lee@corp.com"),
+                entity(id = "action-1", direction = "give", counterpartyRef = "lee@corp.com"),
                 entity(
                     id = "schedule-1",
                     itemType = "schedule",
                     direction = null,
-                    personRef = "park@corp.com",
+                    counterpartyRef = "park@corp.com",
                     scheduleStatus = "changed",
                 ),
                 entity(
                     id = "decision-1",
                     itemType = "decision",
                     direction = null,
-                    personRef = null,
+                    counterpartyRef = null,
                     counterpartyRaw = "Legacy Person",
                     decisionStatus = "ongoing",
                 ),
@@ -389,7 +424,11 @@ class CommitmentManagementViewModelSpecTest {
 
         assertEquals(false, viewModel.uiState.value.refreshing)
         assertTrue(viewModel.uiState.value.error?.contains("boom") == true)
+        coVerify(exactly = 1) {
+            sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = null, since = null)
+        }
         coVerify(exactly = 1) { commitmentRepository.refreshSince("user-1", since = null) }
+        coVerify(exactly = 0) { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) }
     }
 
     @Test
@@ -574,9 +613,13 @@ class CommitmentManagementViewModelSpecTest {
 
     private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(
         commitmentRepository = commitmentRepository,
+        sourceEventParticipantRepository = sourceEventParticipantRepository,
+        commitmentParticipantRepository = commitmentParticipantRepository,
+        workScheduler = workScheduler,
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
         logger = logger,
+        clock = clock,
     )
 
     private fun verifyCancel(id: String) = io.mockk.verify(exactly = 1) { reminderScheduler.cancel(id) }
@@ -589,7 +632,7 @@ class CommitmentManagementViewModelSpecTest {
         itemType: String = "action",
         direction: String? = "give",
         actionState: String = "pending",
-        personRef: String? = null,
+        counterpartyRef: String? = null,
         counterpartyRaw: String? = null,
         dueAt: Instant? = null,
         dueIsApproximate: Boolean = false,
@@ -607,7 +650,7 @@ class CommitmentManagementViewModelSpecTest {
         scheduleStatus = scheduleStatus,
         decisionStatus = decisionStatus,
         counterpartyRaw = counterpartyRaw,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         title = "title-$id",
         description = null,
         quote = "quote",
@@ -641,7 +684,7 @@ class CommitmentManagementViewModelSpecTest {
                 actionState = entity.actionState,
                 dueAt = entity.dueAt,
                 dueIsApproximate = entity.dueIsApproximate,
-                counterpartyDisplayName = entity.personRef?.let { ref ->
+                counterpartyDisplayName = entity.counterpartyRef?.let { ref ->
                     enrichment[ref] ?: ref
                 } ?: entity.counterpartyRaw?.take(30),
                 sourceType = entity.sourceType,

@@ -3,7 +3,7 @@ version: 1
 # Navigation: Jetpack Compose Navigation (NavHost)
 # Language: Korean only
 # Bottom navigation: 3-tab BottomNavigationBar (오늘의 타임라인 / 인물 / 약속관리)
-# Total routes: 22
+# Total routes: 24
 # Glass surfaces must preserve foreground legibility. Compose implementations
 # must not apply foreground blur to panel contents, text fields, or buttons.
 # Android 13+ predictive-back platform warnings must be avoided by enabling
@@ -50,18 +50,33 @@ routes:
     auth: required
     # ENR-001: PIPA 사유 고지 후 READ_CONTACTS 요청. 온보딩 4번째 단계.
     # 거부/[나중에] 시 graceful skip — 앱 기능 영향 없음.
+    # 다음 단계는 /onboarding/sources. Email PIPA disclosure는 source row 안에서
+    # OAuth 시작 직전에 저장된다.
+
+  - path: /onboarding/sources
+    screen: OnboardingSourcesScreen
+    data: []
+    components: [SourceConnectionRow, OAuthConnectButton, SkipButton, ContinueButton]
+    auth: required
+    # First-run source connection hub. Gmail, Outlook Mail, Google Calendar,
+    # Outlook Calendar를 한 화면에서 연결/건너뛰기 처리한다.
+    # Gmail/Outlook Mail은 provider별 PIPA consent 저장이 OAuth 시작보다 먼저
+    # 완료되어야 한다. IMAP은 first-run에서는 graceful skip 처리하고 Settings
+    # source reconnect 또는 legacy route에서 별도 설정한다.
 
   - path: /onboarding/gmail
     screen: GmailOAuthScreen
     data: []
     components: [OAuthConnectButton, SkipButton]
     auth: required
+    # Compatibility route. First-run onboarding uses /onboarding/sources.
 
   - path: /onboarding/outlook-mail
     screen: OutlookMailOAuthScreen
     data: []
     components: [OAuthConnectButton, SkipButton]
     auth: required
+    # Compatibility route. First-run onboarding uses /onboarding/sources.
 
   - path: /onboarding/imap
     screen: ImapSetupScreen
@@ -74,12 +89,14 @@ routes:
     data: []
     components: [OAuthConnectButton, SkipButton]
     auth: required
+    # Compatibility route. First-run onboarding uses /onboarding/sources.
 
   - path: /onboarding/outlook-calendar
     screen: OutlookCalendarOAuthScreen
     data: []
     components: [OAuthConnectButton, SkipButton]
     auth: required
+    # Compatibility route. First-run onboarding uses /onboarding/sources.
 
   - path: /onboarding/battery
     screen: BatteryOptimizationScreen
@@ -108,7 +125,7 @@ routes:
 
   - path: /persons
     screen: PersonsScreen
-    data: ["Room person_ref grouping query", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
+    data: ["Room person_interactions aggregate", "Room persons/person_identities mirror", "Room persons_enrichment join", "ING-011 foreground catch-up", "ENR-005 enrichment refresh"]
     components: [PersonCard, UnassignedSection, SearchBar, OfflineBadge, BottomNavigationBar]
     auth: required
     # Tab 2: 인물. Prototype-aligned person-first layout: "미이행 약속" 섹션을
@@ -118,12 +135,12 @@ routes:
 
   - path: /persons/{person_id}
     screen: PersonDetailScreen
-    data: ["Room raw_ingestion_events query by person_ref", "Room commitments query by person_ref"]
-    components: [PersonHeader, CommitmentCard, InteractionHistoryRow, RawEventRow]
+    data: ["Room person_interactions projection", "Room source_event_participants/commitment_participants mirror", "Room person_identities", "Room persons_enrichment join", "Room raw_ingestion_events drill-down lookup"]
+    components: [PersonHeader, SourceTimelineFilter, SourceEventCardRow, RawEventRow]
     auth: required
     # Prototype-aligned person detail: profile header + derived stats(이메일/통화/미팅/약속)
-    # + 3-section body: 미이행 약속 / 이행 완료 / 상호작용 히스토리 (SRC-002, SRC-008).
-    # Stats are derived from existing Room raw/calendar/commitment rows only.
+    # + unified source timeline. Filters: All / Email / Call / Meeting / Commitment.
+    # Stats and timeline are derived from Room person index projection, with legacy Room rows only as migration fallback.
 
   - path: /persons/{person_id}/events/{event_id}
     screen: RawEventDetailSheet
@@ -170,6 +187,15 @@ routes:
     components: [SourceStatusRow]
     auth: required
     # SMG-001: 8-source list + '연락처' pseudo-source row (ENR-008). meeting은 앱에서 저장한 미팅 오디오/전사본 source다.
+
+  - path: /settings/sources/connect
+    screen: SettingsSourceConnectionsScreen
+    data: []
+    components: [SourceConnectionRow, OAuthConnectButton, NotNowButton, DoneButton]
+    auth: required
+    # Settings source reconnect hub. Reuses the same mail/calendar connection rows
+    # as /onboarding/sources, but Done returns to Settings and does not skip
+    # unfinished onboarding source steps.
 
   - path: /settings/sources/{source_id}
     screen: SourceDetailScreen
@@ -238,9 +264,9 @@ shared_components:
 
   - name: InteractionHistoryRow
     props:
-      event: "RawIngestionEvent"
+      event: "InteractionRow(Event | Commitment | CalendarMeeting)"
       onTap: "(eventId: string) -> Unit"
-    description: "PersonDetailScreen 섹션 3 항목. 소스 아이콘 + event_title + event_snippet(truncated) + timestamp. commitments_extracted_count >= 1 시 '약속 추출 N건' 배지 표시"
+    description: "PersonDetailScreen 단일 timeline 항목. source/type label + title + snippet/status + timestamp. raw event는 탭 시 RawEventDetail로 이동하고 commitments_extracted_count >= 1 시 '약속 추출 N건' 배지 표시"
 
   - name: CalendarEventItem
     props:

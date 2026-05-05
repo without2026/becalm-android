@@ -2,12 +2,14 @@ package com.becalm.android.worker
 
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
-import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.CommitmentDraftDto
 import com.becalm.android.data.remote.dto.PersonCandidateDto
 import com.becalm.android.data.remote.dto.VoiceExtractItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.domain.person.PersonIdentityResolver
 import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
@@ -27,7 +29,7 @@ internal data class VoiceRequestParts(
     val rawEventId: RequestBody,
     val durationSeconds: RequestBody,
     val timestamp: RequestBody,
-    val personRef: RequestBody?,
+    val counterpartyRef: RequestBody?,
     val eventTitle: RequestBody?,
 )
 
@@ -37,7 +39,7 @@ internal fun RawIngestionEventEntity.toRequestParts(rawEventId: String): VoiceRe
         rawEventId = rawEventId.toPlainRequestBody(),
         durationSeconds = (durationSeconds ?: 0).toString().toPlainRequestBody(),
         timestamp = timestamp.toString().toPlainRequestBody(),
-        personRef = personRef?.toPlainRequestBody(),
+        counterpartyRef = counterpartyRef?.toPlainRequestBody(),
         eventTitle = eventTitle?.toPlainRequestBody(),
     )
 
@@ -81,7 +83,7 @@ internal fun CommitmentDraftDto.toCommitmentEntity(
     userId = userId,
     direction = direction.lowercase(),
     counterpartyRaw = null,
-    personRef = personRef,
+    counterpartyRef = counterpartyRef,
     title = text.take(500), // reasonable title truncation
     description = null,
     quote = quote,
@@ -119,7 +121,7 @@ internal fun VoiceExtractItemDto.toTrackableCommitmentEntity(
     scheduleStatus = scheduleStatus,
     decisionStatus = decisionStatus,
     counterpartyRaw = null,
-    personRef = personRef,
+    counterpartyRef = counterpartyRef,
     title = text.take(500),
     description = null,
     quote = quote,
@@ -138,34 +140,72 @@ internal fun VoiceExtractItemDto.toTrackableCommitmentEntity(
     updatedAt = now,
 )
 
-internal fun PersonCandidateDto.toSourcePersonCandidateEntity(
+internal fun PersonCandidateDto.toSourceEventParticipantEntity(
     userId: String,
+    sourceEventId: String,
     sourceType: String,
-    sourceRef: String,
+    sourceRef: String?,
     index: Int,
     now: Instant,
-): SourcePersonCandidateEntity {
-    val candidateRef = email ?: phone ?: name ?: organization ?: "candidate-$index"
-    val id = UUID.nameUUIDFromBytes(
-        "candidate:$userId:$sourceType:$sourceRef:$index:$candidateRef".toByteArray(Charsets.UTF_8),
+): SourceEventParticipantEntity {
+    val anchor = email ?: phone ?: name ?: organization
+    val resolved = PersonIdentityResolver.resolve(userId, anchor)
+    val normalized = resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
+    val participantId = UUID.nameUUIDFromBytes(
+        "source-participant:$userId:$sourceEventId:$index:${role}:${anchor.orEmpty()}".toByteArray(Charsets.UTF_8),
     ).toString()
-    return SourcePersonCandidateEntity(
-        id = id,
+    return SourceEventParticipantEntity(
+        id = participantId,
         userId = userId,
+        sourceEventId = sourceEventId,
         sourceType = sourceType,
         sourceRef = sourceRef,
-        candidateRef = "$role:$candidateRef",
+        personId = resolved?.personId,
         role = role,
-        name = name,
-        email = email,
-        phone = phone,
-        organization = organization,
+        relationToUser = when (role.lowercase()) {
+            "sender", "recipient", "counterparty", "speaker", "caller", "receiver" -> "counterparty"
+            "attendee" -> "participant"
+            else -> "referenced"
+        },
+        identityType = resolved?.identityType,
+        normalizedValue = normalized,
+        displayNameRaw = name,
+        emailRaw = email,
+        phoneRaw = phone,
+        organizationRaw = organization,
         evidence = evidence,
         confidence = confidence.coerceIn(0.0, 1.0),
+        resolutionStatus = if (resolved == null) "unresolved" else "resolved",
+        createdAt = now,
+    )
+}
+
+internal fun CommitmentEntity.toCommitmentParticipantEntity(
+    userId: String,
+    index: Int,
+    now: Instant,
+): CommitmentParticipantEntity? {
+    val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef) ?: return null
+    val participantId = UUID.nameUUIDFromBytes(
+        "commitment-participant:$userId:$id:${resolved.personId}:$index".toByteArray(Charsets.UTF_8),
+    ).toString()
+    return CommitmentParticipantEntity(
+        id = participantId,
+        userId = userId,
+        commitmentId = id,
+        personId = resolved.personId,
+        role = when (itemType) {
+            CommitmentItemType.ACTION -> direction ?: "owner"
+            CommitmentItemType.SCHEDULE -> "attendee"
+            CommitmentItemType.DECISION -> "decision_maker"
+            else -> "owner"
+        },
+        evidence = quote,
+        confidence = confidence,
         createdAt = now,
     )
 }
 
 /** Convenience: creates a plain-text [RequestBody] from this String. */
-private fun String.toPlainRequestBody(): RequestBody =
+internal fun String.toPlainRequestBody(): RequestBody =
     toRequestBody("text/plain".toMediaTypeOrNull())

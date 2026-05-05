@@ -95,13 +95,14 @@ behaviors:
 
   - id: CMT-010
     type: gesture
-    description: "pull-to-refresh 시 CommitmentManagementScreen은 Room 목록을 즉시 재조회하고, 동시에 foreground catch-up(ING-011) + 즉시 업로드(SYNC-006)를 트리거한다. 서버 GET으로 Room을 역갱신하지 않는다"
+    description: "pull-to-refresh 시 CommitmentManagementScreen은 Room 목록을 즉시 렌더링하고, 공통 relation mirror refresh를 통해 commitments/source_event_participants/commitment_participants를 갱신한다"
     gesture: "pull-to-refresh"
     screen: "CommitmentManagementScreen"
     precondition: "CommitmentManagementScreen 표시됨, 네트워크 연결됨"
-    expected: "pull-to-refresh 즉시 현재 action_state 필터로 Room 목록 재조회됨. 동시에 ING-011이 실행되어 새 source event를 로컬 수집하고, 그 결과 생성된 commitments가 Room에 반영되면 목록이 갱신됨. pending mutation이 있으면 SYNC-006으로 mirror flush가 시작된다"
+    expected: "pull-to-refresh 즉시 현재 action_state 필터의 Room 목록이 유지된다. 인증된 세션이면 공통 relation refresh 경로로 source_event_participants, commitments, commitment_participants를 mirror한 뒤 PersonInteractionIndexWorker를 enqueue한다. refresh 결과가 Room에 반영되면 Commitment card와 person 연결 정보가 같은 person graph 기준으로 갱신된다"
     source: phase2-acceptance
-    tests: []
+    tests:
+      - "CommitmentManagementViewModelSpecTest.CMT-010 pull refresh uses current user and surfaces repository failure"
 
   - id: CMT-011
     type: lifecycle

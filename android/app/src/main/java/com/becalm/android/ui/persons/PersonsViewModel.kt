@@ -25,14 +25,14 @@ import kotlinx.datetime.Instant
 /**
  * A single row in the persons list, derived from the Room-backed persons projection owner.
  *
- * @property personRef Canonicalized counterparty identifier.
+ * @property personId Canonical relation person id.
  * @property displayName Human-readable name from the on-device contact, or null when absent.
  * @property lastInteractionAt Timestamp of the most recent raw ingestion event for this person,
  *   or null when no events exist locally yet.
  * @property interactionCount Count of raw ingestion events recorded for this person.
  */
 public data class PersonRow(
-    val personRef: String,
+    val personId: String,
     val displayName: String?,
     val nickname: String? = null,
     val companyName: String? = null,
@@ -44,13 +44,13 @@ public data class PersonRow(
     val lastInteractionSnippet: String? = null,
 ) {
     /**
-     * User-facing label. Falls back to the canonical raw [personRef] when no
+     * User-facing label. Falls back to the canonical [personId] when no
      * display name or nickname is available (SRC-001, ENR-006).
      */
     val displayLabel: String
         get() = displayName
             ?: nickname
-            ?: personRef
+            ?: personId
 }
 
 public enum class PersonSectionKind {

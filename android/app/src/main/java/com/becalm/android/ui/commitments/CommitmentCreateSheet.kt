@@ -91,7 +91,7 @@ public fun CommitmentCreateSheet(
     onTitleChange: ((String) -> Unit)? = null,
     onDirectionChange: ((String) -> Unit)? = null,
     onQuoteChange: ((String) -> Unit)? = null,
-    onPersonRefChange: ((String) -> Unit)? = null,
+    onCounterpartyRefChange: ((String) -> Unit)? = null,
     onDueAtMillisChange: ((Long?) -> Unit)? = null,
     onDueHintChange: ((String) -> Unit)? = null,
     onApproxChange: ((Boolean) -> Unit)? = null,
@@ -107,7 +107,7 @@ public fun CommitmentCreateSheet(
             onTitleChange == null ||
             onDirectionChange == null ||
             onQuoteChange == null ||
-            onPersonRefChange == null ||
+            onCounterpartyRefChange == null ||
             onDueAtMillisChange == null ||
             onDueHintChange == null ||
             onApproxChange == null ||
@@ -140,7 +140,7 @@ public fun CommitmentCreateSheet(
             onTitleChange = onTitleChange ?: requireNotNull(createViewModel)::onTitleChange,
             onDirectionChange = onDirectionChange ?: requireNotNull(createViewModel)::onDirectionChange,
             onQuoteChange = onQuoteChange ?: requireNotNull(createViewModel)::onQuoteChange,
-            onPersonRefChange = onPersonRefChange ?: requireNotNull(createViewModel)::onPersonRefChange,
+            onCounterpartyRefChange = onCounterpartyRefChange ?: requireNotNull(createViewModel)::onCounterpartyRefChange,
             onDueAtMillisChange = onDueAtMillisChange ?: requireNotNull(createViewModel)::onDueAtMillisChange,
             onDueHintChange = onDueHintChange ?: requireNotNull(createViewModel)::onDueHintChange,
             onApproxChange = onApproxChange ?: requireNotNull(createViewModel)::onApproxChange,
@@ -159,7 +159,7 @@ internal fun CreateSheetContent(
     onTitleChange: (String) -> Unit,
     onDirectionChange: (String) -> Unit,
     onQuoteChange: (String) -> Unit,
-    onPersonRefChange: (String) -> Unit,
+    onCounterpartyRefChange: (String) -> Unit,
     onDueAtMillisChange: (Long?) -> Unit,
     onDueHintChange: (String) -> Unit,
     onApproxChange: (Boolean) -> Unit,
@@ -265,8 +265,8 @@ internal fun CreateSheetContent(
 
             item {
                 OutlinedTextField(
-                    value = state.draft.personRef.orEmpty(),
-                    onValueChange = onPersonRefChange,
+                    value = state.draft.counterpartyRef.orEmpty(),
+                    onValueChange = onCounterpartyRefChange,
                     label = { Text(text = stringResource(R.string.commitment_manual_field_person_ref)) },
                     placeholder = {
                         Text(text = stringResource(R.string.commitment_edit_field_person_placeholder))

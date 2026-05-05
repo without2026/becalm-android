@@ -1,5 +1,5 @@
 /**
- * SP-48: Glass card rendering a single commitment with direction cast, D-N badge,
+ * SP-48: Frosted card rendering a single commitment with direction badges, D-N badge,
  * and status chip.
  *
  * The card reads from design token spec §4 (direction) and §5 (D-N badges, state
@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -77,7 +76,7 @@ import kotlinx.datetime.toLocalDateTime
 // ─── CommitmentCard ───────────────────────────────────────────────────────────
 
 /**
- * Renders a single commitment as a glass card with a direction-cast left stripe,
+ * Renders a single commitment as a frosted relationship card with direction chips,
  * a compact D-N urgency badge, an action status chip, and an optional mark-done
  * icon button.
  *
@@ -102,9 +101,8 @@ import kotlinx.datetime.toLocalDateTime
  *                      resolved display label. Never pass a raw email address, phone
  *                      number, or internal identifier — the TalkBack accessibility
  *                      description includes this value verbatim.
- * @param direction     Direction string — `"give"` renders warm amber cast,
- *                      `"take"` renders cool slate cast; any other value falls back
- *                      to `colorScheme.outline`.
+ * @param direction     Direction string. `"give"` / `"take"` are rendered as
+ *                      inline relationship direction chips when applicable.
  * @param derivedStatus Status string driving the chip and card alpha. Accepted values:
  *                      `"PENDING"`, `"REMINDED"`, `"FOLLOWED_UP"`, `"COMPLETED"`,
  *                      `"OVERDUE"`, `"CANCELLED"` (spec-aligned action_state keys,
@@ -169,18 +167,10 @@ public fun CommitmentCard(
     onMarkDone: (() -> Unit)? = null,
 ) {
     val colors = MaterialTheme.becalmColors
-    val colorScheme = MaterialTheme.colorScheme
     val normalizedItemType = itemType.lowercase()
     val normalizedDirection = direction?.lowercase()
     val normalizedScheduleStatus = scheduleStatus?.lowercase()
     val normalizedDecisionStatus = decisionStatus?.lowercase()
-
-    // Direction stripe color
-    val stripeColor = when (normalizedDirection) {
-        "give" -> colors.directionGive.border
-        "take" -> colors.directionTake.border
-        else -> colorScheme.outline
-    }
 
     // Status → alpha; chip visibility. COMPLETED and CANCELLED both dim per spec
     // CMT-009 — the user has closed the row one way or the other. OVERDUE stays at
@@ -358,21 +348,11 @@ public fun CommitmentCard(
                 if (onClick != null) role = Role.Button
             },
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // Left direction stripe
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(stripeColor),
-            )
-
-            // Card body
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
                 // Prototype-aligned hierarchy: person/context first, then promise text.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -460,8 +440,6 @@ public fun CommitmentCard(
                         )
                     }
                 }
-
-            }
         }
     }
     }

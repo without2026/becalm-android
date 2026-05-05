@@ -5,11 +5,10 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonIndexDao
-import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
-import com.becalm.android.data.remote.dto.SourcePersonCandidateDto
+import com.becalm.android.data.remote.dto.CommitmentParticipantDto
 import java.io.IOException
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -19,11 +18,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import retrofit2.Response
 
-public interface SourcePersonCandidateRepository {
+public interface CommitmentParticipantRepository {
     public suspend fun refreshSince(
         userId: String,
-        sourceType: String? = null,
         since: Instant? = null,
+        personId: String? = null,
+        commitmentId: String? = null,
     ): BecalmResult<RefreshStats>
 
     public data class RefreshStats(
@@ -35,12 +35,12 @@ public interface SourcePersonCandidateRepository {
 }
 
 @Singleton
-public class SourcePersonCandidateRepositoryImpl @Inject constructor(
+public class CommitmentParticipantRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
     private val apiProvider: Provider<RailwayApi>,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : SourcePersonCandidateRepository {
+) : CommitmentParticipantRepository {
 
     private val api: RailwayApi
         get() = apiProvider.get()
@@ -57,9 +57,10 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
 
     override suspend fun refreshSince(
         userId: String,
-        sourceType: String?,
         since: Instant?,
-    ): BecalmResult<SourcePersonCandidateRepository.RefreshStats> = withContext(ioDispatcher) {
+        personId: String?,
+        commitmentId: String?,
+    ): BecalmResult<CommitmentParticipantRepository.RefreshStats> = withContext(ioDispatcher) {
         var cursor: String? = null
         var totalFetched = 0
         var totalUpserted = 0
@@ -70,11 +71,12 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
             if (pageIndex > 0 && !lastHasMore) return@repeat
 
             val response = try {
-                api.getSourcePersonCandidates(
+                api.getCommitmentParticipants(
                     cursor = cursor,
                     limit = PAGE_LIMIT,
                     since = since?.toString(),
-                    sourceType = sourceType,
+                    personId = personId,
+                    commitmentId = commitmentId,
                 )
             } catch (e: IOException) {
                 logger.e(TAG, "refreshSince network error on page $pageIndex", e)
@@ -93,11 +95,13 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
                 ?: return@withContext BecalmResult.Failure(
                     BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
                 )
-            val entities = body.data.map { it.toEntity(userId) }
-            if (entities.isNotEmpty()) personIndexDao.upsertCandidates(entities)
+            val participants = body.data.map { it.toEntity(userId) }
+            if (participants.isNotEmpty()) {
+                personIndexDao.upsertCommitmentParticipants(participants)
+            }
 
             totalFetched += body.data.size
-            totalUpserted += entities.size
+            totalUpserted += participants.size
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
@@ -105,10 +109,10 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
 
         logger.d(
             TAG,
-            "refreshSince done sourceType=$sourceType fetched=$totalFetched upserted=$totalUpserted",
+            "refreshSince done fetched=$totalFetched upserted=$totalUpserted",
         )
         BecalmResult.Success(
-            SourcePersonCandidateRepository.RefreshStats(
+            CommitmentParticipantRepository.RefreshStats(
                 fetched = totalFetched,
                 upserted = totalUpserted,
                 hasMore = lastHasMore,
@@ -117,20 +121,13 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun SourcePersonCandidateDto.toEntity(userId: String): SourcePersonCandidateEntity =
-        SourcePersonCandidateEntity(
-            id = id.ifBlank {
-                UUID.nameUUIDFromBytes("$userId:$sourceType:$sourceRef:$candidateRef".toByteArray()).toString()
-            },
+    private fun CommitmentParticipantDto.toEntity(userId: String): CommitmentParticipantEntity =
+        CommitmentParticipantEntity(
+            id = id,
             userId = userId,
-            sourceType = sourceType,
-            sourceRef = sourceRef,
-            candidateRef = candidateRef,
+            commitmentId = commitmentId,
+            personId = personId,
             role = role,
-            name = name,
-            email = email,
-            phone = phone,
-            organization = organization,
             evidence = evidence,
             confidence = confidence.coerceIn(0.0, 1.0),
             createdAt = createdAt,
@@ -138,7 +135,7 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
 
     private fun <T> Response<T>.toRefreshError(): BecalmError = when (code()) {
         401 -> BecalmError.Unauthorized
-        404 -> BecalmError.NotFound("source_person_candidates")
+        404 -> BecalmError.NotFound("commitment_participants")
         422 -> BecalmError.Validation(null, message())
         429 -> BecalmError.RateLimited(headers()["Retry-After"]?.toLongOrNull())
         in 500..599 -> BecalmError.ServerError(code(), errorBody()?.string())
@@ -146,7 +143,7 @@ public class SourcePersonCandidateRepositoryImpl @Inject constructor(
     }
 
     private companion object {
-        private const val TAG = "SourcePersonCandidateRepo"
+        private const val TAG = "CommitmentParticipantRepo"
         private const val PAGE_LIMIT = 100
         private const val REFRESH_PAGE_CAP = 10
     }

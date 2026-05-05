@@ -13,12 +13,15 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
-import com.becalm.android.data.repository.SourcePersonCandidateRepository
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
+import com.becalm.android.worker.SourceRelationRefreshCoordinator
+import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.WorkScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -44,7 +47,8 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     private val apiProvider: Provider<RailwayApi>,
     private val commitmentRepositoryProvider: Provider<CommitmentRepository>,
     private val rawIngestionRepositoryProvider: Provider<RawIngestionRepository>,
-    private val sourcePersonCandidateRepositoryProvider: Provider<SourcePersonCandidateRepository>,
+    private val sourceEventParticipantRepositoryProvider: Provider<SourceEventParticipantRepository>,
+    private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -127,63 +131,40 @@ public class BackendMailSyncWorker @AssistedInject constructor(
     }
 
     private suspend fun refreshRawEventsAndCommitments(provider: MailProviderSpec, userId: String): ProviderSyncResult {
-        when (val result = rawIngestionRepositoryProvider.get().refreshSince(userId = userId, sourceType = provider.sourceType, since = null)) {
-            is BecalmResult.Success -> logger.d(
-                TAG,
-                "raw event refresh after mail sync source=${provider.sourceType} " +
-                    "fetched=${result.value.fetched} upserted=${result.value.upserted}",
+        val coordinator = SourceRelationRefreshCoordinator(
+            rawIngestionRepository = rawIngestionRepositoryProvider.get(),
+            commitmentRepository = commitmentRepositoryProvider.get(),
+            sourceEventParticipantRepository = sourceEventParticipantRepositoryProvider.get(),
+            commitmentParticipantRepository = commitmentParticipantRepositoryProvider.get(),
+            workScheduler = workScheduler,
+            logger = logger,
+        )
+        return when (
+            val result = coordinator.refresh(
+                userId = userId,
+                plan = SourceRelationRefreshPlan(
+                    sourceType = provider.sourceType,
+                    rawSourceType = provider.sourceType,
+                ),
             )
-            is BecalmResult.Failure -> {
-                sourceStatusRepository.recordSyncError(
-                    provider.sourceType,
-                    "Raw mail refresh failed",
-                    clock.nowInstant(),
-                )
-                processingStatusRepository.recordError(provider.sourceType, "Raw mail refresh failed")
-                return ProviderSyncResult.RETRY
-            }
-        }
-
-        when (
-            val result = sourcePersonCandidateRepositoryProvider.get()
-                .refreshSince(userId = userId, sourceType = provider.sourceType, since = null)
         ) {
-            is BecalmResult.Success -> logger.d(
-                TAG,
-                "person candidate refresh after mail sync source=${provider.sourceType} " +
-                    "fetched=${result.value.fetched} upserted=${result.value.upserted}",
-            )
-            is BecalmResult.Failure -> {
-                sourceStatusRepository.recordSyncError(
-                    provider.sourceType,
-                    "Person candidate refresh failed",
-                    clock.nowInstant(),
-                )
-                processingStatusRepository.recordError(provider.sourceType, "Person candidate refresh failed")
-                return ProviderSyncResult.RETRY
-            }
-        }
-
-        return when (val result = commitmentRepositoryProvider.get().refreshSince(userId = userId, since = null)) {
             is BecalmResult.Success -> {
                 logger.d(
                     TAG,
-                    "commitment refresh after mail sync source=${provider.sourceType} " +
-                        "fetched=${result.value.fetched} upserted=${result.value.upserted}",
+                    "relation refresh after mail sync source=${provider.sourceType} changed=${result.value.changedCount}",
                 )
-                workScheduler.enqueuePersonInteractionIndex()
                 ProviderSyncResult.SUCCESS
             }
             is BecalmResult.Failure -> {
                 sourceStatusRepository.recordSyncError(
                     provider.sourceType,
-                    "Commitment refresh failed",
+                    "Relation refresh failed",
                     clock.nowInstant(),
                 )
-                processingStatusRepository.recordError(provider.sourceType, "Commitment refresh failed")
+                processingStatusRepository.recordError(provider.sourceType, "Relation refresh failed")
                 logger.w(
                     TAG,
-                    "commitment refresh after mail sync failed source=${provider.sourceType} " +
+                    "relation refresh after mail sync failed source=${provider.sourceType} " +
                         "error=${result.error::class.simpleName}",
                 )
                 ProviderSyncResult.RETRY

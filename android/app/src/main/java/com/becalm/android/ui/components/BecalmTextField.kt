@@ -34,7 +34,7 @@ import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Single glass-styled text input that wraps [OutlinedTextField] with BeCalm's
- * cosmic glass-panel surface and semantic token colors.
+ * frosted glass-panel surface and semantic token colors.
  *
  * @param value               Current text value.
  * @param onValueChange       Callback invoked on each text change.
@@ -104,6 +104,7 @@ public fun BecalmTextField(
         singleLine = singleLine,
         enabled = enabled,
         visualTransformation = visualTransformation,
+        shape = MaterialTheme.shapes.small,
         colors = OutlinedTextFieldDefaults.colors(
             // Container transparent — glass background comes from glassPanel modifier
             focusedContainerColor = Color.Transparent,

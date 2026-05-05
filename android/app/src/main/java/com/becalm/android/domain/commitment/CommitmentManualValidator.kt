@@ -14,7 +14,7 @@ public data class ManualCommitmentDraft(
     val title: String,
     val direction: String,
     val quote: String,
-    val personRef: String?,
+    val counterpartyRef: String?,
     val dueAtMillis: Long?,
     val dueHint: String?,
     val dueIsApproximate: Boolean,
@@ -29,7 +29,7 @@ public data class ManualCommitmentDraft(
  *   to "give" per spec).
  * - `quote` is stripped. Empty → error (spec MAN-002: "증거 없는 기록 방지").
  *   More than 500 chars → error.
- * - `personRef` is normalised by [PersonRefNormalizer.normalize]; phone-shaped
+ * - `counterpartyRef` is normalised by [CounterpartyRefNormalizer.normalize]; phone-shaped
  *   values must pass strict E.164. Free-form names are accepted as-is.
  * - `dueAtMillis` may be null. Any non-null value is acceptable (past is OK
  *   per MAN-005 "지난 약속 추후 기록").
@@ -79,8 +79,8 @@ public object CommitmentManualValidator {
                 errors[Field.QUOTE] = "Quote must be at most $QUOTE_MAX characters"
         }
 
-        val normalisedRef = PersonRefNormalizer.normalize(input.personRef)
-        if (normalisedRef != null && !PersonRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
+        val normalisedRef = CounterpartyRefNormalizer.normalize(input.counterpartyRef)
+        if (normalisedRef != null && !CounterpartyRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
             errors[Field.PERSON_REF] =
                 "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
         }
@@ -97,7 +97,7 @@ public object CommitmentManualValidator {
             title = draft.title.trim(),
             direction = draft.direction,
             quote = draft.quote.trim(),
-            personRef = PersonRefNormalizer.normalize(draft.personRef),
+            counterpartyRef = CounterpartyRefNormalizer.normalize(draft.counterpartyRef),
             dueAt = draft.dueAtMillis?.let { Instant.fromEpochMilliseconds(it) },
             dueHint = draft.dueHint?.trim()?.takeIf { it.isNotBlank() },
             dueIsApproximate = draft.dueIsApproximate,

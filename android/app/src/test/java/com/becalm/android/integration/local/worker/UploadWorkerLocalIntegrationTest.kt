@@ -7,7 +7,9 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
+import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatusRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -45,6 +47,8 @@ class UploadWorkerLocalIntegrationTest {
     private val logger = RecordingLogger()
     private val authRepository = mockk<AuthRepository>()
     private val commitmentRepository = mockk<CommitmentRepository>()
+    private val sourceEventParticipantRepository = mockk<SourceEventParticipantRepository>()
+    private val commitmentParticipantRepository = mockk<CommitmentParticipantRepository>()
     private lateinit var rawRepository: RawIngestionRepositoryImpl
     private lateinit var sourceStatusRepository: SourceStatusRepositoryImpl
     private lateinit var processingPauseGate: ProcessingPauseGate
@@ -73,6 +77,33 @@ class UploadWorkerLocalIntegrationTest {
         )
         coEvery { authRepository.currentSession() } returns session
         coEvery { commitmentRepository.findPendingSync(any(), any()) } returns emptyList()
+        coEvery { commitmentRepository.refreshSince(any(), any(), any(), any(), any()) } returns
+            com.becalm.android.core.result.BecalmResult.Success(
+                CommitmentRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
+        coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
+            com.becalm.android.core.result.BecalmResult.Success(
+                SourceEventParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
+        coEvery { commitmentParticipantRepository.refreshSince(any(), any(), any(), any()) } returns
+            com.becalm.android.core.result.BecalmResult.Success(
+                CommitmentParticipantRepository.RefreshStats(
+                    fetched = 0,
+                    upserted = 0,
+                    hasMore = false,
+                    nextCursor = null,
+                ),
+            )
     }
 
     @After
@@ -143,6 +174,8 @@ class UploadWorkerLocalIntegrationTest {
         authRepository = authRepository,
         rawIngestionRepository = rawRepository,
         commitmentRepository = commitmentRepository,
+        sourceEventParticipantRepository = sourceEventParticipantRepository,
+        commitmentParticipantRepository = commitmentParticipantRepository,
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = mockk<WorkScheduler>(relaxed = true),
         processingPauseGate = processingPauseGate,

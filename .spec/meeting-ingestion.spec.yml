@@ -33,7 +33,7 @@ behaviors:
     description: "사용자가 전사본 파일을 선택하면 Android가 Recordings SAF tree 내부 `BeCalm Meetings/Transcripts/` 하위로 원본 파일을 복사하고, app-private source_artifacts Markdown archive와 source_type='meeting' raw event를 생성한다"
     trigger: "[전사본 추가] file picker result"
     precondition: "선택 파일이 MTG-001 transcript allowlist에 부합, 파일 크기 <= 10 MiB, current_user_id 존재"
-    expected: "앱은 `Recordings/BeCalm Meetings/Transcripts/{timestamp}-{sanitized_name}`에 원본 전사본을 복사한다. 텍스트 추출 가능한 .txt/.md는 app-private source_artifacts에 markdown_original로 저장하고 raw_ingestion_events.event_snippet은 첫 200자로 로컬 갱신한다. .pdf/.docx는 저장만 수행하고 텍스트 추출 실패 시 raw event는 보존하되 extraction enqueue는 하지 않으며 actionError에 지원 상태를 표시한다. Supabase/Railway에는 원문 파일 본문이나 full transcript를 영속 저장하지 않는다"
+    expected: "앱은 `Recordings/BeCalm Meetings/Transcripts/{timestamp}-{sanitized_name}`에 원본 전사본을 복사한다. 텍스트 추출 가능한 .txt/.md는 app-private source_artifacts에 markdown_original로 저장하고 raw_ingestion_events.event_snippet은 첫 200자로 로컬 갱신한다. PIPA 동의가 있으면 MeetingTranscriptUploadWorker를 enqueue해 `/v1/voice/transcript_extract`로 동일 structured extraction pipeline을 실행한다. .pdf/.docx는 저장만 수행하고 텍스트 추출 실패 시 raw event는 보존하되 extraction enqueue는 하지 않으며 actionError에 지원 상태를 표시한다. Supabase/Railway에는 원문 파일 본문이나 full transcript를 영속 저장하지 않는다"
     source: user-request
     tests: []
 
@@ -50,8 +50,8 @@ behaviors:
     type: lifecycle
     description: "미팅 전사본 텍스트 추출은 transient-only path다. Android local archive는 원문 보존을 소유하고, Railway/Supabase는 full transcript를 저장하지 않는다"
     trigger: ".txt 또는 .md transcript import 후 extraction 실행"
-    precondition: "PIPA third-party provision consent true, transcript text <= 100,000 chars"
-    expected: "Android는 추출 요청에 필요한 transcript text를 transient body로만 전송한다. Railway는 structured items와 person candidates만 반환하고 transcript text를 DB·파일시스템·로그에 저장하지 않는다. Android는 returned items를 source_type='meeting' commitments로 Room에 저장한다"
+    precondition: "PIPA third-party provision consent true, transcript text <= 10 MiB"
+    expected: "Android는 추출 요청에 필요한 transcript text를 transient body로만 전송한다. Railway는 오디오 endpoint와 같은 prompt/schema/validation pipeline으로 structured items와 person candidates만 반환하고 transcript text를 DB·파일시스템·로그에 저장하지 않는다. Android는 returned items를 source_type='meeting' commitments로 Room에 저장하고 source_event_participants/commitment_participants를 갱신한 뒤 PersonInteractionIndexWorker를 enqueue한다"
     source: user-request
     tests: []
 

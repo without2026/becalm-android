@@ -90,11 +90,11 @@ class AuthRepositoryLocalIntegrationTest {
         override fun observeSummary(): Flow<PersonEnrichmentSummary> =
             delegate().observeSummary()
 
-        override fun observeByPersonRef(personRef: String): Flow<PersonEnrichmentEntity?> =
-            delegate().observeByPersonRef(personRef)
+        override fun observeByPersonRef(counterpartyRef: String): Flow<PersonEnrichmentEntity?> =
+            delegate().observeByPersonRef(counterpartyRef)
 
-        override suspend fun findByPersonRef(personRef: String): PersonEnrichmentEntity? =
-            delegate().findByPersonRef(personRef)
+        override suspend fun findByPersonRef(counterpartyRef: String): PersonEnrichmentEntity? =
+            delegate().findByPersonRef(counterpartyRef)
 
         override suspend fun upsert(entity: PersonEnrichmentEntity) = delegate().upsert(entity)
 
@@ -246,7 +246,7 @@ class AuthRepositoryLocalIntegrationTest {
         userId = userId,
         direction = "give",
         counterpartyRaw = "raw",
-        personRef = "person",
+        counterpartyRef = "person",
         title = "local title",
         description = null,
         quote = "quote",

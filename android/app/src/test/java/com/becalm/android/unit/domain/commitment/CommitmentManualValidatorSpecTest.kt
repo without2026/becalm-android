@@ -14,7 +14,7 @@ class CommitmentManualValidatorSpecTest {
         val draft = validDraft(
             title = "  월요일 보고서 전달  ",
             quote = "  3월 15일 팀 미팅에서 월요일 오전까지 전달하기로 함  ",
-            personRef = "  LEE@CORP.COM  ",
+            counterpartyRef = "  LEE@CORP.COM  ",
             dueHint = "  월요일 오전  ",
         )
 
@@ -24,7 +24,7 @@ class CommitmentManualValidatorSpecTest {
                 title = "월요일 보고서 전달",
                 direction = "give",
                 quote = "3월 15일 팀 미팅에서 월요일 오전까지 전달하기로 함",
-                personRef = "lee@corp.com",
+                counterpartyRef = "lee@corp.com",
                 dueAt = Instant.fromEpochMilliseconds(1_710_000_000_000L),
                 dueHint = "월요일 오전",
                 dueIsApproximate = false,
@@ -84,7 +84,7 @@ class CommitmentManualValidatorSpecTest {
                         "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)",
                 ),
             ),
-            CommitmentManualValidator.validate(validDraft(personRef = "010-2222-3333")),
+            CommitmentManualValidator.validate(validDraft(counterpartyRef = "010-2222-3333")),
         )
     }
 
@@ -92,7 +92,7 @@ class CommitmentManualValidatorSpecTest {
     fun `MAN-005 accepts missing person ref missing deadline and past deadline`() {
         assertEquals(
             CommitmentManualValidator.ValidationResult.Ok,
-            CommitmentManualValidator.validate(validDraft(personRef = null, dueAtMillis = null)),
+            CommitmentManualValidator.validate(validDraft(counterpartyRef = null, dueAtMillis = null)),
         )
         assertEquals(
             CommitmentManualValidator.ValidationResult.Ok,
@@ -104,7 +104,7 @@ class CommitmentManualValidatorSpecTest {
         title: String = "보고서 전달",
         direction: String = "give",
         quote: String = "김대리와 월요일 보고서를 전달하기로 약속함",
-        personRef: String? = "lee@corp.com",
+        counterpartyRef: String? = "lee@corp.com",
         dueAtMillis: Long? = 1_710_000_000_000L,
         dueHint: String? = null,
         dueIsApproximate: Boolean = false,
@@ -112,7 +112,7 @@ class CommitmentManualValidatorSpecTest {
         title = title,
         direction = direction,
         quote = quote,
-        personRef = personRef,
+        counterpartyRef = counterpartyRef,
         dueAtMillis = dueAtMillis,
         dueHint = dueHint,
         dueIsApproximate = dueIsApproximate,

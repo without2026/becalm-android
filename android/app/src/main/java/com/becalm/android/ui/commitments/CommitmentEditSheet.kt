@@ -97,7 +97,7 @@ public fun CommitmentEditSheet(
     onDueAtMillisChange: ((Long?) -> Unit)? = null,
     onDueIsApproximateChange: ((Boolean) -> Unit)? = null,
     onDueHintChange: ((String) -> Unit)? = null,
-    onPersonRefChange: ((String) -> Unit)? = null,
+    onCounterpartyRefChange: ((String) -> Unit)? = null,
     onDirectionChange: ((String) -> Unit)? = null,
     onToggleDispute: (() -> Unit)? = null,
     onSave: (() -> Unit)? = null,
@@ -114,7 +114,7 @@ public fun CommitmentEditSheet(
             onDueAtMillisChange == null ||
             onDueIsApproximateChange == null ||
             onDueHintChange == null ||
-            onPersonRefChange == null ||
+            onCounterpartyRefChange == null ||
             onDirectionChange == null ||
             onToggleDispute == null ||
             onSave == null ||
@@ -165,7 +165,7 @@ public fun CommitmentEditSheet(
                     onDueAtMillisChange = onDueAtMillisChange ?: requireNotNull(editViewModel)::onDueAtMillisChange,
                     onDueIsApproximateChange = onDueIsApproximateChange ?: requireNotNull(editViewModel)::onDueIsApproximateChange,
                     onDueHintChange = onDueHintChange ?: requireNotNull(editViewModel)::onDueHintChange,
-                    onPersonRefChange = onPersonRefChange ?: requireNotNull(editViewModel)::onPersonRefChange,
+                    onCounterpartyRefChange = onCounterpartyRefChange ?: requireNotNull(editViewModel)::onCounterpartyRefChange,
                     onDirectionChange = onDirectionChange ?: requireNotNull(editViewModel)::onDirectionChange,
                     onToggleDispute = onToggleDispute ?: requireNotNull(editViewModel)::onToggleDispute,
                     onSave = onSave ?: requireNotNull(editViewModel)::onSave,
@@ -187,7 +187,7 @@ internal fun EditSheetContent(
     onDueAtMillisChange: (Long?) -> Unit,
     onDueIsApproximateChange: (Boolean) -> Unit,
     onDueHintChange: (String) -> Unit,
-    onPersonRefChange: (String) -> Unit,
+    onCounterpartyRefChange: (String) -> Unit,
     onDirectionChange: (String) -> Unit,
     onToggleDispute: () -> Unit,
     onSave: () -> Unit,
@@ -334,8 +334,8 @@ internal fun EditSheetContent(
 
         // ── Person ref ──
         OutlinedTextField(
-            value = state.personRef,
-            onValueChange = onPersonRefChange,
+            value = state.counterpartyRef,
+            onValueChange = onCounterpartyRefChange,
             label = { Text(text = stringResource(R.string.commitment_edit_field_person)) },
             placeholder = { Text(text = stringResource(R.string.commitment_edit_field_person_placeholder)) },
             isError = state.fieldErrors.containsKey(Field.PERSON_REF),

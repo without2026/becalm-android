@@ -40,6 +40,11 @@ internal object TodayTimelineProjector {
             title = title,
             direction = direction,
             scheduleStatus = scheduleStatus,
+            rowTreatment = if (itemType == CommitmentItemType.SCHEDULE) {
+                TodayCommitmentRowTreatment.SCHEDULE
+            } else {
+                TodayCommitmentRowTreatment.ACTION
+            },
             counterpartyDisplayName = counterpartyDisplayName?.take(COUNTERPARTY_DISPLAY_MAX),
             dueAt = dueAt,
             dueIsApproximate = dueIsApproximate,

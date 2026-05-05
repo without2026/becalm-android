@@ -2,13 +2,11 @@ package com.becalm.android.ui.persons
 
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.datastore.UserPrefsStore
-import com.becalm.android.data.local.db.dao.PersonInteractionAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
-import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
-import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.ForegroundCatchUpScheduler
@@ -24,13 +22,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Instant
 
 /** Projection row used by [PersonsViewModel] to expose SRC-001/002 contracts. */
 public data class PersonListProjection(
-    val personRef: String,
+    val personId: String,
     val displayName: String?,
     val nickname: String?,
     val companyName: String?,
@@ -100,6 +99,7 @@ public data class PersonsRefreshSnapshot(
  */
 public interface PersonsScreenProjectionPort {
     public fun observePeople(userId: String): Flow<PersonsListPageProjection>
+    public fun observeSearchableContacts(userId: String): Flow<List<PersonListProjection>> = flowOf(emptyList())
     public fun observeUnassigned(userId: String, limit: Int = 20): Flow<List<UnassignedEventSummary>>
     public fun observeOfflineStatus(): Flow<PersonsOfflineStatus>
 }
@@ -113,7 +113,6 @@ public interface PersonsRefreshCoordinator {
 public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val personIndexDao: PersonIndexDao,
-    private val rawIngestionRepository: RawIngestionRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val userPrefsStore: UserPrefsStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -123,28 +122,47 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         combine(
             personEnrichmentRepository.observeAll(),
             personIndexDao.observeAggregates(userId, PAGE_SIZE + 1),
-            rawIngestionRepository.observePersonInteractionAggregates(userId, PAGE_SIZE + 1),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { enrichmentRows, indexAggregateRows, legacyAggregateRows, blockedPersonRefs ->
+        ) { enrichmentRows, indexAggregateRows, blockedPersonRefs ->
             val filteredIndexRows = indexAggregateRows.filterNot { row ->
                 PersonIdentityResolver.isBlocked(row.primaryIdentityKey, blockedPersonRefs) ||
                     PersonIdentityResolver.isLikelyAutomated(row.primaryIdentityKey) ||
                     PersonIdentityResolver.isLikelyAutomated(row.displayNameHint)
             }
-            if (filteredIndexRows.isNotEmpty()) {
-                buildProjectionPage(
-                    enrichmentRows = enrichmentRows,
-                    aggregateRows = filteredIndexRows,
-                )
-            } else {
-                buildLegacyProjectionPage(
-                    enrichmentRows = enrichmentRows,
-                    aggregateRows = legacyAggregateRows.filterNot { row ->
-                        PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
-                            PersonIdentityResolver.isLikelyAutomated(row.personRef)
-                    },
-                )
-            }
+            buildProjectionPage(
+                enrichmentRows = enrichmentRows,
+                aggregateRows = filteredIndexRows,
+            )
+        }
+            .distinctUntilChanged()
+            .flowOn(ioDispatcher)
+
+    override fun observeSearchableContacts(userId: String): Flow<List<PersonListProjection>> =
+        combine(
+            personEnrichmentRepository.observeAll(),
+            userPrefsStore.observeBlockedPersonRefs(),
+        ) { enrichmentRows, blockedPersonRefs ->
+            enrichmentRows
+                .filterNot { row ->
+                    PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
+                        PersonIdentityResolver.isLikelyAutomated(row.personRef) ||
+                        PersonIdentityResolver.isLikelyAutomated(row.displayName)
+                }
+                .map { enrichment ->
+                    PersonListProjection(
+                        personId = PersonIdentityResolver.resolve(userId, enrichment.personRef)?.personId
+                            ?: enrichment.personRef,
+                        displayName = enrichment.displayName,
+                        nickname = enrichment.nickname,
+                        companyName = enrichment.company,
+                        jobTitle = enrichment.title,
+                        eventCount = 0,
+                        pendingCommitmentCount = 0,
+                        channelSources = emptySet(),
+                        lastInteractionAt = null,
+                        lastInteractionSnippet = null,
+                    )
+                }
         }
             .distinctUntilChanged()
             .flowOn(ioDispatcher)
@@ -152,9 +170,9 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> =
         combine(
             personIndexDao.observeUnmatchedInteractions(userId, limit),
-            personIndexDao.observeCandidatesForUser(userId),
+            personIndexDao.observeSourceEventParticipantsForUser(userId),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { events, candidates, blockedPersonRefs ->
+        ) { events, participants, blockedPersonRefs ->
             events
                 .filterNot { event ->
                     PersonIdentityResolver.isBlocked(event.suggestedLabel, blockedPersonRefs) ||
@@ -163,9 +181,13 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                 .map { event ->
                     val eventCandidates = candidateSourceRefs(event.sourceRef)
                         .flatMap { ref ->
-                            candidates.filter { candidate ->
-                                candidate.sourceType == event.sourceType &&
-                                    candidate.sourceRef == ref
+                            participants.filter { participant ->
+                                participant.sourceType == event.sourceType &&
+                                    (
+                                        participant.sourceRef == ref ||
+                                            "raw:${participant.sourceEventId}" == ref ||
+                                            participant.sourceEventId == ref.removePrefix("raw:")
+                                        )
                             }
                         }
                         .mapNotNull { it.toMatchCandidateSummary(blockedPersonRefs) }
@@ -205,7 +227,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                     ?.removeIdentityPrefix()
                     ?.let(enrichmentByRef::get)
                 PersonListProjection(
-                    personRef = aggregate.personId,
+                    personId = aggregate.personId,
                     displayName = enrichment?.displayName ?: aggregate.displayNameHint,
                     nickname = enrichment?.nickname,
                     companyName = enrichment?.company,
@@ -226,37 +248,6 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         )
     }
 
-    private fun buildLegacyProjectionPage(
-        enrichmentRows: List<PersonEnrichmentEntity>,
-        aggregateRows: List<PersonInteractionAggregateRow>,
-    ): PersonsListPageProjection {
-        val enrichmentByRef = enrichmentRows.associateBy { it.personRef }
-        val hasMore = aggregateRows.size > PAGE_SIZE
-        val pageRows = aggregateRows
-            .take(PAGE_SIZE)
-            .map { aggregate ->
-                val enrichment = enrichmentByRef[aggregate.personRef]
-                PersonListProjection(
-                    personRef = aggregate.personRef,
-                    displayName = enrichment?.displayName,
-                    nickname = enrichment?.nickname,
-                    companyName = enrichment?.company,
-                    jobTitle = enrichment?.title,
-                    eventCount = aggregate.eventCount,
-                    pendingCommitmentCount = aggregate.pendingCommitmentCount,
-                    channelSources = aggregate.channelSources.toSourceSet(),
-                    lastInteractionAt = aggregate.lastInteractionAt,
-                    lastInteractionSnippet = aggregate.lastInteractionSnippet,
-                )
-            }
-        return PersonsListPageProjection(
-            rows = pageRows,
-            hasMorePages = hasMore,
-            nextCursor = pageRows.lastOrNull()?.let(::toCursor),
-            sortOrder = PersonsSortOrder.MOST_RECENT_EVENT_DESC,
-        )
-    }
-
     private fun buildOfflineStatus(
         statuses: List<com.becalm.android.data.repository.SourceStatus>,
     ): PersonsOfflineStatus =
@@ -266,7 +257,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         )
 
     private fun toCursor(row: PersonListProjection): String =
-        "${row.lastInteractionAt?.toEpochMilliseconds() ?: 0}|${row.personRef}"
+        "${row.lastInteractionAt?.toEpochMilliseconds() ?: 0}|${row.personId}"
 
     private fun String.removeIdentityPrefix(): String =
         substringAfter(':', this)
@@ -278,21 +269,26 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             sourceRef.takeIf { !it.startsWith("raw:") }?.let { "raw:$it" }.orEmpty(),
         ).filter { it.isNotBlank() }.distinct()
 
-    private fun SourcePersonCandidateEntity.toMatchCandidateSummary(
+    private fun SourceEventParticipantEntity.toMatchCandidateSummary(
         blockedPersonRefs: Set<String>,
     ): PersonMatchCandidateSummary? {
-        val anchor = email ?: phone ?: name ?: return null
+        val anchor = emailRaw
+            ?: phoneRaw
+            ?: normalizedValue
+            ?: displayNameRaw
+            ?: organizationRaw
+            ?: return null
         if (
             PersonIdentityResolver.isBlocked(anchor, blockedPersonRefs) ||
             PersonIdentityResolver.isLikelyAutomated(anchor)
         ) {
             return null
         }
-        val displayName = name ?: email ?: phone ?: return null
+        val displayName = displayNameRaw ?: emailRaw ?: phoneRaw ?: normalizedValue ?: organizationRaw ?: return null
         val detail = listOfNotNull(
-            email?.takeUnless { it == displayName },
-            phone?.takeUnless { it == displayName },
-            organization,
+            emailRaw?.takeUnless { it == displayName },
+            phoneRaw?.takeUnless { it == displayName },
+            organizationRaw,
         ).firstOrNull()
         return PersonMatchCandidateSummary(
             anchor = anchor,

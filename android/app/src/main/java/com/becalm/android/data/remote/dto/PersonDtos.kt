@@ -5,37 +5,29 @@ import com.squareup.moshi.Json
 import kotlinx.datetime.Instant
 
 /**
- * Summary of a virtual "person" as returned by GET /v1/persons.
+ * Summary of a canonical person as returned by GET /v1/persons.
  *
- * In the MVP there is no separate `persons` Supabase table. Person records are
- * virtual — grouped by `person_ref` across `raw_ingestion_events` and `commitments`.
- * (data-model.yml migration_notes: "persons_enrichment: Room only — never uploaded".)
- *
- * The api-contract.yml declares a `Person[]` response shape but does not enumerate
- * its fields explicitly (the endpoint was added for spec_refs SRC-001/003/006).
- * The fields below are derived from the virtual grouping semantics: the server
- * aggregates across `raw_ingestion_events` and `commitments` on `person_ref`.
- *
- * Note: `display_name` here is the server's best guess (from event data only).
- * The richer [persons_enrichment] data lives in Room and is never sent to Railway.
+ * Backend stores first-class `persons` rows. [personId] is the only wire key.
  */
 @JsonClass(generateAdapter = true)
 public data class PersonSummaryDto(
-    /**
-     * Canonicalized person identifier. Primary key for virtual grouping.
-     * Precedence: E.164 phone > lowercase email > normalized display name.
-     */
-    @field:Json(name = "person_ref") val personRef: String,
+    /** Canonical person id. Primary navigation/key field. */
+    @field:Json(name = "person_id") val personId: String? = null,
 
-    /**
-     * Server-side display name inferred from event titles or counterparty_raw fields.
-     * May be null when no display name can be inferred. The authoritative display name
-     * is in Room's [persons_enrichment] table and is never sent to Railway.
-     */
+    /** Server-side canonical display name. */
     @field:Json(name = "display_name") val displayName: String? = null,
 
+    /** `person` or `organization`. */
+    @field:Json(name = "kind") val kind: String? = null,
+
+    /** Primary email identity when one exists. */
+    @field:Json(name = "primary_email") val primaryEmail: String? = null,
+
+    /** Primary phone identity when one exists. */
+    @field:Json(name = "primary_phone") val primaryPhone: String? = null,
+
     /**
-     * Timestamp of the most recent raw ingestion event associated with this person.
+     * Timestamp of the most recent interaction associated with this person.
      * Used for sorting in the Persons list screen.
      */
     @field:Json(name = "last_contact_at") val lastContactAt: Instant? = null,
@@ -47,7 +39,10 @@ public data class PersonSummaryDto(
      * decision rows count as open until a future dedicated lifecycle is introduced.
      */
     @field:Json(name = "open_commitments_count") val openCommitmentsCount: Int? = null,
-)
+) {
+    public val stablePersonId: String
+        get() = personId.orEmpty()
+}
 
 /**
  * Paginated list response for GET /v1/persons.
@@ -75,7 +70,7 @@ public data class PersonListResponse(
  *
  * Wire format: { data: RawIngestionEvent[], cursor: string, has_more: boolean }
  *
- * Returns the timeline of raw ingestion events associated with the given person_ref.
+ * Returns the timeline of raw ingestion events associated with the given person_id.
  * Returns 404 when no events exist for the given person_id.
  */
 @JsonClass(generateAdapter = true)
@@ -96,7 +91,7 @@ public data class PersonEventsResponse(
  *
  * Wire format: { data: Commitment[], cursor: string, has_more: boolean }
  *
- * Returns commitments where person_ref matches the given person_id.
+ * Returns commitments linked to the given person_id through commitment_participants.
  * Returns 404 when no commitments exist for the given person_id.
  */
 @JsonClass(generateAdapter = true)

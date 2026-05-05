@@ -74,6 +74,32 @@
     <string name="onb_contacts_body">BeCalm은 상호작용 상대방의 이름 표시를 위해 연락처를 읽습니다. 연락처 데이터는 기기 밖으로 전송되지 않습니다. 언제든지 권한을 취소할 수 있습니다.</string>
     <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
 
+    <!-- Source connection hub -->
+    <string name="onb_sources_title">소스 연결</string>
+    <string name="onb_sources_headline">일이 오가는 곳을 연결하세요</string>
+    <string name="onb_sources_body">BeCalm이 관계 히스토리를 만들 때 사용할 계정을 선택하세요. 건너뛴 소스는 설정에서 나중에 연결할 수 있습니다.</string>
+    <string name="onb_sources_mail_section">메일</string>
+    <string name="onb_sources_calendar_section">캘린더</string>
+    <string name="onb_sources_status_ready">준비됨</string>
+    <string name="onb_sources_status_consent">동의 필요</string>
+    <string name="onb_sources_status_connecting">연결 중</string>
+    <string name="onb_sources_status_waiting">브라우저 대기 중</string>
+    <string name="onb_sources_status_connected">연결됨</string>
+    <string name="onb_sources_status_skipped">건너뜀</string>
+    <string name="onb_sources_status_failed">재시도 필요</string>
+    <string name="onb_sources_continue">계속</string>
+    <string name="onb_sources_skip_remaining">남은 항목 건너뛰고 계속</string>
+    <string name="onb_sources_connect_with_consent">동의하고 연결</string>
+    <string name="onb_sources_retry">다시 시도</string>
+    <string name="onb_sources_activity_missing">이 화면에서 연결을 시작할 수 없습니다. 다시 시도해 주세요.</string>
+    <string name="onb_sources_consent_write_failed">동의 저장에 실패했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_sources_mail_consent_body">BeCalm은 관계 약속 추출을 위해 읽기 전용 접근을 사용합니다. 메일 내용은 소스 처리에만 사용되며 나중에 연결을 해제할 수 있습니다.</string>
+    <string name="settings_source_connections_title">소스 연결</string>
+    <string name="settings_source_connections_headline">관계 소스 다시 연결</string>
+    <string name="settings_source_connections_body">다시 연결할 메일 또는 캘린더 계정을 선택하세요. BeCalm은 이 소스로 관계 히스토리를 최신 상태로 유지합니다.</string>
+    <string name="settings_source_connections_done">완료</string>
+    <string name="settings_source_connections_not_now">나중에</string>
+
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
     <string name="onb_gmail_headline">Gmail 연결</string>
@@ -209,9 +235,14 @@
 
     <!-- Person detail -->
     <string name="person_detail_commitments_section">약속</string>
-    <string name="person_detail_history_section">상호작용 기록</string>
+    <string name="person_detail_timeline_section_fmt">타임라인 (%1$d)</string>
+    <string name="person_detail_timeline_filter_empty">이 출처의 항목이 없습니다.</string>
+    <string name="person_detail_filter_all">전체</string>
+    <string name="person_detail_filter_email">이메일</string>
+    <string name="person_detail_filter_call">통화</string>
+    <string name="person_detail_filter_meeting">미팅</string>
+    <string name="person_detail_filter_commitment">약속</string>
     <string name="person_detail_empty_interactions">아직 기록된 상호작용이 없습니다.</string>
-    <string name="person_detail_source_label">출처: %s</string>
     <string name="person_detail_stat_email">이메일</string>
     <string name="person_detail_stat_call">통화</string>
     <string name="person_detail_stat_meeting">미팅</string>
@@ -274,8 +305,6 @@
     <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
 
     <!-- Person 상세 섹션 (SRC-008) -->
-    <string name="person_detail_section_pending_fmt">미이행 약속 (%1$d)</string>
-    <string name="person_detail_section_completed_fmt">이행 완료 (%1$d)</string>
 
     <!-- Commitments -->
     <string name="commitments_title">약속 관리</string>

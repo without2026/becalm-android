@@ -30,7 +30,7 @@ public enum class Direction {
  * @param quote     Verbatim audio fragment from which this commitment was extracted.
  *                  Legally sensitive — treated as an evidentiary record. Never edited by the app.
  *                  Matches `CommitmentDraft.quote` in api-contract.yml.
- * @param personRef Canonicalized counterparty identifier (E.164 phone, lowercase email, or
+ * @param counterpartyRef Canonicalized counterparty identifier (E.164 phone, lowercase email, or
  *                  normalized display name). Null when no specific person can be identified.
  * @param dueAt     Optional ISO-8601 instant parsed from the source audio if a due date is
  *                  mentioned; null when no deadline is detected.
@@ -54,7 +54,7 @@ public data class CommitmentDraft(
     val direction: Direction,
     val text: String,
     val quote: String,
-    val personRef: String?,
+    val counterpartyRef: String?,
     val dueAt: Instant?,
     val dueHint: String? = null,
     val dueIsApproximate: Boolean = false,

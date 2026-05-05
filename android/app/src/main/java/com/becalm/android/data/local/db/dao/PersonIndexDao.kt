@@ -6,10 +6,12 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonAliasRuleEntity
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
+import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonManualMatchEntity
-import com.becalm.android.data.local.db.entity.SourcePersonCandidateEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
@@ -28,13 +30,19 @@ public data class PersonIndexAggregateRow(
 @Dao
 public interface PersonIndexDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertPersons(rows: List<PersonEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertIdentities(rows: List<PersonIdentityEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    public suspend fun upsertInteractions(rows: List<PersonInteractionEntity>)
+    public suspend fun upsertSourceEventParticipants(rows: List<SourceEventParticipantEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    public suspend fun upsertCandidates(rows: List<SourcePersonCandidateEntity>)
+    public suspend fun upsertCommitmentParticipants(rows: List<CommitmentParticipantEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertInteractions(rows: List<PersonInteractionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertUnmatchedInteractions(rows: List<UnmatchedPersonInteractionEntity>)
@@ -54,8 +62,11 @@ public interface PersonIndexDao {
     @Query("DELETE FROM unmatched_person_interactions WHERE user_id = :userId")
     public suspend fun deleteUnmatchedInteractionsForUser(userId: String): Int
 
-    @Query("DELETE FROM source_person_candidates WHERE user_id = :userId")
-    public suspend fun deleteCandidatesForUser(userId: String): Int
+    @Query("DELETE FROM source_event_participants WHERE user_id = :userId")
+    public suspend fun deleteSourceEventParticipantsForUser(userId: String): Int
+
+    @Query("DELETE FROM commitment_participants WHERE user_id = :userId")
+    public suspend fun deleteCommitmentParticipantsForUser(userId: String): Int
 
     @Query(
         """
@@ -107,19 +118,27 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        SELECT * FROM source_person_candidates
+        SELECT * FROM source_event_participants
         WHERE user_id = :userId
         """,
     )
-    public suspend fun findCandidatesForUser(userId: String): List<SourcePersonCandidateEntity>
+    public suspend fun findSourceEventParticipantsForUser(userId: String): List<SourceEventParticipantEntity>
 
     @Query(
         """
-        SELECT * FROM source_person_candidates
+        SELECT * FROM source_event_participants
         WHERE user_id = :userId
         """,
     )
-    public fun observeCandidatesForUser(userId: String): Flow<List<SourcePersonCandidateEntity>>
+    public fun observeSourceEventParticipantsForUser(userId: String): Flow<List<SourceEventParticipantEntity>>
+
+    @Query(
+        """
+        SELECT * FROM commitment_participants
+        WHERE user_id = :userId
+        """,
+    )
+    public suspend fun findCommitmentParticipantsForUser(userId: String): List<CommitmentParticipantEntity>
 
     @Query(
         """

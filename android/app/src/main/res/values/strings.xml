@@ -83,6 +83,32 @@
     <string name="onb_contacts_body">BeCalm reads your contact names to display people you interact with. Contact data never leaves your device. This permission can be revoked at any time.</string>
     <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
 
+    <!-- Onboarding: source connections -->
+    <string name="onb_sources_title">Sources</string>
+    <string name="onb_sources_headline">Connect the places work happens</string>
+    <string name="onb_sources_body">Choose the accounts BeCalm can use to build relationship history. You can skip any source and connect it later from Settings.</string>
+    <string name="onb_sources_mail_section">Mail</string>
+    <string name="onb_sources_calendar_section">Calendar</string>
+    <string name="onb_sources_status_ready">Ready</string>
+    <string name="onb_sources_status_consent">Consent needed</string>
+    <string name="onb_sources_status_connecting">Connecting</string>
+    <string name="onb_sources_status_waiting">Waiting for browser</string>
+    <string name="onb_sources_status_connected">Connected</string>
+    <string name="onb_sources_status_skipped">Skipped</string>
+    <string name="onb_sources_status_failed">Needs retry</string>
+    <string name="onb_sources_continue">Continue</string>
+    <string name="onb_sources_skip_remaining">Skip remaining and continue</string>
+    <string name="onb_sources_connect_with_consent">Agree and connect</string>
+    <string name="onb_sources_retry">Retry</string>
+    <string name="onb_sources_activity_missing">Connection could not start from this screen. Try again.</string>
+    <string name="onb_sources_consent_write_failed">Couldn\'t save consent. Please try again.</string>
+    <string name="onb_sources_mail_consent_body">BeCalm uses read-only access to extract relationship commitments. Mail content is used only for source processing and can be disconnected later.</string>
+    <string name="settings_source_connections_title">Connect sources</string>
+    <string name="settings_source_connections_headline">Reconnect relationship sources</string>
+    <string name="settings_source_connections_body">Choose a mail or calendar account to reconnect. BeCalm uses these sources to keep relationship history current.</string>
+    <string name="settings_source_connections_done">Done</string>
+    <string name="settings_source_connections_not_now">Not now</string>
+
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
     <string name="onb_gmail_headline">Connect Gmail</string>
@@ -245,9 +271,14 @@
 
     <!-- Person detail -->
     <string name="person_detail_commitments_section">Commitments</string>
-    <string name="person_detail_history_section">Interaction History</string>
+    <string name="person_detail_timeline_section_fmt">Timeline (%1$d)</string>
+    <string name="person_detail_timeline_filter_empty">No items for this source.</string>
+    <string name="person_detail_filter_all">All</string>
+    <string name="person_detail_filter_email">Email</string>
+    <string name="person_detail_filter_call">Call</string>
+    <string name="person_detail_filter_meeting">Meeting</string>
+    <string name="person_detail_filter_commitment">Commitment</string>
     <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
-    <string name="person_detail_source_label">Source: %s</string>
     <string name="person_detail_stat_email">Email</string>
     <string name="person_detail_stat_call">Call</string>
     <string name="person_detail_stat_meeting">Meeting</string>
@@ -315,8 +346,6 @@
     <string name="person_interaction_snippet_placeholder">(No preview)</string>
 
     <!-- Person detail sections (SRC-008) -->
-    <string name="person_detail_section_pending_fmt">Pending commitments (%1$d)</string>
-    <string name="person_detail_section_completed_fmt">Completed (%1$d)</string>
 
     <!-- Commitments -->
     <string name="commitments_title">Commitments</string>

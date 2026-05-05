@@ -3,6 +3,7 @@ package com.becalm.android.ui.settings
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.worker.WorkScheduler
@@ -43,7 +44,12 @@ internal class SettingsPipaConsentHandler(
                 updateState = updateState,
             )
             for (id in parkedIds) {
-                workScheduler.cancelVoiceUpload(rawEventId = id)
+                val entity = rawIngestionRepository.findById(id = id, userId = userId)
+                if (entity?.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript()) {
+                    workScheduler.cancelMeetingTranscriptUpload(rawEventId = id)
+                } else {
+                    workScheduler.cancelVoiceUpload(rawEventId = id)
+                }
             }
             logger.d(TAG, "parked and cancelled ${parkedIds.size} voice uploads after consent withdrawal")
         }
@@ -70,15 +76,25 @@ internal class SettingsPipaConsentHandler(
                 logger.w(TAG, "released voice row id=$id not found for re-enqueue — skipping")
                 continue
             }
-            val audioUri = entity.sourceRef
-            if (audioUri.isNullOrBlank()) {
-                logger.w(TAG, "voice row id=$id has null sourceRef — skipping enqueue")
+            val sourceRef = entity.sourceRef
+            if (sourceRef.isNullOrBlank()) {
+                logger.w(TAG, "released voice row id=$id has null sourceRef — skipping enqueue")
                 continue
             }
-            workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = audioUri)
+            if (entity.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript()) {
+                workScheduler.enqueueMeetingTranscriptUpload(rawEventId = id)
+            } else {
+                workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
+            }
             enqueuedCount++
         }
         return enqueuedCount
+    }
+
+    private fun com.becalm.android.data.local.db.entity.RawIngestionEventEntity.looksLikeTextTranscript(): Boolean {
+        val name = eventTitle ?: sourceRef.orEmpty()
+        val extension = name.substringBefore('?').substringAfterLast('.', missingDelimiterValue = "").lowercase()
+        return extension == "txt" || extension == "md"
     }
 
     private companion object {

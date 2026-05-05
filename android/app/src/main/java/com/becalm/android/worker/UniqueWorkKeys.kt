@@ -59,6 +59,7 @@ public object UniqueWorkKeys {
      * Spec refs: VOI-001.
      */
     public const val VOICE_UPLOAD_PREFIX: String = "voice.upload"
+    public const val MEETING_TRANSCRIPT_UPLOAD_PREFIX: String = "meeting.transcript.upload"
 
     /**
      * Returns the unique work name for a [com.becalm.android.worker.VoiceUploadWorker]
@@ -70,6 +71,8 @@ public object UniqueWorkKeys {
      * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
      */
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
+
+    public fun meetingTranscriptUpload(rawEventId: String): String = "$MEETING_TRANSCRIPT_UPLOAD_PREFIX.$rawEventId"
 
     /**
      * Daily retention sweep via [com.becalm.android.worker.RetentionSweepWorker].
