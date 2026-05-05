@@ -17,11 +17,11 @@ behaviors:
 
   - id: SRC-002
     type: ui_interaction
-    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 헤더에 enriched 정보(full_name, nickname, company, title, 이벤트 수, 미이행 약속 수)와 기존 raw/calendar/commitment에서 파생한 이메일/통화/미팅/약속 통계가 표시되고, 본문에 3개 섹션(미이행 약속 / 이행 완료 / 상호작용 히스토리)이 표시된다"
+    description: "인물 카드 탭 시 PersonDetailScreen으로 이동하며 헤더에 enriched 정보(full_name, nickname, company, title, 이벤트 수, 미이행 약속 수)와 기존 raw/calendar/commitment에서 파생한 이메일/통화/미팅/약속 통계가 표시되고, 본문에는 source 필터(All/Email/Call/Meeting/Commitment)와 단일 timeline이 표시된다"
     screen: "PersonDetailScreen"
     interaction: "인물 카드 탭"
     precondition: "PersonsScreen에 person_ref='+821012345678' 카드 표시됨. persons_enrichment {display_name='김철수', nickname='철수', company='ABC Corp', title='팀장'}. Room에 voice 1건 + gmail 1건 + give Commitment 1건(pending) + take Commitment 1건(completed)"
-    expected: "PersonDetailScreen 표시됨. 헤더: '김철수(철수) · ABC Corp · 팀장 · 이벤트 2건 · 미이행 약속 1건'. 섹션 1 '미이행 약속': pending Commitment 1건. 섹션 2 '이행 완료': completed Commitment 1건. 섹션 3 '상호작용 히스토리': voice + gmail 이벤트 event_time 내림차순"
+    expected: "PersonDetailScreen 표시됨. 헤더: '김철수(철수) · ABC Corp · 팀장 · 이벤트 2건 · 미이행 약속 1건'. source 필터 표시됨. All timeline에는 pending Commitment, completed Commitment, voice, gmail 이벤트가 source_event_time 내림차순으로 표시됨. Email 필터는 gmail 이벤트만, Commitment 필터는 pending/completed Commitment만 표시함"
     source: phase2-acceptance
     tests: []
 
@@ -76,18 +76,25 @@ behaviors:
 
   - id: SRC-008
     type: ui_interaction
-    description: "PersonDetailScreen 본문 3-섹션 구조 — 섹션 1: 미이행 약속(action_state != 'completed'), 섹션 2: 이행 완료(action_state='completed', 접힌 상태 기본), 섹션 3: 상호작용 히스토리(raw_ingestion_events, event_time 내림차순). commitments_extracted_count >= 1인 히스토리 항목에 배지 표시됨"
+    description: "PersonDetailScreen 본문 단일 timeline 구조 — pending/completed commitments, raw events, calendar meetings를 source_event_time 내림차순으로 합쳐 표시하고 source 필터(All/Email/Call/Meeting/Commitment)로 좁힌다. commitments_extracted_count >= 1인 raw 이벤트 항목에 배지 표시됨"
     screen: "PersonDetailScreen"
     interaction: "화면 진입"
     precondition: "person_ref='+821012345678' 선택됨. Room에 voice 이벤트 1건(commitments_extracted_count=2) + give Commitment 2건(1건 pending, 1건 completed)"
-    expected: "섹션 1 '미이행 약속 (1)': pending commitment 1건. 섹션 2 '이행 완료 (1)': 접힌 상태. 탭 시 completed commitment 1건 펼쳐짐. 섹션 3 '상호작용 히스토리': voice 이벤트 1건 + '약속 추출 2건' 배지 표시됨"
+    expected: "All 필터가 선택된 상태로 단일 timeline 표시됨. pending commitment, completed commitment, voice 이벤트가 시간 내림차순으로 표시되고 voice 이벤트에는 '약속 추출 2건' 배지가 표시됨. Commitment 필터 선택 시 commitment 2건만 표시됨"
     source: phase2-acceptance
     tests: []
 
 invariants:
   - "원문보기(PersonDetailScreen)와 PersonsScreen 목록은 모두 Room에서 primary 조회한다 — 서버 GET으로 Room을 역갱신하지 않는다"
-  - "person_ref 그룹핑은 Room 쿼리 레벨에서 수행됨 — 별도 persons 테이블 없음 (MVP)"
+  - "Android Room은 backend relation intelligence의 canonical schema(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 mirror한다. Local-only repair/cache 컬럼과 table은 허용하되 canonical person key는 `person_id`다"
+  - "People UI는 source별 raw 결과나 legacy person_ref grouping을 직접 렌더링하지 않는다 — PersonInteractionIndexWorker가 backend relation rows에서 생성한 resolved person_interactions/person_identities projection만 사용한다"
+  - "Source adapter는 사람을 만들지 않는다 — sender/recipient/caller/attendee/mentioned/title 등 source-local participant를 만들고, canonical person 승격은 backend relation intelligence가 수행한다"
+  - "PersonInteractionIndexWorker는 source_event_participants/commitment_participants가 없는 raw/commitment/calendar row를 person projection으로 승격하지 않는다"
   - "persons_enrichment 조인은 순수 온디바이스 Room LEFT JOIN — Railway/Supabase로 연락처 정보 전송 없음"
-  - "enrichment 없는 person_ref는 원본값(전화번호/이메일/표시이름)으로 fallback 표시됨 — 크래시 없음"
+  - "enrichment 없는 person_id는 person_id 또는 person_identities.display_name_hint/raw_value로 표시됨 — 크래시 없음"
+  - "People tab 신규 person 자동 승격은 participant + verified/contact/email/phone/manual alias anchor에 한정한다 — mentioned/title/reference/name-only 후보는 review 또는 detail reference로만 사용한다"
+  - "Person detail timeline은 중복 source evidence를 projection 단계에서 collapse한다 — 같은 사람의 같은 source event는 한 번만 렌더링하고, 같은 source에서 나온 commitment는 history card 반복 대신 commitment 섹션 또는 event badge로 표현한다"
+  - "Person detail은 source별 raw 결과를 별도 화면 구조로 분기하지 않는다 — 공통 person_interactions projection에서 만든 InteractionRow를 단일 timeline으로 합치고 source filter에서만 Email/Call/Meeting/Commitment를 구분한다"
+  - "Calendar schedule과 email/call/meeting 원본이 시간 및 participant overlap으로 같은 약속을 가리키면 원본 email/call/meeting을 primary로 렌더링하고 calendar는 evidence 성격으로만 취급한다"
   - "voice detail은 transcript viewer가 아니라 commitment evidence viewer다 — full transcript는 저장/표시하지 않는다"
   - "teamwithout.com 프로토타입은 강한 UI reference로만 사용한다 — 직접 녹음 UI와 신규 데이터 수집/스키마 추가는 이 모듈 범위가 아니다"

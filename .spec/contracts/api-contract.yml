@@ -61,6 +61,38 @@ types:
     last_sync_at?: datetime
     # contacts는 Railway API surface가 아니다. READ_CONTACTS permission + Room persons_enrichment 기반 로컬 파생 row다.
 
+  SourceEventParticipantInput:
+    role: string                 # self | sender | recipient | cc | bcc | caller | receiver | organizer | attendee | speaker | mentioned | referenced | counterparty
+    relation_to_user: string     # self | counterparty | participant | referenced | unknown
+    identity_type?: string       # email | phone | name | organization
+    raw_value?: string           # source metadata/body에서 본 원본 값
+    normalized_value?: string    # email lowercase, E.164 phone, normalized name/org
+    display_name?: string
+    email?: string
+    phone?: string
+    organization?: string
+    evidence?: string
+    confidence: float            # 0.0 ~ 1.0
+    evidence_source: string      # metadata | body | llm | contact | call_log | filename
+
+  SourceEventInput:
+    client_event_id: uuid
+    source_type: string
+    source_ref?: string
+    conversation_ref?: string
+    event_title?: string
+    event_snippet?: string
+    duration_seconds?: int
+    location?: string
+    folder?: string
+    commitments_extracted_count?: int
+    email_body_plain?: string
+    previous_thread_context?: string
+    timestamp: datetime
+    participants?: "SourceEventParticipantInput[]"
+    counterparty_ref?: string
+    # counterparty_ref는 compatibility seed다. Person/relation 생성의 canonical input은 participants[]다.
+
   CalendarOAuthStart:
     provider: string
     authorization_url: string
@@ -117,7 +149,7 @@ types:
     schedule_status?: string   # item_type=schedule 일 때만 confirmed | changed | postponed | cancelled | follow_up
     decision_status?: string   # item_type=decision 일 때만 approved | rejected | chosen | deferred | ongoing
     counterparty_raw?: string
-    person_ref?: string
+    counterparty_ref?: string
     title: string
     description?: string
     quote: string
@@ -177,11 +209,16 @@ endpoints:
           source_type: string         # voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
                                      # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 8 user-facing sources: voice, meeting, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
           source_ref?: string
-          person_ref?: string         # Canonicalized counterparty; null if unidentifiable
+          counterparty_ref?: string   # Compatibility seed only. New source adapters MUST also send participants[].
           event_title?: string        # voice: MediaStore title / email: subject / calendar: title
           event_snippet?: string      # email: body 앞 ~200 chars / voice: 첫 commitment.quote(<=100 chars). full transcript는 절대 전송되지 않음
           duration_seconds?: int      # voice only
           location?: string           # calendar only
+          folder?: string             # email only: inbox | sent
+          conversation_ref?: string
+          email_body_plain?: string    # transient extraction input; never persisted to raw table
+          previous_thread_context?: string
+          participants?: "SourceEventParticipantInput[]"
           commitments_extracted_count?: int  # default 0; updated after LLM extraction
           timestamp: datetime
     constraints:
@@ -214,7 +251,7 @@ endpoints:
       client_event_id: uuid        # raw_ingestion_events의 멱등 키와 동일
       duration_seconds: int
       timestamp: datetime
-      person_ref?: string
+      counterparty_ref?: string
       event_title?: string         # MediaStore TITLE, SAF display name, or meeting file title
     constraints:
       max_body_bytes: 62914560     # 60 MiB. 60분 AAC 128kbps 상한. 초과 시 413
@@ -223,6 +260,7 @@ endpoints:
       200:
         raw_event_id: uuid
         items: "VoiceExtractItem[]"
+        person_candidates: "PersonCandidate[]"
         model: string                        # "gemini-2.5-flash"
         region: string                       # "us-central1"
         raw_model_text?: string
@@ -244,9 +282,45 @@ endpoints:
       - "오디오 바이트·transcript·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
       - "이 endpoint는 draft extraction only다. Railway는 commitments/raw_ingestion_events를 직접 write하지 않고, Android가 응답을 받아 로컬 Room을 먼저 갱신한 뒤 별도 batch mirror로 서버에 반영한다"
       - "source_type은 multipart body에 포함하지 않는다. Android가 raw_event.source_type(voice|call_recording|meeting)을 보존하고, returned items를 해당 source_type commitment로 저장한다"
-      - "미팅 전사본(.txt/.md)은 audio endpoint를 사용하지 않는다. transcript extraction은 별도 transient-only endpoint 또는 Android-local extraction worker가 소유하며 full transcript 저장은 금지된다"
+      - "미팅 전사본(.txt/.md)은 audio endpoint를 사용하지 않는다. /v1/voice/transcript_extract가 동일 structured extraction pipeline을 transcript text 입력으로 재사용하며 full transcript 저장은 금지된다"
       - "오디오 처리 전략: 청크 분할 없이 전체 파일을 단일 Gemini 호출로 전달 — cross-boundary commitment와 화자 맥락 손실 방지. max_duration_seconds=7200(120분) 상한은 단일 호출 안전 범위(입력 1M 토큰 / 출력 8192 토큰 여유)를 기준으로 설정. 상한 초과는 클라이언트에서 quarantine."
     spec_refs: [VOI-001, VOI-002, VOI-003, VOI-006, VOI-007]
+
+  - method: POST
+    path: /v1/voice/transcript_extract
+    auth: required
+    content_type: multipart/form-data
+    idempotency: client_event_id
+    body:
+      transcript: string
+      client_event_id: uuid
+      raw_event_id: uuid
+      timestamp: datetime
+      counterparty_ref?: string
+      event_title?: string
+    constraints:
+      max_body_bytes: 10485760
+    response:
+      200:
+        raw_event_id: uuid
+        items: "VoiceExtractItem[]"
+        person_candidates: "PersonCandidate[]"
+        model: string
+        region: string
+        raw_model_text?: string
+      400: { error: string, message: string }
+      401: { error: string, message: string }
+      403: { error: string, message: string }
+      413: { error: string, message: string }
+      422: { error: string, message: string }
+      429: { error: string, message: string }
+      500: { error: string, message: string }
+      502: { error: string, message: string }
+      503: { error: string, message: string }
+    notes:
+      - "Same VoiceExtractItem/person_candidates schema, prompt, validation, and Vertex model as /v1/voice/transcribe_extract. Only input modality differs: transcript text part instead of audio inlineData."
+      - "transcript text is request-lifetime transient data. Railway/Supabase must not store it in DB, object storage, filesystem, or logs."
+    spec_refs: [MTG-003, MTG-005, VOI-003]
 
   # ========== RAILWAY — COMMITMENTS ==========
 
@@ -257,7 +331,7 @@ endpoints:
       cursor?: string         # Opaque cursor for pagination
       limit?: int             # Default 20
       since?: string          # ISO datetime — commitments updated after this time
-      person_ref?: string     # Filter by person
+      person_id?: string      # Filter by canonical person_id through commitment_participants
       item_type?: string      # action | schedule | decision
       direction?: string      # give | take
       action_state?: string   # pending | reminded | followed_up | completed | overdue | cancelled
@@ -266,7 +340,7 @@ endpoints:
     response:
       200:
         data: "Commitment[]"
-        # Commitment type includes: id, user_id, item_type, direction?, schedule_status?, decision_status?, counterparty_raw, person_ref,
+        # Commitment type includes: id, user_id, item_type, direction?, schedule_status?, decision_status?, counterparty_raw, counterparty_ref,
         # title, description, quote, source_event_title, source_event_occurred_at,
         # due_at (ISO8601 KST), due_hint, due_is_approximate,
         # action_state, source_type (voice|call_recording|meeting|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
@@ -300,7 +374,7 @@ endpoints:
       due_at?: string          # ISO8601 KST +09:00, nullable(null로 명시적 clear 허용)
       due_hint?: string        # LLM 원문 시점 표현 혹은 사용자 입력(nullable)
       due_is_approximate?: boolean
-      person_ref?: string      # canonicalized counterparty(nullable)
+      counterparty_ref?: string # canonicalized counterparty(nullable)
       schedule_status?: string # confirmed | changed | postponed | cancelled | follow_up
       decision_status?: string # approved | rejected | chosen | deferred | ongoing
       direction?: string       # give | take
@@ -319,7 +393,7 @@ endpoints:
       # 422 cases:
       #   - invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
       #   - immutable_field: body에 quote 또는 기타 금지 필드 포함
-      #   - validation_failed: title 길이·direction enum·due_at ISO8601·person_ref 정규화 실패
+      #   - validation_failed: title 길이·direction enum·due_at ISO8601·counterparty_ref 정규화 실패
     spec_refs: [CMT-005, CMT-006, CMT-007, CMT-011, CMT-012, CMT-013, EDIT-003, EDIT-005, EDIT-006]
 
   - method: POST
@@ -337,7 +411,7 @@ endpoints:
       source_type: string      # enum. manual = 'manual', supersede = 원본의 source_type 상속
       source_event_title?: string  # manual: null, supersede: 원본값
       source_event_occurred_at: string  # manual: now() at save time, supersede: 원본값
-      person_ref?: string
+      counterparty_ref?: string
       due_at?: string
       due_hint?: string
       due_is_approximate: boolean
@@ -369,7 +443,7 @@ endpoints:
           direction?: string
           schedule_status?: string
           decision_status?: string
-          person_ref?: string
+          counterparty_ref?: string
           title: string
           description?: string
           quote: string
@@ -510,7 +584,38 @@ endpoints:
       - "callback 이후 user_calendar_connections 존재 여부를 Android가 polling하는 최소 external integration surface"
     spec_refs: [ONB-001, SMG-003]
 
-  # ========== RAILWAY — PERSONS (virtual grouping — no persons table in MVP) ==========
+  # ========== RAILWAY — RELATION INTELLIGENCE / PERSONS ==========
+
+  - method: GET
+    path: /v1/source_event_participants
+    auth: required
+    query:
+      cursor?: string
+      limit?: int             # Default 20
+      since?: string          # ISO-8601 created_at lower bound
+      source_type?: string
+    response:
+      200: { data: "SourceEventParticipant[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+    notes:
+      - "Canonical backend source-person relation feed. Android mirrors this into Room source_event_participants; no source_person_candidates compatibility cache is part of the active contract."
+    spec_refs: [SRC-001, SRC-008]
+
+  - method: GET
+    path: /v1/commitment_participants
+    auth: required
+    query:
+      cursor?: string
+      limit?: int             # Default 20
+      since?: string          # ISO-8601 created_at lower bound
+      person_id?: string
+      commitment_id?: string
+    response:
+      200: { data: "CommitmentParticipant[]", cursor: string, has_more: boolean }
+      401: { error: string, message: string }
+    notes:
+      - "Canonical backend commitment-person edge feed. Android mirrors this into Room commitment_participants before running PersonInteractionIndexWorker."
+    spec_refs: [SRC-001, SRC-008]
 
   - method: GET
     path: /v1/persons
@@ -522,6 +627,8 @@ endpoints:
     response:
       200: { data: "Person[]", cursor: string, has_more: boolean }
       401: { error: string, message: string }
+    notes:
+      - "Returns first-class persons rows aggregated with person_interactions and commitment_participants. Response identity key is `person_id`; no `person_ref` alias is part of the current Android contract."
     spec_refs: [SRC-001, SRC-003, SRC-006]
 
   - method: GET
