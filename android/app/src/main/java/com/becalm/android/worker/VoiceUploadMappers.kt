@@ -21,10 +21,11 @@ import java.util.UUID
 internal const val STATUS_PENDING: String = "pending"
 
 /**
- * transcribe_extract 멀티파트 폼 필드 생성을 한 곳으로 통합한다.
+ * commitment extraction 멀티파트 폼 필드 생성을 한 곳으로 통합한다.
  * 각 필드의 값과 content type("text/plain") 을 원본 인라인 코드와 byte-identical 하게 보존한다.
  */
 internal data class VoiceRequestParts(
+    val sourceType: RequestBody,
     val clientEventId: RequestBody,
     val rawEventId: RequestBody,
     val durationSeconds: RequestBody,
@@ -35,6 +36,7 @@ internal data class VoiceRequestParts(
 
 internal fun RawIngestionEventEntity.toRequestParts(rawEventId: String): VoiceRequestParts =
     VoiceRequestParts(
+        sourceType = sourceType.toPlainRequestBody(),
         clientEventId = clientEventId.toPlainRequestBody(),
         rawEventId = rawEventId.toPlainRequestBody(),
         durationSeconds = (durationSeconds ?: 0).toString().toPlainRequestBody(),

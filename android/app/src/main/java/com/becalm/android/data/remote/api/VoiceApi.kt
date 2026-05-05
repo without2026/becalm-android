@@ -9,7 +9,7 @@ import retrofit2.http.POST
 import retrofit2.http.Part
 
 /**
- * Retrofit interface for the Railway voice pipeline endpoint.
+ * Retrofit interface for Railway's source-neutral commitment extraction endpoint.
  *
  * Base URL: `${BECALM_API_BASE_URL}` (BuildConfig; injected via the same [retrofit2.Retrofit]
  * instance as [RailwayApi] — see [com.becalm.android.core.di.NetworkModule]).
@@ -33,8 +33,8 @@ import retrofit2.http.Part
 public interface VoiceApi {
 
     /**
-     * Uploads a complete audio file to Railway for server-side business-item extraction via
-     * Vertex AI Gemini 2.5 Flash (`us-central1`, ZDR enabled).
+     * Uploads normalized source content to Railway for server-side business-item extraction via
+     * Vertex AI Gemini 2.5 Flash. Audio sources pass [audio], text sources pass [bodyText].
      *
      * The audio bytes are streamed from a [ContentResolver] input stream directly into this
      * multipart part — no temp-file copy on device (VOI-007).
@@ -49,37 +49,35 @@ public interface VoiceApi {
      * - HTTP 422: audio exceeds 120 minutes or decoding error; retryable=false, quarantine.
      * - HTTP 429/500/502/503: transient; caller retries with exponential backoff (VOI-006).
      *
-     * @param audio          Audio file as a multipart binary part (name="audio").
+     * @param audio          Optional audio file as a multipart binary part (name="audio").
      *                       Content type should be "audio/m4a" or "audio/&#42;".
+     * @param inputModality  One of audio, transcript, email, text.
+     * @param sourceType     Source type of the raw event.
      * @param clientEventId  UUID idempotency key matching the raw_ingestion_event row.
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
-     * @param durationSeconds Duration of the audio file in seconds (integer, voice only).
+     * @param durationSeconds Optional duration of the audio file in seconds.
      * @param timestamp      ISO-8601 timestamp of when the recording occurred.
      * @param counterpartyRef      Optional canonicalized counterparty identifier.
      * @param eventTitle     Optional MediaStore TITLE of the recording.
+     * @param bodyText       Optional normalized text body for transcript/email/text sources.
      *
      * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
      */
     @Multipart
-    @POST("v1/voice/transcribe_extract")
-    public suspend fun transcribeExtract(
-        @Part audio: MultipartBody.Part,
+    @POST("v1/extractions/commitments")
+    public suspend fun commitmentExtract(
+        @Part audio: MultipartBody.Part?,
+        @Part("input_modality") inputModality: RequestBody,
+        @Part("source_type") sourceType: RequestBody,
         @Part("client_event_id") clientEventId: RequestBody,
         @Part("raw_event_id") rawEventId: RequestBody,
-        @Part("duration_seconds") durationSeconds: RequestBody,
+        @Part("duration_seconds") durationSeconds: RequestBody?,
         @Part("timestamp") timestamp: RequestBody,
         @Part("counterparty_ref") counterpartyRef: RequestBody?,
         @Part("event_title") eventTitle: RequestBody?,
-    ): Response<TranscribeExtractResponse>
-
-    @Multipart
-    @POST("v1/voice/transcript_extract")
-    public suspend fun transcriptExtract(
-        @Part("transcript") transcript: RequestBody,
-        @Part("client_event_id") clientEventId: RequestBody,
-        @Part("raw_event_id") rawEventId: RequestBody,
-        @Part("timestamp") timestamp: RequestBody,
-        @Part("counterparty_ref") counterpartyRef: RequestBody?,
-        @Part("event_title") eventTitle: RequestBody?,
+        @Part("folder") folder: RequestBody?,
+        @Part("conversation_ref") conversationRef: RequestBody?,
+        @Part("previous_thread_context") previousThreadContext: RequestBody?,
+        @Part("body_text") bodyText: RequestBody?,
     ): Response<TranscribeExtractResponse>
 }

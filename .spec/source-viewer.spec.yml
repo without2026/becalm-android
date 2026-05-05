@@ -89,6 +89,7 @@ invariants:
   - "Android Room은 backend relation intelligence의 canonical schema(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 mirror한다. Local-only repair/cache 컬럼과 table은 허용하되 canonical person key는 `person_id`다"
   - "People UI는 source별 raw 결과나 legacy person_ref grouping을 직접 렌더링하지 않는다 — PersonInteractionIndexWorker가 backend relation rows에서 생성한 resolved person_interactions/person_identities projection만 사용한다"
   - "Source adapter는 사람을 만들지 않는다 — sender/recipient/caller/attendee/mentioned/title 등 source-local participant를 만들고, canonical person 승격은 backend relation intelligence가 수행한다"
+  - "모든 source adapter는 본문 해석 또는 give/take extraction 전에 `NormalizedSourceEvent` shape(raw event metadata + optional transient body + participants[])로 정규화한다. Email/voice/call/meeting/calendar별 fetch/store 방식은 달라도 backend extraction 및 relation persistence 입구는 같은 adapter/structured persister를 사용한다"
   - "PersonInteractionIndexWorker는 source_event_participants/commitment_participants가 없는 raw/commitment/calendar row를 person projection으로 승격하지 않는다"
   - "persons_enrichment 조인은 순수 온디바이스 Room LEFT JOIN — Railway/Supabase로 연락처 정보 전송 없음"
   - "enrichment 없는 person_id는 person_id 또는 person_identities.display_name_hint/raw_value로 표시됨 — 크래시 없음"

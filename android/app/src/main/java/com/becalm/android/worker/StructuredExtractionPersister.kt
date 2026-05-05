@@ -11,7 +11,7 @@ import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import kotlinx.datetime.Instant
 
-internal class VoiceExtractionPersister(
+internal class StructuredExtractionPersister(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val commitmentDao: CommitmentDao,
     private val personIndexDao: PersonIndexDao,
@@ -25,7 +25,7 @@ internal class VoiceExtractionPersister(
         entity: RawIngestionEventEntity,
         body: TranscribeExtractResponse,
         now: Instant,
-    ): VoiceExtractionPersistStats {
+    ): StructuredExtractionPersistStats {
         val commitmentEntities = body.items.mapIndexed { index, dto ->
             dto.toTrackableCommitmentEntity(
                 rawEventId = entity.id,
@@ -80,7 +80,7 @@ internal class VoiceExtractionPersister(
         processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
         workScheduler.enqueuePersonInteractionIndex()
         logger.d(TAG, "extraction persisted id=${redact(entity.id)} items=${body.items.size}")
-        return VoiceExtractionPersistStats(
+        return StructuredExtractionPersistStats(
             itemCount = body.items.size,
             sourceParticipantCount = sourceParticipants.size,
             commitmentParticipantCount = commitmentParticipants.size,
@@ -88,12 +88,12 @@ internal class VoiceExtractionPersister(
     }
 
     private companion object {
-        private const val TAG = "VoiceExtractionPersister"
+        private const val TAG = "StructuredExtractionPersister"
         private const val SNIPPET_MAX_CHARS = 200
     }
 }
 
-internal data class VoiceExtractionPersistStats(
+internal data class StructuredExtractionPersistStats(
     val itemCount: Int,
     val sourceParticipantCount: Int,
     val commitmentParticipantCount: Int,

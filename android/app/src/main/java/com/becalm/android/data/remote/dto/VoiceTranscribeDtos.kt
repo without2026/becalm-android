@@ -8,7 +8,7 @@ import com.squareup.moshi.JsonClass
 import kotlinx.datetime.Instant
 
 /**
- * Error envelope for a failed POST /v1/voice/transcribe_extract (HTTP 502).
+ * Error envelope for a failed POST /v1/extractions/commitments (HTTP 502).
  *
  * Wire format (api-contract.yml):
  *   { error: "output_truncated" | "schema_violation" | "vertex_upstream_error", message: string }
@@ -19,7 +19,7 @@ import kotlinx.datetime.Instant
  * @property error  Machine-readable error code from the server.
  * @property message Human-readable explanation; may be null if the server omits it.
  *
- * Spec refs: VOI-006, api-contract.yml § /v1/voice/transcribe_extract 502 envelope.
+ * Spec refs: VOI-006, api-contract.yml § /v1/extractions/commitments 502 envelope.
  */
 @JsonClass(generateAdapter = true)
 public data class VoiceErrorEnvelope(
@@ -42,7 +42,7 @@ public data class VoiceErrorEnvelope(
 }
 
 /**
- * Response body for a successful POST /v1/voice/transcribe_extract (HTTP 200).
+ * Response body for a successful POST /v1/extractions/commitments (HTTP 200).
  *
  * Wire format (api-contract.yml):
  *   { raw_event_id, items: VoiceExtractItem[], model, region, raw_model_text? }
@@ -209,7 +209,7 @@ public data class CommitmentDraftDto(
     /**
      * ISO-8601 due instant, or null when no deadline was mentioned.
      *
-     * Inbound from Railway `/v1/voice/transcribe_extract`. Wire format per
+     * Inbound from Railway `/v1/extractions/commitments`. Wire format per
      * api-contract.yml:32 is ISO-8601 with `+09:00` KST offset. The
      * [KstInstant] qualifier's parser is tolerant and accepts both `+09:00`
      * and `Z` forms, so historical responses that still emit UTC round-trip

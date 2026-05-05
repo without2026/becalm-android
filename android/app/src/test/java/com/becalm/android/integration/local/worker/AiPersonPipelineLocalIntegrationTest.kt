@@ -100,14 +100,20 @@ class AiPersonPipelineLocalIntegrationTest {
     fun `Vertex voice response is persisted and indexed into the same person`() = runTest {
         db.rawIngestionEventDao().insert(aiVoiceRawEvent())
         coEvery {
-            voiceApi.transcribeExtract(
+            voiceApi.commitmentExtract(
                 audio = any(),
+                inputModality = any(),
+                sourceType = any(),
                 clientEventId = any(),
                 rawEventId = any(),
                 durationSeconds = any(),
                 timestamp = any(),
                 counterpartyRef = any(),
                 eventTitle = any(),
+                folder = any(),
+                conversationRef = any(),
+                previousThreadContext = any(),
+                bodyText = any(),
             )
         } returns Response.success(aiVoiceResponse())
 

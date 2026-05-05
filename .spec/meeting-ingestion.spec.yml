@@ -33,13 +33,13 @@ behaviors:
     description: "사용자가 전사본 파일을 선택하면 Android가 Recordings SAF tree 내부 `BeCalm Meetings/Transcripts/` 하위로 원본 파일을 복사하고, app-private source_artifacts Markdown archive와 source_type='meeting' raw event를 생성한다"
     trigger: "[전사본 추가] file picker result"
     precondition: "선택 파일이 MTG-001 transcript allowlist에 부합, 파일 크기 <= 10 MiB, current_user_id 존재"
-    expected: "앱은 `Recordings/BeCalm Meetings/Transcripts/{timestamp}-{sanitized_name}`에 원본 전사본을 복사한다. 텍스트 추출 가능한 .txt/.md는 app-private source_artifacts에 markdown_original로 저장하고 raw_ingestion_events.event_snippet은 첫 200자로 로컬 갱신한다. PIPA 동의가 있으면 MeetingTranscriptUploadWorker를 enqueue해 `/v1/voice/transcript_extract`로 동일 structured extraction pipeline을 실행한다. .pdf/.docx는 저장만 수행하고 텍스트 추출 실패 시 raw event는 보존하되 extraction enqueue는 하지 않으며 actionError에 지원 상태를 표시한다. Supabase/Railway에는 원문 파일 본문이나 full transcript를 영속 저장하지 않는다"
+    expected: "앱은 `Recordings/BeCalm Meetings/Transcripts/{timestamp}-{sanitized_name}`에 원본 전사본을 복사한다. 텍스트 추출 가능한 .txt/.md는 app-private source_artifacts에 markdown_original로 저장하고 raw_ingestion_events.event_snippet은 첫 200자로 로컬 갱신한다. PIPA 동의가 있으면 MeetingTranscriptUploadWorker를 enqueue해 `/v1/extractions/commitments`로 동일 structured extraction pipeline을 실행한다. .pdf/.docx는 저장만 수행하고 텍스트 추출 실패 시 raw event는 보존하되 extraction enqueue는 하지 않으며 actionError에 지원 상태를 표시한다. Supabase/Railway에는 원문 파일 본문이나 full transcript를 영속 저장하지 않는다"
     source: user-request
     tests: []
 
   - id: MTG-004
     type: lifecycle
-    description: "미팅 오디오 raw event는 기존 `POST /v1/voice/transcribe_extract` draft extraction endpoint를 재사용한다"
+    description: "미팅 오디오 raw event는 기존 `POST /v1/extractions/commitments` draft extraction endpoint를 재사용한다"
     trigger: "VoiceUploadWorker 실행, raw_event.source_type='meeting'"
     precondition: "MTG-002 raw event, PIPA third-party provision consent true, audio URI 접근 가능, unmetered network"
     expected: "Railway는 오디오 bytes를 요청 lifetime 내에서만 처리하고 VoiceExtractItem[]을 반환한다. Android는 Room commitments를 source_type='meeting'으로 INSERT하고 raw event event_snippet/commitments_extracted_count를 갱신한다. 이후 commitments/raw event mirror는 기존 batch API를 사용한다"

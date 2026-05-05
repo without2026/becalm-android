@@ -39,7 +39,7 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
 
 /**
  * [CoroutineWorker] that uploads a voice recording to Railway's
- * `POST /v1/voice/transcribe_extract` endpoint, receives extracted business items from
+ * `POST /v1/extractions/commitments` endpoint, receives extracted business items from
  * Vertex AI Gemini 2.5 Flash, and persists the current action subset as
  * [CommitmentEntity] rows in Room.
  *
@@ -59,7 +59,7 @@ private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
  * 5a. **PIPA gate — second check (VOI-004)**: immediately before the network call, re-check consent.
  *    If consent was withdrawn after step 4 passed (in-flight race), park entity as
  *    `awaiting_consent` and return [Result.success].
- * 6. Call [VoiceApi.transcribeExtract]. On success: insert [CommitmentEntity] rows for each
+ * 6. Call [VoiceApi.commitmentExtract]. On success: insert [CommitmentEntity] rows for each
  *    extracted action item (deterministic IDs keyed on rawEventId+index), update raw-event
  *    action count and snippet, record sync success.
  * 7. Error handling per VOI-006:
@@ -230,14 +230,20 @@ public class VoiceUploadWorker @AssistedInject constructor(
         processingStatusRepository.recordGemini(entity.sourceType, "Analyzing audio with Gemini")
 
         val response = try {
-            voiceApi.transcribeExtract(
+            voiceApi.commitmentExtract(
                 audio = audioPart,
+                inputModality = "audio".toPlainRequestBody(),
+                sourceType = parts.sourceType,
                 clientEventId = parts.clientEventId,
                 rawEventId = parts.rawEventId,
                 durationSeconds = parts.durationSeconds,
                 timestamp = parts.timestamp,
                 counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
+                folder = null,
+                conversationRef = null,
+                previousThreadContext = null,
+                bodyText = null,
             )
         } catch (e: IOException) {
             logger.w(TAG, "network error id=${redact(rawEventId)} attempt=$runAttemptCount: ${e.message}")
@@ -317,8 +323,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun extractionPersister(): VoiceExtractionPersister =
-        VoiceExtractionPersister(
+    private fun extractionPersister(): StructuredExtractionPersister =
+        StructuredExtractionPersister(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
@@ -551,7 +557,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
         /**
          * HTTP header carrying a server-supplied retry hint in seconds on 429 responses.
-         * Spec refs: api-contract.yml § /v1/voice/transcribe_extract 429; VOI-006.
+         * Spec refs: api-contract.yml § /v1/extractions/commitments 429; VOI-006.
          */
         private const val HEADER_RETRY_AFTER: String = "Retry-After"
 

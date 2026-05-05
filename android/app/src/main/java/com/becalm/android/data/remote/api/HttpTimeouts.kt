@@ -21,7 +21,7 @@ public data class HttpTimeouts(
         public val Default: HttpTimeouts = HttpTimeouts()
 
         /**
-         * Extended timeouts for POST /v1/voice/transcribe_extract.
+         * Extended timeouts for POST /v1/extractions/commitments.
          *
          * Audio uploads can reach 60 MiB (120-minute AAC); Vertex AI processing adds latency.
          * connect=30s, read=180s, write=180s to accommodate slow upload links and long model
