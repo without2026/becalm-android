@@ -52,7 +52,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
         logger.clear()
         newWorker().doWork()
-        assertTrue(logger.entries.any { "person index unchanged sources=0" in it.message })
+        assertTrue(logger.entries.any { "indexed mode=full dirtySources=0 changedSources=0" in it.message })
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
@@ -133,6 +133,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
+            workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -174,6 +175,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             emailRaw = null,
             phoneRaw = null,
             organizationRaw = null,
+            titleRaw = null,
             evidence = displayName,
             confidence = 0.45,
             resolutionStatus = "unresolved",
@@ -188,6 +190,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             personIndexEnqueueCount += 1
         }
 
+        override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) = Unit
         override fun enqueueExpedited(sourceKey: String) = Unit
         override fun enqueuePeriodic(sourceKey: String) = Unit
         override fun enqueueUpload(attempt: Int) = Unit

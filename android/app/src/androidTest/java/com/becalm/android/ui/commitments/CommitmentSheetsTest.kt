@@ -138,7 +138,7 @@ class CommitmentSheetsTest {
     fun commitment_create_content_shows_required_inputs_direction_and_save() {
         var title: String? = null
         var quote: String? = null
-        var personRef: String? = null
+        var counterpartyRef: String? = null
         var dueHint: String? = null
         var direction: String? = null
         var saveClicks = 0
@@ -151,7 +151,7 @@ class CommitmentSheetsTest {
                             title = "",
                             direction = "give",
                             quote = "",
-                            personRef = null,
+                            counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
                             dueIsApproximate = false,
@@ -175,9 +175,9 @@ class CommitmentSheetsTest {
                         quote = it
                         draft = draft.copy(quote = it)
                     },
-                    onPersonRefChange = {
-                        personRef = it
-                        draft = draft.copy(personRef = it)
+                    onCounterpartyRefChange = {
+                        counterpartyRef = it
+                        draft = draft.copy(counterpartyRef = it)
                     },
                     onDueAtMillisChange = {},
                     onDueHintChange = {
@@ -209,7 +209,7 @@ class CommitmentSheetsTest {
         composeTestRule.runOnIdle {
             assertEquals("New commitment", title)
             assertEquals("Please send the deck", quote)
-            assertEquals("alice@example.com", personRef)
+            assertEquals("alice@example.com", counterpartyRef)
             assertEquals("Friday afternoon", dueHint)
             assertEquals("take", direction)
             assertEquals(1, saveClicks)
@@ -220,7 +220,7 @@ class CommitmentSheetsTest {
     fun commitment_edit_content_routes_text_field_changes() {
         var title: String? = null
         var dueHint: String? = null
-        var personRef: String? = null
+        var counterpartyRef: String? = null
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -237,7 +237,7 @@ class CommitmentSheetsTest {
                             dueAtMillis = null,
                             dueIsApproximate = false,
                             dueHint = "",
-                            personRef = "person-1",
+                            counterpartyRef = "person-1",
                             direction = "give",
                         ),
                     )
@@ -254,9 +254,9 @@ class CommitmentSheetsTest {
                         dueHint = it
                         state = state.copy(dueHint = it)
                     },
-                    onPersonRefChange = {
-                        personRef = it
-                        state = state.copy(personRef = it)
+                    onCounterpartyRefChange = {
+                        counterpartyRef = it
+                        state = state.copy(counterpartyRef = it)
                     },
                     onDirectionChange = {},
                     onToggleDispute = {},
@@ -274,7 +274,7 @@ class CommitmentSheetsTest {
         composeTestRule.runOnIdle {
             assertEquals("Edited commitment", title)
             assertEquals("Tomorrow morning", dueHint)
-            assertEquals("bob@example.com", personRef)
+            assertEquals("bob@example.com", counterpartyRef)
         }
     }
 
@@ -297,7 +297,7 @@ class CommitmentSheetsTest {
                         dueAtMillis = null,
                         dueIsApproximate = false,
                         dueHint = "",
-                        personRef = "person-1",
+                        counterpartyRef = "person-1",
                         direction = "give",
                         fieldErrors = mapOf(CommitmentEditValidator.Field.TITLE to "Title required"),
                     ),
@@ -305,7 +305,7 @@ class CommitmentSheetsTest {
                     onDueAtMillisChange = {},
                     onDueIsApproximateChange = {},
                     onDueHintChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDirectionChange = {},
                     onToggleDispute = {},
                     onSave = { saved += 1 },
@@ -348,7 +348,7 @@ class CommitmentSheetsTest {
                             title = "",
                             direction = "give",
                             quote = "",
-                            personRef = null,
+                            counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
                             dueIsApproximate = false,
@@ -358,7 +358,7 @@ class CommitmentSheetsTest {
                     onTitleChange = {},
                     onDirectionChange = {},
                     onQuoteChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDueAtMillisChange = {},
                     onDueHintChange = {},
                     onApproxChange = {},
@@ -489,7 +489,7 @@ class CommitmentSheetsTest {
                             title = "New commitment",
                             direction = "give",
                             quote = "",
-                            personRef = null,
+                            counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
                             dueIsApproximate = false,
@@ -499,7 +499,7 @@ class CommitmentSheetsTest {
                     onTitleChange = {},
                     onDirectionChange = {},
                     onQuoteChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDueAtMillisChange = {},
                     onDueHintChange = {},
                     onApproxChange = {},
@@ -538,7 +538,7 @@ class CommitmentSheetsTest {
                     onDueAtMillisChange = {},
                     onDueIsApproximateChange = {},
                     onDueHintChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDirectionChange = {},
                     onToggleDispute = {},
                     onSave = {},
@@ -579,7 +579,7 @@ class CommitmentSheetsTest {
                         dueAtMillis = null,
                         dueIsApproximate = false,
                         dueHint = "",
-                        personRef = "person-1",
+                        counterpartyRef = "person-1",
                         direction = "give",
                     ),
                     dismissEventsOverride = MutableSharedFlow(extraBufferCapacity = 1),
@@ -587,7 +587,7 @@ class CommitmentSheetsTest {
                     onDueAtMillisChange = {},
                     onDueIsApproximateChange = {},
                     onDueHintChange = {},
-                    onPersonRefChange = {},
+                    onCounterpartyRefChange = {},
                     onDirectionChange = {},
                     onToggleDispute = {},
                     onSave = {},
@@ -621,7 +621,7 @@ class CommitmentSheetsTest {
         scheduleStatus = scheduleStatus,
         decisionStatus = decisionStatus,
         counterpartyRaw = "Alice Kim",
-        personRef = "person-1",
+        counterpartyRef = "person-1",
         title = "Send proposal",
         description = null,
         quote = "Send the deck by Friday",

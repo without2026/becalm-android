@@ -95,15 +95,25 @@ public object PersonIdentityResolver {
         "naverpay",
     )
 
+    public fun normalizeEmailAnchor(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+    }
+
+    public fun normalizePhoneAnchor(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return value.replace(PHONE_CHARS, "")
+            .takeIf { it.length >= 7 && it.any(Char::isDigit) }
+    }
+
     public fun resolve(userId: String, raw: String?): PersonIdentityResolution? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+        val email = normalizeEmailAnchor(value)
         if (email != null) {
             return resolution(userId, identityKey = "email:$email", identityType = "email", rawValue = email)
         }
 
-        val phone = value.replace(PHONE_CHARS, "")
-            .takeIf { it.length >= 7 && it.any(Char::isDigit) }
+        val phone = normalizePhoneAnchor(value)
         if (phone != null) {
             return resolution(userId, identityKey = "phone:$phone", identityType = "phone", rawValue = phone)
         }
@@ -164,10 +174,9 @@ public object PersonIdentityResolver {
 
     public fun normalizeBlockKey(raw: String?): String? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+        val email = normalizeEmailAnchor(value)
         if (email != null) return email
-        val phone = value.replace(PHONE_CHARS, "")
-            .takeIf { it.length >= 7 && it.any(Char::isDigit) }
+        val phone = normalizePhoneAnchor(value)
         if (phone != null) return phone
         return normalizeAlias(value)
     }
@@ -180,7 +189,7 @@ public object PersonIdentityResolver {
 
     public fun isLikelyAutomated(raw: String?): Boolean {
         val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return false
-        val email = EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
+        val email = normalizeEmailAnchor(value)
         val local = email?.substringBefore('@')
             ?.replace(".", "-")
             ?.replace("_", "-")

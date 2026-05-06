@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -30,7 +30,6 @@ import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.glassPanel
-import java.io.File
 
 /**
  * Onboarding step: recording folder / READ_MEDIA_AUDIO + Recordings SAF tree grant.
@@ -61,9 +60,7 @@ public fun RecordingFolderScreen(
     } else {
         viewModel
     }
-    val detection = detectionOverride ?: remember {
-        RecordingFolderDetector.detect { path -> File(path).exists() }
-    }
+    val detection by rememberRecordingFolderDetection(detectionOverride)
     val navigateAfterGrant = {
         navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingCallLogMatching.path)
     }

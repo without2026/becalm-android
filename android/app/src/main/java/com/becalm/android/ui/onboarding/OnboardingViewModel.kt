@@ -30,38 +30,39 @@ import kotlinx.datetime.Clock
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 /**
- * Ordered steps in the onboarding flow.
+ * Durable setup milestones used by first-run onboarding and settings recovery.
  *
- * The display order is determined by [OnboardingViewModel.steps].
+ * The canonical first-run UI is [OnboardingSetupScreen], not one full screen per
+ * enum value. The enum remains the persistence/status vocabulary because existing
+ * source recovery screens and settings reconnect flows still need per-capability
+ * terminal states.
  *
  * **Persistence note**: the current step is NOT persisted to DataStore as an ordinal or name;
  * only [UserPrefsStore.setOnboardingCompleted] is written at the very end. Adding or reordering
  * enum members is therefore safe for in-progress onboardings.
  *
- * **Canonical onboarding flow** (spec `onboarding.spec.yml` invariant line 110):
+ * **Canonical onboarding flow**:
  *
  * ```
- * 약관 → 로그인 → PIPA제3자제공 → 녹음폴더 → 통화기록매칭 → 연락처
- *      → 소스 연결(Gmail, Outlook메일, Google캘린더, Outlook캘린더)
- *      → 배터리최적화 → ColdSync
+ * 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 소스) → Today
  * ```
  *
- * Each enum value maps to exactly one Composable screen; [COLD_SYNC] is the terminal
- * step. Completion is signalled by [UserPrefsStore.setOnboardingCompleted] `true`
- * after [ColdSyncScreen] is dismissed or cold-sync finishes.
+ * Completion is signalled by [UserPrefsStore.setOnboardingCompleted] `true` from
+ * [onCompleteSetup]. Unfinished optional milestones are marked terminal so users can
+ * reach the main person-first surface and reconnect later from Settings.
  */
 public enum class OnboardingStep {
     /** Step 1 — [com.becalm.android.ui.auth.TermsScreen]. */
     TERMS,
     /** Step 2 — [com.becalm.android.ui.auth.LoginScreen]. */
     LOGIN,
-    /** Step 3 — [PipaThirdPartyConsentScreen] (ONB-PIPA). */
+    /** Voice-processing PIPA consent milestone. */
     PIPA_CONSENT,
-    /** Step 4 — [RecordingFolderScreen]. Skipped if PIPA consent denied. */
+    /** Recording-folder SAF/audio permission milestone. */
     RECORDING_FOLDER,
     /** Optional step — local CallLog matching consent for call-recording person refs. */
     CALL_LOG_MATCHING,
-    /** Step 5 — [ContactsPermissionScreen] (ONB-CONTACTS). */
+    /** Contacts permission milestone. */
     CONTACTS_PERM,
     /** Source connection page item: Gmail OAuth. */
     LINK_GMAIL,
@@ -73,18 +74,11 @@ public enum class OnboardingStep {
     LINK_GOOGLE_CALENDAR,
     /** Source connection page item: Outlook Calendar OAuth. */
     LINK_OUTLOOK_CALENDAR,
-    /**
-     * Step 11 — [NotificationPermissionScreen] (S6-E).
-     *
-     * Requests POST_NOTIFICATIONS on API 33+ so commitment / reminder notifications
-     * actually reach the user. On API 32 and below the screen is terminal
-     * ([StepStatus.SKIPPED]) because the permission is implicitly granted at install time.
-     * Inserted between [BATTERY_OPT] and [COLD_SYNC] in the canonical flow.
-     */
+    /** Notification permission milestone. */
     NOTIFICATION_PERM,
-    /** Step 12 — [BatteryOptimizationScreen] (ONB-005). */
+    /** Background/battery recovery milestone retained for settings repair. */
     BATTERY_OPT,
-    /** Step 13 (terminal) — [ColdSyncScreen] (TDY-010, ONB-008). */
+    /** Legacy cold-sync milestone. First-run setup now lets runtime refresh continue behind Today. */
     COLD_SYNC,
 }
 
@@ -196,9 +190,9 @@ private const val TAG = "OnboardingViewModel"
 /**
  * ViewModel for the onboarding flow.
  *
- * Navigation through the canonical 12-step onboarding sequence (see [OnboardingStep])
- * is driven entirely by this class. Permission result callbacks from the UI call
- * [onMarkStepStatus] — no Android framework APIs are used here.
+ * First-run onboarding is driven by the compact setup screen. [OnboardingStep]
+ * remains the durable status vocabulary used to resume setup and expose
+ * compatibility routes without putting Android framework APIs in this class.
  */
 @HiltViewModel
 public class OnboardingViewModel @Inject constructor(
@@ -868,6 +862,51 @@ public class OnboardingViewModel @Inject constructor(
                 persistStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist onboarding completion", e)
+                _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
+            }
+        }
+    }
+
+    /**
+     * Completes the compact first-run setup surface.
+     *
+     * Terms and login are the only hard gates. Every post-login permission/source is
+     * optional at first run and can be repaired from Settings, so unfinished steps are
+     * made terminal here instead of forcing one screen per permission before Today.
+     * Cold sync is intentionally marked complete so runtime refresh can happen behind
+     * the main product surface.
+     */
+    public fun onCompleteSetup() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCompleting = true, error = null) }
+            val current = _uiState.value.stepStates
+            val terminal = setOf(
+                StepStatus.GRANTED,
+                StepStatus.COMPLETE,
+                StepStatus.SKIPPED,
+                StepStatus.DENIED,
+            )
+            val updates = OnboardingStep.entries
+                .filterNot { it == OnboardingStep.TERMS || it == OnboardingStep.LOGIN }
+                .associateWith { step ->
+                    when {
+                        step == OnboardingStep.COLD_SYNC -> StepStatus.COMPLETE
+                        (current[step] ?: StepStatus.NOT_STARTED) in terminal -> current.getValue(step)
+                        else -> StepStatus.SKIPPED
+                    }
+                }
+            val nextStates = current + updates
+            try {
+                _uiState.update { state ->
+                    state.copy(stepStates = nextStates)
+                }
+                persistStepStatuses(updates)
+                userPrefsStore.setOnboardingCompleted(true)
+                appRuntimeSyncCoordinator.refresh()
+                logger.i(TAG, "compact onboarding setup marked complete")
+                _uiState.update { it.copy(isCompleting = false, error = null) }
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to complete compact onboarding setup", e)
                 _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
             }
         }

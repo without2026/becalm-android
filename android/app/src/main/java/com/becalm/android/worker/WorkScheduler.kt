@@ -65,6 +65,17 @@ public interface WorkScheduler {
      */
     public fun enqueuePersonInteractionIndex(initialDelaySeconds: Long = PERSON_INDEX_DEBOUNCE_SECONDS)
 
+    /**
+     * Regenerates and mirrors the compact markdown memory for [personId].
+     *
+     * The unique-work key is person-scoped so repeated source/interaction changes for the same
+     * person coalesce without blocking memory updates for other people.
+     */
+    public fun enqueueProfileMemory(
+        personId: String,
+        initialDelaySeconds: Long = PROFILE_MEMORY_DEBOUNCE_SECONDS,
+    )
+
     /** Enrolls the daily periodic contacts enrichment sweep. */
     public fun scheduleEnrichmentSweep()
 
@@ -192,5 +203,6 @@ public interface WorkScheduler {
 
     public companion object {
         public const val PERSON_INDEX_DEBOUNCE_SECONDS: Long = 10L
+        public const val PROFILE_MEMORY_DEBOUNCE_SECONDS: Long = 5L
     }
 }

@@ -352,6 +352,6 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             startAt = startAt,
             endAt = endAt,
             attendeesRaw = attendeesRaw,
-            syncStatus = syncStatus ?: "synced",
+            syncStatus = "synced",
         )
 }

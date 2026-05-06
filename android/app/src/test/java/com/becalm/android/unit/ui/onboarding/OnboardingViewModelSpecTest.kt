@@ -727,6 +727,24 @@ class OnboardingViewModelSpecTest {
         assertEquals(false, viewModel.uiState.value.isCompleting)
     }
 
+    @Test
+    fun `setup completion marks unfinished optional steps terminal and completes onboarding`() = runTest {
+        val viewModel = buildViewModel()
+        viewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
+        viewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
+        viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, StepStatus.GRANTED)
+
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(StepStatus.GRANTED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.CONTACTS_PERM))
+        assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.PIPA_CONSENT))
+        assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.RECORDING_FOLDER))
+        assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.BATTERY_OPT))
+        assertEquals(StepStatus.COMPLETE, viewModel.uiState.value.stepStates.getValue(OnboardingStep.COLD_SYNC))
+    }
+
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
         userPrefsStore = userPrefsStore,
         logger = logger,

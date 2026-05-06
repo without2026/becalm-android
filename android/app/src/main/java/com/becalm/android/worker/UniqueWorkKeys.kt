@@ -47,6 +47,15 @@ public object UniqueWorkKeys {
     /** Local person identity/interaction index rebuild. */
     public const val PERSON_INDEX: String = "person.index"
 
+    /**
+     * Person memory markdown generation via [com.becalm.android.worker.ProfileMemoryWorker].
+     *
+     * Each enqueue uses a per-person suffix so relationship graph changes for different people
+     * can run independently, while repeated changes for the same person replace the in-flight
+     * request with the latest projection.
+     */
+    public const val PROFILE_MEMORY_PREFIX: String = "person.memory"
+
     /** Daily periodic enrichment sweep. */
     public const val ENRICHMENT_PERIODIC: String = "enrichment.periodic"
 
@@ -73,6 +82,8 @@ public object UniqueWorkKeys {
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
 
     public fun meetingTranscriptUpload(rawEventId: String): String = "$MEETING_TRANSCRIPT_UPLOAD_PREFIX.$rawEventId"
+
+    public fun profileMemory(personId: String): String = "$PROFILE_MEMORY_PREFIX.$personId"
 
     /**
      * Daily retention sweep via [com.becalm.android.worker.RetentionSweepWorker].

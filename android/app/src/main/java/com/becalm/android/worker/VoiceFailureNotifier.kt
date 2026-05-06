@@ -1,10 +1,15 @@
 package com.becalm.android.worker
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.becalm.android.R
 import kotlin.math.abs
 import javax.inject.Inject
@@ -18,12 +23,14 @@ public data class VoiceFailureNotificationSpec(
 
 public class VoiceFailureNotifier @Inject constructor() {
 
+    @SuppressLint("MissingPermission")
     fun notifyFailure(
         context: Context,
         rawEventId: String,
         eventTitle: String?,
         reasonCode: String?,
     ) {
+        if (!canPostNotifications(context)) return
         val spec = buildNotificationSpec(
             context = context,
             rawEventId = rawEventId,
@@ -83,5 +90,10 @@ public class VoiceFailureNotifier @Inject constructor() {
         }
 
         fun notificationId(rawEventId: String): Int = abs(rawEventId.hashCode())
+
+        private fun canPostNotifications(context: Context): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
     }
 }

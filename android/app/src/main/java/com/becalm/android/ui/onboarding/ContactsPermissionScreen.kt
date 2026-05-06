@@ -37,8 +37,8 @@ import kotlinx.coroutines.flow.Flow
  *
  * Primary VM: [OnboardingViewModel]
  * Navigation entry: [BecalmRoute.OnboardingContacts]
- * Navigation exit: [BecalmRoute.OnboardingSources]. Email-source PIPA disclosures are
- * shown inline before each OAuth connection starts.
+ * Navigation exit: compatibility [BecalmRoute.OnboardingSources]. The first-run setup
+ * screen requests contacts inline instead of navigating here.
  */
 @Composable
 public fun ContactsPermissionScreen(

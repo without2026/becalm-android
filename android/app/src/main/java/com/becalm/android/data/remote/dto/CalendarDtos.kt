@@ -11,7 +11,6 @@ import kotlinx.datetime.Instant
  * Mirrors the `calendar_events` Supabase table (data-model.yml).
  *
  * @property sourceType Valid values: [SourceType.GOOGLE_CALENDAR] | [SourceType.OUTLOOK_CALENDAR]
- * @property syncStatus Valid values (Room-side enum): "pending" | "synced" | "failed"
  */
 @JsonClass(generateAdapter = true)
 public data class CalendarEventDto(
@@ -50,11 +49,6 @@ public data class CalendarEventDto(
      */
     @field:Json(name = "attendees_raw") val attendeesRaw: String? = null,
 
-    /**
-     * Sync status of this record.
-     * Valid values: "pending" | "synced" | "failed"
-     */
-    @field:Json(name = "sync_status") val syncStatus: String? = null,
 )
 
 /**

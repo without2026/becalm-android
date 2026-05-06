@@ -147,6 +147,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             emailRaw = emailRaw,
             phoneRaw = phoneRaw,
             organizationRaw = organizationRaw,
+            titleRaw = titleRaw,
             evidence = evidence,
             confidence = confidence.coerceIn(0.0, 1.0),
             resolutionStatus = resolutionStatus,

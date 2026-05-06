@@ -109,33 +109,6 @@
             android:name="com.becalm.android.receiver.ReminderBroadcastReceiver"
             android:exported="false" />
 
-        <!-- ── MSAL Browser Tab Activity (ING-007 / MsGraphTokenProviderImpl) ─ -->
-
-        <!--
-            MSAL launches Chrome Custom Tabs for the Microsoft OAuth2 consent flow and
-            receives the `msauth://<applicationId>/<keyhash>` redirect through this
-            activity. See docs/plans/repo-auth-msgraph-oauth-provider.md § 5.4.
-
-            `PLACEHOLDER_KEYHASH` is a build-time sentinel — the debug keystore SHA-1
-            base64url-encoded value is registered in the Microsoft Entra app registration
-            and must be substituted per build variant (sourceSet override or
-            manifestPlaceholders) before the flow resolves on a real device. Unit tests
-            do not exercise this path.
-        -->
-        <activity
-            android:name="com.microsoft.identity.client.BrowserTabActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="msauth"
-                    android:host="com.becalm.android"
-                    android:path="/PLACEHOLDER_KEYHASH" />
-            </intent-filter>
-        </activity>
-
         <!-- ── WorkManager: disable auto-init; BecalmApplication provides HiltWorkerFactory ── -->
 
         <provider

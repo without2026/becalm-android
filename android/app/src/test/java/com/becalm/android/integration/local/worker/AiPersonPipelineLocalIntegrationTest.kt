@@ -12,8 +12,8 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
-import com.becalm.android.data.remote.dto.PersonCandidateDto
 import com.becalm.android.data.remote.dto.ScheduleStatus
+import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
@@ -198,6 +198,7 @@ class AiPersonPipelineLocalIntegrationTest {
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
+            workScheduler = workScheduler,
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -243,19 +244,24 @@ class AiPersonPipelineLocalIntegrationTest {
                     direction = "give",
                 ),
             ),
-            personCandidates = listOf(
-                PersonCandidateDto(
+            sourceEventParticipants = listOf(
+                SourceExtractedParticipantDto(
                     role = "counterparty",
-                    name = "김고객",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    rawValue = CUSTOMER_EMAIL,
+                    normalizedValue = CUSTOMER_EMAIL,
+                    displayName = "김고객",
                     email = CUSTOMER_EMAIL,
                     organization = "Acme",
                     evidence = "김고객 customer@example.com",
+                    evidenceSource = "transcript",
                     confidence = 0.96,
                 ),
             ),
             model = "gemini-2.5-flash",
             region = "us-central1",
-            rawModelText = """{"items":[],"person_candidates":[]}""",
+            rawModelText = """{"items":[],"source_event_participants":[]}""",
         )
 
     private companion object {

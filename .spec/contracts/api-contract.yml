@@ -71,6 +71,7 @@ types:
     email?: string
     phone?: string
     organization?: string
+    title?: string               # explicitly stated job title/role only; no inference from work context
     evidence?: string
     confidence: float            # 0.0 ~ 1.0
     evidence_source: string      # metadata | body | llm | contact | call_log | filename
@@ -151,7 +152,6 @@ types:
     source_type: string
     source_ref?: string
     confidence: float
-    sync_status?: string
     created_at: datetime
     updated_at: datetime
     last_edited_by?: uuid
@@ -257,7 +257,7 @@ endpoints:
       200:
         raw_event_id: uuid
         items: "SourceExtractedItem[]"
-        person_candidates: "PersonCandidate[]"
+        source_event_participants: "SourceEventParticipantInput[]" # canonical participant signal output for person matching
         model: string                        # "gemini-2.5-flash"
         region: string                       # "us-central1"
         raw_model_text?: string
@@ -306,8 +306,7 @@ endpoints:
         # due_at (ISO8601 KST), due_hint, due_is_approximate,
         # action_state, source_type (voice|call_recording|meeting|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar|manual),
         # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'; call_recording remains an internal/raw subtype rather than a separate source-status chip.
-        # source_ref, confidence,
-        # sync_status, created_at, updated_at,
+        # source_ref, confidence, created_at, updated_at,
         # last_edited_by, last_edited_at, quote_disputed, quote_disputed_at,
         # deleted_at, supersedes_commitment_id
         # 서버는 기본값으로 deleted_at IS NULL 필터를 적용. include_deleted=true인 경우에만 soft-deleted row도 반환.
@@ -350,7 +349,7 @@ endpoints:
       400: { error: string, message: string }  # empty body
       401: { error: string, message: string }
       404: { error: string, message: string }
-      422: { error: string, message: string, field?: string }
+      422: { error: string, message: string, "field?": string }
       # 422 cases:
       #   - invalid action_state value or illegal transition (server enforces transition matrix; see data-model.yml commitments.action_state comment)
       #   - immutable_field: body에 quote 또는 기타 금지 필드 포함
@@ -386,7 +385,7 @@ endpoints:
         disposition: string   # "inserted" | "duplicate". 201은 durable commit 완료를 의미한다
       401: { error: string, message: string }
       409: { error: string, message: string }  # 동일 id 중복 — 멱등 처리로 기존 row 반환 가능(서버 선택) 또는 409
-      422: { error: string, message: string, field?: string }
+      422: { error: string, message: string, "field?": string }
       # 422 cases:
       #   - invalid_source_type: source_type 값이 enum에 없음
       #   - supersede_target_not_found: supersedes_commitment_id가 존재하지 않거나 다른 user 소유
@@ -469,7 +468,7 @@ endpoints:
       status?: string         # confirmed | cancelled — optional filter. 기본(미지정) 시 양쪽 모두 반환하며 client가 status='cancelled'를 strike-through로 렌더링
     response:
       200: { data: "CalendarEvent[]", cursor: string, has_more: boolean }
-      # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), recurring_event_id, original_start_at, sync_status
+      # CalendarEvent includes: id, user_id, source_type, source_ref, title, start_at, end_at, attendees_raw, status (confirmed|cancelled), recurring_event_id, original_start_at
       401: { error: string, message: string }
     spec_refs: [TDY-005, ING-009, ING-010]
 
@@ -615,6 +614,58 @@ endpoints:
       401: { error: string, message: string }
       404: { error: string, message: string }
     spec_refs: [SRC-002]
+
+  - method: PUT
+    path: /v1/persons/{person_id}/memory
+    auth: required
+    content_type: application/json
+    body:
+      schema_version: 1
+      content_markdown: string       # validated person memory Markdown, max 64 KiB UTF-8
+      content_hash: string           # sha256 hex of canonical Markdown bytes after replacing frontmatter content_hash with 64 zeroes
+      generated_at: datetime
+      source_window_from?: datetime
+      source_window_to?: datetime
+    constraints:
+      max_body_bytes: 131072
+      max_markdown_bytes: 65536
+    response:
+      200:
+        bucket: person-memory
+        object_path: string          # "{user_id}/{person_id}/memory.md"
+        person_id: uuid
+        content_hash: string
+        generated_at: datetime
+      400: { error: string, message: string }
+      401: { error: string, message: string }
+      404: { error: string, message: string }
+      422: { error: string, message: string }  # frontmatter/path/person_id/hash mismatch or validation failure
+      503: { error: string, message: string }  # Supabase Storage unavailable; Android retries asynchronously
+    notes:
+      - "Android ProfileMemoryWorker generates memory.md from structured Room data and uploads through Railway; Android must not write Supabase Storage directly."
+      - "Railway writes Supabase Storage bucket `person-memory` object `{user_id}/{person_id}/memory.md` with metadata user_id, person_id, schema_version, content_hash, generated_at."
+      - "No Supabase table is created for person memory. It is a derived artifact, not canonical person data."
+      - "content_markdown must not include full email body, full transcript, source_artifacts original Markdown, audio transcript, or raw_model_text."
+      - "UI rendering, source ingestion, person matching, and person_interactions rebuild must not depend on upload success."
+    spec_refs: [PMEM-001, PMEM-002, PMEM-003, PMEM-004, PMEM-005]
+
+  - method: GET
+    path: /v1/persons/{person_id}/memory
+    auth: required
+    response:
+      200:
+        bucket: person-memory
+        object_path: string
+        person_id: uuid
+        content_markdown: string
+        content_hash: string
+        generated_at: datetime
+      401: { error: string, message: string }
+      404: { error: string, message: string }  # person or memory artifact absent
+      503: { error: string, message: string }
+    notes:
+      - "Reserved for cross-device restore/future assistant context. Current Android UI remains local-first and may ignore missing remote memory."
+    spec_refs: [PMEM-001, PMEM-005]
 
   # ========== RAILWAY — USER PROFILE ==========
 

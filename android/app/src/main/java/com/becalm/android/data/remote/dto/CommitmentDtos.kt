@@ -14,13 +14,12 @@ import kotlinx.datetime.Instant
  * - PATCH /v1/commitments/{id} → { data: CommitmentDto }
  * - GET /v1/persons/{person_id}/commitments → [PersonCommitmentsResponse.data]
  *
- * Mirrors the `commitments` Supabase table (data-model.yml). The `sync_status`
- * column is included in GET responses per api-contract.yml comment ("includes sync_status").
+ * Mirrors the `commitments` Supabase table (data-model.yml). Upload/retry state is
+ * maintained only in Room and is not part of the Railway commitment DTO.
  *
  * @property direction Valid values: "give" | "take"
  * @property actionState Valid values: "pending" | "reminded" | "followed_up" | "completed"
  * @property sourceType Valid values: see [SourceType] constants.
- * @property syncStatus Valid values (Room-side enum): "pending" | "synced" | "failed"
  */
 @JsonClass(generateAdapter = true)
 public data class CommitmentDto(
@@ -124,13 +123,6 @@ public data class CommitmentDto(
      * Higher is more confident.
      */
     @field:Json(name = "confidence") val confidence: Double,
-
-    /**
-     * Railway/Supabase sync status.
-     * Valid values: "pending" | "synced" | "failed"
-     * Included in GET responses per api-contract.yml.
-     */
-    @field:Json(name = "sync_status") val syncStatus: String? = null,
 
     /** Server-assigned creation timestamp. */
     @field:Json(name = "created_at") val createdAt: Instant,

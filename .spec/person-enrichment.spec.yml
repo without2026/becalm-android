@@ -9,20 +9,20 @@ behaviors:
   - id: ENR-001
     type: permission
     description: "온보딩 중 CONTACTS 권한 요청 — PIPA 사유를 명확히 고지하고 [허용] / [나중에] 선택지를 제공한다"
-    screen: "ContactsPermissionScreen"
-    interaction: "화면 진입 (온보딩 자동 순서)"
-    precondition: "온보딩 RecordingFolderScreen 완료 후, READ_CONTACTS 미부여"
-    expected: "ContactsPermissionScreen 표시됨. 고지문: '연락처 접근은 약속 상대방의 이름·회사·직함을 앱 안에서만 표시하는 데 사용되며 서버로 전송되지 않습니다'. [허용] 탭 시 시스템 READ_CONTACTS 권한 다이얼로그 표시됨. [나중에] 탭 시 다음 온보딩 단계 진행됨"
+    screen: "OnboardingSetupScreen"
+    interaction: "연락처 항목 [허용] / [나중에] 탭"
+    precondition: "첫 setup 진입, READ_CONTACTS 미부여"
+    expected: "OnboardingSetupScreen의 연락처 항목에 고지문이 표시된다: '연락처 접근은 약속 상대방의 이름·회사·직함을 앱 안에서만 표시하는 데 사용되며 서버로 전송되지 않습니다'. [허용] 탭 시 시스템 READ_CONTACTS 권한 다이얼로그 표시됨. [나중에] 탭 시 해당 항목이 skipped 상태가 된다"
     source: phase2-acceptance
     tests: []
 
   - id: ENR-002
     type: permission
     description: "[허용] 탭 후 시스템 다이얼로그에서 거부 선택 시 graceful skip — 앱은 정상 진행되며 persons_enrichment 테이블은 빈 상태로 유지된다"
-    screen: "ContactsPermissionScreen"
+    screen: "OnboardingSetupScreen"
     interaction: "시스템 다이얼로그에서 [거부] 선택"
-    precondition: "ContactsPermissionScreen에서 [허용] 탭 후 시스템 다이얼로그 표시됨"
-    expected: "다음 온보딩 단계로 진행됨. persons_enrichment 테이블 빈 상태 유지됨. PersonsScreen에서 person_ref 원본값이 표시명으로 fallback 사용됨. 크래시 없음"
+    precondition: "OnboardingSetupScreen 연락처 항목에서 [허용] 탭 후 시스템 다이얼로그 표시됨"
+    expected: "setup 화면에 남고 연락처 항목이 denied/skipped 상태가 된다. persons_enrichment 테이블 빈 상태 유지됨. PersonsScreen에서 person_ref 원본값이 표시명으로 fallback 사용됨. 크래시 없음"
     source: phase2-acceptance
     tests: []
 

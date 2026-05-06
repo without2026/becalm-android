@@ -106,3 +106,32 @@ public data class PersonCommitmentsResponse(
     /** True when additional pages exist beyond this response. */
     @field:Json(name = "has_more") val hasMore: Boolean,
 )
+
+@JsonClass(generateAdapter = true)
+public data class PersonMemoryUploadRequestDto(
+    @field:Json(name = "schema_version") val schemaVersion: Int,
+    @field:Json(name = "content_markdown") val contentMarkdown: String,
+    @field:Json(name = "content_hash") val contentHash: String,
+    @field:Json(name = "generated_at") val generatedAt: Instant,
+    @field:Json(name = "source_window_from") val sourceWindowFrom: Instant? = null,
+    @field:Json(name = "source_window_to") val sourceWindowTo: Instant? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class PersonMemoryUploadResponseDto(
+    @field:Json(name = "bucket") val bucket: String,
+    @field:Json(name = "object_path") val objectPath: String,
+    @field:Json(name = "person_id") val personId: String,
+    @field:Json(name = "content_hash") val contentHash: String,
+    @field:Json(name = "generated_at") val generatedAt: Instant,
+)
+
+@JsonClass(generateAdapter = true)
+public data class PersonMemoryDownloadResponseDto(
+    @field:Json(name = "bucket") val bucket: String,
+    @field:Json(name = "object_path") val objectPath: String,
+    @field:Json(name = "person_id") val personId: String,
+    @field:Json(name = "content_markdown") val contentMarkdown: String,
+    @field:Json(name = "content_hash") val contentHash: String,
+    @field:Json(name = "generated_at") val generatedAt: Instant,
+)

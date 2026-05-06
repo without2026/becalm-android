@@ -30,7 +30,7 @@ class PersonsScreenTest {
                     state = PersonsUiState(
                         people = listOf(
                             PersonRow(
-                                personRef = "+821012345678",
+                                personId = "+821012345678",
                                 displayName = "김철수",
                                 lastInteractionAt = Instant.parse("2026-04-24T01:00:00Z"),
                                 interactionCount = 2,
@@ -68,7 +68,7 @@ class PersonsScreenTest {
                     state = PersonsUiState(
                         people = listOf(
                             PersonRow(
-                                personRef = "+821012345678",
+                                personId = "+821012345678",
                                 displayName = "김철수",
                                 companyName = "ABC Corp",
                                 jobTitle = "팀장",
@@ -102,7 +102,7 @@ class PersonsScreenTest {
                     state = PersonsUiState(
                         people = listOf(
                             PersonRow(
-                                personRef = "kim@example.com",
+                                personId = "kim@example.com",
                                 displayName = "김철수",
                                 lastInteractionAt = Instant.parse("2026-04-24T01:00:00Z"),
                                 interactionCount = 1,

@@ -57,7 +57,7 @@ internal suspend fun runServerBackedCalendarSync(
     val rangeStart = lookbackDays?.let { windowDays -> daysAgo(startedAt, windowDays) }
     val rangeEnd = lookbackDays?.let { windowDays -> daysAhead(startedAt, windowDays) }
 
-    val result = ServerBackedSourceSyncRunner(
+    val syncOutcome = ServerBackedSourceSyncRunner(
         calendarEventRepository = calendarEventRepository,
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
@@ -106,15 +106,15 @@ internal suspend fun runServerBackedCalendarSync(
                 }
             },
         ),
-    ).toWorkerResult()
+    )
 
-    if (result is Result.Success) {
+    if (syncOutcome == ServerBackedSourceSyncResult.SUCCESS) {
         logger.d(
             tag,
             "doWork success elapsedMs=${clock.nowInstant().toEpochMilliseconds() - startedAt.toEpochMilliseconds()}",
         )
     }
-    return result
+    return syncOutcome.toWorkerResult()
 }
 
 private const val NO_LOOKBACK: Int = -1

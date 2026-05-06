@@ -237,6 +237,8 @@ public data class SourceEventParticipantEntity(
     val phoneRaw: String?,
     @ColumnInfo(name = "organization_raw")
     val organizationRaw: String?,
+    @ColumnInfo(name = "title_raw")
+    val titleRaw: String?,
     @ColumnInfo(name = "evidence")
     val evidence: String?,
     @ColumnInfo(name = "confidence")
@@ -327,45 +329,6 @@ public data class UnmatchedPersonInteractionEntity(
     val occurredAt: Instant,
     @ColumnInfo(name = "created_at")
     val createdAt: Instant,
-)
-
-/**
- * Fingerprint of a source-derived person-index row from the last successful index pass.
- *
- * The index worker uses this table to avoid tearing down and rebuilding every person
- * interaction on each source sync. A row is reprocessed only when its source payload or
- * suppression state changes.
- */
-@Entity(
-    tableName = "person_index_source_state",
-    indices = [
-        Index(
-            name = "ux_person_index_source_state_user_source",
-            value = ["user_id", "source_type", "source_ref", "interaction_kind"],
-            unique = true,
-        ),
-        Index(
-            name = "idx_person_index_source_state_user_updated",
-            value = ["user_id", "updated_at"],
-        ),
-    ],
-)
-public data class PersonIndexSourceStateEntity(
-    @PrimaryKey
-    @ColumnInfo(name = "id")
-    val id: String,
-    @ColumnInfo(name = "user_id")
-    val userId: String,
-    @ColumnInfo(name = "source_type")
-    val sourceType: String,
-    @ColumnInfo(name = "source_ref")
-    val sourceRef: String,
-    @ColumnInfo(name = "interaction_kind")
-    val interactionKind: String,
-    @ColumnInfo(name = "fingerprint")
-    val fingerprint: String,
-    @ColumnInfo(name = "updated_at")
-    val updatedAt: Instant,
 )
 
 /**

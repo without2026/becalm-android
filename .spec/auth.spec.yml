@@ -98,10 +98,10 @@ behaviors:
 
   - id: AUTH-010
     type: lifecycle
-    description: "SplashScreen은 transition-only gate다. cold start에서 AuthViewModel은 persisted session + terms/onboarding DataStore를 먼저 resolve한 뒤, Terms / Login / OnboardingPipaConsent / Today 중 하나로 즉시 라우팅해야 하며 indefinite blank loading shell에 머무르면 안 된다"
+    description: "SplashScreen은 transition-only gate다. cold start에서 AuthViewModel은 persisted session + terms/onboarding DataStore를 먼저 resolve한 뒤, Terms / Login / OnboardingSetup / Today 중 하나로 즉시 라우팅해야 하며 indefinite blank loading shell에 머무르면 안 된다"
     trigger: "앱 cold start 직후 SplashScreen 첫 composition"
     precondition: "MainActivity 시작, Compose root mounted"
-    expected: "유효 세션이 없으면 termsAccepted 값에 따라 Terms 또는 Login으로 이동. 유효 세션이 있으면 onboardingCompleted 값에 따라 OnboardingPipaConsent 또는 Today로 이동. 세션 bootstrap 실패 시 Error 상태를 통해 Terms fallback이 허용된다. Splash bootstrap은 로컬 encrypted session read만 수행하며 SupabaseClient/AuthRepository network graph 생성은 로그인/회원가입/토큰 refresh 같은 실제 auth action까지 지연된다"
+    expected: "유효 세션이 없으면 termsAccepted 값에 따라 Terms 또는 Login으로 이동. 유효 세션이 있으면 onboardingCompleted 값에 따라 OnboardingSetup 또는 Today로 이동. 세션 bootstrap 실패 시 Error 상태를 통해 Terms fallback이 허용된다. Splash bootstrap은 로컬 encrypted session read만 수행하며 SupabaseClient/AuthRepository network graph 생성은 로그인/회원가입/토큰 refresh 같은 실제 auth action까지 지연된다"
     source: phase2-acceptance
     tests: []
 

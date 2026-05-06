@@ -30,9 +30,9 @@ class SplashRouteResolverSpecTest {
     }
 
     @Test
-    fun `signed in without completed onboarding routes to onboarding pipa`() {
+    fun `signed in without completed onboarding routes to onboarding setup`() {
         assertEquals(
-            BecalmRoute.OnboardingPipaConsent.path,
+            BecalmRoute.OnboardingSetup.path,
             splashDestinationFor(
                 AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = false),
             ),
@@ -42,12 +42,12 @@ class SplashRouteResolverSpecTest {
     @Test
     fun `signed in without completed onboarding routes to persisted resume route`() {
         assertEquals(
-            BecalmRoute.OnboardingGmail.path,
+            BecalmRoute.OnboardingSetup.path,
             splashDestinationFor(
                 AuthUiState.SignedIn(
                     userId = "user-1",
                     onboardingCompleted = false,
-                    onboardingResumeRoute = BecalmRoute.OnboardingGmail.path,
+                    onboardingResumeRoute = BecalmRoute.OnboardingSetup.path,
                 ),
             ),
         )

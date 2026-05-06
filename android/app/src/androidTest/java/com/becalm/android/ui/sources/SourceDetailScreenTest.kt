@@ -84,6 +84,8 @@ class SourceDetailScreenTest {
                     onDisconnectClick = {},
                     onDisconnectDismiss = onDisconnectDismiss,
                     onDisconnectConfirm = onDisconnectConfirm,
+                    onMeetingAudioAdd = {},
+                    onMeetingTranscriptAdd = {},
                 )
             }
         }

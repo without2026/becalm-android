@@ -8,6 +8,8 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepositoryImpl
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
+import com.becalm.android.data.repository.PersonMemoryRemoteRepository
+import com.becalm.android.data.repository.PersonMemoryRemoteRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.SourceEventParticipantRepository
@@ -59,6 +61,12 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindPersonManualMatchRepository(
         impl: PersonManualMatchRepositoryImpl,
     ): PersonManualMatchRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindPersonMemoryRemoteRepository(
+        impl: PersonMemoryRemoteRepositoryImpl,
+    ): PersonMemoryRemoteRepository
 
     @Binds
     @Singleton

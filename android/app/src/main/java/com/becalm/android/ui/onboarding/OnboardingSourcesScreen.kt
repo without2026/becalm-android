@@ -111,13 +111,14 @@ public fun SettingsSourceConnectionsScreen(
     )
 }
 
-private enum class SourceConnectionsEntryPoint {
+internal enum class SourceConnectionsEntryPoint {
+    Setup,
     Onboarding,
     Settings,
 }
 
 @Composable
-private fun SourceConnectionsScreen(
+internal fun SourceConnectionsScreen(
     navController: NavHostController,
     entryPoint: SourceConnectionsEntryPoint,
     viewModel: OnboardingViewModel? = null,
@@ -129,15 +130,23 @@ private fun SourceConnectionsScreen(
     onSkipRemaining: (() -> Unit)? = null,
     onPersistEmailConsent: (suspend (EmailPipaProvider) -> Boolean)? = null,
     onRefreshSource: ((OnboardingSourceProvider) -> Unit)? = null,
+    onCompleteSetup: (() -> Unit)? = null,
     onNavigateComplete: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
+    setupItems: List<OnboardingSetupItemUi> = emptyList(),
+    onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
+    onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
 ) {
     val needsViewModel = emailEventsOverride == null ||
         calendarEventsOverride == null ||
         stateOverride == null ||
         onConnectSource == null ||
-        (entryPoint == SourceConnectionsEntryPoint.Onboarding && onSkipSource == null) ||
+        (entryPoint != SourceConnectionsEntryPoint.Settings && onSkipSource == null) ||
         (entryPoint == SourceConnectionsEntryPoint.Onboarding && onSkipRemaining == null) ||
+        (
+            entryPoint == SourceConnectionsEntryPoint.Setup &&
+                (onCompleteSetup == null || onConnectSetupItem == null || onSkipSetupItem == null)
+            ) ||
         onPersistEmailConsent == null ||
         onRefreshSource == null
     val resolvedViewModel = if (needsViewModel) {
@@ -164,6 +173,7 @@ private fun SourceConnectionsScreen(
     val skipSource: (OnboardingSourceProvider) -> Unit = onSkipSource
         ?: { provider -> requireNotNull(resolvedViewModel).onSkipSourceProvider(provider) }
     val skipRemaining: (() -> Unit)? = when (entryPoint) {
+        SourceConnectionsEntryPoint.Setup -> null
         SourceConnectionsEntryPoint.Onboarding -> onSkipRemaining ?: {
             requireNotNull(resolvedViewModel).onSkipRemainingSourceConnections()
         }
@@ -176,6 +186,13 @@ private fun SourceConnectionsScreen(
         requireNotNull(resolvedViewModel).refreshSourceProviderConnection(provider)
     }
     val navigateComplete = onNavigateComplete ?: when (entryPoint) {
+        SourceConnectionsEntryPoint.Setup -> {
+            {
+                navController.navigate(BecalmRoute.Today.path) {
+                    popUpTo(BecalmRoute.OnboardingSetup.path) { inclusive = true }
+                }
+            }
+        }
         SourceConnectionsEntryPoint.Onboarding -> {
             { navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingNotificationPerm.path) }
         }
@@ -292,10 +309,10 @@ private fun SourceConnectionsScreen(
         items.any { item ->
             item.state !in setOf(SourceConnectionState.Connected, SourceConnectionState.Skipped)
         }
-
     BecalmScaffold(
         title = stringResource(
             when (entryPoint) {
+                SourceConnectionsEntryPoint.Setup -> R.string.onb_setup_title
                 SourceConnectionsEntryPoint.Onboarding -> R.string.onb_sources_title
                 SourceConnectionsEntryPoint.Settings -> R.string.settings_source_connections_title
             },
@@ -306,18 +323,21 @@ private fun SourceConnectionsScreen(
             items = items,
             headline = stringResource(
                 when (entryPoint) {
+                    SourceConnectionsEntryPoint.Setup -> R.string.onb_setup_headline
                     SourceConnectionsEntryPoint.Onboarding -> R.string.onb_sources_headline
                     SourceConnectionsEntryPoint.Settings -> R.string.settings_source_connections_headline
                 },
             ),
             body = stringResource(
                 when (entryPoint) {
+                    SourceConnectionsEntryPoint.Setup -> R.string.onb_setup_body
                     SourceConnectionsEntryPoint.Onboarding -> R.string.onb_sources_body
                     SourceConnectionsEntryPoint.Settings -> R.string.settings_source_connections_body
                 },
             ),
             continueLabel = stringResource(
                 when {
+                    entryPoint == SourceConnectionsEntryPoint.Setup -> R.string.onb_setup_start
                     entryPoint == SourceConnectionsEntryPoint.Settings -> R.string.settings_source_connections_done
                     hasIncomplete -> R.string.onb_sources_skip_remaining
                     else -> R.string.onb_sources_continue
@@ -325,6 +345,7 @@ private fun SourceConnectionsScreen(
             ),
             skipLabel = stringResource(
                 when (entryPoint) {
+                    SourceConnectionsEntryPoint.Setup -> R.string.action_skip
                     SourceConnectionsEntryPoint.Onboarding -> R.string.action_skip
                     SourceConnectionsEntryPoint.Settings -> R.string.settings_source_connections_not_now
                 },
@@ -353,8 +374,13 @@ private fun SourceConnectionsScreen(
                 transientStates = transientStates - provider
                 skipSource(provider)
             },
+            setupItems = setupItems,
+            onConnectSetupItem = onConnectSetupItem ?: {},
+            onSkipSetupItem = onSkipSetupItem ?: {},
             onContinue = {
-                if (entryPoint == SourceConnectionsEntryPoint.Onboarding) {
+                if (entryPoint == SourceConnectionsEntryPoint.Setup) {
+                    (onCompleteSetup ?: { requireNotNull(resolvedViewModel).onCompleteSetup() }).invoke()
+                } else if (entryPoint == SourceConnectionsEntryPoint.Onboarding) {
                     requireNotNull(skipRemaining).invoke()
                 }
                 navigateComplete()
@@ -373,9 +399,15 @@ internal fun SourceConnectionsContent(
     skipLabel: String = stringResource(R.string.action_skip),
     onConnect: (OnboardingSourceProvider) -> Unit,
     onSkip: (OnboardingSourceProvider) -> Unit,
+    setupItems: List<OnboardingSetupItemUi> = emptyList(),
+    onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
+    onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val requiredSection = stringResource(R.string.onb_setup_required_section)
+    val recommendedSection = stringResource(R.string.onb_setup_recommended_section)
+    val optionalSection = stringResource(R.string.onb_setup_optional_section)
     val mailSection = stringResource(R.string.onb_sources_mail_section)
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
     LazyColumn(
@@ -397,6 +429,43 @@ internal fun SourceConnectionsContent(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
+        if (setupItems.isNotEmpty()) {
+            item(key = "required-setup-title") {
+                Text(
+                    text = requiredSection,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            item(key = "required-setup-summary") {
+                RequiredSetupSummary()
+            }
+            item(key = "recommended-setup-title") {
+                Text(
+                    text = recommendedSection,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            items(items = setupItems, key = { item -> item.item.name }) { item ->
+                SetupConnectionRow(
+                    item = item,
+                    onConnect = { onConnectSetupItem(item.item) },
+                    onSkip = { onSkipSetupItem(item.item) },
+                    skipLabel = skipLabel,
+                )
+            }
+            item(key = "optional-setup-title") {
+                Text(
+                    text = optionalSection,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
         sourceSection(
             title = mailSection,
             items = items.filter { it.category == SourceConnectionCategory.Mail },
@@ -417,6 +486,99 @@ internal fun SourceConnectionsContent(
                 text = continueLabel,
                 onClick = onContinue,
                 modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RequiredSetupSummary() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.onb_setup_required_terms),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.onb_setup_required_privacy),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SetupConnectionRow(
+    item: OnboardingSetupItemUi,
+    onConnect: () -> Unit,
+    onSkip: () -> Unit,
+    skipLabel: String,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel(MaterialTheme.shapes.medium)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (item.detail != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = item.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            AssistChip(
+                onClick = {},
+                label = {
+                    Text(
+                        text = stateLabel(item.state),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val terminal = item.state == SourceConnectionState.Connected || item.state == SourceConnectionState.Skipped
+            BecalmButton(
+                text = connectLabel(item.state, requiresConsent = false),
+                onClick = onConnect,
+                enabled = !terminal,
+                modifier = Modifier.weight(1f),
+            )
+            BecalmButton(
+                text = skipLabel,
+                onClick = onSkip,
+                variant = BecalmButtonVariant.Text,
+                enabled = !terminal,
             )
         }
     }

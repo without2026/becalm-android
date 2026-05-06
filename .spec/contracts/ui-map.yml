@@ -3,7 +3,7 @@ version: 1
 # Navigation: Jetpack Compose Navigation (NavHost)
 # Language: Korean only
 # Bottom navigation: 3-tab BottomNavigationBar (오늘의 타임라인 / 인물 / 약속관리)
-# Total routes: 24
+# Total routes: 25
 # Glass surfaces must preserve foreground legibility. Compose implementations
 # must not apply foreground blur to panel contents, text fields, or buttons.
 # Android 13+ predictive-back platform warnings must be avoided by enabling
@@ -18,7 +18,7 @@ routes:
     components: [SplashLogo]
     auth: public
     # Transition-only gate. Must resolve immediately to /terms, /login,
-    # /onboarding/pipa-consent, or /today after persisted session + DataStore bootstrap.
+    # /onboarding/setup, or /today after persisted session + DataStore bootstrap.
 
   - path: /terms
     screen: TermsScreen
@@ -36,6 +36,17 @@ routes:
     # SignUpLink creates an email account from the same email/password fields.
     # If the auth provider requires email confirmation, the shell shows a
     # confirmation-required message and stays on /login.
+
+  - path: /onboarding/setup
+    screen: OnboardingSetupScreen
+    data: []
+    components: [RequiredConsentSummary, RecommendedPermissionRow, SourceConnectionRow, OAuthConnectButton, SkipButton, StartButton]
+    auth: required
+    # Canonical first-run onboarding after Login. Required legal/auth gates are
+    # already satisfied; this one screen groups recommended permissions
+    # (recordings, contacts, notifications) and optional sources (mail/calendar).
+    # System permission dialogs, SAF picker, and OAuth browser flows may appear,
+    # but the app must return to this screen and update row status.
 
   - path: /onboarding/recording-folder
     screen: RecordingFolderScreen
@@ -135,12 +146,14 @@ routes:
 
   - path: /persons/{person_id}
     screen: PersonDetailScreen
-    data: ["Room person_interactions projection", "Room source_event_participants/commitment_participants mirror", "Room person_identities", "Room persons_enrichment join", "Room raw_ingestion_events drill-down lookup"]
+    data: ["Room person_interactions projection", "Room source_event_participants/commitment_participants mirror", "Room person_identities", "Room persons_enrichment join", "Room raw_ingestion_events drill-down lookup", "optional local person_memory/<user_hash>/<person_id>/memory.md"]
     components: [PersonHeader, SourceTimelineFilter, SourceEventCardRow, RawEventRow]
     auth: required
     # Prototype-aligned person detail: profile header + derived stats(이메일/통화/미팅/약속)
     # + unified source timeline. Filters: All / Email / Call / Meeting / Commitment.
     # Stats and timeline are derived from Room person index projection, with legacy Room rows only as migration fallback.
+    # person_memory.md may provide optional compact description text, but this route
+    # must render from structured Room data when the artifact is missing or stale.
 
   - path: /persons/{person_id}/events/{event_id}
     screen: RawEventDetailSheet
