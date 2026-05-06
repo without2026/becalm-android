@@ -9,7 +9,6 @@ import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
-import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import kotlinx.coroutines.flow.Flow
@@ -47,9 +46,6 @@ public interface PersonIndexDao {
     public suspend fun upsertUnmatchedInteractions(rows: List<UnmatchedPersonInteractionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    public suspend fun upsertSourceStates(rows: List<PersonIndexSourceStateEntity>)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertDirtySources(rows: List<PersonIndexDirtySourceEntity>)
 
     @Query("DELETE FROM person_interactions WHERE user_id = :userId")
@@ -82,6 +78,58 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        DELETE FROM person_interactions
+        WHERE user_id = :userId
+          AND source_ref = :sourceRef
+          AND interaction_kind = :interactionKind
+        """,
+    )
+    public suspend fun deleteInteractionsForSourceRefKind(
+        userId: String,
+        sourceRef: String,
+        interactionKind: String,
+    ): Int
+
+    @Query(
+        """
+        SELECT * FROM person_interactions
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND source_ref = :sourceRef
+          AND interaction_kind = :interactionKind
+        """,
+    )
+    public suspend fun findInteractionsForSource(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        interactionKind: String,
+    ): List<PersonInteractionEntity>
+
+    @Query(
+        """
+        SELECT * FROM person_interactions
+        WHERE user_id = :userId
+          AND source_ref = :sourceRef
+          AND interaction_kind = :interactionKind
+        """,
+    )
+    public suspend fun findInteractionsForSourceRefKind(
+        userId: String,
+        sourceRef: String,
+        interactionKind: String,
+    ): List<PersonInteractionEntity>
+
+    @Query(
+        """
+        SELECT DISTINCT person_id FROM person_interactions
+        WHERE user_id = :userId
+        """,
+    )
+    public suspend fun findInteractionPersonIdsForUser(userId: String): List<String>
+
+    @Query(
+        """
         DELETE FROM unmatched_person_interactions
         WHERE user_id = :userId
           AND source_type = :sourceType
@@ -98,16 +146,14 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        DELETE FROM person_index_source_state
+        DELETE FROM unmatched_person_interactions
         WHERE user_id = :userId
-          AND source_type = :sourceType
           AND source_ref = :sourceRef
           AND interaction_kind = :interactionKind
         """,
     )
-    public suspend fun deleteSourceState(
+    public suspend fun deleteUnmatchedInteractionsForSourceRefKind(
         userId: String,
-        sourceType: String,
         sourceRef: String,
         interactionKind: String,
     ): Int
@@ -221,14 +267,6 @@ public interface PersonIndexDao {
 
     @Query(
         """
-        SELECT * FROM person_index_source_state
-        WHERE user_id = :userId
-        """,
-    )
-    public suspend fun findSourceStatesForUser(userId: String): List<PersonIndexSourceStateEntity>
-
-    @Query(
-        """
         SELECT * FROM person_index_dirty_sources
         WHERE user_id = :userId
         ORDER BY updated_at ASC
@@ -326,6 +364,71 @@ public interface PersonIndexDao {
         """,
     )
     public fun observeIdentitiesForPerson(userId: String, personId: String): Flow<List<PersonIdentityEntity>>
+
+    @Query(
+        """
+        SELECT * FROM persons
+        WHERE user_id = :userId
+          AND id = :personId
+          AND archived_at IS NULL
+        """,
+    )
+    public suspend fun findPersonForMemory(userId: String, personId: String): PersonEntity?
+
+    @Query(
+        """
+        SELECT * FROM person_identities
+        WHERE user_id = :userId
+          AND person_id = :personId
+        ORDER BY verified DESC, confidence DESC, identity_type ASC
+        """,
+    )
+    public suspend fun findIdentitiesForMemory(userId: String, personId: String): List<PersonIdentityEntity>
+
+    @Query(
+        """
+        SELECT * FROM source_event_participants
+        WHERE user_id = :userId
+          AND person_id = :personId
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findSourceEventParticipantsForMemory(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): List<SourceEventParticipantEntity>
+
+    @Query(
+        """
+        SELECT * FROM commitment_participants
+        WHERE user_id = :userId
+          AND person_id = :personId
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findCommitmentParticipantsForMemory(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): List<CommitmentParticipantEntity>
+
+    @Query(
+        """
+        SELECT * FROM person_interactions
+        WHERE user_id = :userId
+          AND person_id = :personId
+        ORDER BY occurred_at DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findInteractionsForMemory(
+        userId: String,
+        personId: String,
+        limit: Int,
+    ): List<PersonInteractionEntity>
 
     @Query(
         """

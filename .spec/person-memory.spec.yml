@@ -1,0 +1,186 @@
+module: person-memory
+platform: android-backend
+version: 1
+
+summary: >
+  Person memory is a compact, person-scoped Markdown artifact generated from the
+  canonical person/relation graph. It behaves like a compact context cache: useful
+  for human review, future assistant reasoning, and optional semantic matching
+  context, but never the source of truth for identity, source ingestion, UI
+  rendering, or person interaction projection.
+
+canonical_inputs:
+  structured_source_of_truth:
+    - persons
+    - person_identities
+    - source_event_participants
+    - commitment_participants
+    - person_interactions
+    - raw_ingestion_events metadata fields only
+    - commitments quote/title/status fields only
+  forbidden_inputs:
+    - full email body
+    - full meeting transcript
+    - full audio transcript
+    - source_artifacts markdown_original body
+    - ContactsContract rows not already represented as user-confirmed identities
+    - model output raw text
+
+artifact_contract:
+  storage:
+    local_path: "person_memory/<user_hash>/<person_id>/memory.md"
+    supabase_bucket: "person-memory"
+    supabase_object_path: "{user_id}/{person_id}/memory.md"
+    upload_owner: "Railway endpoint; Android does not write Supabase Storage directly"
+    metadata:
+      user_id: uuid
+      person_id: uuid
+      schema_version: 1
+      content_hash: sha256
+      generated_at: datetime
+  canonicality:
+    - "Derived artifact only. Deleting it must not delete any canonical person/relation row."
+    - "Regeneration from structured DB must produce a valid replacement."
+    - "Missing, stale, or failed upload state must not block source ingestion, person matching, person_interactions rebuild, or UI rendering."
+    - "Supabase mirror is for cross-device/future assistant context. Android local DB remains usable without downloading it."
+
+markdown_format:
+  required_frontmatter:
+    schema_version: 1
+    user_id: uuid
+    person_id: uuid
+    display_name: string
+    generated_at: datetime
+    source_window:
+      from?: datetime
+      to?: datetime
+    content_hash: sha256
+  required_sections:
+    - "# Person Memory"
+    - "## Identity"
+    - "## Profile"
+    - "## Work Context"
+    - "## Recent Interactions"
+    - "## Matching Notes"
+    - "## Evidence References"
+  section_rules:
+    Identity:
+      - "Only verified deterministic anchors: email, phone, user-confirmed exact alias."
+      - "Do not write role/title/company phrases as aliases."
+    Profile:
+      - "Only facts explicitly present in participant evidence, source title/snippet, commitment quote, or verified identity metadata."
+      - "Company/title/role facts must include a source ref and observed date."
+      - "Do not resolve conflicts; list conflicting evidence separately."
+    Work_Context:
+      - "Summarize current work relationship, open commitments, decisions, and recurring topics."
+      - "Every bullet must include source refs."
+      - "Do not include full source bodies or transcript passages."
+    Recent_Interactions:
+      - "Most recent bounded interaction list, newest first."
+      - "Use title/snippet/quote only; never full body."
+    Matching_Notes:
+      - "May include user-confirmed semantic patterns, rejected matches, and ambiguity warnings."
+      - "Semantic notes are reinforcement context, not deterministic identity anchors."
+    Evidence_References:
+      - "List source_ref, source_type, occurred_at, and short evidence label for every factual bullet above."
+
+generation_rules:
+  - id: PMEM-001
+    description: "ProfileMemoryWorker runs asynchronously after person graph changes."
+    trigger: "PersonInteractionIndexWorker successfully rebuilds affected person_interactions/person_identities for one or more person_id values."
+    expected: "WorkScheduler enqueues ProfileMemoryWorker with a stable person-scoped unique work key. Repeated graph changes for the same person replace the in-flight request, while different people run independently. The worker reads structured DB on IO dispatcher, generates memory.md, stores a local file, and attempts Railway upload without blocking local generation."
+
+  - id: PMEM-002
+    description: "Markdown generation is off the critical path."
+    expected: "Worker failure records retry state only. Source ingestion, matching, PersonInteractionIndexWorker, People tab, and PersonDetail must keep working."
+
+  - id: PMEM-003
+    description: "Prompt uses compact structured evidence only."
+    expected: "PromptBuilder serializes bounded JSON evidence and never passes full email body, full transcript, source_artifacts original Markdown, raw model text, or audio bytes."
+
+  - id: PMEM-004
+    description: "Factual claims require evidence."
+    expected: "Validator rejects profile/work bullets that lack source refs or exceed evidence length bounds."
+
+  - id: PMEM-005
+    description: "Supabase mirror is person_id aligned."
+    expected: "Upload endpoint path parameter, object path, object metadata, and Markdown frontmatter all carry the same person_id. Mismatch returns 422 and local upload remains retryable."
+
+  - id: PMEM-006
+    description: "Semantic matching may consult person memory only as optional context."
+    expected: "Deterministic email/phone/confirmed identity matching remains first. If no deterministic match exists, semantic matcher may compare participant evidence against the latest local memory.md. Absence or staleness of memory.md falls back to structured DB context or user review."
+
+reinforcement_matching_rules:
+  - "Email and phone identities are automatic deterministic anchors."
+  - "User-confirmed exact aliases may become person_identities when they are sufficiently scoped and not ambiguous."
+  - "Profile phrases such as 'Acme 대표', 'CFO', or 'marketing lead' are profile/work facts, not aliases."
+  - "A user-approved semantic match may be written to Matching Notes as a confirmed pattern and used to avoid repeated prompts for materially similar future participants."
+  - "A single profile fact must not auto-match a person. Automatic semantic matching requires a strong feature bundle, e.g. name hint + organization + role/title + source context, and no competing candidate."
+  - "Rejected matches must be preserved as negative Matching Notes so similar ambiguous candidates are not repeatedly suggested."
+
+prompt_contract:
+  system: |
+    You generate a compact person memory Markdown document for BeCalm.
+    Use only the provided structured evidence.
+    Do not infer facts that are not explicitly stated.
+    Do not invent employers, titles, relationships, responsibilities, deadlines, or aliases.
+    Do not include full source bodies, full transcripts, audio content, or raw model output.
+    Every profile or work-context statement must include a source reference.
+    Separate identity anchors, profile facts, work context, recent interactions, matching notes, and evidence references.
+    If evidence conflicts, preserve the conflict instead of resolving it.
+    If information is missing, omit the item rather than guessing.
+    Output Markdown only, with the required YAML frontmatter and required sections.
+  input_shape:
+    person:
+      person_id: uuid
+      display_name: string
+    identities:
+      - identity_type: "email|phone|name|organization"
+        value: string
+        verified: boolean
+        source_ref?: string
+    participants:
+      - source_ref: string
+        source_type: string
+        role: string
+        relation_to_user: string
+        display_name?: string
+        organization?: string
+        evidence?: string
+        occurred_at: datetime
+    interactions:
+      - source_ref: string
+        source_type: string
+        interaction_kind: string
+        title?: string
+        snippet?: string
+        occurred_at: datetime
+    commitments:
+      - commitment_id: uuid
+        source_ref: string
+        item_type: "action|schedule|decision"
+        title: string
+        status?: string
+        quote: string
+        occurred_at: datetime
+    matching_feedback:
+      - kind: "confirmed_semantic_match|rejected_semantic_match|ambiguity_warning"
+        pattern: string
+        source_ref: string
+        created_at: datetime
+
+validation_rules:
+  - "Frontmatter must parse and must include schema_version, user_id, person_id, display_name, generated_at, source_window, content_hash."
+  - "content_hash is SHA-256 of canonical Markdown bytes after replacing the frontmatter content_hash value with 64 zeroes. This avoids self-referential hashing while keeping the artifact tamper-checkable."
+  - "person_id in frontmatter must equal the worker target person_id."
+  - "Markdown byte size must stay below 64 KiB."
+  - "No single evidence quote/snippet may exceed 240 characters."
+  - "Forbidden original-body markers or transcript-size text blocks cause validation failure."
+  - "Every Profile, Work Context, and Matching Notes factual bullet must contain a source ref token such as raw:<id>, commitment:<id>, or participant:<id>."
+  - "Validator failure prevents upload and keeps the local worker retryable or quarantined according to error type."
+
+privacy_and_retention:
+  - "The artifact is user-scoped and person-scoped. Account deletion deletes local files and Supabase Storage objects under {user_id}/."
+  - "The artifact is included in privacy export as derived context, clearly marked as regeneratable."
+  - "Full originals remain local-only source_artifacts and are never embedded."
+  - "Contacts-only enrichment that was never confirmed into person_identities must not be uploaded through memory.md."

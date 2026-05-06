@@ -50,18 +50,18 @@ internal object OnboardingProgressResolver {
     fun resumeRoute(stepStates: Map<OnboardingStep, StepStatus>): String = when (firstIncompleteStep(stepStates)) {
         OnboardingStep.TERMS -> BecalmRoute.Terms.path
         OnboardingStep.LOGIN -> BecalmRoute.Login.path
-        OnboardingStep.PIPA_CONSENT -> BecalmRoute.OnboardingPipaConsent.path
-        OnboardingStep.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
-        OnboardingStep.CALL_LOG_MATCHING -> BecalmRoute.OnboardingCallLogMatching.path
-        OnboardingStep.CONTACTS_PERM -> BecalmRoute.OnboardingContacts.path
+        OnboardingStep.PIPA_CONSENT,
+        OnboardingStep.RECORDING_FOLDER,
+        OnboardingStep.CALL_LOG_MATCHING,
+        OnboardingStep.CONTACTS_PERM,
         OnboardingStep.LINK_GMAIL,
         OnboardingStep.LINK_OUTLOOK_MAIL,
         OnboardingStep.LINK_IMAP,
         OnboardingStep.LINK_GOOGLE_CALENDAR,
         OnboardingStep.LINK_OUTLOOK_CALENDAR,
-        -> BecalmRoute.OnboardingSources.path
-        OnboardingStep.NOTIFICATION_PERM -> BecalmRoute.OnboardingNotificationPerm.path
-        OnboardingStep.BATTERY_OPT -> BecalmRoute.OnboardingBattery.path
-        OnboardingStep.COLD_SYNC -> BecalmRoute.OnboardingColdSync.path
+        OnboardingStep.NOTIFICATION_PERM,
+        OnboardingStep.BATTERY_OPT,
+        OnboardingStep.COLD_SYNC,
+        -> BecalmRoute.OnboardingSetup.path
     }
 }

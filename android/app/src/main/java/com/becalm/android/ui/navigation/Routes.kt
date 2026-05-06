@@ -52,26 +52,33 @@ public sealed class BecalmRoute(public val path: String) {
     // ── Onboarding (auth required) ─────────────────────────────────────────────
 
     /**
-     * Onboarding step 3 of 12: PIPA 제3자 제공 + 국외 이전 동의 (ONB-PIPA).
+     * Canonical first-run setup surface after login.
      *
-     * Shown immediately after login, before RecordingFolderScreen.
-     * [동의] navigates to [OnboardingRecordingFolder]; [동의 안 함] skips to [OnboardingContacts].
+     * Terms and login remain public/auth gates. Post-login setup groups recommended
+     * permissions and optional source connections in one screen so users do not walk
+     * through one app page per permission. Legacy individual onboarding routes remain
+     * registered for settings reconnect and recovery flows.
+     */
+    public data object OnboardingSetup : BecalmRoute("onboarding/setup")
+
+    /**
+     * Compatibility route for the former standalone PIPA 제3자 제공 + 국외 이전 동의 screen.
+     *
+     * Canonical first-run setup now shows the same disclosure inline before the
+     * recording folder permission flow.
      */
     public data object OnboardingPipaConsent : BecalmRoute("onboarding/pipa-consent")
 
-    /** Onboarding step: recording folder permission grant. */
+    /** Compatibility route: standalone recording folder permission grant. */
     public data object OnboardingRecordingFolder : BecalmRoute("onboarding/recording-folder")
 
     /** Onboarding step: optional READ_CALL_LOG consent for call-recording person matching. */
     public data object OnboardingCallLogMatching : BecalmRoute("onboarding/call-log-matching")
 
-    /**
-     * Onboarding step: READ_CONTACTS permission with PIPA notice (ENR-001).
-     * Graceful skip — refusal does not block app functionality.
-     */
+    /** Compatibility route: READ_CONTACTS permission with PIPA notice (ENR-001). */
     public data object OnboardingContacts : BecalmRoute("onboarding/contacts")
 
-    /** Onboarding step: connect optional mail and calendar OAuth sources in one page. */
+    /** Compatibility/settings route: connect optional mail and calendar OAuth sources. */
     public data object OnboardingSources : BecalmRoute("onboarding/sources")
 
     /**
@@ -95,41 +102,36 @@ public sealed class BecalmRoute(public val path: String) {
         }
     }
 
-    /** Onboarding step: Gmail OAuth connection. */
+    /** Source connection route: Gmail OAuth connection. */
     public data object OnboardingGmail : BecalmRoute("onboarding/gmail")
 
-    /** Onboarding step: Outlook Mail OAuth connection. */
+    /** Source connection route: Outlook Mail OAuth connection. */
     public data object OnboardingOutlookMail : BecalmRoute("onboarding/outlook-mail")
 
-    /** Onboarding step: IMAP / App Password manual setup. */
+    /** Source connection route: IMAP / App Password manual setup. */
     public data object OnboardingImap : BecalmRoute("onboarding/imap")
 
-    /** Onboarding step: Google Calendar OAuth connection. */
+    /** Source connection route: Google Calendar OAuth connection. */
     public data object OnboardingGoogleCalendar : BecalmRoute("onboarding/google-calendar")
 
-    /** Onboarding step: Outlook Calendar OAuth connection. */
+    /** Source connection route: Outlook Calendar OAuth connection. */
     public data object OnboardingOutlookCalendar : BecalmRoute("onboarding/outlook-calendar")
 
     /**
-     * Onboarding step (S6-E): POST_NOTIFICATIONS runtime permission for Android 13+.
+     * Compatibility route: POST_NOTIFICATIONS runtime permission for Android 13+.
      *
      * On API 32 and below the permission is implicitly granted at install time, so the
-     * screen self-skips in a single recomposition and navigates straight to
-     * [OnboardingBattery]. The screen is registered unconditionally so the onboarding
-     * flow has a stable step count across SDK levels.
+     * screen self-skips in a single recomposition. First-run setup requests this
+     * permission inline from [OnboardingSetup].
      */
     public data object OnboardingNotificationPerm : BecalmRoute("onboarding/notifications")
 
-    /**
-     * Onboarding step: battery optimisation exemption (ONB-005).
-     * 2-step: standard REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + Samsung sleeping-apps guide.
-     */
+    /** Compatibility route: battery optimisation exemption (ONB-005). */
     public data object OnboardingBattery : BecalmRoute("onboarding/battery")
 
     /**
-     * Onboarding step: first-run cold-sync progress screen (TDY-010 / ONB-008).
-     * Shown when Room is entirely empty after onboarding completes.
-     * DataStore `onboarding_completed=true` written only after dismiss or sync completion.
+     * Compatibility route: former first-run cold-sync progress screen (TDY-010 / ONB-008).
+     * Canonical setup now enters Today first and lets runtime sync status surface progress.
      */
     public data object OnboardingColdSync : BecalmRoute("onboarding/cold-sync")
 

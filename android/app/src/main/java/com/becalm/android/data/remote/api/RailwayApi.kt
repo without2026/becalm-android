@@ -18,6 +18,9 @@ import com.becalm.android.data.remote.dto.MailSyncResponse
 import com.becalm.android.data.remote.dto.PersonCommitmentsResponse
 import com.becalm.android.data.remote.dto.PersonEventsResponse
 import com.becalm.android.data.remote.dto.PersonListResponse
+import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
+import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
+import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
@@ -29,6 +32,7 @@ import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.PUT
 import retrofit2.http.Query
 
 /**
@@ -385,4 +389,15 @@ public interface RailwayApi {
         @Query("cursor") cursor: String? = null,
         @Query("limit") limit: Int? = null,
     ): Response<PersonCommitmentsResponse>
+
+    @PUT("v1/persons/{person_id}/memory")
+    public suspend fun uploadPersonMemory(
+        @Path("person_id") personId: String,
+        @Body request: PersonMemoryUploadRequestDto,
+    ): Response<PersonMemoryUploadResponseDto>
+
+    @GET("v1/persons/{person_id}/memory")
+    public suspend fun getPersonMemory(
+        @Path("person_id") personId: String,
+    ): Response<PersonMemoryDownloadResponseDto>
 }

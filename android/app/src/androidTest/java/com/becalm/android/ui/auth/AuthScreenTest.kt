@@ -121,7 +121,7 @@ class AuthScreenTest {
         }
 
         composeTestRule.runOnIdle {
-            assertEquals(BecalmRoute.OnboardingPipaConsent.path, destination)
+            assertEquals(BecalmRoute.OnboardingSetup.path, destination)
         }
     }
 
@@ -271,7 +271,7 @@ class AuthScreenTest {
         }
 
         composeTestRule.runOnIdle {
-            assertEquals(BecalmRoute.OnboardingPipaConsent.path, destination)
+            assertEquals(BecalmRoute.OnboardingSetup.path, destination)
             assertEquals(1, grantedCount)
         }
     }

@@ -91,6 +91,20 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.personIndexPlan(initialDelaySeconds))
     }
 
+    override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) {
+        val normalizedPersonId = personId.trim()
+        if (normalizedPersonId.isEmpty()) {
+            logger.w(TAG, "enqueueProfileMemory: blank personId — skipped")
+            return
+        }
+        planRunner.run(
+            WorkSchedulerRequests.profileMemoryPlan(
+                personId = normalizedPersonId,
+                initialDelaySeconds = initialDelaySeconds,
+            ),
+        )
+    }
+
     override fun scheduleEnrichmentSweep() {
         planRunner.run(WorkSchedulerRequests.enrichmentPeriodicPlan())
     }
@@ -186,11 +200,12 @@ public class WorkSchedulerImpl @Inject constructor(
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MEETING_TRANSCRIPT_UPLOAD)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_PROFILE_MEMORY)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         logger.d(
             TAG,
             "cancelAll — cancelled ${ALL_KEYS.size} unique chains + " +
-                "voice uploads and stale local commitment extractions by tag",
+                "voice uploads, profile memory, and stale local commitment extractions by tag",
         )
     }
 

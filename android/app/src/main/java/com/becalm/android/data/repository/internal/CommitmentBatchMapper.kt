@@ -25,7 +25,7 @@ internal const val MAX_BATCH_SIZE = 100
  *
  * Room-only tracking columns (`sync_status`, `commitment_state`) are intentionally NOT
  * serialized — the server-side `commitments` table does not carry the `commitment_state`
- * SP-36 lifecycle column, and `sync_status` is a local-only value per data-model.yml line 150.
+ * SP-36 lifecycle column, and `sync_status` is a local-only value per data-model.yml.
  */
 internal fun CommitmentEntity.toBatchItemDto(): CommitmentBatchItemDto =
     CommitmentBatchItemDto(
@@ -141,7 +141,7 @@ internal fun CommitmentDto.toEntity(
         sourceType = sourceType,
         sourceRef = sourceRef,
         confidence = confidence,
-        syncStatus = syncStatus ?: "synced",
+        syncStatus = "synced",
         createdAt = createdAt,
         updatedAt = updatedAt,
         // Lifecycle merge — see function KDoc for per-field rationale.

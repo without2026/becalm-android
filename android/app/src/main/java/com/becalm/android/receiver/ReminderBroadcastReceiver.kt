@@ -1,5 +1,7 @@
 package com.becalm.android.receiver
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -176,10 +178,12 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
      * what CMT-008 specifies; the notification composition itself is covered
      * by instrumented tests when available.
      */
+    @SuppressLint("MissingPermission")
     internal open fun postNotification(
         context: Context,
         spec: ReminderNotificationSpec,
     ) {
+        if (!canPostNotifications(context)) return
         val notificationId = commitmentIdToNotificationId(spec.commitmentId)
 
         val deepLink = Uri.parse(spec.deepLinkUri)
@@ -221,6 +225,11 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
          * (data-model.yml:476). A missing / blank value causes a silent drop.
          */
         public const val EXTRA_USER_ID: String = "user_id"
+
+        private fun canPostNotifications(context: Context): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
 
         /**
          * Notification channel ID used by the `commitment_due_soon` channel. Registered

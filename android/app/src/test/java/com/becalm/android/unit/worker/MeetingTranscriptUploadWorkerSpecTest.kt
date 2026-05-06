@@ -127,10 +127,10 @@ class MeetingTranscriptUploadWorkerSpecTest {
                         scheduleStatus = "confirmed",
                     ),
                 ),
-                personCandidates = emptyList(),
+                sourceEventParticipants = emptyList(),
                 model = "gemini-2.5-flash",
                 region = "us-central1",
-                rawModelText = """{"items":[],"person_candidates":[]}""",
+                rawModelText = """{"items":[],"source_event_participants":[]}""",
             ),
         )
 

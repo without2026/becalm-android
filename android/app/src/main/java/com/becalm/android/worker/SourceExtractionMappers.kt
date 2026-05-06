@@ -5,7 +5,7 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
-import com.becalm.android.data.remote.dto.PersonCandidateDto
+import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.person.PersonIdentityResolver
@@ -54,7 +54,7 @@ internal fun SourceExtractedItemDto.toTrackableCommitmentEntity(
     updatedAt = now,
 )
 
-internal fun PersonCandidateDto.toSourceEventParticipantEntity(
+internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     userId: String,
     sourceEventId: String,
     sourceType: String,
@@ -62,9 +62,9 @@ internal fun PersonCandidateDto.toSourceEventParticipantEntity(
     index: Int,
     now: Instant,
 ): SourceEventParticipantEntity {
-    val anchor = email ?: phone ?: name ?: organization
+    val anchor = normalizedValue ?: email ?: phone ?: displayName ?: organization ?: rawValue
     val resolved = PersonIdentityResolver.resolve(userId, anchor)
-    val normalized = resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
+    val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
     val participantId = UUID.nameUUIDFromBytes(
         "source-participant:$userId:$sourceEventId:$index:${role}:${anchor.orEmpty()}".toByteArray(Charsets.UTF_8),
     ).toString()
@@ -76,17 +76,14 @@ internal fun PersonCandidateDto.toSourceEventParticipantEntity(
         sourceRef = sourceRef,
         personId = resolved?.personId,
         role = role,
-        relationToUser = when (role.lowercase()) {
-            "sender", "recipient", "counterparty", "speaker", "caller", "receiver" -> "counterparty"
-            "attendee" -> "participant"
-            else -> "referenced"
-        },
-        identityType = resolved?.identityType,
+        relationToUser = relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role),
+        identityType = identityType ?: resolved?.identityType,
         normalizedValue = normalized,
-        displayNameRaw = name,
+        displayNameRaw = displayName,
         emailRaw = email,
         phoneRaw = phone,
         organizationRaw = organization,
+        titleRaw = title,
         evidence = evidence,
         confidence = confidence.coerceIn(0.0, 1.0),
         resolutionStatus = if (resolved == null) "unresolved" else "resolved",
@@ -119,3 +116,13 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
         createdAt = now,
     )
 }
+
+private val RELATION_TO_USER_VALUES = setOf("self", "counterparty", "participant", "referenced", "unknown")
+
+private fun relationToUserForRole(role: String): String =
+    when (role.lowercase()) {
+        "sender", "recipient", "counterparty", "caller", "receiver" -> "counterparty"
+        "organizer", "attendee", "speaker" -> "participant"
+        "self" -> "self"
+        else -> "referenced"
+    }

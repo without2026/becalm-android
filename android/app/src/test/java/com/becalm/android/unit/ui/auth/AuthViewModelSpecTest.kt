@@ -235,7 +235,7 @@ class AuthViewModelSpecTest {
     }
 
     @Test
-    fun `AUTH-010 bootstrap resumes first incomplete onboarding provider after email PIPA consent`() = runTest {
+    fun `AUTH-010 bootstrap resumes incomplete onboarding to compact setup`() = runTest {
         coEvery { sessionStore.load() } returns session
         every { sessionStore.observe() } returns sessionEvents()
         every { userPrefsStore.observeOnboardingStepStatuses() } returns flowOf(
@@ -257,7 +257,7 @@ class AuthViewModelSpecTest {
             AuthUiState.SignedIn(
                 userId = "user-123",
                 onboardingCompleted = false,
-                onboardingResumeRoute = BecalmRoute.OnboardingSources.path,
+                onboardingResumeRoute = BecalmRoute.OnboardingSetup.path,
             ),
             viewModel.uiState.value,
         )

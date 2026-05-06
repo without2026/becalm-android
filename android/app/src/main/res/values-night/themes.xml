@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!--
         Night alias — the app controls dark/light mode via BecalmTheme composable,
         not via system DayNight switching. Both day and night use the same transparent
@@ -13,6 +13,6 @@
 
     <style name="Theme.Becalm.Splash" parent="Theme.Becalm">
         <item name="android:windowBackground">#111111</item>
-        <item name="android:windowSplashScreenBackground">#111111</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="s">#111111</item>
     </style>
 </resources>

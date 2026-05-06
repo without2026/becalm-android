@@ -142,6 +142,11 @@ class BecalmNavHostTest {
     @Test
     fun onboarding_static_routes_are_registered() {
         assertStaticRouteResolves(
+            BecalmRoute.OnboardingSetup.path,
+            BecalmRoute.OnboardingSetup.path,
+            "onb-setup-screen",
+        )
+        assertStaticRouteResolves(
             BecalmRoute.OnboardingPipaConsent.path,
             BecalmRoute.OnboardingPipaConsent.path,
             "onb-pipa-screen",

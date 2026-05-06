@@ -14,6 +14,7 @@ import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
+import com.becalm.android.worker.WorkScheduler
 import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -38,6 +39,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         LocalIntegrationSupport.prefsDataStore("person-index-worker-prefs"),
     )
     private val logger = RecordingLogger()
+    private val scheduler = RecordingWorkScheduler()
     private val dispatcher = UnconfinedTestDispatcher()
 
     @After
@@ -99,6 +101,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         assertEquals(setOf("raw:raw-mail-1", "commitment:commitment-1"), interactions.map { it.sourceRef }.toSet())
         val legacyInteractions = db.personIndexDao().observeInteractionsForPerson(USER_ID, legacyPersonId, limit = 20).first()
         assertTrue(legacyInteractions.isEmpty())
+        assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
     }
 
     @Test
@@ -228,6 +231,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
 
         newWorker().doWork()
         logger.clear()
+        scheduler.clear()
 
         db.personIndexDao().upsertSourceEventParticipants(
             listOf(
@@ -271,6 +275,60 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         )
         assertTrue(db.personIndexDao().findDirtySourcesForUser(USER_ID, limit = 10).isEmpty())
         assertTrue(logger.entries.any { "indexed mode=dirty dirtySources=1 changedSources=1" in it.message })
+        assertEquals(setOf(firstPersonId, updatedPersonId), scheduler.profileMemoryPersonIds.toSet())
+        assertTrue(untouchedPersonId !in scheduler.profileMemoryPersonIds)
+    }
+
+    @Test
+    fun `dirty deleted commitment removes stale interaction and enqueues previous person memory`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        val row = commitment(
+            id = "commitment-delete-1",
+            counterpartyRef = CUSTOMER_EMAIL,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-delete-1",
+        )
+        db.commitmentDao().insertAll(listOf(row))
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                commitmentParticipant(
+                    id = "commitment-participant-delete-1",
+                    commitmentId = row.id,
+                    personId = personId,
+                    role = "owner",
+                ),
+            ),
+        )
+        newWorker().doWork()
+        assertEquals(
+            listOf("commitment:${row.id}"),
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
+                .map { it.sourceRef },
+        )
+        scheduler.clear()
+
+        db.commitmentDao().update(
+            row.copy(
+                deletedAt = Instant.parse("2026-04-29T05:00:00Z"),
+                updatedAt = Instant.parse("2026-04-29T05:00:00Z"),
+            ),
+        )
+        db.personIndexDao().upsertDirtySources(
+            listOf(
+                PersonIndexDirtySources.commitment(
+                    userId = USER_ID,
+                    commitmentId = row.id,
+                    reason = "test-delete",
+                    now = Instant.parse("2026-04-29T05:00:00Z"),
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first().isEmpty())
+        assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
     }
 
     private fun newWorker(): PersonInteractionIndexWorker =
@@ -282,9 +340,49 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
+            workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
         )
+
+    private class RecordingWorkScheduler : WorkScheduler {
+        val profileMemoryPersonIds: MutableList<String> = mutableListOf()
+
+        fun clear() {
+            profileMemoryPersonIds.clear()
+        }
+
+        override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) {
+            profileMemoryPersonIds += personId
+        }
+
+        override fun enqueueExpedited(sourceKey: String) = Unit
+        override fun enqueuePeriodic(sourceKey: String) = Unit
+        override fun enqueueUpload(attempt: Int) = Unit
+        override fun scheduleUploadRedundancy() = Unit
+        override fun scheduleBackendMailSync() = Unit
+        override fun enqueueEnrichment() = Unit
+        override fun enqueuePersonInteractionIndex(initialDelaySeconds: Long) = Unit
+        override fun scheduleEnrichmentSweep() = Unit
+        override fun cancelEnrichmentSweep() = Unit
+        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
+        override fun enqueueMeetingTranscriptUpload(rawEventId: String) = Unit
+        override fun enqueueVoiceUploadWithDelay(
+            rawEventId: String,
+            audioUri: String,
+            initialDelaySec: Long,
+            rateLimitedAttempt: Int,
+        ) = Unit
+        override fun scheduleRetentionSweep() = Unit
+        override fun scheduleOverdueSweep() = Unit
+        override fun enqueueDeferredColdSyncStage1() = Unit
+        override fun enqueueColdSyncStage2() = Unit
+        override fun cancelColdSyncStage2() = Unit
+        override fun cancelVoiceUpload(rawEventId: String) = Unit
+        override fun cancelMeetingTranscriptUpload(rawEventId: String) = Unit
+        override fun cancelAll() = Unit
+        override fun cleanupLegacyWorkNames() = Unit
+    }
 
     private fun rawEvent(
         id: String,
@@ -370,6 +468,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             emailRaw = email,
             phoneRaw = null,
             organizationRaw = null,
+            titleRaw = null,
             evidence = email ?: displayName,
             confidence = 0.95,
             resolutionStatus = resolutionStatus,

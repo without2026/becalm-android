@@ -67,28 +67,7 @@ tables:
       - name: timestamp
         type: timestamptz
         nullable: false
-      - name: sync_status
-        type: text
-        nullable: false
-        default: "'pending'"
-        # enum: pending | synced | failed | quarantined | awaiting_consent — Room-side tracking column, not uploaded to Supabase
-        # awaiting_consent: voice/call_recording/meeting audio 및 meeting transcript source에서 사용. pipa_third_party_consent=false인 동안 Railway extraction 업로드를 보류. 동의 ON 시 자동으로 pending으로 전이 (VOI-004, MTG-006).
-      - name: quarantine_reason
-        type: text
-        nullable: true
-        # Room-side only. sync_status='quarantined'일 때 사유 enum 저장:
-        # schema_invalid | source_type_unknown | timestamp_parse_error | output_truncated | internal_error | payload_too_large
-        # null = non-quarantined row.
-      - name: retry_count
-        type: int
-        nullable: false
-        default: "0"
-      - name: last_attempt_at
-        type: timestamptz
-        nullable: true
     indexes:
-      - columns: [user_id, sync_status]
-        type: btree
       - columns: [user_id, timestamp]
         type: btree
     rls: true
@@ -195,10 +174,6 @@ tables:
         type: float
         nullable: false
         default: "0.0"
-      - name: sync_status
-        type: text
-        nullable: false
-        default: "'pending'"
       - name: created_at
         type: timestamptz
         nullable: false
@@ -238,8 +213,6 @@ tables:
       - columns: [user_id, item_type, action_state, due_at]
         type: btree
         # idx_commitments_user_action_due — supports action-only CommitmentManagementScreen / Today queries. Queries MUST still filter `deleted_at IS NULL` at application level.
-      - columns: [user_id, sync_status]
-        type: btree
       - columns: [user_id, counterparty_ref, due_at]
         type: btree
         # idx_commitments_user_counterparty_due — supports local counterparty-scoped edit/search paths only. Person UI uses commitment_participants/person_id.
@@ -296,10 +269,6 @@ tables:
         type: timestamptz
         nullable: true
         # Google Calendar: originalStartTime (instance의 원래 시각, 이동/오버라이드 감지용). Microsoft Graph: originalStart. NULL for first-time-generated instances. When an instance is rescheduled (start_at != original_start_at) UI can show '원래: M/d HH:mm'. Used by ING-009/010 to detect override-vs-cancel distinction.
-      - name: sync_status
-        type: text
-        nullable: false
-        default: "'pending'"
     indexes:
       - columns: [user_id, start_at]
         type: btree
@@ -582,20 +551,48 @@ derived_models:
     rules:
       - "source graph write path는 변경된 raw:<source_event_id> 또는 commitment:<commitment_id> key를 person_index_dirty_sources에 UPSERT한다"
       - "PersonInteractionIndexWorker는 dirty queue가 있으면 queued key만 읽고 해당 projection slice만 delete/rebuild한다"
-      - "dirty queue가 비어 있고 person_index_source_state가 비어 있으면 최초 bootstrap으로 전체 source graph를 projection한다"
-      - "dirty queue가 비어 있고 blocked person refs가 있으면 suppression fingerprint 검증을 위해 전체 source graph를 재검증한다"
-      - "dirty queue가 비어 있고 source state가 있으면 full source graph scan 없이 no-op으로 종료한다"
+      - "dirty queue가 비어 있으면 현재 source graph를 전체 재검증한다. 별도 person_index_source_state fingerprint cache는 active schema에 두지 않는다"
       - "person_interactions의 canonical grouping key는 person_id이며 raw/commitment counterparty_ref fallback은 projection input으로 쓰지 않는다"
+
+  PersonMemoryArtifact:
+    owner: android_generated_backend_mirrored
+    description: "사람별 compact context artifact. canonical DB를 대체하지 않는 재생성 가능한 people/{person_id}/memory.md"
+    local_path: "person_memory/<user_hash>/<person_id>/memory.md"
+    supabase_storage:
+      bucket: person-memory
+      object_path: "{user_id}/{person_id}/memory.md"
+      metadata: [user_id, person_id, schema_version, content_hash, generated_at]
+      upload_path: "Railway PUT /v1/persons/{person_id}/memory"
+    inputs:
+      - "persons, person_identities"
+      - "source_event_participants, commitment_participants"
+      - "person_interactions"
+      - "raw_ingestion_events metadata/event_snippet only"
+      - "commitments title/status/quote only"
+    forbidden_inputs:
+      - "full email body"
+      - "full meeting transcript"
+      - "source_artifacts markdown_original body"
+      - "audio bytes or generated transcript"
+      - "raw_model_text"
+    rules:
+      - "memory.md는 compact skill처럼 structured DB에서 파생된 요약 artifact이며 source of truth가 아니다"
+      - "UI 렌더링, source 계산, deterministic/semantic matching, PersonInteractionIndexWorker는 memory.md 생성·업로드 성공에 의존하지 않는다"
+      - "person_id는 local path, Supabase object path, object metadata, Markdown frontmatter가 모두 동일해야 하며 불일치 시 업로드 실패"
+      - "Profile/Work Context/Matching Notes의 사실 bullet은 source ref를 포함해야 한다"
+      - "email/phone/confirmed exact alias만 person_identities deterministic anchor가 될 수 있고, 'Acme 대표' 같은 role/title/company 문구는 profile fact로만 기록한다"
+      - "semantic matching은 memory.md를 optional context로 참조할 수 있으나 단일 profile fact만으로 자동 매칭하지 않는다"
 
 migration_notes:
   - "auth.users는 Supabase Auth가 관리하는 외부 테이블이다 — BeCalm이 직접 DDL하지 않음"
   - "Room 전용 엔티티 (Supabase 없음): EmailBody, source_artifacts, persons_enrichment — 개인정보(원본 텍스트, 연락처) 보호 목적으로 로컬 only. source_artifacts는 app-private Markdown 원문 archive의 metadata만 저장하며, 파일 본문과 local_path는 네트워크 DTO에 포함 금지. Transcript는 voice pipeline에서 제거되었고, 저장되는 voice/meeting audio text는 commitment.quote(<=100 chars)와 raw_ingestion_events.event_snippet뿐이다. meeting transcript 원문은 Android local archive와 Recordings/BeCalm Meetings/ 복사본에만 보존된다"
   - "Today/Settings의 source status는 별도 Room 테이블이 아니라 로컬 파생 projection이다. source status row/chip을 서버 API 또는 단일 DB row에서 직접 읽는 계약은 없다"
-  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase row shape를 기본 mirror하되, sync_status·retry_count·last_attempt_at와 counterparty_ref는 Android-side tracking/seed 컬럼으로 Supabase durable table에는 존재하지 않음"
+  - "Room RawIngestionEvent·Commitment·CalendarEvent는 Supabase durable row shape를 기본 mirror하되, sync_status·retry_count·last_attempt_at·quarantine_reason와 counterparty_ref는 Android-side tracking/seed 컬럼으로 Supabase durable table에는 존재하지 않음"
   - "Supabase 쓰기 경로: Android → Railway POST /v1/raw_ingestion_events:batch → Supabase INSERT. Android에서 Supabase REST 직접 쓰기 없음"
   - "client_event_id: Android에서 생성하는 UUID v4 멱등성 키. Railway가 upsert deduplication에 사용"
   - "relation intelligence 전환: Supabase와 Android Room은 canonical person/relation mirror(`persons`, `person_identities`, `source_event_participants`, `commitment_participants`, `person_interactions`)를 공유한다. Android-only sync/projection/cache 컬럼은 허용하지만 backend-managed source wiring의 기준 key는 `person_id`다"
   - "person_index_dirty_sources는 Android Room-only incremental projection queue다. Supabase mirror 대상이 아니며, source_event_participants/commitment_participants/commitments 쓰기 이후 changed source key만 기록해 PersonInteractionIndexWorker가 전체 source graph를 매번 scan하지 않도록 한다."
+  - "person memory artifact: 별도 Supabase table을 추가하지 않는다. Android ProfileMemoryWorker가 person_id별 memory.md를 비동기 생성하고 Railway `PUT /v1/persons/{person_id}/memory`가 Supabase Storage bucket `person-memory/{user_id}/{person_id}/memory.md`로 mirror한다. Storage object metadata와 Markdown frontmatter의 person_id가 path person_id와 일치해야 한다."
   - "raw_ingestion_events / commitments의 상대방 seed 필드는 `counterparty_ref`로 통일한다. Android Room, DTO 내부 모델, Railway API input 모두 이 이름을 사용한다. People/PersonDetail UI 모델과 route argument는 `person_id`만 사용한다."
   - "`person_ref`는 Vertex/LLM item output schema와 Android local contacts enrichment cache(`persons_enrichment.person_ref`)의 legacy-compatible anchor 이름으로만 허용된다. raw/commitment durable schema나 People/PersonDetail primary projection에서 `person_ref` grouping/fallback은 제거됐다."
   - "commitments.status 컬럼 → action_state 컬럼으로 대체: enum이 pending|done|overdue에서 pending|reminded|followed_up|completed로 변경. Room 마이그레이션: ALTER TABLE commitments RENAME COLUMN status TO action_state; UPDATE commitments SET action_state='pending' WHERE action_state='done' OR action_state='overdue'"
@@ -608,7 +605,7 @@ migration_notes:
   - "Room DB 파일 분리 정책: DB 파일명은 `becalm_<sha256(supabase_user_id)[:16]>.db` 형식으로 user 단위 격리 (AUTH-008). 동일 디바이스에서 계정 전환·공유 시 RLS와 무관하게 로컬 레벨에서 데이터가 섞이지 않는다. 로그아웃은 해당 user의 DB 연결을 close()할 뿐 파일 삭제는 하지 않음 — 동일 계정 재로그인 시 데이터 복원"
   - "user_profile 테이블: 로그인 직후 Android가 auth session + 기본 timezone/locale로 로컬 row를 bootstrap하고, 이후 Railway `PATCH /v1/user_profile`로 mirror한다. phone_e164_self는 Settings > 내 프로필에서 사용자 직접 입력 — 미입력 시 voice 파이프라인 Gemini 프롬프트는 fallback 문구 '본인과 상대방을 구분해 direction을 추정하라'만 사용. display_name_override는 UI 상단 바 인사말 및 Gemini 프롬프트에서 활용. Supabase 미러는 export/PIPA 용도이며 MVP Android는 server→Room 역방향 sync를 사용하지 않는다"
   - "Vertex AI 리전: asia-northeast3 (서울). ZDR(Zero Data Retention) 플래그 필수. voice-pipeline v2는 Railway `POST /v1/extractions/commitments`에서 Vertex AI Gemini 2.5 Flash를 호출하며 오디오 바이트·transcript·Gemini 응답은 요청 lifetime 내 ephemeral. Railway는 draft만 반환하고, Android가 Room commitments를 먼저 갱신한 뒤 commitments:batch로 Supabase mirror를 수행한다. meeting audio도 같은 endpoint를 재사용하고 source_type은 Android Room에서 보존한다"
-  - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice/call_recording/meeting source에 대한 Railway extraction 업로드가 차단됨 (VOI-004, MTG-006, ONB-PIPA)"
+  - "PIPA 제3자 제공 + 국외 이전 동의(pipa_third_party_consent)는 DataStore에 저장되며 Android Room raw_ingestion_events.sync_status='awaiting_consent'와 연동. 미동의 시 voice/call_recording/meeting source에 대한 Railway extraction 업로드가 차단됨 (VOI-004, MTG-006, ONB-PIPA)"
   - "원문 보존 정책 (MVP 확정): Room raw_ingestion_events 및 연관 EmailBody/source_artifacts는 timestamp 기준 자동 삭제하지 않는다. 원문 recall은 app-private Markdown archive(source_artifacts.artifact_type='markdown_original')가 소유하며 사용자가 Privacy Management에서 특정 날짜 이전 원문 삭제를 명시 실행할 때만 source_artifacts 파일과 metadata가 삭제된다. 삭제 후에도 raw_ingestion_events·commitments·calendar_events·person index는 유지되어 timeline/context metadata가 보존된다. synced되지 않은 raw_ingestion_events는 Railway durable result 전까지 어떤 user cleanup에서도 삭제 금지. Supabase 서버 미러는 원문 본문을 저장하지 않고 raw metadata/commitments lifecycle만 따른다"
   - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
   - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. backend mirror pagination도 reset될 수 있다. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."

@@ -1,5 +1,6 @@
 package com.becalm.android.worker
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,6 +31,7 @@ public object MatchingRequiredNotifier {
     public const val CHANNEL_ID: String = "person_matching_required"
     private const val NOTIFICATION_ID: Int = 4929
 
+    @SuppressLint("MissingPermission")
     public suspend fun update(
         context: Context,
         userPrefsStore: UserPrefsStore,

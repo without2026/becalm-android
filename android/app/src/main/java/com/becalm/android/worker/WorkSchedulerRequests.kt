@@ -30,6 +30,7 @@ internal object WorkSchedulerRequests {
     const val UPLOAD_DEBOUNCE_SECONDS: Long = 10L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
     const val TAG_MEETING_TRANSCRIPT_UPLOAD: String = "meeting_transcript_upload"
+    const val TAG_PROFILE_MEMORY: String = "profile_memory"
     const val LEGACY_TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
 
     val uploadConstraints: Constraints = Constraints.Builder()
@@ -216,6 +217,34 @@ internal object WorkSchedulerRequests {
             policy = ExistingWorkPolicy.REPLACE,
             request = personIndexRequest(initialDelaySeconds.coerceAtLeast(0L)),
             logMessage = "enqueuePersonInteractionIndex key=${UniqueWorkKeys.PERSON_INDEX} delaySec=$initialDelaySeconds",
+        )
+
+    fun profileMemoryRequest(personId: String, initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(ProfileMemoryWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+            .setInputData(workDataOf(ProfileMemoryWorker.KEY_PERSON_ID to personId))
+            .addTag(TAG_PROFILE_MEMORY)
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun profileMemoryPlan(personId: String, initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.profileMemory(personId),
+            policy = ExistingWorkPolicy.REPLACE,
+            request = profileMemoryRequest(
+                personId = personId,
+                initialDelaySeconds = initialDelaySeconds.coerceAtLeast(0L),
+            ),
+            logMessage = "enqueueProfileMemory personId=$personId " +
+                "key=${UniqueWorkKeys.profileMemory(personId)} delaySec=$initialDelaySeconds",
         )
 
     fun enrichmentPeriodicPlan(): UniquePeriodicWorkPlan =

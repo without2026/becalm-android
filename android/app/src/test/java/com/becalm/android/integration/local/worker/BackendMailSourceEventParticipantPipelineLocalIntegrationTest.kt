@@ -14,6 +14,8 @@ import com.becalm.android.data.repository.SourceEventParticipantRepositoryImpl
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
+import com.becalm.android.worker.WorkScheduler
+import io.mockk.mockk
 import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -34,14 +36,15 @@ import org.robolectric.annotation.Config
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE)
-class BackendMailPersonCandidatePipelineLocalIntegrationTest {
+class BackendMailSourceEventParticipantPipelineLocalIntegrationTest {
 
     private lateinit var server: MockWebServer
     private val db = LocalIntegrationSupport.inMemoryDatabase()
     private val userPrefsStore = UserPrefsStoreImpl(
-        LocalIntegrationSupport.prefsDataStore("backend-mail-person-candidates"),
+        LocalIntegrationSupport.prefsDataStore("backend-mail-source-event-participants"),
     )
     private val logger = RecordingLogger()
+    private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val dispatcher = UnconfinedTestDispatcher()
 
     @Before
@@ -175,6 +178,7 @@ class BackendMailPersonCandidatePipelineLocalIntegrationTest {
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
+            workScheduler = workScheduler,
             logger = logger,
             ioDispatcher = dispatcher,
         )

@@ -137,6 +137,24 @@ class WorkSchedulerImplSpecTest {
     }
 
     @Test
+    fun `profile memory work is person scoped and can run offline`() {
+        val workName = slot<String>()
+        val policy = slot<ExistingWorkPolicy>()
+        val request = slot<OneTimeWorkRequest>()
+
+        WorkSchedulerImpl(appContext, logger).enqueueProfileMemory(" person-1 ", initialDelaySeconds = 0L)
+
+        verify(exactly = 1) {
+            workManager.enqueueUniqueWork(capture(workName), capture(policy), capture(request))
+        }
+        assertEquals(UniqueWorkKeys.profileMemory("person-1"), workName.captured)
+        assertEquals(ExistingWorkPolicy.REPLACE, policy.captured)
+        assertEquals(NetworkType.NOT_REQUIRED, request.captured.workSpec.constraints.requiredNetworkType)
+        assertEquals("person-1", request.captured.workSpec.input.getString("person_id"))
+        assertEquals(0L, request.captured.workSpec.initialDelay)
+    }
+
+    @Test
     fun `AUTH-009 cancelAll cancels voice work and stale local extraction work by tag`() {
         every { workManager.cancelUniqueWork(any()) } returns operation
         every { workManager.cancelAllWorkByTag(any()) } returns operation
@@ -145,6 +163,9 @@ class WorkSchedulerImplSpecTest {
 
         verify(exactly = 1) {
             workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
+        }
+        verify(exactly = 1) {
+            workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_PROFILE_MEMORY)
         }
         verify(exactly = 1) {
             workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)

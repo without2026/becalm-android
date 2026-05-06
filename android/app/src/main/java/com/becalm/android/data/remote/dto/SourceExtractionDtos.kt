@@ -43,7 +43,7 @@ public data class SourceExtractionErrorEnvelope(
  * Response body for a successful POST /v1/extractions/commitments (HTTP 200).
  *
  * Wire format (api-contract.yml):
- *   { raw_event_id, items: SourceExtractedItem[], model, region, raw_model_text? }
+ *   { raw_event_id, items: SourceExtractedItem[], source_event_participants: SourceExtractedParticipant[], model, region, raw_model_text? }
  *
  * @property rawEventId Server-side UUID of the raw_ingestion_event row that was updated.
  * @property items List of extracted business items; may be empty when no
@@ -62,8 +62,9 @@ public data class SourceExtractionResponse(
     /** Extracted structured items from the source by the LLM. Empty list when none detected. */
     @field:Json(name = "items") val items: List<SourceExtractedItemDto>,
 
-    /** People or organizations mentioned in the source, emitted by Vertex Gemini. */
-    @field:Json(name = "person_candidates") val personCandidates: List<PersonCandidateDto> = emptyList(),
+    /** Canonical source-level participant signals emitted by Vertex Gemini for person matching. */
+    @field:Json(name = "source_event_participants")
+    val sourceEventParticipants: List<SourceExtractedParticipantDto> = emptyList(),
 
     /** Model identifier used for extraction, e.g. "gemini-2.5-flash". */
     @field:Json(name = "model") val model: String,
@@ -73,6 +74,23 @@ public data class SourceExtractionResponse(
 
     /** Raw model JSON text for diagnostics. Optional because older backends omit it. */
     @field:Json(name = "raw_model_text") val rawModelText: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class SourceExtractedParticipantDto(
+    @field:Json(name = "role") val role: String,
+    @field:Json(name = "relation_to_user") val relationToUser: String = "unknown",
+    @field:Json(name = "identity_type") val identityType: String? = null,
+    @field:Json(name = "raw_value") val rawValue: String? = null,
+    @field:Json(name = "normalized_value") val normalizedValue: String? = null,
+    @field:Json(name = "display_name") val displayName: String? = null,
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "phone") val phone: String? = null,
+    @field:Json(name = "organization") val organization: String? = null,
+    @field:Json(name = "title") val title: String? = null,
+    @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "evidence_source") val evidenceSource: String? = null,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
 )
 
 public object SourceExtractedItemType {
@@ -111,15 +129,4 @@ public data class SourceExtractedItemDto(
     @field:Json(name = "direction") val direction: String? = null,
     @field:Json(name = "schedule_status") val scheduleStatus: String? = null,
     @field:Json(name = "decision_status") val decisionStatus: String? = null,
-)
-
-@JsonClass(generateAdapter = true)
-public data class PersonCandidateDto(
-    @field:Json(name = "role") val role: String,
-    @field:Json(name = "name") val name: String? = null,
-    @field:Json(name = "email") val email: String? = null,
-    @field:Json(name = "phone") val phone: String? = null,
-    @field:Json(name = "organization") val organization: String? = null,
-    @field:Json(name = "evidence") val evidence: String? = null,
-    @field:Json(name = "confidence") val confidence: Double = 0.0,
 )

@@ -55,7 +55,7 @@ public sealed class AuthUiState {
     public data class SignedIn(
         val userId: String,
         val onboardingCompleted: Boolean = false,
-        val onboardingResumeRoute: String = com.becalm.android.ui.navigation.BecalmRoute.OnboardingPipaConsent.path,
+        val onboardingResumeRoute: String = com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetup.path,
     ) : AuthUiState()
 
     /**
@@ -343,7 +343,7 @@ public class AuthViewModel @Inject constructor(
                 userId = userId,
                 onboardingCompleted = onboardingCompleted,
                 onboardingResumeRoute = if (onboardingCompleted) {
-                    com.becalm.android.ui.navigation.BecalmRoute.OnboardingPipaConsent.path
+                    com.becalm.android.ui.navigation.BecalmRoute.OnboardingSetup.path
                 } else {
                     onboardingResumeRoute()
                 },

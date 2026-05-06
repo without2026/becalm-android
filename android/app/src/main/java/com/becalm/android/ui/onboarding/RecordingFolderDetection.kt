@@ -15,6 +15,16 @@ internal object RecordingFolderDetector {
     private const val PRIMARY_CALL_PATH = "/storage/emulated/0/Recordings/Call"
     private const val FALLBACK_PATH = "/storage/emulated/0/VoiceRecorder"
 
+    fun fallback(): RecordingFolderDetection =
+        RecordingFolderDetection(
+            displayPath = PRIMARY_PATH,
+            preferredDocumentId = "primary:Recordings",
+            voiceFolderDetected = false,
+            callFolderDetected = false,
+            usedFallbackPath = false,
+            requiresManualPicker = true,
+        )
+
     fun detect(pathExists: (String) -> Boolean): RecordingFolderDetection {
         if (pathExists(PRIMARY_PATH)) {
             return RecordingFolderDetection(
@@ -38,13 +48,6 @@ internal object RecordingFolderDetector {
             )
         }
 
-        return RecordingFolderDetection(
-            displayPath = PRIMARY_PATH,
-            preferredDocumentId = "primary:Recordings",
-            voiceFolderDetected = false,
-            callFolderDetected = false,
-            usedFallbackPath = false,
-            requiresManualPicker = true,
-        )
+        return fallback()
     }
 }

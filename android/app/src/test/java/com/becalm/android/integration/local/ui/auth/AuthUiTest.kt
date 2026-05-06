@@ -61,10 +61,10 @@ class AuthUiTest {
     }
 
     @Test
-    fun `splash screen routes signed in unfinished user to onboarding pipa`() {
+    fun `splash screen routes signed in unfinished user to onboarding setup`() {
         assertSplashRoute(
             AuthUiState.SignedIn(userId = "user-1", onboardingCompleted = false),
-            BecalmRoute.OnboardingPipaConsent.path,
+            BecalmRoute.OnboardingSetup.path,
         )
     }
 

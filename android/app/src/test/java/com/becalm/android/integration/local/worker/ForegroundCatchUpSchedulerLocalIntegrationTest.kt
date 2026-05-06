@@ -58,6 +58,33 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
     }
 
     @Test
+    fun `meeting source preference is user scoped and fans out to media worker`() = runTest {
+        val userPrefsStore = UserPrefsStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("foreground-meeting"),
+        )
+        val workScheduler = FakeForegroundWorkScheduler()
+        val scheduler = ForegroundCatchUpScheduler(
+            scope = this,
+            workScheduler = workScheduler,
+            userPrefsStore = userPrefsStore,
+            runtimeSyncSourceResolver = FakeRuntimeSyncSourceResolver(userPrefsStore),
+            processingPauseGate = ProcessingPauseGate(userPrefsStore, RecordingLogger(), backgroundScope),
+            logger = RecordingLogger(),
+        )
+
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setSourceEnabled(SourceType.MEETING, true)
+
+        assertEquals(true, userPrefsStore.observeSourceEnabled(SourceType.MEETING).first())
+        assertEquals(setOf(SourceType.MEETING), userPrefsStore.observeEnabledSources().first())
+
+        scheduler.triggerCatchUp()
+        advanceUntilIdle()
+
+        assertEquals(1, workScheduler.mediaStoreCount)
+    }
+
+    @Test
     fun `onStart reads user scoped enabled sources from prefs before scheduling`() = runTest {
         val userPrefsStore = UserPrefsStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("foreground-onstart"),

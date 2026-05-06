@@ -51,7 +51,7 @@ behaviors:
     description: "미팅 전사본 텍스트 추출은 transient-only path다. Android local archive는 원문 보존을 소유하고, Railway/Supabase는 full transcript를 저장하지 않는다"
     trigger: ".txt 또는 .md transcript import 후 extraction 실행"
     precondition: "PIPA third-party provision consent true, transcript text <= 10 MiB"
-    expected: "Android는 추출 요청에 필요한 transcript text를 transient body로만 전송한다. Railway는 오디오 endpoint와 같은 prompt/schema/validation pipeline으로 structured items와 person candidates만 반환하고 transcript text를 DB·파일시스템·로그에 저장하지 않는다. Android는 returned items를 source_type='meeting' commitments로 Room에 저장하고 source_event_participants/commitment_participants를 갱신한 뒤 PersonInteractionIndexWorker를 enqueue한다"
+    expected: "Android는 추출 요청에 필요한 transcript text를 transient body로만 전송한다. Railway는 오디오 endpoint와 같은 prompt/schema/validation pipeline으로 structured items와 canonical source_event_participants만 반환하고 transcript text를 DB·파일시스템·로그에 저장하지 않는다. Android는 returned items를 source_type='meeting' commitments로 Room에 저장하고 source_event_participants/commitment_participants를 갱신한 뒤 PersonInteractionIndexWorker를 enqueue한다"
     source: user-request
     tests: []
 

@@ -41,6 +41,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = {},
                     onOpenAccountDeletion = {},
                     onOpenActivityLog = {},
+                    onOpenSourceArchiveDelete = {},
                 )
             }
         }
@@ -72,6 +73,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = { pauseClicks++ },
                     onOpenAccountDeletion = { deleteClicks++ },
                     onOpenActivityLog = { activityLogClicks++ },
+                    onOpenSourceArchiveDelete = {},
                 )
             }
         }
@@ -117,6 +119,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = {},
                     onOpenAccountDeletion = {},
                     onOpenActivityLog = {},
+                    onDeleteSourceArchiveBefore = {},
                 )
             }
         }
@@ -148,6 +151,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = {},
                     onOpenAccountDeletion = {},
                     onOpenActivityLog = {},
+                    onDeleteSourceArchiveBefore = {},
                 )
             }
         }
@@ -188,6 +192,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = {},
                     onOpenAccountDeletion = {},
                     onOpenActivityLog = {},
+                    onDeleteSourceArchiveBefore = {},
                 )
             }
         }
@@ -232,6 +237,7 @@ class PrivacyManagementScreenTest {
                     onOpenProcessingPause = {},
                     onOpenAccountDeletion = {},
                     onOpenActivityLog = {},
+                    onDeleteSourceArchiveBefore = {},
                 )
             }
         }

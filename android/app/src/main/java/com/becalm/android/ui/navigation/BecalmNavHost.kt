@@ -25,6 +25,7 @@ import com.becalm.android.ui.onboarding.GmailOAuthScreen
 import com.becalm.android.ui.onboarding.ImapSetupScreen
 import com.becalm.android.ui.onboarding.NotificationPermissionScreen
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentScreen
+import com.becalm.android.ui.onboarding.OnboardingSetupScreen
 import com.becalm.android.ui.onboarding.OnboardingSourcesScreen
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthScreen
 import com.becalm.android.ui.onboarding.OutlookMailOAuthScreen
@@ -126,8 +127,17 @@ public fun BecalmNavHost(
 
         // ── Onboarding ─────────────────────────────────────────────────────────
 
-        // ONB-PIPA: step 3 of 12 — shown after login, before recording-folder.
-        // [동의] → recording-folder; [동의 안 함] → contacts (recording-folder skipped).
+        composable(route = BecalmRoute.OnboardingSetup.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.OnboardingSetup.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                OnboardingSetupScreen(navController = navController)
+            }
+        }
+
+        // Compatibility route for the former standalone recording consent flow.
+        // First-run setup now shows this disclosure inline in OnboardingSetupScreen.
         composable(route = BecalmRoute.OnboardingPipaConsent.path) { backStackEntry ->
             val override = routeOverrides[BecalmRoute.OnboardingPipaConsent.path]
             if (override != null) {

@@ -43,7 +43,7 @@ internal class StructuredExtractionPersister(
             commitmentDao.insertAll(commitmentEntities)
         }
 
-        val sourceParticipants = body.personCandidates.mapIndexed { index, dto ->
+        val sourceParticipants = body.sourceEventParticipants.mapIndexed { index, dto ->
             dto.toSourceEventParticipantEntity(
                 userId = userId,
                 sourceEventId = entity.id,

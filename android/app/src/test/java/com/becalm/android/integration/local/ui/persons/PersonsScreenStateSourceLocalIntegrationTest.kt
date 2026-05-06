@@ -19,10 +19,8 @@ import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.persons.EnrichmentBackedPersonsScreenProjectionPort
 import com.becalm.android.ui.persons.PersonsScreenStateSource
 import com.becalm.android.ui.persons.PersonsSortOrder
-import com.becalm.android.worker.PersonInteractionIndexWorker
 import io.mockk.every
 import io.mockk.mockk
-import javax.inject.Provider
 import java.util.UUID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -187,7 +185,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
                 ),
             ),
         )
-        newPersonIndexWorker().doWork()
         val phonePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "+821012345678")).personId
         val unknownPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "unknown@corp.com")).personId
 
@@ -251,8 +248,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
                 snippet = row.eventSnippet,
             )
         }
-        newPersonIndexWorker().doWork()
-
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             var state = awaitItem()
             while (state.people.size < 20) {
@@ -332,8 +327,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
                 snippet = "quote-$id",
             )
         }
-        newPersonIndexWorker().doWork()
-
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             var state = awaitItem()
             while (state.people.isEmpty()) {
@@ -396,19 +389,6 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         createdAt = sourceEventOccurredAt,
         updatedAt = sourceEventOccurredAt,
     )
-
-    private fun newPersonIndexWorker(): PersonInteractionIndexWorker =
-        PersonInteractionIndexWorker(
-            appContext = LocalIntegrationSupport.appContext(),
-            workerParams = LocalIntegrationSupport.workerParams(),
-            databaseProvider = Provider { db },
-            rawDaoProvider = Provider { db.rawIngestionEventDao() },
-            commitmentDaoProvider = Provider { db.commitmentDao() },
-            personIndexDaoProvider = Provider { db.personIndexDao() },
-            userPrefsStore = userPrefsStore,
-            logger = logger,
-            ioDispatcher = kotlinx.coroutines.test.UnconfinedTestDispatcher(),
-        )
 
     private suspend fun upsertIdentityAndInteraction(
         anchor: String,

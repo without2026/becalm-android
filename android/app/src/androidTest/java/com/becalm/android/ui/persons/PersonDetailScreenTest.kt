@@ -3,9 +3,7 @@ package com.becalm.android.ui.persons
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -25,16 +23,13 @@ class PersonDetailScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun person_detail_shows_section_headers_and_action_count_badge_while_completed_section_is_collapsed() {
+    fun person_detail_shows_source_event_timeline_card_and_action_count_badge() {
         setScreen(
             state = baseState(
-                completedExpanded = false,
-                interactionHistory = listOf(
-                    InteractionRow.Event(
-                        id = "event-1",
-                        timestamp = Instant.parse("2026-04-24T01:00:00Z"),
-                        source = "voice",
-                        summary = "팀 회의",
+                sourceEventCards = listOf(
+                    sourceEventCard(
+                        rawEventId = "event-1",
+                        title = "팀 회의",
                         snippet = "다음 주까지 제안서 보내기",
                         commitmentsExtractedCount = 2,
                     ),
@@ -42,24 +37,42 @@ class PersonDetailScreenTest {
             ),
         )
 
-        composeTestRule.onNodeWithText(string(R.string.person_detail_section_pending_fmt, 1))
+        composeTestRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 1))
             .assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.person_detail_section_completed_fmt, 1))
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.person_detail_history_section))
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("팀 회의").assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 2))
             .assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("완료된 약속").assertCountEquals(0)
     }
 
     @Test
-    fun person_detail_renders_completed_rows_when_section_is_expanded() {
+    fun person_detail_renders_commitment_buckets_inside_source_event_card() {
         setScreen(
-            state = baseState(completedExpanded = true),
+            state = baseState(
+                sourceEventCards = listOf(
+                    sourceEventCard(
+                        myActions = listOf(
+                            PersonDetailCommitmentSummary(
+                                title = "제안서 보내기",
+                                itemType = "action",
+                                direction = "give",
+                            ),
+                        ),
+                        theirActions = listOf(
+                            PersonDetailCommitmentSummary(
+                                title = "자료 확인하기",
+                                itemType = "action",
+                                direction = "take",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         )
 
-        composeTestRule.onNodeWithText("완료된 약속").assertIsDisplayed()
+        composeTestRule.onNodeWithText("내가 해야 할 일").assertIsDisplayed()
+        composeTestRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
+        composeTestRule.onNodeWithText("상대가 해야 할 일").assertIsDisplayed()
+        composeTestRule.onNodeWithText("자료 확인하기").assertIsDisplayed()
     }
 
     @Test
@@ -68,12 +81,10 @@ class PersonDetailScreenTest {
 
         setScreen(
             state = baseState(
-                interactionHistory = listOf(
-                    InteractionRow.Event(
-                        id = "event-7",
-                        timestamp = Instant.parse("2026-04-24T01:00:00Z"),
-                        source = "voice",
-                        summary = "콜 녹음",
+                sourceEventCards = listOf(
+                    sourceEventCard(
+                        rawEventId = "event-7",
+                        title = "콜 녹음",
                         snippet = "금요일까지 회신",
                         commitmentsExtractedCount = 1,
                     ),
@@ -101,42 +112,45 @@ class PersonDetailScreenTest {
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
                     onEventTap = onEventTap,
-                    onToggleCompletedExpanded = {},
                 )
             }
         }
     }
 
     private fun baseState(
-        completedExpanded: Boolean = false,
-        interactionHistory: List<InteractionRow> = emptyList(),
+        sourceEventCards: List<SourceEventCardProjection> = emptyList(),
     ): PersonDetailUiState = PersonDetailUiState(
-        personRef = "+821012345678",
+        personId = "+821012345678",
         displayName = "김철수",
         nickname = "철수",
         companyName = "ABC Corp",
         jobTitle = "팀장",
         eventCount = 2,
+        emailInteractionCount = 0,
+        callInteractionCount = 1,
+        meetingCount = 0,
         pendingCommitmentCount = 1,
-        completedExpanded = completedExpanded,
-        pendingCommitments = listOf(
-            InteractionRow.Commitment(
-                timestamp = Instant.parse("2026-04-24T00:00:00Z"),
-                title = "제안서 보내기",
-                direction = "give",
-                actionState = "pending",
-            ),
-        ),
-        completedCommitments = listOf(
-            InteractionRow.Commitment(
-                timestamp = Instant.parse("2026-04-23T00:00:00Z"),
-                title = "완료된 약속",
-                direction = "take",
-                actionState = "completed",
-            ),
-        ),
-        interactionHistory = interactionHistory,
+        sourceEventCards = sourceEventCards,
         loading = false,
+    )
+
+    private fun sourceEventCard(
+        rawEventId: String? = "event-1",
+        title: String = "팀 회의",
+        snippet: String? = "다음 주까지 제안서 보내기",
+        commitmentsExtractedCount: Int = 0,
+        myActions: List<PersonDetailCommitmentSummary> = emptyList(),
+        theirActions: List<PersonDetailCommitmentSummary> = emptyList(),
+    ): SourceEventCardProjection = SourceEventCardProjection(
+        sourceEventKey = rawEventId ?: title,
+        sourceType = "voice",
+        rawEventId = rawEventId,
+        occurredAt = Instant.parse("2026-04-24T01:00:00Z"),
+        title = title,
+        snippet = snippet,
+        commitmentsExtractedCount = commitmentsExtractedCount,
+        myActions = myActions,
+        theirActions = theirActions,
     )
 
     private fun string(resId: Int, vararg args: Any): String =

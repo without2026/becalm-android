@@ -17,7 +17,6 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
-import com.becalm.android.data.local.db.entity.PersonIndexSourceStateEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
@@ -26,7 +25,6 @@ import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.SourceInteractionKind
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import java.security.MessageDigest
 import java.util.UUID
 import javax.inject.Provider
 import kotlinx.coroutines.CoroutineDispatcher
@@ -45,6 +43,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
     private val userPrefsStore: UserPrefsStore,
+    private val workScheduler: WorkScheduler,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -57,34 +56,32 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         }
 
         val dao = personIndexDaoProvider.get()
-        val existingStates = dao.findSourceStatesForUser(userId)
         val dirtySources = dao.findDirtySourcesForUser(userId, DIRTY_LIMIT)
         val blockedPersonRefs = userPrefsStore.observeBlockedPersonRefs().first()
         val projectionInput = loadProjectionInput(
             userId = userId,
             dirtySources = dirtySources,
-            existingStates = existingStates,
-            forceFullVerification = dirtySources.isEmpty() && blockedPersonRefs.isNotEmpty(),
         )
 
-        val suppressionFingerprint = suppressionFingerprint(blockedPersonRefs)
         val sourceRecords = buildSourceRecords(
-            suppressionFingerprint = suppressionFingerprint,
             rawEvents = projectionInput.rawEvents,
             commitments = projectionInput.commitments,
             sourceParticipants = projectionInput.sourceParticipants,
             commitmentParticipants = projectionInput.commitmentParticipants,
         )
-        val recordsByKey = sourceRecords.associateBy { it.key }
-        val existingStateByKey = existingStates.associateBy { it.key() }
-        val changedRecords = sourceRecords.filter { record ->
-            existingStateByKey[record.key]?.fingerprint != record.fingerprint
+        val changedRecords = sourceRecords
+        val changedKeys = if (projectionInput.mode == "full") {
+            emptyList()
+        } else {
+            (dirtySources.map { it.toSourceKey() } + changedRecords.map { it.key }).distinct()
         }
-        val obsoleteStates = existingStates.filter { state ->
-            state.key() !in recordsByKey && projectionInput.includesState(state)
-        }
+        val previousAffectedPersonIds = findPreviousAffectedPersonIds(
+            userId = userId,
+            mode = projectionInput.mode,
+            changedKeys = changedKeys,
+        )
 
-        if (changedRecords.isEmpty() && obsoleteStates.isEmpty()) {
+        if (projectionInput.mode == "dirty" && changedKeys.isEmpty()) {
             if (dirtySources.isNotEmpty()) {
                 dao.deleteDirtySourcesByIds(userId, dirtySources.map { it.id })
             }
@@ -104,70 +101,85 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         changedRecords.forEach { it.applyTo(builder) }
 
         val snapshot = builder.snapshot()
+        val affectedPersonIds = (
+            previousAffectedPersonIds +
+                snapshot.identities.map { it.personId } +
+                snapshot.interactions.map { it.personId }
+            )
+            .filter { it.isNotBlank() }
+            .distinct()
         databaseProvider.get().withTransaction {
             val txDao = personIndexDaoProvider.get()
-            (changedRecords.map { it.key } + obsoleteStates.map { it.key() })
-                .distinct()
-                .forEach { key ->
-                    txDao.deleteInteractionsForSource(
+            if (projectionInput.mode == "full") {
+                txDao.deleteInteractionsForUser(userId)
+                txDao.deleteUnmatchedInteractionsForUser(userId)
+            } else {
+                changedKeys.forEach { key ->
+                    txDao.deleteInteractionsForSourceKey(
                         userId = userId,
-                        sourceType = key.sourceType,
-                        sourceRef = key.sourceRef,
-                        interactionKind = key.interactionKind,
+                        key = key,
                     )
-                    txDao.deleteUnmatchedInteractionsForSource(
+                    txDao.deleteUnmatchedInteractionsForSourceKey(
                         userId = userId,
-                        sourceType = key.sourceType,
-                        sourceRef = key.sourceRef,
-                        interactionKind = key.interactionKind,
+                        key = key,
                     )
-                    if (key !in recordsByKey) {
-                        txDao.deleteSourceState(
-                            userId = userId,
-                            sourceType = key.sourceType,
-                            sourceRef = key.sourceRef,
-                            interactionKind = key.interactionKind,
-                        )
-                    }
                 }
+            }
             if (snapshot.identities.isNotEmpty()) txDao.upsertIdentities(snapshot.identities)
             if (snapshot.interactions.isNotEmpty()) txDao.upsertInteractions(snapshot.interactions)
             if (snapshot.unmatched.isNotEmpty()) txDao.upsertUnmatchedInteractions(snapshot.unmatched)
-            val sourceStates = changedRecords.map { it.toState(userId) }
-            if (sourceStates.isNotEmpty()) txDao.upsertSourceStates(sourceStates)
             if (dirtySources.isNotEmpty()) txDao.deleteDirtySourcesByIds(userId, dirtySources.map { it.id })
         }
 
         logger.d(
             TAG,
                 "indexed mode=${projectionInput.mode} dirtySources=${dirtySources.size} " +
-                "changedSources=${changedRecords.size} obsoleteSources=${obsoleteStates.size} " +
+                "changedSources=${changedRecords.size} " +
                 "identities=${snapshot.identities.size} interactions=${snapshot.interactions.size} " +
                 "unmatched=${snapshot.unmatched.size}",
         )
         notifyMatchingState(userId)
+        enqueueProfileMemoryForAffectedPeople(affectedPersonIds)
         Result.success()
+    }
+
+    private suspend fun findPreviousAffectedPersonIds(
+        userId: String,
+        mode: String,
+        changedKeys: List<SourceKey>,
+    ): List<String> {
+        val dao = personIndexDaoProvider.get()
+        return if (mode == "full") {
+            dao.findInteractionPersonIdsForUser(userId)
+        } else {
+            changedKeys.flatMap { key ->
+                dao.findInteractionsForSourceKey(
+                    userId = userId,
+                    key = key,
+                )
+            }.map { it.personId }
+        }
+    }
+
+    private fun enqueueProfileMemoryForAffectedPeople(personIds: List<String>) {
+        personIds.distinct().forEach { personId ->
+            workScheduler.enqueueProfileMemory(personId)
+        }
     }
 
     private suspend fun loadProjectionInput(
         userId: String,
         dirtySources: List<PersonIndexDirtySourceEntity>,
-        existingStates: List<PersonIndexSourceStateEntity>,
-        forceFullVerification: Boolean,
     ): ProjectionInput {
         if (dirtySources.isEmpty()) {
-            return if (existingStates.isEmpty() || forceFullVerification) {
-                ProjectionInput(
-                    mode = if (existingStates.isEmpty()) "bootstrap" else "suppression",
-                    dirtySources = emptyList(),
-                    rawEvents = rawDaoProvider.get().findAllForUser(userId),
-                    commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId),
-                    sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId),
-                    commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId),
-                )
-            } else {
-                ProjectionInput.empty(mode = "idle", dirtySources = emptyList())
-            }
+            return ProjectionInput(
+                mode = "full",
+                dirtySources = emptyList(),
+                rawEvents = rawDaoProvider.get().findAllForUser(userId),
+                commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId),
+                sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId),
+                commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId),
+            )
         }
 
         val rawEventIds = dirtySources
@@ -208,7 +220,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     }
 
     private fun buildSourceRecords(
-        suppressionFingerprint: String,
         rawEvents: List<RawIngestionEventEntity>,
         commitments: List<CommitmentEntity>,
         sourceParticipants: List<SourceEventParticipantEntity>,
@@ -229,20 +240,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 )
                 records += SourceRecord(
                     key = key,
-                    fingerprint = fingerprintOf(
-                        suppressionFingerprint,
-                        raw?.eventTitle,
-                        raw?.eventSnippet,
-                        raw?.timestamp?.toString(),
-                        *participants
-                            .map {
-                                "p|${it.id}|${it.personId}|${it.role}|${it.relationToUser}|${it.identityType}|" +
-                                    "${it.normalizedValue}|${it.displayNameRaw}|${it.emailRaw}|${it.phoneRaw}|" +
-                                    "${it.organizationRaw}|${it.resolutionStatus}|${it.confidence}|${it.createdAt}"
-                            }
-                            .sorted()
-                            .toTypedArray(),
-                    ),
                     applyTo = { builder ->
                         participants.forEach { participant ->
                             builder.addSourceParticipant(participant, raw)
@@ -262,24 +259,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 )
                 records += SourceRecord(
                     key = key,
-                    fingerprint = fingerprintOf(
-                        suppressionFingerprint,
-                        commitment.itemType,
-                        commitment.direction,
-                        commitment.scheduleStatus,
-                        commitment.decisionStatus,
-                        commitment.title,
-                        commitment.quote,
-                        commitment.sourceEventOccurredAt.toString(),
-                        commitment.actionState,
-                        commitment.confidence.toString(),
-                        commitment.updatedAt.toString(),
-                        commitment.deletedAt?.toString(),
-                        *participants
-                            .map { "cp|${it.id}|${it.personId}|${it.role}|${it.evidence}|${it.confidence}|${it.createdAt}" }
-                            .sorted()
-                            .toTypedArray(),
-                    ),
                     applyTo = { builder ->
                         participants.forEach { participant ->
                             builder.addCommitmentParticipant(participant, commitment)
@@ -292,7 +271,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             .map { (key, grouped) ->
                 SourceRecord(
                     key = key,
-                    fingerprint = fingerprintOf(*grouped.map { it.fingerprint }.sorted().toTypedArray()),
                     applyTo = { builder -> grouped.forEach { it.applyTo(builder) } },
                 )
             }
@@ -509,31 +487,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val commitments: List<CommitmentEntity>,
         val sourceParticipants: List<SourceEventParticipantEntity>,
         val commitmentParticipants: List<CommitmentParticipantEntity>,
-    ) {
-        fun includesState(state: PersonIndexSourceStateEntity): Boolean {
-            if (mode == "bootstrap" || mode == "suppression") return true
-            return dirtySources.any { dirty ->
-                dirty.sourceRef == state.sourceRef &&
-                    dirty.interactionKind == state.interactionKind &&
-                    (dirty.sourceType == state.sourceType || dirty.sourceType == SourceInteractionKind.COMMITMENT)
-            }
-        }
-
-        companion object {
-            fun empty(
-                mode: String,
-                dirtySources: List<PersonIndexDirtySourceEntity>,
-            ): ProjectionInput =
-                ProjectionInput(
-                    mode = mode,
-                    dirtySources = dirtySources,
-                    rawEvents = emptyList(),
-                    commitments = emptyList(),
-                    sourceParticipants = emptyList(),
-                    commitmentParticipants = emptyList(),
-                )
-        }
-    }
+    )
 
     private data class SourceKey(
         val sourceType: String,
@@ -543,52 +497,68 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
 
     private data class SourceRecord(
         val key: SourceKey,
-        val fingerprint: String,
         val applyTo: (PersonIndexBuild) -> Unit,
-    ) {
-        fun toState(userId: String): PersonIndexSourceStateEntity {
-            val id = UUID.nameUUIDFromBytes(
-                "person-index-source:$userId:${key.sourceType}:${key.sourceRef}:${key.interactionKind}"
-                    .toByteArray(Charsets.UTF_8),
-            ).toString()
-            return PersonIndexSourceStateEntity(
-                id = id,
+    )
+
+    private fun PersonIndexDirtySourceEntity.toSourceKey(): SourceKey =
+        SourceKey(sourceType = sourceType, sourceRef = sourceRef, interactionKind = interactionKind)
+
+    private suspend fun PersonIndexDao.findInteractionsForSourceKey(
+        userId: String,
+        key: SourceKey,
+    ): List<PersonInteractionEntity> =
+        if (key.sourceType == SourceInteractionKind.COMMITMENT && key.interactionKind == SourceInteractionKind.COMMITMENT) {
+            findInteractionsForSourceRefKind(
+                userId = userId,
+                sourceRef = key.sourceRef,
+                interactionKind = key.interactionKind,
+            )
+        } else {
+            findInteractionsForSource(
                 userId = userId,
                 sourceType = key.sourceType,
                 sourceRef = key.sourceRef,
                 interactionKind = key.interactionKind,
-                fingerprint = fingerprint,
-                updatedAt = Clock.System.now(),
             )
         }
-    }
 
-    private fun PersonIndexSourceStateEntity.key(): SourceKey =
-        SourceKey(
-            sourceType = sourceType,
-            sourceRef = sourceRef,
-            interactionKind = interactionKind,
-        )
-
-    private fun suppressionFingerprint(
-        blockedPersonRefs: Set<String>,
-    ): String = fingerprintOf(
-        *blockedPersonRefs.sorted().map { "b|$it" }.toTypedArray(),
-    )
-
-    private fun fingerprintOf(vararg parts: String?): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        parts.forEach { part ->
-            val value = part.orEmpty().toByteArray(Charsets.UTF_8)
-            digest.update(value.size.toString().toByteArray(Charsets.UTF_8))
-            digest.update(0.toByte())
-            digest.update(value)
-            digest.update(0.toByte())
+    private suspend fun PersonIndexDao.deleteInteractionsForSourceKey(
+        userId: String,
+        key: SourceKey,
+    ): Int =
+        if (key.sourceType == SourceInteractionKind.COMMITMENT && key.interactionKind == SourceInteractionKind.COMMITMENT) {
+            deleteInteractionsForSourceRefKind(
+                userId = userId,
+                sourceRef = key.sourceRef,
+                interactionKind = key.interactionKind,
+            )
+        } else {
+            deleteInteractionsForSource(
+                userId = userId,
+                sourceType = key.sourceType,
+                sourceRef = key.sourceRef,
+                interactionKind = key.interactionKind,
+            )
         }
-        return digest.digest().joinToString(separator = "") { byte ->
-            (byte.toInt() and 0xFF).toString(16).padStart(2, '0')
+
+    private suspend fun PersonIndexDao.deleteUnmatchedInteractionsForSourceKey(
+        userId: String,
+        key: SourceKey,
+    ): Int =
+        if (key.sourceType == SourceInteractionKind.COMMITMENT && key.interactionKind == SourceInteractionKind.COMMITMENT) {
+            deleteUnmatchedInteractionsForSourceRefKind(
+                userId = userId,
+                sourceRef = key.sourceRef,
+                interactionKind = key.interactionKind,
+            )
+        } else {
+            deleteUnmatchedInteractionsForSource(
+                userId = userId,
+                sourceType = key.sourceType,
+                sourceRef = key.sourceRef,
+                interactionKind = key.interactionKind,
+            )
         }
-    }
 
     private companion object {
         private const val TAG = "PersonIndexWorker"

@@ -34,4 +34,10 @@ class UniqueWorkKeysSpecTest {
         )
     }
 
+    @Test
+    fun `profile memory key is stable per person id`() {
+        assertEquals("person.memory.person-1", UniqueWorkKeys.profileMemory("person-1"))
+        assertEquals(UniqueWorkKeys.profileMemory("person-1"), UniqueWorkKeys.profileMemory("person-1"))
+        assertNotEquals(UniqueWorkKeys.profileMemory("person-1"), UniqueWorkKeys.profileMemory("person-2"))
+    }
 }

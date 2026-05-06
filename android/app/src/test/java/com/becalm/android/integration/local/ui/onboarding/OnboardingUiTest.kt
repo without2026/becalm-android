@@ -26,9 +26,13 @@ import com.becalm.android.ui.onboarding.GoogleCalendarOAuthContent
 import com.becalm.android.ui.onboarding.ImapForm
 import com.becalm.android.ui.onboarding.NotificationPermissionContent
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentContent
+import com.becalm.android.ui.onboarding.OnboardingSetupItem
+import com.becalm.android.ui.onboarding.OnboardingSetupItemUi
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthContent
 import com.becalm.android.ui.onboarding.OutlookMailOAuthContent
 import com.becalm.android.ui.onboarding.RecordingFolderContent
+import com.becalm.android.ui.onboarding.SourceConnectionState
+import com.becalm.android.ui.onboarding.SourceConnectionsContent
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.today.ColdSyncUiState
 import org.junit.Assert.assertEquals
@@ -44,6 +48,48 @@ class OnboardingUiTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun `compact setup content shows required recommended and optional sections`() {
+        var connectedSetupItem: OnboardingSetupItem? = null
+        var skippedSetupItem: OnboardingSetupItem? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = emptyList(),
+                    headline = string(R.string.onb_setup_headline),
+                    body = string(R.string.onb_setup_body),
+                    continueLabel = string(R.string.onb_setup_start),
+                    onConnect = {},
+                    onSkip = {},
+                    setupItems = listOf(
+                        OnboardingSetupItemUi(
+                            item = OnboardingSetupItem.Contacts,
+                            title = string(R.string.onb_setup_contacts_title),
+                            description = string(R.string.onb_setup_contacts_body),
+                            state = SourceConnectionState.Idle,
+                        ),
+                    ),
+                    onConnectSetupItem = { connectedSetupItem = it },
+                    onSkipSetupItem = { skippedSetupItem = it },
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.onb_setup_required_section)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_recommended_section)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_required_privacy)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_contacts_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.action_connect)).performClick()
+        composeRule.onNodeWithText(string(R.string.action_skip)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(OnboardingSetupItem.Contacts, connectedSetupItem)
+            assertEquals(OnboardingSetupItem.Contacts, skippedSetupItem)
+        }
+    }
 
     @Test
     fun `recording folder content shows detection summary fallback and ctas`() {

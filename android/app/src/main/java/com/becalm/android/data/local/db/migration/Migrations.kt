@@ -1023,6 +1023,29 @@ private val MIGRATION_16_17 = object : Migration(16, 17) {
     }
 }
 
+// ─── Migration 17 → 18 (remove person_index_source_state cache) ─────────────
+//
+// PersonInteractionIndexWorker now treats person_interactions as a rebuildable graph
+// projection. Deduplication belongs to canonical source ids and the dirty queue; no
+// durable fingerprint cache is maintained.
+private val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `person_index_source_state`")
+    }
+}
+
+// ─── Migration 18 → 19 (source participant profile title evidence) ──────────
+//
+// Person memory/profile enrichment stores only source-backed facts. `title_raw`
+// captures an explicitly stated job title from the same canonical participant row as
+// organization/name/email so downstream memory generation never has to infer roles from
+// work context or event titles.
+private val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(db, "source_event_participants", "title_raw", "TEXT")
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1053,4 +1076,6 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_14_15,
     MIGRATION_15_16,
     MIGRATION_16_17,
+    MIGRATION_17_18,
+    MIGRATION_18_19,
 )
