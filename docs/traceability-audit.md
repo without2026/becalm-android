@@ -261,7 +261,7 @@ flowchart LR
     RAWR -.병렬.-> VOICE[VoiceUploadWorker]
     VOICE -->|POST /v1/voice/transcribe_extract<br/>multipart audio| RAILWAY
     RAILWAY -->|INSERT| SUPA[(Supabase<br/>raw + commitments)]
-    RAILWAY -->|Vertex AI Gemini 2.5 Flash<br/>asia-northeast3 ZDR| LLM[[CommitmentDraft array]]
+    RAILWAY -->|Vertex AI Gemini 2.5 Flash<br/>us-central1 ZDR| LLM[[CommitmentDraft array]]
     LLM --> RAILWAY
     RAILWAY -->|response| VOICE
     VOICE -->|INSERT commitments<br/>UPDATE raw count| CEL[(Room<br/>commitments)]
@@ -565,7 +565,7 @@ flowchart LR
 
 - [ ] FastAPI 엔드포인트 12개 (Android 스펙 일치)
 - [ ] Supabase `001_initial.sql` (6 tables + 6 relationships + RLS + 인덱스)
-- [ ] Vertex AI Gemini 2.5 Flash 연동 (asia-northeast3 + ZDR) — `prompts/commitment_extractor.ko.md`
+- [ ] Vertex AI Gemini 2.5 Flash 연동 (us-central1 + ZDR) — `prompts/commitment_extractor.ko.md`
 - [ ] pg_cron 서버 리텐션 60일
 
 ### 공통 post-PR 검증
