@@ -5,12 +5,9 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonIndexDao
-import com.becalm.android.data.local.db.entity.PersonEntity
-import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantDto
-import com.becalm.android.domain.person.PersonIdentityResolver
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
@@ -98,8 +95,8 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
                 )
             val participants = body.data.map { it.toEntity(userId) }
             if (participants.isNotEmpty()) {
-                personIndexDao.upsertPersons(participants.mapNotNull { it.toPersonEntity() })
-                personIndexDao.upsertIdentities(participants.mapNotNull { it.toPersonIdentityEntity() })
+                personIndexDao.upsertPersons(participants.mapNotNull { it.toPersonEntityOrNull() })
+                personIndexDao.upsertIdentities(participants.mapNotNull { it.toPersonIdentityEntityOrNull() })
                 personIndexDao.upsertSourceEventParticipants(participants)
                 personIndexDao.upsertDirtySources(
                     PersonIndexDirtySources.forSourceParticipants(
@@ -153,58 +150,6 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             resolutionStatus = resolutionStatus,
             createdAt = createdAt,
         )
-
-    private fun SourceEventParticipantEntity.toPersonEntity(): PersonEntity? {
-        val id = personId ?: return null
-        return PersonEntity(
-            id = id,
-            userId = userId,
-            displayName = displayNameRaw ?: organizationRaw ?: normalizedValue ?: emailRaw ?: phoneRaw ?: id,
-            kind = if (identityType == "organization") "organization" else "person",
-            primaryEmail = emailRaw ?: normalizedValue.takeIf { identityType == "email" },
-            primaryPhone = phoneRaw ?: normalizedValue.takeIf { identityType == "phone" },
-            confidence = confidence.coerceIn(0.0, 1.0),
-            createdAt = createdAt,
-            updatedAt = createdAt,
-            archivedAt = null,
-        )
-    }
-
-    private fun SourceEventParticipantEntity.toPersonIdentityEntity(): PersonIdentityEntity? {
-        val ownerPersonId = personId ?: return null
-        val type = identityType ?: return null
-        val normalized = normalizedValue ?: return null
-        val raw = when (type) {
-            "email" -> emailRaw ?: normalized
-            "phone" -> phoneRaw ?: normalized
-            "organization" -> organizationRaw ?: normalized
-            "name" -> displayNameRaw ?: normalized
-            else -> normalized
-        }
-        return PersonIdentityEntity(
-            id = PersonIdentityResolver.stableIdentityId(
-                userId = userId,
-                identityKey = "$type:$normalized",
-            ),
-            userId = userId,
-            personId = ownerPersonId,
-            identityKey = "$type:$normalized",
-            identityType = type,
-            rawValue = raw,
-            displayNameHint = displayNameRaw ?: organizationRaw ?: raw,
-            identityValue = raw,
-            normalizedValue = normalized,
-            displayName = displayNameRaw,
-            sourceType = sourceType,
-            sourceRef = sourceRef,
-            confidence = confidence.coerceIn(0.0, 1.0),
-            isPrimary = true,
-            verified = resolutionStatus == "resolved",
-            lastSeenAt = createdAt,
-            createdAt = createdAt,
-            updatedAt = createdAt,
-        )
-    }
 
     private fun <T> Response<T>.toRefreshError(): BecalmError = when (code()) {
         401 -> BecalmError.Unauthorized

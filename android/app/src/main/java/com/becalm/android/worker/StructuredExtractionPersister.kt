@@ -10,6 +10,8 @@ import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.toPersonEntityOrNull
+import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
 import kotlinx.datetime.Instant
 
 internal class StructuredExtractionPersister(
@@ -54,13 +56,17 @@ internal class StructuredExtractionPersister(
             )
         }
         if (sourceParticipants.isNotEmpty()) {
+            personIndexDao.upsertPersons(sourceParticipants.mapNotNull { it.toPersonEntityOrNull() })
+            personIndexDao.upsertIdentities(sourceParticipants.mapNotNull { it.toPersonIdentityEntityOrNull() })
             personIndexDao.upsertSourceEventParticipants(sourceParticipants)
         }
 
+        val fallbackPersonId = sourceParticipants.singleSourceCounterpartyPersonId()
         val commitmentParticipants = commitmentEntities.mapIndexedNotNull { index, commitment ->
             commitment.toCommitmentParticipantEntity(
                 userId = userId,
                 index = index,
+                fallbackPersonId = fallbackPersonId,
                 now = now,
             )
         }

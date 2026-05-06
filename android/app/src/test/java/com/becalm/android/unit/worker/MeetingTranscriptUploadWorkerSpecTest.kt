@@ -21,8 +21,10 @@ import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
+import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.MeetingTranscriptUploadWorker
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.WorkScheduler
@@ -119,7 +121,7 @@ class MeetingTranscriptUploadWorkerSpecTest {
                         type = "schedule",
                         text = "내일 3시 회의 확정",
                         quote = "내일 3시에 회의합시다",
-                        counterpartyRef = "lee@example.com",
+                        counterpartyRef = null,
                         dueAt = null,
                         dueHint = "내일 3시",
                         dueIsApproximate = false,
@@ -127,10 +129,25 @@ class MeetingTranscriptUploadWorkerSpecTest {
                         scheduleStatus = "confirmed",
                     ),
                 ),
-                sourceEventParticipants = emptyList(),
+                sourceEventParticipants = listOf(
+                    SourceExtractedParticipantDto(
+                        role = "counterparty",
+                        relationToUser = "counterparty",
+                        identityType = "email",
+                        rawValue = "lee@example.com",
+                        normalizedValue = "lee@example.com",
+                        displayName = "Lee",
+                        email = "lee@example.com",
+                        organization = "Acme",
+                        title = "Lead",
+                        evidence = "Lee from Acme",
+                        evidenceSource = "transcript",
+                        confidence = 0.92,
+                    ),
+                ),
                 model = "gemini-2.5-flash",
                 region = "us-central1",
-                rawModelText = """{"items":[],"source_event_participants":[]}""",
+                rawModelText = """{"items":[],"source_event_participants":[{"email":"lee@example.com"}]}""",
             ),
         )
 
@@ -139,8 +156,14 @@ class MeetingTranscriptUploadWorkerSpecTest {
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals(1, updated.captured.commitmentsExtractedCount)
         assertEquals("pending", updated.captured.syncStatus)
+        val leePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "lee@example.com")).personId
         coVerify(exactly = 1) { commitmentDao.insertAll(match { it.single().itemType == "schedule" }) }
-        coVerify(exactly = 1) { personIndexDao.upsertCommitmentParticipants(any()) }
+        coVerify(exactly = 1) { personIndexDao.upsertPersons(match { it.single().primaryEmail == "lee@example.com" }) }
+        coVerify(exactly = 1) { personIndexDao.upsertIdentities(match { it.single().normalizedValue == "lee@example.com" }) }
+        coVerify(exactly = 1) { personIndexDao.upsertSourceEventParticipants(match { it.single().organizationRaw == "Acme" }) }
+        coVerify(exactly = 1) {
+            personIndexDao.upsertCommitmentParticipants(match { it.single().personId == leePersonId })
+        }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 

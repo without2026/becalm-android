@@ -94,17 +94,19 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
 internal fun CommitmentEntity.toCommitmentParticipantEntity(
     userId: String,
     index: Int,
+    fallbackPersonId: String? = null,
     now: Instant,
 ): CommitmentParticipantEntity? {
-    val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef) ?: return null
+    val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef)
+    val personId = resolved?.personId ?: fallbackPersonId ?: return null
     val participantId = UUID.nameUUIDFromBytes(
-        "commitment-participant:$userId:$id:${resolved.personId}:$index".toByteArray(Charsets.UTF_8),
+        "commitment-participant:$userId:$id:$personId:$index".toByteArray(Charsets.UTF_8),
     ).toString()
     return CommitmentParticipantEntity(
         id = participantId,
         userId = userId,
         commitmentId = id,
-        personId = resolved.personId,
+        personId = personId,
         role = when (itemType) {
             CommitmentItemType.ACTION -> direction ?: "owner"
             CommitmentItemType.SCHEDULE -> "attendee"
@@ -115,6 +117,20 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
         confidence = confidence,
         createdAt = now,
     )
+}
+
+internal fun List<SourceEventParticipantEntity>.singleSourceCounterpartyPersonId(): String? {
+    val counterpartyPersonIds = asSequence()
+        .filter { participant ->
+            participant.personId != null &&
+                participant.relationToUser == "counterparty" &&
+                participant.role.lowercase() != "self"
+        }
+        .mapNotNull { it.personId }
+        .distinct()
+        .take(2)
+        .toList()
+    return counterpartyPersonIds.singleOrNull()
 }
 
 private val RELATION_TO_USER_VALUES = setOf("self", "counterparty", "participant", "referenced", "unknown")

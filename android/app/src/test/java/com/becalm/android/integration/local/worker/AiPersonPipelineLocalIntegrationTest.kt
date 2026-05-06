@@ -133,6 +133,7 @@ class AiPersonPipelineLocalIntegrationTest {
         val participants = db.personIndexDao().findSourceEventParticipantsForUser(USER_ID)
         assertEquals(1, participants.size)
         assertEquals(CUSTOMER_EMAIL, participants.single().emailRaw)
+        assertNotNull(db.personIndexDao().findPersonForMemory(USER_ID, participants.single().personId!!))
 
         val indexResult = newPersonIndexWorker().doWork()
 
