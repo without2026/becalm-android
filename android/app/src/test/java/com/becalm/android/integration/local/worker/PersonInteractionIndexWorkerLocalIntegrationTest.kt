@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -99,6 +100,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
         assertEquals(setOf("raw:raw-mail-1", "commitment:commitment-1"), interactions.map { it.sourceRef }.toSet())
+        assertNotNull(db.personIndexDao().findPersonForMemory(USER_ID, personId))
         val legacyInteractions = db.personIndexDao().observeInteractionsForPerson(USER_ID, legacyPersonId, limit = 20).first()
         assertTrue(legacyInteractions.isEmpty())
         assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)

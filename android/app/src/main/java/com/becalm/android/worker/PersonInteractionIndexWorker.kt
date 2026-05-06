@@ -21,6 +21,8 @@ import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
+import com.becalm.android.data.repository.toPersonEntityOrNull
+import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.SourceInteractionKind
 import dagger.assisted.Assisted
@@ -101,8 +103,11 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         changedRecords.forEach { it.applyTo(builder) }
 
         val snapshot = builder.snapshot()
+        val repairedPersons = projectionInput.sourceParticipants.mapNotNull { it.toPersonEntityOrNull() }
+        val repairedIdentities = projectionInput.sourceParticipants.mapNotNull { it.toPersonIdentityEntityOrNull() }
         val affectedPersonIds = (
             previousAffectedPersonIds +
+                repairedPersons.map { it.id } +
                 snapshot.identities.map { it.personId } +
                 snapshot.interactions.map { it.personId }
             )
@@ -125,6 +130,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     )
                 }
             }
+            if (repairedPersons.isNotEmpty()) txDao.upsertPersons(repairedPersons)
+            if (repairedIdentities.isNotEmpty()) txDao.upsertIdentities(repairedIdentities)
             if (snapshot.identities.isNotEmpty()) txDao.upsertIdentities(snapshot.identities)
             if (snapshot.interactions.isNotEmpty()) txDao.upsertInteractions(snapshot.interactions)
             if (snapshot.unmatched.isNotEmpty()) txDao.upsertUnmatchedInteractions(snapshot.unmatched)
@@ -135,7 +142,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             TAG,
                 "indexed mode=${projectionInput.mode} dirtySources=${dirtySources.size} " +
                 "changedSources=${changedRecords.size} " +
-                "identities=${snapshot.identities.size} interactions=${snapshot.interactions.size} " +
+                "personsRepaired=${repairedPersons.size} " +
+                "identities=${snapshot.identities.size + repairedIdentities.size} interactions=${snapshot.interactions.size} " +
                 "unmatched=${snapshot.unmatched.size}",
         )
         notifyMatchingState(userId)
