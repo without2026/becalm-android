@@ -1,5 +1,5 @@
 /**
- * SP-48: Frosted card rendering a single commitment with direction badges, D-N badge,
+ * SP-48: Frosted card rendering a single commitment with action labels, D-N badge,
  * and status chip.
  *
  * The card reads from design token spec §4 (direction) and §5 (D-N badges, state
@@ -76,7 +76,7 @@ import kotlinx.datetime.toLocalDateTime
 // ─── CommitmentCard ───────────────────────────────────────────────────────────
 
 /**
- * Renders a single commitment as a frosted relationship card with direction chips,
+ * Renders a single commitment as a frosted relationship card with action labels,
  * a compact D-N urgency badge, an action status chip, and an optional mark-done
  * icon button.
  *
@@ -101,8 +101,8 @@ import kotlinx.datetime.toLocalDateTime
  *                      resolved display label. Never pass a raw email address, phone
  *                      number, or internal identifier — the TalkBack accessibility
  *                      description includes this value verbatim.
- * @param direction     Direction string. `"give"` / `"take"` are rendered as
- *                      inline relationship direction chips when applicable.
+ * @param direction     Direction string. `"give"` / `"take"` are translated to
+ *                      user-facing action labels when applicable.
  * @param derivedStatus Status string driving the chip and card alpha. Accepted values:
  *                      `"PENDING"`, `"REMINDED"`, `"FOLLOWED_UP"`, `"COMPLETED"`,
  *                      `"OVERDUE"`, `"CANCELLED"` (spec-aligned action_state keys,
@@ -182,20 +182,9 @@ public fun CommitmentCard(
     val cardAlpha = if (isTerminal) 0.6f else 1.0f
     // Chip is always shown so the terminal-state reason is visible even when dimmed.
     val showChip = normalizedItemType == CommitmentItemType.ACTION && normalized.isNotBlank()
-    val itemTypeLabel = remember(normalizedItemType) {
-        when (normalizedItemType) {
-            CommitmentItemType.ACTION -> R.string.commitment_item_type_action
-            CommitmentItemType.SCHEDULE -> R.string.commitment_item_type_schedule
-            CommitmentItemType.DECISION -> R.string.commitment_item_type_decision
-            else -> R.string.commitment_item_type_action
-        }
-    }
+    val itemTypeLabel = remember(normalizedItemType) { commitmentItemTypeLabelRes(normalizedItemType) }
     val subtypeLabel = when (normalizedItemType) {
-        CommitmentItemType.ACTION -> when (normalizedDirection) {
-            "give" -> stringResource(R.string.commitments_filter_give)
-            "take" -> stringResource(R.string.commitments_filter_take)
-            else -> null
-        }
+        CommitmentItemType.ACTION -> stringResource(commitmentActionLabelRes(normalizedDirection))
         CommitmentItemType.SCHEDULE -> when (normalizedScheduleStatus) {
             CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
             CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
@@ -250,7 +239,7 @@ public fun CommitmentCard(
         label to stateColors
     }
 
-    val semanticsDesc = "$direction $title"
+    val semanticsDesc = "${commitmentActionSemanticsLabel(normalizedDirection)} $title"
     val showMarkDone = onMarkDone != null && !isTerminal
 
     // Mark-done confirmation pulse: brief 1.0 → 1.04 → 1.0 scale on the card

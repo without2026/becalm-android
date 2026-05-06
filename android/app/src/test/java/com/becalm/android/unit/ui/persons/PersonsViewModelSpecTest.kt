@@ -94,7 +94,7 @@ class PersonsViewModelSpecTest {
         assertEquals(4, primary.interactionCount)
         assertEquals(2, primary.pendingCommitmentCount)
         assertEquals(setOf(SourceType.VOICE, SourceType.GMAIL), primary.channelSources)
-        assertEquals("latest snippet", primary.lastInteractionSnippet)
+        assertEquals(null, primary.lastInteractionSnippet)
 
         val sections = viewModel.uiState.value.personSections.associateBy { it.kind }
         assertEquals(

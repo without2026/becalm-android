@@ -59,6 +59,7 @@ import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
+import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
@@ -226,6 +227,9 @@ public fun CommitmentManagementScreenContent(
                         )
                     }
                     else -> {
+                        val activePersonGroups = remember(state.activeItems) {
+                            state.activePersonGroups
+                        }
                         val completedHeader = stringResource(
                             R.string.commitment_section_completed_fmt,
                             state.completedSection.count,
@@ -240,7 +244,7 @@ public fun CommitmentManagementScreenContent(
                                 .fillMaxSize()
                                 .testTag("commitment-list"),
                         ) {
-                            state.activePersonGroups.forEach { group ->
+                            activePersonGroups.forEach { group ->
                                 item(key = "active-group-${group.stableKey}") {
                                     CommitmentPersonGroupHeader(
                                         group = group,
@@ -463,17 +467,8 @@ private fun commitmentSourceContextLabel(row: CommitmentRow): String? {
 }
 
 @Composable
-private fun readableSourceType(sourceType: String): String = when (sourceType) {
-    "gmail" -> stringResource(R.string.raw_event_source_badge_gmail)
-    "outlook_mail" -> stringResource(R.string.raw_event_source_badge_outlook_mail)
-    "naver_imap" -> stringResource(R.string.raw_event_source_badge_naver_imap)
-    "daum_imap" -> stringResource(R.string.raw_event_source_badge_daum_imap)
-    "google_calendar" -> stringResource(R.string.raw_event_source_badge_google_calendar)
-    "outlook_calendar" -> stringResource(R.string.raw_event_source_badge_outlook_calendar)
-    "voice" -> stringResource(R.string.raw_event_source_badge_voice)
-    "call_recording" -> stringResource(R.string.raw_event_source_badge_call_recording)
-    else -> sourceType
-}
+private fun readableSourceType(sourceType: String): String =
+    stringResource(sourcePresentationFor(sourceType).labelRes)
 
 private fun Instant.toMonthDayLabel(): String {
     val date = toLocalDateTime(KST).date
@@ -488,11 +483,10 @@ private fun FilterChipRow(
 ) {
     val filters = listOf(
         CommitmentFilter.ALL to stringResource(R.string.commitments_filter_all),
-        CommitmentFilter.ACTION to stringResource(R.string.commitments_filter_action),
         CommitmentFilter.GIVE to stringResource(R.string.commitments_filter_give),
         CommitmentFilter.TAKE to stringResource(R.string.commitments_filter_take),
         CommitmentFilter.SCHEDULE to stringResource(R.string.commitments_filter_schedule),
-        CommitmentFilter.DECISION to stringResource(R.string.commitments_filter_decision),
+        CommitmentFilter.CLOSED to stringResource(R.string.commitments_filter_closed),
     )
     LazyRow(
         modifier = modifier,

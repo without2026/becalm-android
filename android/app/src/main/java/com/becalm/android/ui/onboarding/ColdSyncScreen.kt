@@ -2,12 +2,14 @@ package com.becalm.android.ui.onboarding
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,8 +28,10 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
+import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.today.ColdSyncEffect
+import com.becalm.android.ui.today.DefaultColdSyncRuntimeCoordinator
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.today.ColdSyncUiState
 import com.becalm.android.ui.today.ColdSyncViewModel
@@ -134,11 +138,33 @@ internal fun ColdSyncContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+                ColdSyncSourceList(
+                    perSourceProgress = state.perSourceProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.transitionError) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.onb_cold_sync_transition_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (!state.skipEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.onb_cold_sync_skip_disabled),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
                 BecalmButton(
                     text = stringResource(R.string.onb_cold_sync_skip_cta),
                     onClick = onSkipForNow,
-                    enabled = state.skipEnabled && !state.transitioning,
+                    enabled = state.skipEnabled,
+                    loading = state.transitioning,
                     variant = BecalmButtonVariant.Secondary,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -152,11 +178,67 @@ internal fun ColdSyncContent(
                 BecalmButton(
                     text = stringResource(R.string.onb_cold_sync_cta),
                     onClick = onContinue,
+                    loading = state.transitioning,
                     variant = BecalmButtonVariant.Primary,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ColdSyncSourceList(
+    perSourceProgress: Map<String, Float>,
+    modifier: Modifier = Modifier,
+) {
+    if (perSourceProgress.isEmpty()) return
+    Column(modifier = modifier) {
+        perSourceProgress.forEach { (sourceType, progress) ->
+            ColdSyncSourceRow(sourceType = sourceType, progress = progress)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun ColdSyncSourceRow(
+    sourceType: String,
+    progress: Float,
+) {
+    val label = if (sourceType == DefaultColdSyncRuntimeCoordinator.USER_PROFILE_SOURCE_ID) {
+        stringResource(R.string.onb_cold_sync_profile)
+    } else {
+        stringResource(sourcePresentationFor(sourceType).labelRes)
+    }
+    val status = if (progress >= 1f) {
+        stringResource(R.string.onb_cold_sync_source_done)
+    } else {
+        stringResource(R.string.onb_cold_sync_source_syncing)
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (progress >= 1f) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

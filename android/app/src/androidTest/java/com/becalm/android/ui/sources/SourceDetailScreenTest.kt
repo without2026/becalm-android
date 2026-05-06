@@ -3,10 +3,13 @@ package com.becalm.android.ui.sources
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -32,10 +35,50 @@ class SourceDetailScreenTest {
         composeTestRule.onNodeWithText(string(R.string.source_detail_status_section)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.action_reconnect)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.action_sync_now)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasTestTag("source-detail-disconnect"))
         composeTestRule.onNodeWithText(string(R.string.action_disconnect)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.source_detail_recent_events_section))
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("계약 검토").assertIsDisplayed()
+    }
+
+    @Test
+    fun source_detail_connected_source_keeps_recovery_cta_quiet() {
+        setScreen(
+            state = baseState(
+                status = "CONNECTED",
+                showReconnectButton = false,
+                showDisconnectButton = true,
+                showManualSyncButton = true,
+            ),
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.sources_status_connected)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.action_reconnect)).assertCountEquals(0)
+        composeTestRule.onNodeWithText(string(R.string.action_sync_now)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasTestTag("source-detail-disconnect"))
+        composeTestRule.onNodeWithText(string(R.string.action_disconnect)).assertIsDisplayed()
+    }
+
+    @Test
+    fun source_detail_error_source_prioritizes_reconnect_recovery() {
+        setScreen(
+            state = baseState(
+                status = "ERROR",
+                lastError = "권한이 만료되었습니다.",
+                showReconnectButton = true,
+                showDisconnectButton = false,
+                showManualSyncButton = false,
+            ),
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("권한이 만료되었습니다.", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.action_reconnect)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.action_sync_now)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.action_disconnect)).assertCountEquals(0)
     }
 
     @Test
@@ -92,15 +135,21 @@ class SourceDetailScreenTest {
     }
 
     private fun baseState(
+        status: String = "CONNECTED",
+        lastError: String? = null,
+        showReconnectButton: Boolean = true,
+        showDisconnectButton: Boolean = true,
+        showManualSyncButton: Boolean = true,
         showDisconnectConfirmDialog: Boolean = false,
     ): SourceDetailUiState = SourceDetailUiState(
         sourceType = "gmail",
-        status = "CONNECTED",
+        status = status,
         lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
         eventsSyncedCount = 12,
-        showReconnectButton = true,
-        showDisconnectButton = true,
-        showManualSyncButton = true,
+        lastError = lastError,
+        showReconnectButton = showReconnectButton,
+        showDisconnectButton = showDisconnectButton,
+        showManualSyncButton = showManualSyncButton,
         showDisconnectConfirmDialog = showDisconnectConfirmDialog,
         recentEvents = listOf(
             RecentEventSummary(

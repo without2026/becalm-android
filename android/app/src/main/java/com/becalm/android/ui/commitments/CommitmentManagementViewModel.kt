@@ -9,7 +9,6 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.SystemClock
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
@@ -46,11 +45,10 @@ import javax.inject.Inject
  * Display filter applied in-memory to the full commitment list.
  *
  * - [ALL]      — no filter; shows every trackable item for the current user.
- * - [ACTION]   — action rows only.
  * - [GIVE]     — action rows where direction == "give".
  * - [TAKE]     — action rows where direction == "take".
  * - [SCHEDULE] — schedule rows only.
- * - [DECISION] — decision rows only.
+ * - [CLOSED]   — completed or cancelled action rows.
  *
  * Action-specific lifecycle (due-today / overdue / completed / cancelled) is surfaced
  * per-card and in the terminal sections rather than as a top-level filter.
@@ -58,11 +56,10 @@ import javax.inject.Inject
 // spec: CMT-001, CMT-002
 public enum class CommitmentFilter {
     ALL,
-    ACTION,
     GIVE,
     TAKE,
     SCHEDULE,
-    DECISION,
+    CLOSED,
 }
 
 // ─── Row model ────────────────────────────────────────────────────────────────

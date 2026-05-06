@@ -1,6 +1,8 @@
 package com.becalm.android.ui.auth
 
 import android.view.WindowManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -9,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,12 +40,12 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
+import com.becalm.android.ui.components.GoogleSignInButton
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 
 /**
@@ -236,11 +240,18 @@ internal fun LoginForm(
         modifier = Modifier
             .fillMaxWidth()
             .widthIn(max = LoginFormMaxContentWidth)
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 32.dp)
-            .glassPanel()
             .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Text(
+            text = stringResource(R.string.login_framing),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(20.dp))
         BecalmTextField(
             value = email,
             onValueChange = { email = it; showEmptyError = false },
@@ -284,11 +295,11 @@ internal fun LoginForm(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        BecalmButton(
+        GoogleSignInButton(
             text = stringResource(R.string.login_google_cta),
             onClick = onGoogleSignIn,
-            variant = BecalmButtonVariant.Secondary,
             enabled = googleSignInEnabled && !isLoading,
+            loading = false,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(12.dp))

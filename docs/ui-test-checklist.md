@@ -64,3 +64,11 @@ Exit condition:
 - [x] `NotificationPermissionScreen` rationale / grant / skip
 - [x] `BatteryOptimizationScreen` guidance / CTA / skip
 - [x] `ColdSyncScreen` in-progress and done states / skip / continue
+
+## R10 Service Quality Invariants
+- [x] People list rows hide work-context snippets; person detail can still show source evidence in the original language
+- [x] Source list rows render localized source/status labels, never raw `source_type` or status enum ids
+- [x] Source detail differentiates healthy connected actions from recovery-only error actions
+- [x] Korean locale keeps app-authored product copy in Korean while allowing provider/proper nouns
+- [x] Initial sync disabled skip and transition failure copy are covered by local UI tests
+- [ ] Screenshot smoke matrix: 360x800 Korean, 430x932 Korean, tablet, font scale 1.3, dark theme

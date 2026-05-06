@@ -1,8 +1,10 @@
 package com.becalm.android.ui.sources
 
 import android.content.Context
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -61,6 +63,54 @@ class SourcesListScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.sources_empty_title)).assertIsDisplayed()
+    }
+
+    @Test
+    fun sources_list_uses_display_labels_instead_of_raw_source_or_status_ids() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                SourcesListScreenContent(
+                    state = SourcesListUiState(
+                        items = listOf(
+                            SourceStatusRow(
+                                sourceType = "gmail",
+                                status = "SYNCING",
+                                lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
+                                lastError = null,
+                            ),
+                            SourceStatusRow(
+                                sourceType = "naver_imap",
+                                status = "NEVER_CONNECTED",
+                                lastSyncAt = null,
+                                lastError = null,
+                            ),
+                            SourceStatusRow(
+                                sourceType = "outlook_mail",
+                                status = "ERROR",
+                                lastSyncAt = null,
+                                lastError = "토큰이 만료되었습니다.",
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                    onRowClick = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_gmail)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_naver_imap)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_outlook_mail)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_syncing)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_disconnected)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
+
+        composeTestRule.onAllNodesWithText("gmail").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("naver_imap").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("outlook_mail").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("SYNCING").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("NEVER_CONNECTED").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("ERROR").assertCountEquals(0)
     }
 
     @Test

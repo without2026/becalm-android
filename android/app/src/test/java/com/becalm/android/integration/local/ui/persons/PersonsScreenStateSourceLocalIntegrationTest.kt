@@ -204,12 +204,12 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             assertEquals(1, first.interactionCount)
             assertEquals(1, first.pendingCommitmentCount)
             assertEquals(setOf(SourceType.VOICE), first.channelSources)
-            assertEquals("가장 최근 음성 메모", first.lastInteractionSnippet)
+            assertEquals(null, first.lastInteractionSnippet)
 
             val second = updated.people.last()
             assertEquals("unknown@corp.com", second.displayLabel)
             assertEquals(0, second.pendingCommitmentCount)
-            assertEquals("메일 미리보기", second.lastInteractionSnippet)
+            assertEquals(null, second.lastInteractionSnippet)
 
             assertEquals(PersonsSortOrder.MOST_RECENT_EVENT_DESC, updated.sortOrder)
             assertEquals(listOf("raw:raw-unassigned"), updated.unassignedEvents.map { it.sourceRef })

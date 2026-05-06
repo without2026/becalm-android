@@ -2,9 +2,11 @@ package com.becalm.android.integration.local.ui.persons
 
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
@@ -69,16 +71,16 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = {},
                     onPersonClick = {},
-                    onBlockPerson = {},
                 )
             }
         }
 
         composeRule.onNodeWithText(string(R.string.person_matching_required_banner_title)).assertExists()
         composeRule.onNodeWithText(string(R.string.persons_offline_badge_no_sync)).assertIsDisplayed()
-        composeRule.onNodeWithText("김철수 · ABC Corp · 팀장").assertExists()
+        composeRule.onNodeWithText("김철수").assertExists()
+        composeRule.onAllNodesWithText("김철수 · ABC Corp · 팀장").assertCountEquals(0)
         composeRule.onNodeWithText(string(R.string.persons_pending_commitments_fmt, 2)).assertExists()
-        composeRule.onNodeWithText("계약서 검토 요청").assertExists()
+        composeRule.onAllNodesWithText("계약서 검토 요청").assertCountEquals(0)
         composeRule.onNodeWithTag("persons-list")
             .performScrollToNode(hasText(string(R.string.persons_unassigned_title)))
         composeRule.onNodeWithText(string(R.string.persons_unassigned_title)).assertExists()
@@ -108,7 +110,6 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = { typedQuery = it },
                     onPersonClick = {},
-                    onBlockPerson = {},
                 )
             }
         }

@@ -3,10 +3,12 @@ package com.becalm.android.integration.local.ui.sources
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import com.becalm.android.ui.sources.RecentEventSummary
 import com.becalm.android.ui.sources.SourceDetailScreenContent
 import com.becalm.android.ui.sources.SourceDetailUiState
@@ -121,6 +123,8 @@ class SourcesUiTest {
         composeRule.onNodeWithText("계약 메일").assertExists()
         composeRule.onNodeWithTag("source-detail-reconnect").performClick()
         composeRule.onNodeWithTag("source-detail-sync-now").performClick()
+        composeRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasTestTag("source-detail-disconnect"))
         composeRule.onNodeWithTag("source-detail-disconnect").performClick()
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_disconnect_confirm_title)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-detail-disconnect-cancel").performClick()

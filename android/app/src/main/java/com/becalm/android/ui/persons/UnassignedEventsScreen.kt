@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,6 +45,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
@@ -340,7 +341,8 @@ private fun PersonMatchReviewCard(
                 OutlinedButton(onClick = { manualOpen = true }) {
                     Text(text = stringResource(R.string.person_match_other_person_action))
                 }
-                Button(
+                BecalmButton(
+                    text = stringResource(R.string.person_match_confirm_action),
                     modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
                     onClick = {
                         onConfirm(
@@ -348,9 +350,8 @@ private fun PersonMatchReviewCard(
                             selectedNickname.ifBlank { candidate.displayName },
                         )
                     },
-                ) {
-                    Text(text = stringResource(R.string.person_match_confirm_action))
-                }
+                    variant = BecalmButtonVariant.Primary,
+                )
             }
         } else {
             ManualMatchPanel(
@@ -469,12 +470,12 @@ private fun ManualMatchPanel(
         ) {
             Text(text = stringResource(R.string.persons_manual_add_person_action))
         }
-        Button(
+        BecalmButton(
+            text = stringResource(R.string.persons_manual_match_action),
             enabled = personAnchor.isNotBlank(),
             onClick = onConfirm,
-        ) {
-            Text(text = stringResource(R.string.persons_manual_match_action))
-        }
+            variant = BecalmButtonVariant.Primary,
+        )
     }
 }
 

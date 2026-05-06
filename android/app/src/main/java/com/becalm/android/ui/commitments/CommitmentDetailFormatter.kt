@@ -25,6 +25,7 @@ internal object CommitmentDetailFormatter {
         }
         return CommitmentSourcePresentation(
             isManual = isManual,
+            sourceType = entity.sourceType,
             sourceTitle = if (isManual) null else entity.sourceEventTitle,
             sourceOccurredAt = occurredAt,
             sourceLabel = label,

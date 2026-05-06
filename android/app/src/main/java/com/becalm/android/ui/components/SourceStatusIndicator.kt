@@ -33,15 +33,19 @@ import com.becalm.android.ui.theme.becalmColors
 /**
  * Represents the health of a data source's last synchronization.
  *
- * - [Ok]: source synced successfully and is fresh.
+ * - [Connected]: source synced successfully and is fresh.
+ * - [Syncing]: source is actively syncing.
  * - [Stale]: source has not synced recently; attention may be needed.
  * - [Error]: sync failed; user action required.
+ * - [Disconnected]: source has not been connected.
  * - [Unknown]: status cannot be determined (e.g. first-run, no connectivity check yet).
  */
 public enum class SourceSyncStatus {
-    Ok,
+    Connected,
+    Syncing,
     Stale,
     Error,
+    Disconnected,
     Unknown,
 }
 
@@ -55,10 +59,11 @@ public enum class SourceSyncStatus {
  * [SourceDetailScreen]; behavior is byte-identical to those prior implementations.
  */
 internal fun statusStringToSyncStatus(raw: String): SourceSyncStatus = when (raw.uppercase()) {
-    "CONNECTED" -> SourceSyncStatus.Ok
-    "SYNCING" -> SourceSyncStatus.Ok
+    "CONNECTED" -> SourceSyncStatus.Connected
+    "SYNCING" -> SourceSyncStatus.Syncing
     "ERROR" -> SourceSyncStatus.Error
-    "NEVER_CONNECTED" -> SourceSyncStatus.Unknown
+    "NEVER_CONNECTED" -> SourceSyncStatus.Disconnected
+    "" -> SourceSyncStatus.Unknown
     else -> SourceSyncStatus.Stale
 }
 
@@ -94,9 +99,11 @@ public fun SourceStatusIndicator(
     val colorScheme = MaterialTheme.colorScheme
 
     val dotColor = when (status) {
-        SourceSyncStatus.Ok -> becalmColors.sourceStatusOk
+        SourceSyncStatus.Connected -> becalmColors.sourceStatusOk
+        SourceSyncStatus.Syncing -> colorScheme.primary
         SourceSyncStatus.Stale -> becalmColors.sourceStatusStale
         SourceSyncStatus.Error -> becalmColors.sourceStatusError
+        SourceSyncStatus.Disconnected -> colorScheme.outlineVariant
         SourceSyncStatus.Unknown -> colorScheme.outline
     }
 
@@ -134,7 +141,7 @@ public fun SourceStatusIndicator(
 private fun PreviewSourceStatusOkFull() {
     BecalmTheme {
         Box(modifier = Modifier.padding(16.dp)) {
-            SourceStatusIndicator(status = SourceSyncStatus.Ok, label = "Synced 2m ago")
+            SourceStatusIndicator(status = SourceSyncStatus.Connected, label = "Synced 2m ago")
         }
     }
 }
@@ -176,7 +183,7 @@ private fun PreviewSourceStatusCompact() {
         Box(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SourceStatusIndicator(
-                    status = SourceSyncStatus.Ok,
+                    status = SourceSyncStatus.Connected,
                     label = "Synced",
                     compact = true,
                 )

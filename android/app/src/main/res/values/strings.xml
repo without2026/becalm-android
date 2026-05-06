@@ -47,6 +47,9 @@
     <string name="terms_title">Terms &amp; Privacy</string>
     <string name="terms_subtitle">Please read and accept before continuing.</string>
     <string name="terms_pipa_notice">BeCalm collects and processes personal information (contacts, calendar events, emails) on-device under your consent as required by the Personal Information Protection Act (PIPA). Your data is stored locally first and only shared with our servers with your explicit consent.</string>
+    <string name="terms_required_label">Required</string>
+    <string name="terms_check_terms_privacy">I agree to the Terms and Privacy notice.</string>
+    <string name="terms_check_local_first">Raw content and relationship data are managed locally first; only consented processing leaves the device.</string>
     <string name="terms_accept_checkbox">I have read and agree to the Terms</string>
     <string name="terms_cta">Continue</string>
     <string name="terms_decline_cta">Decline &amp; exit</string>
@@ -60,6 +63,7 @@
     <string name="login_cta">Sign In</string>
     <string name="login_signup_cta">Create account</string>
     <string name="login_google_cta">Continue with Google</string>
+    <string name="login_framing">Quietly organize conversations and commitments by person.</string>
     <string name="login_google_error_no_credentials">No Google account found on this device. Add one from Settings → Accounts and try again.</string>
     <string name="login_google_error_unknown">Google sign-in failed. Please try again or use email.</string>
     <string name="login_error_empty_fields">Please enter your email and password.</string>
@@ -220,11 +224,16 @@
 
     <!-- Onboarding: Cold sync -->
     <string name="onb_cold_sync_title">Initial Sync</string>
-    <string name="onb_cold_sync_headline">Syncing your data…</string>
-    <string name="onb_cold_sync_body">BeCalm is importing your existing data for the first time. This may take a few minutes.</string>
-    <string name="onb_cold_sync_done">All done! Tap to continue.</string>
+    <string name="onb_cold_sync_headline">Preparing your first data</string>
+    <string name="onb_cold_sync_body">You can enter the app first. Longer sync work will continue in the background.</string>
+    <string name="onb_cold_sync_done">Initial sync is complete</string>
     <string name="onb_cold_sync_cta">Go to Today</string>
     <string name="onb_cold_sync_skip_cta">Skip for now</string>
+    <string name="onb_cold_sync_skip_disabled">Please wait while BeCalm checks the minimum setup. You can skip shortly.</string>
+    <string name="onb_cold_sync_transition_error">Could not finish this step. Please try again.</string>
+    <string name="onb_cold_sync_profile">My profile</string>
+    <string name="onb_cold_sync_source_done">Done</string>
+    <string name="onb_cold_sync_source_syncing">Syncing</string>
 
     <!-- Today Timeline -->
     <string name="today_title">Today</string>
@@ -275,7 +284,6 @@
     <string name="person_match_confirm_action">확인</string>
     <string name="person_match_other_person_action">다른 사람</string>
     <string name="person_match_later_action">나중에</string>
-    <string name="persons_block_person_action">Hide</string>
     <string name="persons_interactions_count">%d interactions</string>
     <string name="persons_pending_commitments_fmt">Pending %1$d</string>
     <string name="persons_section_pending_commitments">Pending commitments</string>
@@ -301,6 +309,9 @@
     <string name="person_detail_stat_call">Call</string>
     <string name="person_detail_stat_meeting">Meeting</string>
     <string name="person_detail_stat_commitment">Commitment</string>
+    <string name="person_detail_bucket_my_actions">What I need to do</string>
+    <string name="person_detail_bucket_their_actions">What they need to do</string>
+    <string name="person_detail_next_action_title">Recommended next action</string>
     <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
     <string name="source_detail_events_synced_fmt">%1$d recent items shown</string>
     <string name="source_detail_last_error_fmt">Last error: %1$s</string>
@@ -332,20 +343,15 @@
     <string name="raw_event_source_badge_outlook_calendar">Outlook Calendar</string>
     <string name="raw_event_source_badge_voice">Voice</string>
     <string name="raw_event_source_badge_call_recording">Call Recording</string>
+    <string name="raw_event_source_badge_meeting">Meeting</string>
     <string name="raw_event_source_badge_unknown">Other</string>
 
     <!-- Today timeline (S5-A / S5-B) -->
-    <string name="today_direction_badge_give">I give</string>
-    <string name="today_direction_badge_take">I take</string>
-    <string name="today_direction_badge_unknown">—</string>
     <string name="today_counterparty_unknown">Unknown</string>
     <string name="today_timed_section">Timeline</string>
     <string name="today_untimed_section">Needs time</string>
     <string name="today_no_due_time">No time</string>
     <string name="today_add_due_time">Add time</string>
-    <string name="today_type_action_give">Action · I give</string>
-    <string name="today_type_action_take">Action · I take</string>
-    <string name="today_type_action">Action</string>
     <string name="today_type_schedule">Schedule</string>
     <string name="today_type_meeting">Meeting</string>
     <string name="today_type_event">Event</string>
@@ -368,14 +374,16 @@
     <!-- Commitments -->
     <string name="commitments_title">Commitments</string>
     <string name="commitments_filter_all">All</string>
-    <string name="commitments_filter_action">Action</string>
-    <string name="commitments_filter_give">I give</string>
-    <string name="commitments_filter_take">I take</string>
+    <string name="commitments_filter_give">My tasks</string>
+    <string name="commitments_filter_take">Waiting</string>
     <string name="commitments_filter_schedule">Schedule</string>
-    <string name="commitments_filter_decision">Decision</string>
-    <string name="commitment_item_type_action">Action</string>
+    <string name="commitments_filter_closed">Closed</string>
+    <string name="commitment_item_type_action">Task</string>
     <string name="commitment_item_type_schedule">Schedule</string>
     <string name="commitment_item_type_decision">Decision</string>
+    <string name="commitment_action_label_give">My task</string>
+    <string name="commitment_action_label_take">Waiting on them</string>
+    <string name="commitment_action_label_unknown">Task</string>
     <string name="commitment_subtype_schedule_confirmed">Confirmed</string>
     <string name="commitment_subtype_schedule_changed">Changed</string>
     <string name="commitment_subtype_schedule_postponed">Postponed</string>
@@ -501,6 +509,7 @@
     <string name="settings_account_section">Account</string>
     <string name="settings_preferences_section">Preferences</string>
     <string name="settings_data_section">Data</string>
+    <string name="settings_danger_section">Danger Zone</string>
     <string name="settings_notifications_label">Notifications</string>
     <string name="settings_sources_label">Data Sources</string>
     <string name="settings_processing_status_label">Processing Status</string>
@@ -515,10 +524,12 @@
     <string name="sources_title">Data Sources</string>
     <string name="sources_empty_title">No sources connected</string>
     <string name="sources_empty_message">Connect a data source to start capturing commitments.</string>
-    <string name="sources_status_ok">Synced</string>
+    <string name="sources_status_connected">Synced</string>
+    <string name="sources_status_syncing">Syncing</string>
     <string name="sources_status_stale">Stale</string>
     <string name="sources_status_error">Error</string>
-    <string name="sources_status_unknown">Not connected</string>
+    <string name="sources_status_disconnected">Not connected</string>
+    <string name="sources_status_unknown">Checking</string>
 
     <!-- Bottom navigation -->
     <string name="nav_today">Today</string>
@@ -577,9 +588,14 @@
     <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX only</string>
     <string name="source_detail_empty_events">No events recorded from this source yet.</string>
     <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
+    <string name="source_detail_danger_zone_title">Danger zone</string>
+    <string name="source_detail_disconnect_body">Disconnect only this source. Existing local data stays on this device.</string>
 
     <!-- Privacy management -->
     <string name="privacy_management_title">Privacy Management</string>
+    <string name="privacy_data_control_section">Data Control</string>
+    <string name="privacy_processing_section">Processing</string>
+    <string name="privacy_danger_section">Danger Zone</string>
     <string name="privacy_export_title">내 데이터 다운로드 — 열람권(제35조)</string>
     <string name="privacy_export_subtitle">Save the current on-device BeCalm data as a ZIP file.</string>
     <string name="privacy_withdraw_title">동의 철회 — 동의철회권(제39조)</string>
@@ -610,6 +626,13 @@
     <string name="privacy_delete_keyword_label">Type “삭제” to confirm</string>
     <string name="privacy_delete_confirm">Delete account locally</string>
     <string name="privacy_activity_log_empty">No PIPA activity has been recorded yet.</string>
+    <string name="privacy_withdraw_voice_label">Voice auto processing</string>
+    <string name="privacy_withdraw_gmail_label">Gmail</string>
+    <string name="privacy_withdraw_outlook_mail_label">Outlook Mail</string>
+    <string name="privacy_withdraw_naver_label">Naver Email</string>
+    <string name="privacy_withdraw_daum_label">Daum Email</string>
+    <string name="privacy_withdraw_google_calendar_label">Google Calendar</string>
+    <string name="privacy_withdraw_outlook_calendar_label">Outlook Calendar</string>
     <string name="processing_paused_banner">처리 일시중단 중</string>
     <string name="processing_status_title">Processing Status</string>
 </resources>

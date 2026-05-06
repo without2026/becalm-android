@@ -40,6 +40,7 @@ public data class ColdSyncUiState(
     val done: Boolean = false,
     val skipEnabled: Boolean = false,
     val transitioning: Boolean = false,
+    val transitionError: Boolean = false,
     val lastTransition: ColdSyncTransitionSnapshot? = null,
 )
 
@@ -73,6 +74,7 @@ public class ColdSyncViewModel @Inject constructor(
 
     private val skipEnabledFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val transitioningFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val transitionErrorFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private val transitionSnapshotFlow: MutableStateFlow<ColdSyncTransitionSnapshot?> = MutableStateFlow(null)
     private val _effects: MutableSharedFlow<ColdSyncEffect> = MutableSharedFlow(extraBufferCapacity = 1)
     private val backingState: MutableStateFlow<ColdSyncUiState> = MutableStateFlow(ColdSyncUiState())
@@ -93,9 +95,13 @@ public class ColdSyncViewModel @Inject constructor(
         if (stage1Started) return
         stage1Started = true
         viewModelScope.launch {
+            transitionErrorFlow.value = false
             when (val result = runtimeCoordinator.startStage1(Instant.fromEpochMilliseconds(System.currentTimeMillis()))) {
                 is BecalmResult.Success -> logger.d(TAG, "Stage 1 started")
-                is BecalmResult.Failure -> logger.w(TAG, "Stage 1 start failed: ${result.error}")
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "Stage 1 start failed: ${result.error}")
+                    transitionErrorFlow.value = true
+                }
             }
         }
     }
@@ -110,12 +116,16 @@ public class ColdSyncViewModel @Inject constructor(
             CombinedFlowValues(statuses, userProfileReady, enabledSources, skipEnabled, transitioning)
         }
         .combine(transitionSnapshotFlow) { values, lastTransition ->
+            values to lastTransition
+        }
+        .combine(transitionErrorFlow) { (values, lastTransition), transitionError ->
             buildUiState(
                 values.statuses,
                 values.userProfileReady,
                 values.enabledSources,
                 values.skipEnabled,
                 values.transitioning,
+                transitionError,
                 lastTransition,
             )
         }
@@ -135,12 +145,16 @@ public class ColdSyncViewModel @Inject constructor(
     public fun onStage1Completed(at: Instant = Instant.fromEpochMilliseconds(System.currentTimeMillis())) {
         viewModelScope.launch {
             transitioningFlow.value = true
+            transitionErrorFlow.value = false
             when (val result = lifecycleCoordinator.completeStage1(at)) {
                 is BecalmResult.Success -> {
                     transitionSnapshotFlow.value = result.value
                     _effects.tryEmit(ColdSyncEffect.NavigateToToday)
                 }
-                is BecalmResult.Failure -> logger.w(TAG, "completeStage1 failed: ${result.error}")
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "completeStage1 failed: ${result.error}")
+                    transitionErrorFlow.value = true
+                }
             }
             transitioningFlow.value = false
         }
@@ -151,12 +165,16 @@ public class ColdSyncViewModel @Inject constructor(
         if (!skipEnabledFlow.value) return
         viewModelScope.launch {
             transitioningFlow.value = true
+            transitionErrorFlow.value = false
             when (val result = lifecycleCoordinator.deferStage1(at)) {
                 is BecalmResult.Success -> {
                     transitionSnapshotFlow.value = result.value
                     _effects.tryEmit(ColdSyncEffect.NavigateToToday)
                 }
-                is BecalmResult.Failure -> logger.w(TAG, "deferStage1 failed: ${result.error}")
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "deferStage1 failed: ${result.error}")
+                    transitionErrorFlow.value = true
+                }
             }
             transitioningFlow.value = false
         }
@@ -187,6 +205,7 @@ public class ColdSyncViewModel @Inject constructor(
         enabledSources: Set<String>,
         skipEnabled: Boolean,
         transitioning: Boolean,
+        transitionError: Boolean,
         lastTransition: ColdSyncTransitionSnapshot?,
     ): ColdSyncUiState {
         // Only sources the user actually enabled during onboarding can ever leave
@@ -212,6 +231,7 @@ public class ColdSyncViewModel @Inject constructor(
             done = trackedProgress.isNotEmpty() && trackedProgress.values.all { it >= 1f },
             skipEnabled = skipEnabled,
             transitioning = transitioning,
+            transitionError = transitionError,
             lastTransition = lastTransition,
         )
     }

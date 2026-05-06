@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -109,18 +110,38 @@ internal fun SourceEventCardRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        CommitmentBucket(label = "내가 해야 할 일", items = card.myActions)
-        CommitmentBucket(label = "상대가 해야 할 일", items = card.theirActions)
+        CommitmentBucket(label = stringResource(R.string.person_detail_bucket_my_actions), items = card.myActions)
+        CommitmentBucket(label = stringResource(R.string.person_detail_bucket_their_actions), items = card.theirActions)
         CommitmentBucket(label = stringResource(R.string.commitment_item_type_schedule), items = card.schedules)
+        card.nextAction?.let { nextAction ->
+            NextActionPanel(label = nextAction.label)
+        }
         if (card.commitmentsExtractedCount > 0) {
             CommitmentsExtractedBadge(count = card.commitmentsExtractedCount)
         }
-        card.nextAction?.let { nextAction ->
+    }
+}
+
+@Composable
+private fun NextActionPanel(label: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             Text(
-                text = "다음: ${nextAction.label}",
+                text = stringResource(R.string.person_detail_next_action_title),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

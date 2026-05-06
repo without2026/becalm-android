@@ -47,15 +47,15 @@ import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
-import com.becalm.android.ui.components.DirectionBadge
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
-import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.components.TimestampText
+import com.becalm.android.ui.components.commitmentActionLabelRes
+import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
@@ -530,10 +530,8 @@ private fun TimelineCard(
     } else {
         Modifier
     }
-    // Surface = glassPanel only. Direction is signalled by the inline
-    // DirectionBadge below; type is signalled by the leading label. Tinting the
-    // surface itself was double-signal and used wrong (amber) colors for the
-    // take direction. See DESIGN.md §4 Two-Recipe Rule.
+    // Surface = glassPanel only. Action ownership is signalled by the leading label.
+    // Tinting the surface itself was double-signal and used wrong colors for take.
     Column(
         modifier = modifier
             .then(clickModifier)
@@ -569,21 +567,22 @@ private fun TimelineCard(
         if (item is TimelineItem.Commitment) {
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                when (item.itemType) {
-                    CommitmentItemType.ACTION -> item.direction?.let { direction ->
-                        DirectionBadge(direction = direction)
-                        Spacer(modifier = Modifier.size(size = 8.dp))
-                    }
-                    CommitmentItemType.SCHEDULE -> {
-                        Text(
-                            text = scheduleLabel(item.scheduleStatus),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(modifier = Modifier.size(size = 8.dp))
-                    }
-                }
                 CounterpartyText(name = item.counterpartyDisplayName)
+                if (item.itemType == CommitmentItemType.SCHEDULE) {
+                    Spacer(modifier = Modifier.size(size = 8.dp))
+                    Text(
+                        text = scheduleLabel(item.scheduleStatus),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else if (item.direction.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.size(size = 8.dp))
+                    Text(
+                        text = stringResource(R.string.commitment_action_label_unknown),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (!item.isTimed) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -605,11 +604,7 @@ private fun TimelineCard(
 @Composable
 private fun typeLabelFor(item: TimelineItem): String = when (item) {
     is TimelineItem.Commitment -> when (item.itemType) {
-        CommitmentItemType.ACTION -> when (item.direction) {
-            "give" -> stringResource(R.string.today_type_action_give)
-            "take" -> stringResource(R.string.today_type_action_take)
-            else -> stringResource(R.string.today_type_action)
-        }
+        CommitmentItemType.ACTION -> stringResource(commitmentActionLabelRes(item.direction))
         CommitmentItemType.SCHEDULE -> stringResource(R.string.today_type_schedule)
         else -> stringResource(R.string.today_section_commitments)
     }

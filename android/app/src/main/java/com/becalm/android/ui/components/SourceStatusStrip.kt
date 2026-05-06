@@ -187,28 +187,9 @@ private fun ChipStateIndicator(state: ChipState) {
     }
 }
 
-/**
- * Display name for the seven user-facing ingestion sources shown on the Today
- * strip. Resolves to localized resources so KO devices see the Korean labels
- * already shared with [EventSourceBadge]; previously hardcoded English.
- *
- * Any source type not in the seven falls through to the unknown resource so
- * the UI stays renderable when the server ships a new wire type.
- */
 @Composable
-private fun sourceDisplayName(sourceType: String): String = stringResource(
-    when (sourceType) {
-        SourceType.VOICE -> R.string.raw_event_source_badge_voice
-        SourceType.GMAIL -> R.string.raw_event_source_badge_gmail
-        SourceType.OUTLOOK_MAIL -> R.string.raw_event_source_badge_outlook_mail
-        SourceType.NAVER_IMAP -> R.string.raw_event_source_badge_naver_imap
-        SourceType.DAUM_IMAP -> R.string.raw_event_source_badge_daum_imap
-        SourceType.GOOGLE_CALENDAR -> R.string.raw_event_source_badge_google_calendar
-        SourceType.OUTLOOK_CALENDAR -> R.string.raw_event_source_badge_outlook_calendar
-        SourceType.CALL_RECORDING -> R.string.raw_event_source_badge_call_recording
-        else -> R.string.raw_event_source_badge_unknown
-    },
-)
+private fun sourceDisplayName(sourceType: String): String =
+    stringResource(sourcePresentationFor(sourceType).labelRes)
 
 private fun formatTimeHHmm(at: Instant): String {
     val local = at.toLocalDateTime(TimeZone.currentSystemDefault())

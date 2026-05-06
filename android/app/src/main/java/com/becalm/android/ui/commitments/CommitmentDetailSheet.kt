@@ -37,6 +37,7 @@ import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.SheetCloseRow
 import com.becalm.android.ui.navigation.BecalmRoute
 import kotlinx.coroutines.flow.Flow
@@ -245,6 +246,10 @@ internal fun DetailSheetContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 4. Source section — manual vs LLM-extracted diverge per MAN-004
+        if (!source.isManual && !source.sourceType.isNullOrBlank()) {
+            EventSourceBadge(sourceType = source.sourceType)
+            Spacer(modifier = Modifier.height(6.dp))
+        }
         Text(
             text = source.sourceLabel,
             style = MaterialTheme.typography.bodySmall,

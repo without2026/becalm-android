@@ -1,10 +1,11 @@
 package com.becalm.android.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Preferences section of [SettingsScreen] — notifications toggle plus the VOI-004
@@ -23,7 +23,8 @@ import com.becalm.android.ui.theme.glassPanel
  * live here because they are only consumed by the PIPA enable dialog rendered above
  * this section.
  *
- * Body is byte-identical with the original inlined "Preferences section" block.
+ * R8 audit: rendered as a plain section list so settings does not look like a wall
+ * of equivalent glass cards.
  */
 @Composable
 internal fun SettingsPipaSection(
@@ -37,10 +38,8 @@ internal fun SettingsPipaSection(
     SettingsSectionLabel(stringResource(R.string.settings_preferences_section))
     Spacer(modifier = Modifier.height(8.dp))
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         SettingsToggleRow(
             label = stringResource(R.string.settings_notifications_label),
@@ -48,12 +47,14 @@ internal fun SettingsPipaSection(
             onCheckedChange = onToggleNotifications,
             toggleTestTag = "settings-notifications-toggle",
         )
+        HorizontalDivider()
         SettingsToggleRow(
             label = stringResource(R.string.settings_pipa_toggle_label),
             checked = pipaConsentEnabled,
             onCheckedChange = onTogglePipa,
             toggleTestTag = "settings-pipa-toggle",
         )
+        HorizontalDivider()
         SettingsToggleRow(
             label = stringResource(R.string.settings_call_log_matching_toggle_label),
             checked = callLogMatchingConsentEnabled,

@@ -69,9 +69,9 @@ class PersonDetailScreenTest {
             ),
         )
 
-        composeTestRule.onNodeWithText("내가 해야 할 일").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_my_actions)).assertIsDisplayed()
         composeTestRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
-        composeTestRule.onNodeWithText("상대가 해야 할 일").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_their_actions)).assertIsDisplayed()
         composeTestRule.onNodeWithText("자료 확인하기").assertIsDisplayed()
     }
 

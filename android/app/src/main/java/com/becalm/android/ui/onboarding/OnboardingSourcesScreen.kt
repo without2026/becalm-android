@@ -5,16 +5,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -27,7 +24,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -41,12 +37,10 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmButton
-import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -490,219 +484,6 @@ internal fun SourceConnectionsContent(
         }
     }
 }
-
-@Composable
-private fun RequiredSetupSummary() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.onb_setup_required_terms),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(R.string.onb_setup_required_privacy),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun SetupConnectionRow(
-    item: OnboardingSetupItemUi,
-    onConnect: () -> Unit,
-    onSkip: () -> Unit,
-    skipLabel: String,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (item.detail != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = item.detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            AssistChip(
-                onClick = {},
-                label = {
-                    Text(
-                        text = stateLabel(item.state),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                },
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val terminal = item.state == SourceConnectionState.Connected || item.state == SourceConnectionState.Skipped
-            BecalmButton(
-                text = connectLabel(item.state, requiresConsent = false),
-                onClick = onConnect,
-                enabled = !terminal,
-                modifier = Modifier.weight(1f),
-            )
-            BecalmButton(
-                text = skipLabel,
-                onClick = onSkip,
-                variant = BecalmButtonVariant.Text,
-                enabled = !terminal,
-            )
-        }
-    }
-}
-
-private fun androidx.compose.foundation.lazy.LazyListScope.sourceSection(
-    title: String,
-    items: List<SourceConnectionItemUi>,
-    onConnect: (OnboardingSourceProvider) -> Unit,
-    onSkip: (OnboardingSourceProvider) -> Unit,
-    skipLabel: String,
-) {
-    item(key = "$title-title") {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-    }
-    items(items = items, key = { item -> item.provider.name }) { item ->
-        SourceConnectionRow(
-            item = item,
-            onConnect = { onConnect(item.provider) },
-            onSkip = { onSkip(item.provider) },
-            skipLabel = skipLabel,
-        )
-    }
-}
-
-@Composable
-private fun SourceConnectionRow(
-    item: SourceConnectionItemUi,
-    onConnect: () -> Unit,
-    onSkip: () -> Unit,
-    skipLabel: String,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            AssistChip(
-                onClick = {},
-                label = {
-                    Text(
-                        text = stateLabel(item.state),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                },
-            )
-        }
-        if (item.consentCopy != null && item.state == SourceConnectionState.ConsentRequired) {
-            Text(
-                text = item.consentCopy,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val terminal = item.state == SourceConnectionState.Connected || item.state == SourceConnectionState.Skipped
-            BecalmButton(
-                text = connectLabel(item.state, item.consentCopy != null),
-                onClick = onConnect,
-                enabled = !terminal && item.state != SourceConnectionState.Connecting &&
-                    item.state != SourceConnectionState.PendingExternalAuth,
-                loading = item.state == SourceConnectionState.Connecting ||
-                    item.state == SourceConnectionState.PendingExternalAuth,
-                modifier = Modifier.weight(1f),
-            )
-            BecalmButton(
-                text = skipLabel,
-                onClick = onSkip,
-                variant = BecalmButtonVariant.Text,
-                enabled = !terminal,
-            )
-        }
-    }
-}
-
-@Composable
-private fun connectLabel(state: SourceConnectionState, requiresConsent: Boolean): String =
-    when {
-        state == SourceConnectionState.Failed -> stringResource(R.string.onb_sources_retry)
-        requiresConsent -> stringResource(R.string.onb_sources_connect_with_consent)
-        else -> stringResource(R.string.action_connect)
-    }
-
-@Composable
-private fun stateLabel(state: SourceConnectionState): String =
-    stringResource(
-        when (state) {
-            SourceConnectionState.Idle -> R.string.onb_sources_status_ready
-            SourceConnectionState.ConsentRequired -> R.string.onb_sources_status_consent
-            SourceConnectionState.Connecting -> R.string.onb_sources_status_connecting
-            SourceConnectionState.PendingExternalAuth -> R.string.onb_sources_status_waiting
-            SourceConnectionState.Connected -> R.string.onb_sources_status_connected
-            SourceConnectionState.Skipped -> R.string.onb_sources_status_skipped
-            SourceConnectionState.Failed -> R.string.onb_sources_status_failed
-        },
-    )
 
 @Composable
 private fun sourceConnectionItems(

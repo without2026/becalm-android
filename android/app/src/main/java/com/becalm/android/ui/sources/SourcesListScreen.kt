@@ -38,7 +38,8 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.SourceStatusIndicator
-import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.components.sourceStatusLabelRes
 import com.becalm.android.ui.components.statusStringToSyncStatus
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchSourcesListNavigation
@@ -130,12 +131,7 @@ private fun SourceRowItem(
     modifier: Modifier = Modifier,
 ) {
     val syncStatus = statusStringToSyncStatus(row.status)
-    val statusLabel = when (syncStatus) {
-        SourceSyncStatus.Ok -> stringResource(R.string.sources_status_ok)
-        SourceSyncStatus.Stale -> stringResource(R.string.sources_status_stale)
-        SourceSyncStatus.Error -> stringResource(R.string.sources_status_error)
-        SourceSyncStatus.Unknown -> stringResource(R.string.sources_status_unknown)
-    }
+    val statusLabel = stringResource(sourceStatusLabelRes(syncStatus))
     Row(
         modifier = modifier
             .testTag("sources-row-${row.sourceType}")
@@ -177,7 +173,7 @@ private fun SourceRowItem(
 @Composable
 private fun rowDisplayName(row: SourceStatusRow): String = when (row.sourceType) {
     "contacts" -> stringResource(R.string.sources_contacts_title)
-    else -> row.sourceType.replaceFirstChar { it.uppercase() }
+    else -> stringResource(sourcePresentationFor(row.sourceType).labelRes)
 }
 
 @PreviewLightDark

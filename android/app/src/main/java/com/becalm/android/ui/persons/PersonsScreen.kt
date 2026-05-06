@@ -52,6 +52,7 @@ import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
+import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -88,7 +89,6 @@ public fun PersonsScreen(
         onPersonClick = { personId ->
             navController.navigate(BecalmRoute.PersonDetail(personId).path)
         },
-        onBlockPerson = viewModel::onBlockPerson,
         onOpenUnassigned = {
             navController.navigate(BecalmRoute.PersonsUnassigned.path)
         },
@@ -103,7 +103,6 @@ public fun PersonsScreenContent(
     snackbarHostState: SnackbarHostState,
     onQueryChange: (String) -> Unit,
     onPersonClick: (String) -> Unit,
-    onBlockPerson: (PersonRow) -> Unit = {},
     onOpenUnassigned: () -> Unit = {},
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onOpenSettings: () -> Unit = {},
@@ -153,7 +152,6 @@ public fun PersonsScreenContent(
                         PersonList(
                             state = state,
                             onPersonClick = onPersonClick,
-                            onBlockPerson = onBlockPerson,
                         )
                     } else {
                         EmptyState(
@@ -167,7 +165,6 @@ public fun PersonsScreenContent(
                     PersonList(
                         state = state,
                         onPersonClick = onPersonClick,
-                        onBlockPerson = onBlockPerson,
                     )
                 }
             }
@@ -256,7 +253,6 @@ private fun PersonListSkeleton(modifier: Modifier = Modifier) {
 private fun PersonList(
     state: PersonsUiState,
     onPersonClick: (String) -> Unit,
-    onBlockPerson: (PersonRow) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -271,7 +267,6 @@ private fun PersonList(
                 titleRes = section.kind.titleRes,
                 people = section.people,
                 onPersonClick = onPersonClick,
-                onBlockPerson = onBlockPerson,
             )
         }
         if (state.unassignedEvents.isNotEmpty()) {
@@ -312,7 +307,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
     titleRes: Int,
     people: List<PersonRow>,
     onPersonClick: (String) -> Unit,
-    onBlockPerson: (PersonRow) -> Unit,
 ) {
     if (people.isEmpty()) return
     item(key = "$key-header") {
@@ -322,7 +316,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.personSection(
         PersonRowItem(
             person = person,
             onClick = { onPersonClick(person.personId) },
-            onBlockClick = { onBlockPerson(person) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp),
@@ -344,12 +337,19 @@ private fun PersonListSectionHeader(text: String) {
 private fun PersonRowItem(
     person: PersonRow,
     onClick: () -> Unit,
-    onBlockClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
-            .glassPanel(MaterialTheme.shapes.medium)
+            .background(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
+                shape = MaterialTheme.shapes.medium,
+            )
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = MaterialTheme.shapes.medium,
+            )
             .clickable(onClick = onClick)
             .padding(16.dp)
             .semantics { role = Role.Button },
@@ -368,15 +368,6 @@ private fun PersonRowItem(
             if (person.pendingCommitmentCount > 0) {
                 PendingCommitmentBadge(count = person.pendingCommitmentCount)
             }
-            if (!person.lastInteractionSnippet.isNullOrBlank()) {
-                Text(
-                    text = person.lastInteractionSnippet,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
             if (person.interactionCount > 0) {
                 Text(
                     text = stringResource(R.string.persons_interactions_count, person.interactionCount),
@@ -384,9 +375,6 @@ private fun PersonRowItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        TextButton(onClick = onBlockClick) {
-            Text(text = stringResource(R.string.persons_block_person_action))
         }
     }
 }
@@ -457,7 +445,7 @@ private fun UnassignedEventRow(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = event.sourceType,
+                text = stringResource(sourcePresentationFor(event.sourceType).labelRes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -488,12 +476,7 @@ private fun avatarInitial(seed: String): String =
     seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
 
 private fun buildDisplayHeadline(person: PersonRow): String {
-    val parts = buildList {
-        add(person.displayLabel)
-        person.companyName?.takeIf { it.isNotBlank() }?.let(::add)
-        person.jobTitle?.takeIf { it.isNotBlank() }?.let(::add)
-    }
-    return parts.joinToString(separator = " · ")
+    return person.displayLabel
 }
 
 private fun Instant.toHourMinuteLabel(): String {
@@ -545,7 +528,6 @@ private fun PreviewPersonsScreenPopulated() {
                         PersonRowItem(
                             person = person,
                             onClick = {},
-                            onBlockClick = {},
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),

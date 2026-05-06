@@ -45,6 +45,7 @@ public data class CommitmentDetailActionState(
 
 public data class CommitmentSourcePresentation(
     val isManual: Boolean = false,
+    val sourceType: String? = null,
     val sourceTitle: String? = null,
     val sourceOccurredAt: Instant? = null,
     val sourceLabel: String = "",

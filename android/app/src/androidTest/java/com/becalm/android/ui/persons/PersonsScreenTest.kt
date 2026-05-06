@@ -1,8 +1,10 @@
 package com.becalm.android.ui.persons
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
@@ -61,7 +63,7 @@ class PersonsScreenTest {
     }
 
     @Test
-    fun persons_screen_person_card_shows_enrichment_meta_pending_count_and_snippet() {
+    fun persons_screen_person_card_keeps_work_context_out_of_contact_row() {
         composeTestRule.setContent {
             BecalmTheme {
                 PersonsScreenContent(
@@ -87,9 +89,10 @@ class PersonsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("김철수 · ABC Corp · 팀장").assertIsDisplayed()
+        composeTestRule.onNodeWithText("김철수").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("김철수 · ABC Corp · 팀장").assertCountEquals(0)
         composeTestRule.onNodeWithText("미이행 2건").assertIsDisplayed()
-        composeTestRule.onNodeWithText("계약서 검토 요청").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("계약서 검토 요청").assertCountEquals(0)
     }
 
     @Test

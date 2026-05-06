@@ -138,7 +138,7 @@ class SettingsUiTest {
 
         composeRule.onNodeWithText(string(R.string.privacy_export_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.privacy_withdraw_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.privacy_pause_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("privacy-pause-card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("privacy-source-archive-card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("privacy-delete-card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().assertIsDisplayed()
