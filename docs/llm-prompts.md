@@ -53,6 +53,8 @@ Rules:
 - If source carries a resolved person_ref (passed in context), use it verbatim for person_ref output.
 - LLM may override person_ref with a body-explicit mention (e.g. "김대리한테") — emit the normalized form and mark confidence ≤0.7.
 - If counterparty cannot be identified, set person_ref=null (UI will route to Unassigned).
+- In a one-counterparty source, use that counterparty identity when the item clearly concerns them.
+- In multi-counterparty or multi-party sources, set `person_ref` per item only when the quote or surrounding sentence identifies the responsible/requesting participant; if ambiguous, set `person_ref=null`.
 
 [Quote]
 - quote = verbatim source text fragment containing the commitment signal.
