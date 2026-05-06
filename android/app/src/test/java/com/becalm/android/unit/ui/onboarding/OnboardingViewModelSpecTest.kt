@@ -148,7 +148,7 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ONB-003 recording folder permission denied clears SAF tree and disables voice`() = runTest {
+    fun `ONB-003 recording folder permission denied clears SAF tree and disables recordings sources`() = runTest {
         val viewModel = buildViewModel()
 
         viewModel.onRecordingFolderPermissionResult(granted = false)
@@ -156,6 +156,7 @@ class OnboardingViewModelSpecTest {
 
         coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(null) }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.VOICE, false) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.MEETING, false) }
         verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
         assertEquals(
             StepStatus.DENIED,
@@ -164,7 +165,7 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `ONB-003 SAF tree grant persists URI enables voice and marks recording folder granted`() = runTest {
+    fun `ONB-003 SAF tree grant persists URI enables recordings sources and marks recording folder granted`() = runTest {
         val viewModel = buildViewModel()
 
         viewModel.onRecordingFolderTreeGranted("content://tree/recordings")
@@ -172,6 +173,7 @@ class OnboardingViewModelSpecTest {
 
         coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri("content://tree/recordings") }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.VOICE, true) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.MEETING, true) }
         verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
         assertEquals(
             StepStatus.GRANTED,

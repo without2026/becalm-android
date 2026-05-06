@@ -275,7 +275,7 @@ public interface UserPrefsStore {
     /**
      * Emits whether the non-email [sourceType] is enabled for ingestion.
      *
-     * Supported values: `voice`, `google_calendar`, `outlook_calendar`.
+     * Supported values: `voice`, `meeting`, `google_calendar`, `outlook_calendar`.
      * Email sources continue to use [observeEmailSourceConnected].
      */
     public fun observeSourceEnabled(sourceType: String): Flow<Boolean>
@@ -283,7 +283,7 @@ public interface UserPrefsStore {
     /**
      * Persists whether the non-email [sourceType] is enabled for ingestion.
      *
-     * Supported values: `voice`, `google_calendar`, `outlook_calendar`.
+     * Supported values: `voice`, `meeting`, `google_calendar`, `outlook_calendar`.
      * Email sources continue to use [setEmailSourceConnected].
      */
     public suspend fun setSourceEnabled(sourceType: String, enabled: Boolean)
@@ -706,6 +706,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     override fun observeEnabledSources(): Flow<Set<String>> =
         combine(
             observeSourceEnabled(SourceType.VOICE),
+            observeSourceEnabled(SourceType.MEETING),
             observeEmailSourceConnected(EmailPipaProvider.GMAIL),
             observeEmailSourceManagedByBackend(EmailPipaProvider.GMAIL),
             observeEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL),
@@ -719,12 +720,13 @@ public class UserPrefsStoreImpl @Inject constructor(
         ) { values ->
             buildSet {
                 if (values[0]) add(SourceType.VOICE)
-                if (values[1] && !values[2]) add(SourceType.GMAIL)
-                if (values[3] && !values[4]) add(SourceType.OUTLOOK_MAIL)
-                if (values[5] && !values[6]) add(SourceType.NAVER_IMAP)
-                if (values[7] && !values[8]) add(SourceType.DAUM_IMAP)
-                if (values[9]) add(SourceType.GOOGLE_CALENDAR)
-                if (values[10]) add(SourceType.OUTLOOK_CALENDAR)
+                if (values[1]) add(SourceType.MEETING)
+                if (values[2] && !values[3]) add(SourceType.GMAIL)
+                if (values[4] && !values[5]) add(SourceType.OUTLOOK_MAIL)
+                if (values[6] && !values[7]) add(SourceType.NAVER_IMAP)
+                if (values[8] && !values[9]) add(SourceType.DAUM_IMAP)
+                if (values[10]) add(SourceType.GOOGLE_CALENDAR)
+                if (values[11]) add(SourceType.OUTLOOK_CALENDAR)
             }
         }
 
@@ -946,6 +948,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private companion object {
         val SUPPORTED_NON_EMAIL_SOURCES: Set<String> = setOf(
             SourceType.VOICE,
+            SourceType.MEETING,
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
         )

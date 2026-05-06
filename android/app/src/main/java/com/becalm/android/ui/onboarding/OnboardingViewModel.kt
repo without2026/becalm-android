@@ -348,17 +348,19 @@ public class OnboardingViewModel @Inject constructor(
         if (granted) return
         viewModelScope.launch {
             userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
+            userPrefsStore.setSourceEnabled(SourceType.MEETING, false)
             userPrefsStore.setRecordingFolderTreeUri(null)
             onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.DENIED)
             appRuntimeSyncCoordinator.refresh()
         }
     }
 
-    /** Persists the SAF tree grant for the shared Recordings folder and enables voice capture. */
+    /** Persists the shared Recordings SAF tree grant and enables voice/meeting capture. */
     public fun onRecordingFolderTreeGranted(uri: String) {
         viewModelScope.launch {
             userPrefsStore.setRecordingFolderTreeUri(uri)
             userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
+            userPrefsStore.setSourceEnabled(SourceType.MEETING, true)
             onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
             appRuntimeSyncCoordinator.refresh()
         }
@@ -369,6 +371,7 @@ public class OnboardingViewModel @Inject constructor(
         viewModelScope.launch {
             userPrefsStore.setRecordingFolderTreeUri(null)
             userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
+            userPrefsStore.setSourceEnabled(SourceType.MEETING, false)
             onSkipStep(OnboardingStep.RECORDING_FOLDER)
             appRuntimeSyncCoordinator.refresh()
         }
