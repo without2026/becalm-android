@@ -141,7 +141,7 @@ class UploadWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `SYNC-004 local worker path marks row failed and records sync error on retryable server failure`() = runTest {
+    fun `SYNC-004 local worker path leaves row pending and records sync error on retryable server failure`() = runTest {
         db.rawIngestionEventDao().insert(
             rawEvent(
                 id = "raw-1",
@@ -162,8 +162,8 @@ class UploadWorkerLocalIntegrationTest {
         }
 
         assertEquals(androidx.work.ListenableWorker.Result.retry().javaClass, result.javaClass)
-        assertEquals("failed", stored?.syncStatus)
-        assertEquals(1, stored?.retryCount)
+        assertEquals("pending", stored?.syncStatus)
+        assertEquals(0, stored?.retryCount)
         assertEquals(SourceConnectionStatus.ERROR, status.status)
         assertTrue(status.errorMessage?.contains("raw upload retry") == true)
     }

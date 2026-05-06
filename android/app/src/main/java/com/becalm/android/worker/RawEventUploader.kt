@@ -14,7 +14,7 @@ import kotlinx.datetime.Instant
 /**
  * Raw ingestion flush path of [UploadWorker].
  *
- * Drains all `pending` raw ingestion rows for the signed-in user in [UploadWorker.BATCH_SIZE]-item
+ * Drains all `pending` raw ingestion rows for the signed-in user in [RAW_UPLOAD_BATCH_SIZE]-item
  * pages, partitions each batch response, and translates transport errors into [FlushOutcome]
  * decisions. Every call site and log string is byte-identical with the original inlined
  * implementation; tests exercise the worker's `doWork()` only, so this extraction is invisible
@@ -28,7 +28,7 @@ internal class RawEventUploader(
 ) {
 
     /**
-     * Drains all `pending` raw ingestion rows for [userId] in [UploadWorker.BATCH_SIZE]-item pages.
+     * Drains all `pending` raw ingestion rows for [userId] in [RAW_UPLOAD_BATCH_SIZE]-item pages.
      * Marks each batch synced or failed before fetching the next page.
      *
      * @return [FlushOutcome] indicating whether to continue, retry, or fail permanently.
@@ -37,7 +37,7 @@ internal class RawEventUploader(
         var totalUploaded = 0
 
         while (true) {
-            val pending = rawIngestionRepository.findPendingSync(userId, UploadWorker.BATCH_SIZE)
+            val pending = rawIngestionRepository.findPendingSync(userId, RAW_UPLOAD_BATCH_SIZE)
             if (pending.isEmpty()) break
 
             logger.d(TAG, "rawIngestion batch count=${pending.size} attempt=$attempt")
@@ -68,16 +68,17 @@ internal class RawEventUploader(
                 }
 
                 is BecalmResult.Failure -> {
-                    // Mark every row in this batch as failed so retry_count is visible.
-                    val now = Clock.System.now()
-                    pending.forEach { rawIngestionRepository.markFailed(it.id, now) }
-
-                    return mapErrorToOutcome(
+                    val outcome = mapErrorToOutcome(
                         logger = logger,
                         error = uploadResult.error,
                         attempt = attempt,
                         domain = "rawIngestion",
                     )
+                    if (outcome is FlushOutcome.PermanentFailure) {
+                        val now = Clock.System.now()
+                        pending.forEach { rawIngestionRepository.markFailed(it.id, now) }
+                    }
+                    return outcome
                 }
             }
         }
@@ -132,6 +133,7 @@ internal class RawEventUploader(
 
     private companion object {
         private const val TAG = "UploadWorker"
+        private const val RAW_UPLOAD_BATCH_SIZE = 20
     }
 }
 
