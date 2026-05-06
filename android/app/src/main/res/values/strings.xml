@@ -94,7 +94,7 @@
     <string name="onb_setup_optional_section">선택</string>
     <string name="onb_setup_recordings_title">녹음 폴더</string>
     <string name="onb_setup_recordings_body">통화와 미팅 녹음에서 앞으로 해야 할 일을 정리합니다.</string>
-    <string name="onb_setup_recordings_consent">연결 시 녹음 파일이 약속 추출을 위해 Google LLC Vertex AI로 전송될 수 있습니다. 처리 리전은 asia-northeast3(서울)이며, 요청 처리 후 즉시 삭제됩니다.</string>
+    <string name="onb_setup_recordings_consent">연결 시 녹음 파일이 약속 추출을 위해 Google LLC Vertex AI로 전송될 수 있습니다. 처리 리전은 us-central1(미국 중부)이며, 요청 처리 후 즉시 삭제됩니다.</string>
     <string name="onb_setup_contacts_title">연락처</string>
     <string name="onb_setup_contacts_body">상대방을 이름과 연락처 기준으로 더 정확히 매칭합니다.</string>
     <string name="onb_setup_notifications_title">알림</string>
@@ -540,7 +540,7 @@
     <string name="onb_pipa_bullet_3_value">약속/할 일 자동 추출 (Gemini 2.5 Flash audio multimodal)</string>
     <!-- Bullet 4: 데이터 처리 리전 -->
     <string name="onb_pipa_bullet_4_label">데이터 처리 리전</string>
-    <string name="onb_pipa_bullet_4_value">asia-northeast3 (서울)</string>
+    <string name="onb_pipa_bullet_4_value">us-central1 (미국 중부)</string>
     <!-- Bullet 5: 보유 및 이용 기간 -->
     <string name="onb_pipa_bullet_5_label">보유 및 이용 기간</string>
     <string name="onb_pipa_bullet_5_value">요청 처리 후 즉시 삭제 (ZDR — Zero Data Retention)</string>

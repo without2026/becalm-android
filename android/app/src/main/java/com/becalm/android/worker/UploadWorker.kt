@@ -30,7 +30,7 @@ import javax.inject.Provider
  *
  * ## Lifecycle per run
  * 1. Resolve [userId] from [AuthRepository.currentSession] — no session → failure.
- * 2. Flush pending raw ingestion events in 100-item batches (SYNC-001, SYNC-004).
+ * 2. Flush pending raw ingestion events in bounded pages (SYNC-001, SYNC-004).
  * 3. On success, flush pending commitments in the same envelope.
  * 4. Record sync success via [SourceStatusRepository.recordSyncSuccess].
  *
@@ -147,7 +147,7 @@ public class UploadWorker @AssistedInject constructor(
          */
         public const val MAX_RETRIES: Int = 5
 
-        /** Railway per-batch item cap (SYNC-004). */
+        /** Railway per-batch item cap (SYNC-004). Commitment upload still uses the full cap. */
         public const val BATCH_SIZE: Int = 100
 
         /**

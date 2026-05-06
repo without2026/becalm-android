@@ -138,9 +138,28 @@ class UploadWorkerSpecTest {
         assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
         assertEquals(1, state.rawFindPendingCalls)
         assertEquals(1, state.rawUploadCalls)
+        assertEquals(0, state.rawMarkFailedCalls)
         assertEquals(0, state.commitmentUploadCalls)
         assertEquals(0, state.recordSyncSuccessCalls)
         assertEquals(1, state.recordSyncErrorCalls)
+    }
+
+    @Test
+    fun `raw ingestion upload uses small pages so email extraction batches do not monopolize one request`() = runTest {
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        val state = FakeState(
+            session = fakeSession,
+            pendingRaw = (1..45).map { index -> rawEvent(id = "raw-$index") },
+            rawUploadResult = BecalmResult.Success(
+                BatchUploadResponse(acknowledged = 20, failed = emptyList<FailedEventDto>()),
+            ),
+        )
+
+        val result = state.buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(listOf(20, 20, 5), state.rawUploadBatchSizes)
+        assertEquals(3, state.rawMarkSyncedCalls)
     }
 
     @Test
@@ -170,6 +189,8 @@ class UploadWorkerSpecTest {
         var rawFindPendingCalls = 0
         var rawUploadCalls = 0
         var rawMarkSyncedCalls = 0
+        var rawMarkFailedCalls = 0
+        val rawUploadBatchSizes = mutableListOf<Int>()
         var commitmentFindPendingCalls = 0
         var commitmentUploadCalls = 0
         var commitmentMarkSyncedCalls = 0
@@ -210,18 +231,24 @@ class UploadWorkerSpecTest {
             when (name) {
                 "findPendingSync" -> {
                     rawFindPendingCalls += 1
-                    rawRemaining
+                    val limit = args?.getOrNull(1) as? Int ?: rawRemaining.size
+                    rawRemaining.take(limit)
                 }
                 "uploadBatch" -> {
                     rawUploadCalls += 1
+                    @Suppress("UNCHECKED_CAST")
+                    rawUploadBatchSizes += (args?.firstOrNull() as? List<RawIngestionEventEntity>).orEmpty().size
                     rawUploadResult
                 }
                 "markSynced" -> {
                     rawMarkSyncedCalls += 1
-                    rawRemaining = emptyList()
+                    @Suppress("UNCHECKED_CAST")
+                    val syncedIds = (args?.firstOrNull() as? List<String>).orEmpty().toSet()
+                    rawRemaining = rawRemaining.filterNot { it.id in syncedIds }
                     BecalmResult.Success(Unit)
                 }
                 "markFailed" -> {
+                    rawMarkFailedCalls += 1
                     rawRemaining = emptyList()
                     BecalmResult.Success(Unit)
                 }

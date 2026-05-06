@@ -122,7 +122,7 @@ types:
     type: string              # "action" | "schedule" | "decision"
     text: string              # 원문 언어를 유지한 정규화 문구
     quote: string             # source에서 추출한 verbatim 근거 단편(<=100 chars, 원문 언어 유지)
-    person_ref?: string       # 정규화된 상대방 식별자. 식별 불가 시 null
+    person_ref?: string       # 정규화된 상대방 식별자. 1:1은 해당 counterparty, N:M은 item별 명시 근거가 있을 때만 설정. 식별 불가/모호하면 null
     due_at?: datetime         # ISO8601 with explicit +09:00 offset (KST) or null
     due_hint?: string         # 원문 시점 표현(원문 언어 유지)
     due_is_approximate: bool
