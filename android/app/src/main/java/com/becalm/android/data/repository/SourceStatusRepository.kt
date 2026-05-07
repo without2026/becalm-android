@@ -99,7 +99,7 @@ public interface SourceStatusRepository {
      * Pulls the authoritative per-source state from Railway `GET /v1/source_status`
      * and merges it into the local DataStore-backed cache.
      *
-     * The product-facing status projection covers the seven user-facing sources
+     * The product-facing status projection covers the user-facing sources
      * (`voice + gmail + outlook_mail + naver_imap + daum_imap + google_calendar +
      * outlook_calendar`). `call_recording` remains schema-only and is ignored.
      *
@@ -211,7 +211,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     // ─── Observation ─────────────────────────────────────────────────────────
 
     override fun observeAll(): Flow<List<SourceStatus>> {
-        // PRODUCT_SOURCES (8 user-facing sources) — NOT the schema-level ALL set.
+        // PRODUCT_SOURCES (user-facing sources) — NOT the schema-level ALL set.
         // ALL still includes CALL_RECORDING, but that remains a schema-only carve-out
         // and must not appear in the Sources strip or Today aggregate banner.
         return userPrefs.data

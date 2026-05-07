@@ -126,6 +126,14 @@ public class WorkSchedulerImpl @Inject constructor(
         oneShotEnqueuer.enqueueMeetingTranscriptUpload(rawEventId)
     }
 
+    override fun enqueueMessageScreenshotUpload(rawEventId: String) {
+        oneShotEnqueuer.enqueueMessageScreenshotUpload(rawEventId)
+    }
+
+    override fun enqueueManualTextUpload(rawEventId: String) {
+        oneShotEnqueuer.enqueueManualTextUpload(rawEventId)
+    }
+
     override fun enqueueVoiceUploadWithDelay(
         rawEventId: String,
         audioUri: String,
@@ -174,6 +182,26 @@ public class WorkSchedulerImpl @Inject constructor(
         )
     }
 
+    override fun cancelMessageScreenshotUpload(rawEventId: String) {
+        val workKey = UniqueWorkKeys.messageScreenshotUpload(rawEventId)
+        planRunner.run(
+            CancelUniqueWorkPlan(
+                uniqueKey = workKey,
+                logMessage = "cancelMessageScreenshotUpload rawEventId_hash=${redact(rawEventId)} key=$workKey",
+            ),
+        )
+    }
+
+    override fun cancelManualTextUpload(rawEventId: String) {
+        val workKey = UniqueWorkKeys.manualTextUpload(rawEventId)
+        planRunner.run(
+            CancelUniqueWorkPlan(
+                uniqueKey = workKey,
+                logMessage = "cancelManualTextUpload rawEventId_hash=${redact(rawEventId)} key=$workKey",
+            ),
+        )
+    }
+
     override fun scheduleRetentionSweep() {
         planRunner.run(WorkSchedulerRequests.retentionSweepPlan())
     }
@@ -200,6 +228,8 @@ public class WorkSchedulerImpl @Inject constructor(
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MEETING_TRANSCRIPT_UPLOAD)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MESSAGE_SCREENSHOT_UPLOAD)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MANUAL_TEXT_UPLOAD)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_PROFILE_MEMORY)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)
         logger.d(

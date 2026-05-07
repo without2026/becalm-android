@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -28,7 +29,6 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.commitment.ManualCommitmentDraft
-import com.becalm.android.ui.commitments.CommitmentCreateMode
 import com.becalm.android.ui.commitments.CommitmentDetailActionState
 import com.becalm.android.ui.commitments.CommitmentHistoryPresentation
 import com.becalm.android.ui.commitments.CommitmentSheetAction
@@ -155,9 +155,8 @@ class CommitmentSheetsUiTest {
     }
 
     @Test
-    fun `commitment create content shows required inputs direction and save`() {
+    fun `commitment create content shows supersede inputs read only quote and save`() {
         var title: String? = null
-        var quote: String? = null
         var counterpartyRef: String? = null
         var dueHint: String? = null
         var direction: String? = null
@@ -180,7 +179,7 @@ class CommitmentSheetsUiTest {
                 }
                 CreateSheetContent(
                     state = CreateUiState(
-                        mode = CommitmentCreateMode.MANUAL,
+                        supersedeSource = commitmentEntity(quote = "자료 보내주세요"),
                         draft = draft,
                     ),
                     onTitleChange = {
@@ -190,10 +189,6 @@ class CommitmentSheetsUiTest {
                     onDirectionChange = {
                         direction = it
                         draft = draft.copy(direction = it)
-                    },
-                    onQuoteChange = {
-                        quote = it
-                        draft = draft.copy(quote = it)
                     },
                     onCounterpartyRefChange = {
                         counterpartyRef = it
@@ -212,11 +207,10 @@ class CommitmentSheetsUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.commitment_manual_field_title)).assertIsDisplayed()
+        composeRule.onNodeWithText("자료 보내주세요").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("commitment-create-quote").assertCountEquals(0)
         composeRule.onNodeWithTag("commitment-create-title").performTextInput("새 약속")
         composeRule.onNodeWithText(string(R.string.commitment_manual_field_direction_take)).performClick()
-        composeRule.onNodeWithTag("commitment-create-form")
-            .performScrollToNode(hasTestTag("commitment-create-quote"))
-        composeRule.onNodeWithTag("commitment-create-quote").performTextInput("자료 보내주세요")
         composeRule.onNodeWithTag("commitment-create-form")
             .performScrollToNode(hasTestTag("commitment-create-person-ref"))
         composeRule.onNodeWithTag("commitment-create-person-ref").performTextInput("kim@example.com")
@@ -227,7 +221,6 @@ class CommitmentSheetsUiTest {
 
         composeRule.runOnIdle {
             assertEquals("새 약속", title)
-            assertEquals("자료 보내주세요", quote)
             assertEquals("kim@example.com", counterpartyRef)
             assertEquals("금요일 오후", dueHint)
             assertEquals("take", direction)
@@ -361,6 +354,7 @@ class CommitmentSheetsUiTest {
         direction: String? = "give",
         scheduleStatus: String? = null,
         decisionStatus: String? = null,
+        quote: String = "금요일까지 보내겠습니다",
     ): CommitmentEntity = CommitmentEntity(
         id = "commitment-1",
         userId = "user-1",
@@ -372,7 +366,7 @@ class CommitmentSheetsUiTest {
         counterpartyRef = "person-1",
         title = "제안서 보내기",
         description = null,
-        quote = "금요일까지 보내겠습니다",
+        quote = quote,
         sourceEventTitle = "통화",
         sourceEventOccurredAt = Instant.parse("2026-04-24T01:00:00Z"),
         dueAt = Instant.parse("2026-04-25T01:00:00Z"),

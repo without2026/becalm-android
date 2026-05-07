@@ -112,6 +112,7 @@ class MeetingTranscriptUploadWorkerSpecTest {
                 any(),
                 any(),
                 any(),
+                any(),
             )
         } returns Response.success(
             SourceExtractionResponse(

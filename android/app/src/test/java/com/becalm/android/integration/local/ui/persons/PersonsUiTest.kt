@@ -3,6 +3,7 @@ package com.becalm.android.integration.local.ui.persons
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
@@ -96,6 +98,8 @@ class PersonsUiTest {
     @Test
     fun `persons search input routes typed query`() {
         var typedQuery: String? = null
+        var screenshotImports = 0
+        var manualText: String? = null
 
         composeRule.setContent {
             BecalmTheme {
@@ -114,13 +118,31 @@ class PersonsUiTest {
                     snackbarHostState = SnackbarHostState(),
                     onQueryChange = { typedQuery = it },
                     onPersonClick = {},
+                    onMessageScreenshotImport = { screenshotImports += 1 },
+                    onManualTextImport = { manualText = it },
                 )
             }
         }
 
         composeRule.onNodeWithTag("persons-search-input").performTextInput("김")
+        composeRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("evidence-import-message-screenshot")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("evidence-import-manual-text")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithTag("evidence-import-manual-text-input").performTextInput("견적서를 내일까지 보낸다")
+        composeRule.onNodeWithTag("evidence-import-manual-text-save").performClick()
 
-        composeRule.runOnIdle { assertEquals("김", typedQuery) }
+        composeRule.runOnIdle {
+            assertEquals("김", typedQuery)
+            assertEquals(1, screenshotImports)
+            assertEquals("견적서를 내일까지 보낸다", manualText)
+        }
     }
 
     @Test

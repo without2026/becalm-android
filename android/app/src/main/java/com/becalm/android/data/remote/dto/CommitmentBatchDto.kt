@@ -117,7 +117,7 @@ public data class CommitmentBatchPayloadDto(
     /** Server-assigned last-update timestamp. Included for audit — server may override. */
     @field:Json(name = "updated_at") val updatedAt: Instant,
 
-    // ── v5 lifecycle fields (EDIT-001..008 / MAN-001..006) ──────────────────────
+    // ── v5 lifecycle fields (EDIT-001..008 / supersede corrections) ─────────────
     //
     // These mirror the six new `commitments` columns added by Room 4→5 / Supabase
     // migration 011 (`.spec/contracts/data-model.yml:188-210`). They are sent on upload

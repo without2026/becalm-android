@@ -518,7 +518,7 @@
         <a class="flow-box" href="#today"><strong>Today</strong><small>timeline + sync strip</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
         <a class="flow-box" href="#persons"><strong>Persons</strong><small>people + offline/unassigned</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
         <a class="flow-box" href="#persons-unassigned"><strong>Persons Unassigned</strong><small>separate route bucket</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
-        <a class="flow-box" href="#commitment-management"><strong>Commitments</strong><small>action / schedule / decision inbox</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
+        <a class="flow-box" href="#commitment-management"><strong>Commitments</strong><small>action / schedule inbox</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>I</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
         <a class="flow-box" href="#settings"><strong>Settings</strong><small>toggles + sources/privacy</small><div class="coverage-row"><span class="badge on"><span class="dot"></span>U</span><span class="badge on"><span class="dot"></span>UI</span><span class="badge on"><span class="dot"></span>A</span></div></a>
       </div>
     </div>
@@ -1645,7 +1645,7 @@
                 <li><code>PersonDetailViewModel.uiState</code>가 enrichment, counts, pending/completed items, history, expansion 상태를 제공.</li>
                 <li>History의 event tap → <code>RawEventDetail(personId, eventId)</code>.</li>
                 <li>Completed section header tap → <code>onToggleCompletedExpanded()</code>.</li>
-                <li>pending section에는 <strong>action + schedule + decision</strong> item이 모두 들어감.</li>
+                <li>pending section에는 <strong>action + schedule</strong> item만 들어가며, decision은 person memory/relation context로만 소비됨.</li>
               </ul>
             </div>
             <div class="panel-block">
@@ -1663,7 +1663,7 @@
             <div class="panel-block">
               <h4>검증 완료</h4>
               <ul class="test-list">
-                <li><strong>Unit</strong>: <code>PersonDetailViewModelSpecTest</code>가 missing id, header projection, history sort, pending schedule/decision inclusion, fallback display를 검증.</li>
+                <li><strong>Unit</strong>: <code>PersonDetailViewModelSpecTest</code>가 missing id, header projection, history sort, action/schedule pending count와 decision exclusion, fallback display를 검증.</li>
                 <li><strong>Integration</strong>: <code>PersonDetailLocalIntegrationTest</code>가 Room timeline projection과 enrichment join, raw event detail room join을 검증.</li>
                 <li><strong>UI</strong>: <code>PersonsUiTest</code>가 section/expansion/tap을 검증.</li>
                 <li><strong>androidTest</strong>: <code>PersonDetailScreenTest</code>가 section header, collapsed/expanded, raw event tap을 검증.</li>
@@ -1939,9 +1939,9 @@
           <div class="wireframe">
             <div class="wf-screen">
               <div class="wf-bar">Header + FAB</div>
-              <div class="wf-chip-row"><span>ALL</span><span>ACTION</span><span>GIVE</span><span>TAKE</span><span>SCHEDULE</span><span>DECISION</span></div>
+              <div class="wf-chip-row"><span>ALL</span><span>GIVE</span><span>TAKE</span><span>SCHEDULE</span><span>CLOSED</span></div>
               <div class="wf-block">Completed / cancelled action section</div>
-              <div class="wf-block">Schedule / decision stay in active trackable list</div>
+              <div class="wf-block">Action / schedule stay in active trackable list</div>
               <div class="wf-list">
                 <div class="wf-list-item">Trackable card with type + subtype + person</div>
               </div>
@@ -1964,10 +1964,10 @@
               <ul class="branch-list">
                 <li><strong>Loading</strong>: spinner.</li>
                 <li><strong>Empty</strong>: empty state.</li>
-                <li><strong>Filter</strong>: ALL / ACTION / GIVE / TAKE / SCHEDULE / DECISION.</li>
+                <li><strong>Filter</strong>: ALL / GIVE / TAKE / SCHEDULE / CLOSED.</li>
                 <li><strong>Action row</strong>: give/take subtype와 pending/completed/cancelled 상태 pill 표시.</li>
                 <li><strong>Schedule row</strong>: changed/confirmed/postponed/cancelled/follow_up subtype 표시, action 상태 pill 없음.</li>
-                <li><strong>Decision row</strong>: approved/rejected/chosen/deferred/ongoing subtype 표시, action 상태 pill 없음.</li>
+                <li><strong>Decision row</strong>: 기본 feed에는 표시하지 않고 person memory/relation context에서 approved/rejected/chosen/deferred/ongoing 상태로 보존.</li>
                 <li><strong>Counterparty</strong>: person display name 우선, 없으면 raw counterparty 또는 미지정 상대 fallback.</li>
                 <li><strong>Completed / Cancelled</strong>: action terminal rows만 기본 collapsed, independent expand.</li>
                 <li><strong>Undo snackbar</strong>: Complete/Cancel 후 action 수행 시 복원.</li>
@@ -1976,7 +1976,7 @@
             <div class="panel-block">
               <h4>검증 완료</h4>
               <ul class="test-list">
-                <li><strong>Unit</strong>: <code>CommitmentManagementViewModelSpecTest</code>가 counterparty resolution, action/schedule/decision filter, detail nav, section toggle, refresh failure, reminder scheduling을 검증.</li>
+                <li><strong>Unit</strong>: <code>CommitmentManagementViewModelSpecTest</code>가 counterparty resolution, action/schedule filters, decision exclusion, detail nav, section toggle, refresh failure, reminder scheduling을 검증.</li>
                 <li><strong>Integration</strong>: <code>CommitmentLocalIntegrationTest</code>가 local persistence/update contract를 검증.</li>
                 <li><strong>UI</strong>: <code>CommitmentManagementUiTest</code>가 empty, type filters, person-visible row, FAB, detail tap을 검증.</li>
                 <li><strong>androidTest</strong>: <code>CommitmentManagementScreenTest</code>가 동일 interaction을 검증.</li>

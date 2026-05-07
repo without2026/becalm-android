@@ -21,12 +21,7 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -35,8 +30,11 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +61,11 @@ import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
+import com.becalm.android.ui.evidence.EvidenceImportSheet
+import com.becalm.android.ui.evidence.EvidenceImportViewModel
+import com.becalm.android.ui.evidence.ManualTextEvidenceDialog
+import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
@@ -93,12 +96,13 @@ private val CommitmentListBottomPadding = 144.dp
 @Composable
 public fun CommitmentManagementScreen(
     viewModel: CommitmentManagementViewModel = hiltViewModel(),
+    evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
     headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
-    onOpenCreate: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
     val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -109,6 +113,10 @@ public fun CommitmentManagementScreen(
 
     val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
+    val importMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
+
+    val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
 
     // CMT-013 — collect one-shot undo snapshots emitted by [onComplete] / [onCancel]
     // and present a `[복구]` snackbar with a 5 s window. Material3 does not expose a
@@ -151,7 +159,12 @@ public fun CommitmentManagementScreen(
         pullState = pullState,
         headerState = headerState,
         onFilterChange = viewModel::onFilterChange,
-        onOpenCreate = onOpenCreate,
+        onMessageScreenshotImport = {
+            evidenceImportActions.openMessageScreenshotPicker()
+        },
+        onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
+        onMeetingTranscriptImport = evidenceImportActions.openMeetingTranscriptPicker,
+        onManualTextImport = evidenceImportActions.submitManualText,
         onOpenSettings = onOpenSettings,
         onOpenDetail = viewModel::onCommitmentSelected,
         onToggleCompletedSection = viewModel::onToggleCompletedSection,
@@ -167,13 +180,18 @@ public fun CommitmentManagementScreenContent(
     pullState: androidx.compose.material.pullrefresh.PullRefreshState,
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onFilterChange: (CommitmentFilter) -> Unit,
-    onOpenCreate: () -> Unit,
+    onMessageScreenshotImport: () -> Unit,
+    onMeetingAudioImport: () -> Unit,
+    onMeetingTranscriptImport: () -> Unit,
+    onManualTextImport: (String) -> Unit,
     onOpenSettings: () -> Unit = {},
     onOpenDetail: (String) -> Unit,
     onToggleCompletedSection: () -> Unit,
     onToggleCancelledSection: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showImportSheet by rememberSaveable { mutableStateOf(false) }
+    var showManualTextDialog by rememberSaveable { mutableStateOf(false) }
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.commitments_title),
@@ -184,21 +202,7 @@ public fun CommitmentManagementScreenContent(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            // C9 / MAN-001 — Manual add FAB. Navigates to the create sheet with
-            // supersedeOf=null; edit-sheet supersede path reuses the same destination
-            // with supersedeOf bound to the old row id.
-            FloatingActionButton(
-                onClick = onOpenCreate,
-                modifier = Modifier.testTag("commitment-fab-add"),
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = stringResource(R.string.commitment_fab_add_content_desc),
-                )
-            }
+            EvidenceImportFloatingActionButton(onClick = { showImportSheet = true })
         },
     ) { padding ->
         Column(
@@ -324,6 +328,37 @@ public fun CommitmentManagementScreenContent(
                 )
             }
         }
+    }
+
+    if (showImportSheet) {
+        EvidenceImportSheet(
+            onDismiss = { showImportSheet = false },
+            onMessageScreenshotImport = {
+                showImportSheet = false
+                onMessageScreenshotImport()
+            },
+            onMeetingAudioImport = {
+                showImportSheet = false
+                onMeetingAudioImport()
+            },
+            onMeetingTranscriptImport = {
+                showImportSheet = false
+                onMeetingTranscriptImport()
+            },
+            onManualTextImport = {
+                showImportSheet = false
+                showManualTextDialog = true
+            },
+        )
+    }
+    if (showManualTextDialog) {
+        ManualTextEvidenceDialog(
+            onDismiss = { showManualTextDialog = false },
+            onSubmit = {
+                showManualTextDialog = false
+                onManualTextImport(it)
+            },
+        )
     }
 }
 

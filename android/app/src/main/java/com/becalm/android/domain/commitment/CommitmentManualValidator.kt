@@ -3,7 +3,7 @@ package com.becalm.android.domain.commitment
 import kotlinx.datetime.Instant
 
 /**
- * Raw form state for the manual-create sheet (MAN-001..005). The VM holds this
+ * Raw form state for the EDIT-007 supersede correction sheet. The VM holds this
  * and passes it to [CommitmentManualValidator.validate] on every save attempt.
  *
  * [dueAtMillis] is carried as nullable epoch-millisecond Long rather than an
@@ -21,7 +21,7 @@ public data class ManualCommitmentDraft(
 )
 
 /**
- * Pure-Kotlin validator for the manual-create form. Implements MAN-005 rules:
+ * Pure-Kotlin validator for the supersede correction form. Implements MAN-005 rules:
  *
  * - `title` is stripped of leading/trailing whitespace. Empty → error. More than
  *   200 chars → error.

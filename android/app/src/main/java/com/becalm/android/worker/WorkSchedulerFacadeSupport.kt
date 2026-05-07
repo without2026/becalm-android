@@ -71,4 +71,28 @@ internal class WorkSchedulerOneShotEnqueuer(
             ),
         )
     }
+
+    fun enqueueMessageScreenshotUpload(rawEventId: String) {
+        planRunner.run(
+            UniqueOneTimeWorkPlan(
+                uniqueKey = UniqueWorkKeys.messageScreenshotUpload(rawEventId),
+                policy = ExistingWorkPolicy.REPLACE,
+                request = WorkSchedulerRequests.messageScreenshotUploadRequest(rawEventId),
+                logMessage = "enqueueMessageScreenshotUpload rawEventId_hash=${redact(rawEventId)} " +
+                    "key=${UniqueWorkKeys.messageScreenshotUpload(rawEventId)}",
+            ),
+        )
+    }
+
+    fun enqueueManualTextUpload(rawEventId: String) {
+        planRunner.run(
+            UniqueOneTimeWorkPlan(
+                uniqueKey = UniqueWorkKeys.manualTextUpload(rawEventId),
+                policy = ExistingWorkPolicy.REPLACE,
+                request = WorkSchedulerRequests.manualTextUploadRequest(rawEventId),
+                logMessage = "enqueueManualTextUpload rawEventId_hash=${redact(rawEventId)} " +
+                    "key=${UniqueWorkKeys.manualTextUpload(rawEventId)}",
+            ),
+        )
+    }
 }

@@ -6,11 +6,11 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
 import com.becalm.android.ui.components.isTakeDirection
-import com.becalm.android.ui.components.isTerminalActionState
 
 internal object PersonDetailProjector {
     private const val SNIPPET_PREVIEW_CHAR_LIMIT: Int = 200
@@ -40,9 +40,7 @@ internal object PersonDetailProjector {
             emailInteractionCount = interactions.count { it.interactionKind == "email" },
             callInteractionCount = interactions.count { it.interactionKind == "call" },
             meetingCount = interactions.count { it.interactionKind == "calendar" },
-            pendingCommitmentCount = interactions.count {
-                it.interactionKind == "commitment" && !isTerminalActionState(it.status)
-            },
+            pendingCommitmentCount = interactions.count { it.isOpenCommitmentLoop() },
             channelSources = interactions.map { it.sourceType }.toSet(),
             sourceEventCards = sourceEventCards,
             loading = false,
@@ -57,6 +55,7 @@ internal object PersonDetailProjector {
         val rawById = rawEvents.associateBy { it.id }
         val buckets = linkedMapOf<String, MutableSourceEventCard>()
         interactions.forEach { interaction ->
+            if (interaction.isDecisionCommitment()) return@forEach
             val key = interaction.sourceEventKey()
             val rawEventId = interaction.sourceEventId
                 ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
@@ -222,6 +221,7 @@ internal object PersonDetailProjector {
 
         fun addCommitment(summary: PersonDetailCommitmentSummary) {
             when {
+                CommitmentDisplayPolicy.isDecisionContextItem(summary.itemType) -> Unit
                 summary.itemType == CommitmentItemType.SCHEDULE -> schedules += summary
                 isTakeDirection(summary.direction) -> theirActions += summary
                 else -> myActions += summary
@@ -257,5 +257,15 @@ internal object PersonDetailProjector {
 
     private val SOURCE_ARTIFACT_FILE_NAME_REGEX =
         Regex("(?i).+\\.(txt|m4a|mp3|wav|aac|mp4|pdf|docx?|xlsx?|pptx?|eml|html?)$")
+
+    private fun PersonInteractionEntity.isOpenCommitmentLoop(): Boolean =
+        interactionKind == "commitment" &&
+            CommitmentDisplayPolicy.countsAsOpenPersonLoop(
+                itemType = role,
+                status = status,
+            )
+
+    private fun PersonInteractionEntity.isDecisionCommitment(): Boolean =
+        interactionKind == "commitment" && CommitmentDisplayPolicy.isDecisionContextItem(role)
 
 }

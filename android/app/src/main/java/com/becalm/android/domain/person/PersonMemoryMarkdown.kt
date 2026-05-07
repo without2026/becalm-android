@@ -121,20 +121,35 @@ public object PersonMemoryMarkdownBuilder {
     private fun StringBuilder.appendWorkContext(input: PersonMemoryInput) {
         appendLine("## Work Context")
         val openCommitments = input.commitments
-            .filter { it.status != "completed" }
+            .filter { it.itemType != DECISION_ITEM_TYPE }
+            .filter { it.status !in TERMINAL_WORK_STATUSES }
             .take(8)
         if (openCommitments.isEmpty()) {
             appendLine("- No open work context recorded.")
         } else {
             openCommitments.forEach { commitment ->
-                appendLine(
-                    "- ${commitment.title.safeInline(160)} (${commitment.itemType}" +
-                        commitment.status?.let { ", $it" }.orEmpty() +
-                        "). [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]",
-                )
+                appendCommitmentBullet(commitment)
+            }
+        }
+        val decisions = input.commitments
+            .filter { it.itemType == DECISION_ITEM_TYPE }
+            .take(8)
+        if (decisions.isNotEmpty()) {
+            appendLine()
+            appendLine("### Decisions")
+            decisions.forEach { decision ->
+                appendCommitmentBullet(decision)
             }
         }
         appendLine()
+    }
+
+    private fun StringBuilder.appendCommitmentBullet(commitment: PersonMemoryCommitment) {
+        appendLine(
+            "- ${commitment.title.safeInline(160)} (${commitment.itemType}" +
+                commitment.status?.let { ", $it" }.orEmpty() +
+                "). [${commitment.sourceRef}, ${commitment.occurredAt.datePart()}]",
+        )
     }
 
     private fun StringBuilder.appendRecentInteractions(input: PersonMemoryInput) {
@@ -190,6 +205,8 @@ public object PersonMemoryMarkdownBuilder {
     }
 
     private val DETERMINISTIC_IDENTITY_TYPES = setOf("email", "phone", "alias")
+    private const val DECISION_ITEM_TYPE = "decision"
+    private val TERMINAL_WORK_STATUSES = setOf("completed", "cancelled")
     private val HASH_PLACEHOLDER = "0".repeat(64)
 }
 

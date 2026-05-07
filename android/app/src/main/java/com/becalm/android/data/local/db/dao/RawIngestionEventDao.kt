@@ -299,7 +299,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT * FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot', 'manual_text') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun findVoiceAwaitingConsent(userId: String): List<RawIngestionEventEntity>
@@ -313,7 +313,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot', 'manual_text') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun findAwaitingConsentVoiceIds(userId: String): List<String>
@@ -330,7 +330,7 @@ public interface RawIngestionEventDao {
         "UPDATE raw_ingestion_events " +
             "SET sync_status = 'pending' " +
             "WHERE user_id = :userId " +
-            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot', 'manual_text') " +
             "AND sync_status = 'awaiting_consent'",
     )
     public suspend fun flipAwaitingConsentVoiceToPending(userId: String)
@@ -371,7 +371,7 @@ public interface RawIngestionEventDao {
     @Query(
         "SELECT id FROM raw_ingestion_events " +
             "WHERE user_id = :userId " +
-            "AND source_type IN ('voice', 'call_recording', 'meeting') " +
+            "AND source_type IN ('voice', 'call_recording', 'meeting', 'message_screenshot', 'manual_text') " +
             "AND sync_status IN ('pending', 'queued', 'failed_retryable')",
     )
     public suspend fun findCancellableVoiceIds(userId: String): List<String>

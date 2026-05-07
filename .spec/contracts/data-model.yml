@@ -29,9 +29,13 @@ tables:
       - name: source_type
         type: text
         nullable: false
-        # enum: voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-        # voice = Samsung 음성 녹음(Voice Recorder), call_recording = Samsung 통화 녹음(Call), meeting = 사용자가 앱에서 Recordings/BeCalm Meetings/로 저장한 미팅 오디오 또는 전사본. voice/call_recording/meeting 오디오는 동일한 Vertex AI Gemini 파이프라인(VOI-001)에서 처리되며, source_type은 UI·필터링·증거성 표시 용도로 보존된다.
-        # 사용자-facing source label은 meeting='Meetings', naver_imap='Naver Email', daum_imap='Daum Email'. SourceStatusStrip/OverallSyncIndicator는 voice, meeting, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar의 8개 source를 기준으로 계산하고 call_recording은 별도 칩을 두지 않음.
+        # enum: voice | call_recording | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+        # voice = Samsung 음성 녹음(Voice Recorder), call_recording = Samsung 통화 녹음(Call),
+        # meeting = 사용자가 앱에서 Recordings/BeCalm Meetings/로 저장한 미팅 오디오 또는 전사본,
+        # message_screenshot = 사용자가 앱에서 수동으로 추가한 카카오톡/Slack/SMS 등 메신저 대화 캡처. source_ref는 원본 파일이 아니라 앱 private storage의 OCR용 정규화 JPEG를 가리킨다.
+        # manual_text = 사용자가 앱에서 직접 입력한 업무 맥락 텍스트. source_ref는 앱 private storage의 UTF-8 txt 파일을 가리킨다.
+        # voice/call_recording/meeting/message_screenshot/manual_text는 동일한 source-neutral Vertex AI Gemini structured extraction pipeline(VOI-001)을 공유하며, source_type은 UI·필터링·증거성 표시 용도로 보존된다.
+        # 사용자-facing source label은 meeting='Meetings', message_screenshot='Messenger Captures', manual_text='Manual Notes', naver_imap='Naver Email', daum_imap='Daum Email'. SourceStatusStrip/OverallSyncIndicator는 voice, meeting, message_screenshot, manual_text, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar의 10개 source를 기준으로 계산하고 call_recording은 별도 칩을 두지 않음.
       - name: source_ref
         type: text
         nullable: true
@@ -46,11 +50,11 @@ tables:
       - name: event_title
         type: text
         nullable: true
-        # voice/meeting audio: MediaStore TITLE 또는 SAF display name / meeting transcript: user-picked file title / email: subject / calendar: event title. Populated at ingestion time.
+        # voice/meeting audio: MediaStore TITLE 또는 SAF display name / meeting transcript: user-picked file title / message_screenshot: user-picked image display name / email: subject / calendar: event title. Populated at ingestion time.
       - name: event_snippet
         type: text
         nullable: true
-        # voice/meeting audio: Android가 draft extraction 응답을 받은 뒤 첫 번째 commitment.quote(<=100 chars)를 로컬에 반영한 값. meeting transcript: transcript extraction 응답의 첫 commitment.quote 또는 사용자 전사본 앞 200자 로컬-only preview. full transcript는 Supabase/Railway에 영속되지 않는다. / email: first 200 chars of body / calendar: null
+        # voice/meeting audio/message_screenshot: Android가 draft extraction 응답을 받은 뒤 첫 번째 commitment.quote(<=100 chars)를 로컬에 반영한 값. meeting transcript: transcript extraction 응답의 첫 commitment.quote 또는 사용자 전사본 앞 200자 로컬-only preview. full transcript와 screenshot OCR text는 Supabase/Railway에 영속되지 않는다. / email: first 200 chars of body / calendar: null
       - name: duration_seconds
         type: int
         nullable: true
@@ -89,8 +93,10 @@ tables:
         default: "'action'"
         # enum: action | schedule | decision
         # action rows participate in action_state lifecycle / reminders / Today / CommitmentManagement.
-        # schedule and decision rows are persisted so PersonDetail and person timelines can surface
-        # non-action outcomes from calls/meetings without forcing them through the action state machine.
+        # schedule rows may surface in Today / CommitmentManagement as dated coordination items.
+        # decision rows are persisted as canonical relationship facts for relation intelligence and
+        # person_memory.md. They must not be counted as open action loops or rendered as primary
+        # actionable UI feed rows by default.
       - name: direction
         type: text
         nullable: true
@@ -106,6 +112,9 @@ tables:
         nullable: true
         # enum: approved | rejected | chosen | deferred | ongoing
         # Required only when item_type='decision'. NULL for action / schedule rows.
+        # This is the semantic status consumed by person memory and relation context.
+        # action_state is a storage compatibility sentinel for decision rows and must not be
+        # used to derive decision meaning.
       - name: counterparty_ref
         type: text
         nullable: true
@@ -164,9 +173,9 @@ tables:
       - name: source_type
         type: text
         nullable: false
-        # enum: voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar | manual
-        # 'manual' = user-created via CommitmentCreateSheet (manual-commitment.spec.yml MAN-001..006). No associated raw_ingestion_events row.
-        # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. call_recording은 source provenance 보존용이며 Today/Settings의 source status count에는 포함되지 않는다.
+        # enum: voice | call_recording | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar | manual
+        # 'manual' = compatibility/user-edited commitment source with no raw_ingestion_events row. Commitments tab + no longer creates new manual rows.
+        # UI label mapping: meeting -> 'Meetings', message_screenshot -> 'Messenger Captures', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. call_recording은 source provenance 보존용이며 Today/Settings의 source status count에는 포함되지 않는다.
       - name: source_ref
         type: text
         nullable: true
@@ -610,6 +619,6 @@ migration_notes:
   - "RISK — Samsung Sleeping Apps: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 승인과 별개로 Samsung One UI '잠자는 앱 / 깊은 잠자는 앱' 목록이 WorkManager 주기적 작업을 최대 24시간 이상 지연시킬 수 있음(실측). 완화책: ING-011 foreground catch-up이 앱 오픈 시 100% 도달을 보장하므로 주기적 WorkManager는 보조 중복 경로로 격하. 모니터링 지표: periodic_sync_completion_rate (목표 ≥80%). 80% 미만 지속 시 deploy-gate 경고."
   - "RISK — Per-source cursor invalidation: Gmail historyId는 7일 오프라인 후 HTTP 410으로 만료됨. IMAP UIDVALIDITY 변경(메일함 재생성)은 전체 UID 시퀀스를 무효화함. backend mirror pagination도 reset될 수 있다. 각 어댑터는 이 오류를 감지하고 DataStore cursor를 초기화한 뒤 제한된 전체 재동기화를 수행해야 함 — 메일함 전체를 blind full-pull하면 안 됨 (ING-013 커버)."
   - "RISK — CONTACTS 권한 부여 범위: EnrichmentWorker는 ContactsContract.CommonDataKinds.StructuredName·Nickname·Organization만 읽음. SMS·통화기록·사진 등 접근 없음. 앱 스토어 심사 시 READ_CONTACTS 사용 목적 명시 필요 (개인화된 표시명 — 서버 전송 없음)"
-  - "commitments 편집/삭제/이의제기/승계 컬럼 6개 추가: last_edited_by(uuid, fk auth.users.id), last_edited_at(timestamptz), quote_disputed(bool default false), quote_disputed_at(timestamptz), deleted_at(timestamptz), supersedes_commitment_id(uuid, fk commitments.id). Room 마이그레이션: ALTER TABLE commitments ADD COLUMN last_edited_by TEXT; ADD COLUMN last_edited_at INTEGER; ADD COLUMN quote_disputed INTEGER NOT NULL DEFAULT 0; ADD COLUMN quote_disputed_at INTEGER; ADD COLUMN deleted_at INTEGER; ADD COLUMN supersedes_commitment_id TEXT REFERENCES commitments(id) ON DELETE SET NULL; CREATE INDEX idx_commitments_user_deleted ON commitments(user_id, deleted_at); CREATE INDEX idx_commitments_supersedes ON commitments(supersedes_commitment_id). Supabase Postgres: 동일 DDL(uuid 타입·NULL allowed·FK 명시) + 선택적 `CREATE INDEX idx_commitments_user_deleted_partial ON commitments(user_id) WHERE deleted_at IS NULL` (post-MVP 최적화). 기존 row는 모든 신규 컬럼이 NULL 또는 false로 backfill — 서비스 동작에 영향 없음. 모든 클라이언트 쿼리는 `WHERE deleted_at IS NULL` 필터 추가 필수(AppDatabase DAO 레벨 일괄 적용). commitment-edit.spec.yml EDIT-001..008 및 manual-commitment.spec.yml MAN-001..006이 이 스키마를 전제로 한다."
-  - "source_type enum 확장: raw_ingestion_events는 meeting을 추가해 9종(voice|call_recording|meeting|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar)을 허용한다. commitments.source_type은 여기에 manual을 추가해 10종을 허용한다. 수동 약속은 원본 이벤트가 없어 raw 테이블에 row를 만들지 않는다(manual-commitment.spec.yml MAN-003 invariant). 마이그레이션 DDL 변경 없음(컬럼 타입은 TEXT) — 애플리케이션 레벨 enum 검증과 Railway validation만 업데이트."
+  - "commitments 편집/삭제/이의제기/승계 컬럼 6개 추가: last_edited_by(uuid, fk auth.users.id), last_edited_at(timestamptz), quote_disputed(bool default false), quote_disputed_at(timestamptz), deleted_at(timestamptz), supersedes_commitment_id(uuid, fk commitments.id). Room 마이그레이션: ALTER TABLE commitments ADD COLUMN last_edited_by TEXT; ADD COLUMN last_edited_at INTEGER; ADD COLUMN quote_disputed INTEGER NOT NULL DEFAULT 0; ADD COLUMN quote_disputed_at INTEGER; ADD COLUMN deleted_at INTEGER; ADD COLUMN supersedes_commitment_id TEXT REFERENCES commitments(id) ON DELETE SET NULL; CREATE INDEX idx_commitments_user_deleted ON commitments(user_id, deleted_at); CREATE INDEX idx_commitments_supersedes ON commitments(supersedes_commitment_id). Supabase Postgres: 동일 DDL(uuid 타입·NULL allowed·FK 명시) + 선택적 `CREATE INDEX idx_commitments_user_deleted_partial ON commitments(user_id) WHERE deleted_at IS NULL` (post-MVP 최적화). 기존 row는 모든 신규 컬럼이 NULL 또는 false로 backfill — 서비스 동작에 영향 없음. 모든 클라이언트 쿼리는 `WHERE deleted_at IS NULL` 필터 추가 필수(AppDatabase DAO 레벨 일괄 적용). commitment-edit.spec.yml EDIT-001..008 및 manual-commitment.spec.yml의 EDIT-007 supersede 전용 흐름이 이 스키마를 전제로 한다."
+  - "source_type enum 확장: raw_ingestion_events는 message_screenshot/manual_text까지 포함해 11종(voice|call_recording|meeting|message_screenshot|manual_text|gmail|outlook_mail|naver_imap|daum_imap|google_calendar|outlook_calendar)을 허용한다. commitments.source_type은 여기에 manual을 추가해 12종을 허용한다. 수동 약속은 원본 이벤트가 없어 raw 테이블에 row를 만들지 않는다(manual-commitment.spec.yml MAN-003 invariant). 수동 텍스트 증거는 source_type='manual_text' raw event를 만들고 공통 extraction pipeline을 탄다. Supabase CHECK constraint가 있는 테이블은 message_screenshot/manual_text를 포함하도록 migration이 필요하다."
   - "calendar_events 반복 일정 컬럼 2개 추가: recurring_event_id(text, nullable), original_start_at(timestamptz, nullable). Google Calendar의 recurringEventId·originalStartTime 및 MS Graph의 seriesMasterId·originalStart에서 채운다. Room 마이그레이션: ALTER TABLE calendar_events ADD COLUMN recurring_event_id TEXT; ADD COLUMN original_start_at INTEGER; CREATE INDEX idx_calendar_events_user_recurring ON calendar_events(user_id, recurring_event_id). Supabase Postgres: 동일 DDL + 동일 index. 기존 row는 NULL backfill — 현재 동작에 영향 없음(non-recurring 이벤트는 여전히 NULL). post-MVP에서 '반복 — 매주 월' 뱃지, 시리즈 전체 [완료] 등 UI에 활용. 이동(override)된 instance는 start_at != original_start_at로 감지되어 '원래: M/d HH:mm' 보조 라벨 표시 가능."

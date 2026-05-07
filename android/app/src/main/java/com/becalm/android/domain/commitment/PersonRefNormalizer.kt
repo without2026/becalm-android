@@ -2,7 +2,7 @@ package com.becalm.android.domain.commitment
 
 /**
  * Shared normalization + validation helpers for the `counterparty_ref` column used across
- * the commitment edit (EDIT-004) and manual-create (MAN-005) flows.
+ * the commitment edit (EDIT-004) and supersede correction (MAN-005) flows.
  *
  * A [CommitmentEntity.counterpartyRef][com.becalm.android.data.local.db.entity.CommitmentEntity.counterpartyRef]
  * is a canonicalized counterparty identifier following the precedence rule:

@@ -50,7 +50,10 @@ class CommitmentManagementUiTest {
                     snackbarHostState = SnackbarHostState(),
                     pullState = pullState,
                     onFilterChange = {},
-                    onOpenCreate = {},
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    onMeetingTranscriptImport = {},
+                    onManualTextImport = {},
                     onOpenDetail = {},
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -64,7 +67,6 @@ class CommitmentManagementUiTest {
     @Test
     fun `commitment management shows filters sections fab and detail tap`() {
         var selectedFilter: CommitmentFilter? = null
-        var openCreateCount = 0
         var openedDetailId: String? = null
 
         composeRule.setContent {
@@ -76,12 +78,10 @@ class CommitmentManagementUiTest {
                         items = listOf(
                             activeRow("active-1", "활성 약속"),
                             scheduleRow("schedule-1", "일정 변경"),
-                            decisionRow("decision-1", "방향 결정"),
                         ),
                         activeItems = listOf(
                             activeRow("active-1", "활성 약속"),
                             scheduleRow("schedule-1", "일정 변경"),
-                            decisionRow("decision-1", "방향 결정"),
                         ),
                         completedSection = CommitmentSectionUiState(
                             expanded = false,
@@ -98,7 +98,10 @@ class CommitmentManagementUiTest {
                     snackbarHostState = SnackbarHostState(),
                     pullState = pullState,
                     onFilterChange = { selectedFilter = it },
-                    onOpenCreate = { openCreateCount += 1 },
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    onMeetingTranscriptImport = {},
+                    onManualTextImport = {},
                     onOpenDetail = { openedDetailId = it },
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -112,12 +115,12 @@ class CommitmentManagementUiTest {
         composeRule.onNodeWithText("일정 변경").assertIsDisplayed()
         composeRule.onNodeWithTag("commitment-list").performScrollToNode(hasText("활성 약속"))
         composeRule.onNodeWithText("활성 약속").performClick()
-        composeRule.onNodeWithTag("commitment-fab-add").performClick()
+        composeRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeRule.onNodeWithText("증거 추가").assertIsDisplayed()
         composeRule.onNodeWithTag("commitment-filter-schedule").performClick()
 
         composeRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
-            assertEquals(1, openCreateCount)
             assertEquals(CommitmentFilter.SCHEDULE, selectedFilter)
         }
     }
@@ -151,22 +154,6 @@ class CommitmentManagementUiTest {
         dueIsApproximate = false,
         dueHint = null,
         counterpartyDisplayName = "박과장",
-        isManual = false,
-    )
-
-    private fun decisionRow(id: String, title: String): CommitmentRow = CommitmentRow(
-        id = id,
-        itemType = "decision",
-        title = title,
-        direction = null,
-        scheduleStatus = null,
-        decisionStatus = "chosen",
-        derivedStatus = null,
-        actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
-        dueAt = null,
-        dueIsApproximate = false,
-        dueHint = null,
-        counterpartyDisplayName = "이부장",
         isManual = false,
     )
 

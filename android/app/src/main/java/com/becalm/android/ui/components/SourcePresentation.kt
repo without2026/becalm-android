@@ -2,8 +2,10 @@ package com.becalm.android.ui.components
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.ui.graphics.Color
@@ -70,6 +72,18 @@ internal fun sourcePresentationFor(sourceType: String): SourcePresentation = whe
         labelRes = R.string.raw_event_source_badge_meeting,
         icon = Icons.Outlined.Mic,
         accentColor = Color(0xFF7E7861),
+    )
+
+    SourceType.MESSAGE_SCREENSHOT -> SourcePresentation(
+        labelRes = R.string.raw_event_source_badge_message_screenshot,
+        icon = Icons.Outlined.Image,
+        accentColor = Color(0xFF8B7158),
+    )
+
+    SourceType.MANUAL_TEXT -> SourcePresentation(
+        labelRes = R.string.raw_event_source_badge_manual_text,
+        icon = Icons.AutoMirrored.Outlined.Notes,
+        accentColor = Color(0xFF6F7F68),
     )
 
     else -> SourcePresentation(

@@ -28,7 +28,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +55,11 @@ import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
+import com.becalm.android.ui.evidence.EvidenceImportSheet
+import com.becalm.android.ui.evidence.EvidenceImportViewModel
+import com.becalm.android.ui.evidence.ManualTextEvidenceDialog
+import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -73,13 +81,19 @@ import kotlinx.datetime.toLocalDateTime
 public fun PersonsScreen(
     navController: NavHostController,
     viewModel: PersonsViewModel = hiltViewModel(),
+    evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
     headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
     val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
+    val importMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
+
+    val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
 
     PersonsScreenContent(
         state = state,
@@ -93,6 +107,10 @@ public fun PersonsScreen(
         },
         headerState = headerState,
         onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
+        onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
+        onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
+        onMeetingTranscriptImport = evidenceImportActions.openMeetingTranscriptPicker,
+        onManualTextImport = evidenceImportActions.submitManualText,
     )
 }
 
@@ -105,8 +123,14 @@ public fun PersonsScreenContent(
     onOpenUnassigned: () -> Unit = {},
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onOpenSettings: () -> Unit = {},
+    onMessageScreenshotImport: () -> Unit = {},
+    onMeetingAudioImport: () -> Unit = {},
+    onMeetingTranscriptImport: () -> Unit = {},
+    onManualTextImport: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var showImportSheet by rememberSaveable { mutableStateOf(false) }
+    var showManualTextDialog by rememberSaveable { mutableStateOf(false) }
     val hasUnassignedEvents = state.unassignedEvents.isNotEmpty()
     BecalmScaffold(
         modifier = modifier,
@@ -117,6 +141,9 @@ public fun PersonsScreenContent(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            EvidenceImportFloatingActionButton(onClick = { showImportSheet = true })
+        },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -168,6 +195,37 @@ public fun PersonsScreenContent(
                 }
             }
         }
+    }
+
+    if (showImportSheet) {
+        EvidenceImportSheet(
+            onDismiss = { showImportSheet = false },
+            onMessageScreenshotImport = {
+                showImportSheet = false
+                onMessageScreenshotImport()
+            },
+            onMeetingAudioImport = {
+                showImportSheet = false
+                onMeetingAudioImport()
+            },
+            onMeetingTranscriptImport = {
+                showImportSheet = false
+                onMeetingTranscriptImport()
+            },
+            onManualTextImport = {
+                showImportSheet = false
+                showManualTextDialog = true
+            },
+        )
+    }
+    if (showManualTextDialog) {
+        ManualTextEvidenceDialog(
+            onDismiss = { showManualTextDialog = false },
+            onSubmit = {
+                showManualTextDialog = false
+                onManualTextImport(it)
+            },
+        )
     }
 }
 

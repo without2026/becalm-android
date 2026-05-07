@@ -102,6 +102,7 @@ class AiPersonPipelineLocalIntegrationTest {
         coEvery {
             sourceExtractionApi.commitmentExtract(
                 audio = any(),
+                image = any(),
                 inputModality = any(),
                 sourceType = any(),
                 clientEventId = any(),

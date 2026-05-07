@@ -39,6 +39,7 @@ import kotlinx.datetime.Instant
 import kotlin.reflect.full.memberProperties
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -140,7 +141,7 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
-    fun `CMT-002 filter tabs isolate give take and all commitments`() = runTest {
+    fun `CMT-002 filter tabs isolate give take and action schedule commitments`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(id = "give-1", direction = "give"),
@@ -175,12 +176,12 @@ class CommitmentManagementViewModelSpecTest {
                     "give-2",
                     "take-1",
                     "schedule-1",
-                    "decision-1",
                     "completed-1",
                     "cancelled-1",
                 ),
                 initial.items.map { it.id },
             )
+            assertFalse(initial.items.any { it.itemType == "decision" })
 
             viewModel.onFilterChange(CommitmentFilter.GIVE)
             val giveOnly = awaitItem()
@@ -220,12 +221,12 @@ class CommitmentManagementViewModelSpecTest {
                     "give-2",
                     "take-1",
                     "schedule-1",
-                    "decision-1",
                     "completed-1",
                     "cancelled-1",
                 ),
                 allAgain.items.map { it.id },
             )
+            assertFalse(allAgain.items.any { it.id == "decision-1" })
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -422,11 +423,8 @@ class CommitmentManagementViewModelSpecTest {
         assertEquals("schedule", rows.getValue("schedule-1").itemType)
         assertEquals("changed", rows.getValue("schedule-1").scheduleStatus)
         assertEquals("박과장", rows.getValue("schedule-1").counterpartyDisplayName)
-        assertEquals("decision", rows.getValue("decision-1").itemType)
-        assertEquals("ongoing", rows.getValue("decision-1").decisionStatus)
-        assertEquals("Legacy Person", rows.getValue("decision-1").counterpartyDisplayName)
         assertEquals(null, rows.getValue("schedule-1").derivedStatus)
-        assertEquals(null, rows.getValue("decision-1").derivedStatus)
+        assertFalse(rows.containsKey("decision-1"))
     }
 
     @Test

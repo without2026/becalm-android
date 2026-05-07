@@ -358,9 +358,6 @@ public fun BecalmNavHost(
                     onOpenDetail = { id ->
                         navController.navigate(BecalmRoute.CommitmentDetail(id).path)
                     },
-                    onOpenCreate = {
-                        navController.navigate(BecalmRoute.CommitmentCreate(null).path)
-                    },
                     onOpenSettings = {
                         navController.navigate(BecalmRoute.Settings.path)
                     },
@@ -368,10 +365,8 @@ public fun BecalmNavHost(
             }
         }
 
-        // MAN-001..006 + EDIT-007: manual-create / supersede-create sheet.
-        // `supersedeOf` is declared nullable with defaultValue=null so the
-        // plain FAB navigation path (`commitments/new`) matches the same
-        // destination as the supersede path (`commitments/new?supersedeOf=...`).
+        // EDIT-007 supersede sheet. The Commitments FAB opens evidence import,
+        // so this destination remains only for routes that intentionally pass supersedeOf.
         composable(
             route = BecalmRoute.CommitmentCreate.PATH,
             arguments = listOf(

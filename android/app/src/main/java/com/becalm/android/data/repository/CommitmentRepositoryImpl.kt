@@ -21,7 +21,6 @@ import com.becalm.android.data.remote.dto.CommitmentBatchRequestDto
 import com.becalm.android.data.remote.dto.CommitmentBatchResponseDto
 import com.becalm.android.data.remote.dto.CommitmentPatchDto
 import com.becalm.android.data.remote.dto.PatchCommitmentRequest
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.internal.MAX_BATCH_SIZE
 import com.becalm.android.data.repository.internal.toBatchItemDto
@@ -471,11 +470,11 @@ public class CommitmentRepositoryImpl @Inject constructor(
         result
     }
 
-    // ── Manual create (MAN-001..006) ──────────────────────────────────────────
+    // ── Supersede correction (EDIT-007) ───────────────────────────────────────
 
     override suspend fun saveManualCommitment(
         input: ManualCommitmentInput,
-        supersedeOf: String?,
+        supersedeOf: String,
     ): BecalmResult<String> = withContext(ioDispatcher) {
         val actorId = resolveActorId()
             ?: return@withContext BecalmResult.Failure(BecalmError.Unauthorized)
@@ -487,41 +486,35 @@ public class CommitmentRepositoryImpl @Inject constructor(
         // preserves evidentiary provenance — the new row inherits source_type,
         // source_event_title, source_event_occurred_at, and source_ref from the
         // old row. Only the user-editable fields come from `input`.
-        val oldRow: CommitmentEntity? = supersedeOf?.let { dao.findByIdForUser(actorId, it) }
+        val oldRow = dao.findByIdForUser(actorId, supersedeOf)
+            ?: return@withContext BecalmResult.Failure(
+                BecalmError.NotFound("commitment/$supersedeOf"),
+            )
 
-        // Build the new row. Two sources:
-        //   1. Manual create (supersedeOf == null) — spec MAN-003 invariants:
-        //      source_type='manual', confidence=1.0, source_ref=null,
-        //      source_event_title=null, source_event_occurred_at=created_at.
-        //      GREP GUARD: this branch MUST NEVER insert into raw_ingestion_events
-        //      (`rawIngestionEventDao.insert` / `rawEventDao.insert`). Manual
-        //      rows have no backing raw event per MAN-003 invariant 4.
-        //   2. Supersede (supersedeOf != null, oldRow != null) — spec EDIT-007:
-        //      quote + source_* copied verbatim from the old row to preserve
-        //      evidentiary provenance. confidence follows the old row so an
-        //      LLM-extracted commitment that gets corrected keeps its original
-        //      confidence score. user-editable fields still come from `input`.
-        //   In both cases last_edited_by/at are populated immediately so the
-        //   audit trail mirrors LLM-extracted rows (EDIT-008 parity).
+        // Build the replacement row. quote + source_* are copied verbatim from
+        // the old row to preserve evidentiary provenance. confidence follows the
+        // old row so an LLM-extracted commitment that gets corrected keeps its
+        // original confidence score. User-editable fields come from `input`.
+        // last_edited_by/at are populated immediately for EDIT-008 parity.
         val newRow = CommitmentEntity(
             id = newId,
             userId = actorId,
             itemType = CommitmentItemType.ACTION,
             direction = input.direction,
-            counterpartyRaw = oldRow?.counterpartyRaw,
+            counterpartyRaw = oldRow.counterpartyRaw,
             counterpartyRef = input.counterpartyRef,
             title = input.title,
             description = null,
-            quote = oldRow?.quote ?: input.quote,
-            sourceEventTitle = oldRow?.sourceEventTitle,
-            sourceEventOccurredAt = oldRow?.sourceEventOccurredAt ?: now,
+            quote = oldRow.quote,
+            sourceEventTitle = oldRow.sourceEventTitle,
+            sourceEventOccurredAt = oldRow.sourceEventOccurredAt ?: now,
             dueAt = input.dueAt,
             dueHint = input.dueHint,
             dueIsApproximate = input.dueIsApproximate,
             actionState = "pending",
-            sourceType = oldRow?.sourceType ?: SourceType.MANUAL,
-            sourceRef = oldRow?.sourceRef,
-            confidence = oldRow?.confidence ?: 1.0,
+            sourceType = oldRow.sourceType,
+            sourceRef = oldRow.sourceRef,
+            confidence = oldRow.confidence,
             commitmentState = CommitmentLifecycleLegacy.DRAFT,
             syncStatus = "pending",
             createdAt = now,
@@ -534,50 +527,9 @@ public class CommitmentRepositoryImpl @Inject constructor(
             supersedesCommitmentId = supersedeOf,
         )
 
-        if (supersedeOf != null) {
-            if (oldRow == null) {
-                return@withContext BecalmResult.Failure(
-                    BecalmError.NotFound("commitment/$supersedeOf")
-                )
-            }
-            // EDIT-007 reuses this path: supersede() wraps INSERT + softDelete
-            // in a single Room transaction + best-effort upload of the new row.
-            return@withContext supersede(supersedeOf, newRow)
-        }
-
-        // Plain manual create — local INSERT then best-effort batch POST.
-        try {
-            dao.insert(newRow)
-        } catch (e: Exception) {
-            e.rethrowIfCancellation()
-            logger.e(TAG, "saveManualCommitment dao.insert failed id=$newId", e)
-            return@withContext BecalmResult.Failure(BecalmError.Io(e.message ?: "dao insert failed"))
-        }
-
-        // Best-effort upload. Failure is absorbed into the standard
-        // `sync_status='pending'` retry queue (UploadWorker drains it).
-        runCatching {
-            api.uploadCommitmentsBatch(
-                request = CommitmentBatchRequestDto(commitments = listOf(newRow.toBatchItemDto())),
-            )
-        }.onSuccess { response ->
-            if (response.isSuccessful) {
-                dao.markSynced(listOf(newId))
-            } else {
-                logger.w(
-                    TAG,
-                    "saveManualCommitment upload non-2xx id=$newId http=${response.code()} — leaving pending",
-                )
-            }
-        }.onFailure { e ->
-            if (e is IOException) {
-                logger.w(TAG, "saveManualCommitment upload IOException id=$newId — leaving pending")
-            } else {
-                e.rethrowIfCancellation()
-                logger.e(TAG, "saveManualCommitment upload failed id=$newId", e)
-            }
-        }
-        BecalmResult.Success(newId)
+        // supersede() wraps INSERT + softDelete in a single Room transaction +
+        // best-effort upload of the new row.
+        supersede(supersedeOf, newRow)
     }
 
     // ── Sync helpers ──────────────────────────────────────────────────────────

@@ -1,45 +1,45 @@
 # Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
 #
-# 이 스펙은 사용자가 LLM 추출을 거치지 않고 **직접** 약속을 추가하는 경로를 codify한다.
-# 사용 상황: (a) 오프라인 대면 대화에서 구두 약속 발생, (b) 메모나 포스트잇으로 받은 약속,
-# (c) LLM이 놓친 약속을 수동으로 보완, (d) commitment-edit.spec.yml EDIT-007 supersede 경로의 입력 화면.
+# 이 스펙은 과거 "신규 수동 약속 추가" 경로를 더 이상 primary UX로 노출하지 않는
+# boundary를 codify한다. Commitments 탭의 + 버튼은 MAN-001 수동 폼이 아니라
+# message-screenshot-ingestion.spec.yml의 evidence import sheet를 연다.
 #
-# 핵심 차이: source_type='manual', confidence=1.0, source_event_title=null, quote=사용자 입력 텍스트.
-# 스키마 의존성: commitments.source_type enum에만 'manual' 추가 필요.
-# raw_ingestion_events.source_type은 확장하지 않는다 — 수동 약속은 원본 이벤트가 없어 raw row를 만들지 않는다.
+# 남는 사용 상황: commitment-edit.spec.yml EDIT-007 supersede 경로의 내부 입력 화면.
+# 사용자가 원본 evidence 없이 새 약속을 직접 만드는 경로는 신규 entry point가 없다.
 
 module: manual-commitment
 platform: android
-version: 1
+version: 3
 
 behaviors:
   - id: MAN-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 우하단에 ExtendedFloatingActionButton [+ 약속 추가]가 표시되며 탭 시 CommitmentCreateSheet(빈 폼)가 열린다. sheet 상단에 '직접 추가한 약속은 LLM 추출 약속과 동일하게 관리됩니다' 안내 라벨. 동일 sheet는 EDIT-007 supersede 경로에서는 quote + source_event_* pre-filled 상태로 재사용된다 — 즉, '신규 manual' mode와 'supersede' mode 두 가지"
-    screen: "CommitmentManagementScreen | CommitmentCreateSheet"
-    interaction: "FAB [+ 약속 추가] 탭"
+    description: "CommitmentManagementScreen 우하단 + 버튼은 신규 manual CommitmentCreateSheet를 열지 않는다. 대신 evidence import sheet를 연다"
+    screen: "CommitmentManagementScreen"
+    interaction: "FAB [+] 탭"
     precondition: "CommitmentManagementScreen 표시됨"
-    expected: "CommitmentCreateSheet 열림. 상단 제목: '약속 직접 추가'. 필드: title(필수), direction(필수), quote(필수 — '약속 맥락' 라벨로 표시), person_ref(선택), due_at(선택), due_hint(선택), due_is_approximate(선택, default false). 하단 [취소]/[저장] 버튼. 모드 구분: 신규 manual = 모든 필드 빈 값으로 시작, supersede = EDIT-007에서 호출되어 quote/source_event_* pre-filled + 읽기 전용으로 전환"
+    expected: "CommitmentCreateSheet 빈 폼은 열리지 않는다. 화면에는 '증거 추가' sheet가 표시되고 메신저 스크린샷, 회의 녹음, 회의 전사본 import action이 보인다. 신규 manual source_type row는 생성되지 않는다"
     source: phase2-acceptance
-    tests: []
+    tests:
+      - "CommitmentManagementScreenTest.commitment_management_fab_opens_evidence_import_sheet"
 
   - id: MAN-002
     type: ui_interaction
-    description: "quote 필드는 사용자가 약속의 맥락·증거를 **본인이 기술**하는 영역이다 (예: '김대리와 3시 미팅 중 월요일 보고서 전달 약속'). LLM 추출 quote와 동일한 법적 증거 필드로 저장되지만 사용자 자기 기록이므로 'verbatim' 제약은 없다. 최대 500자. 빈 값 저장 불가 — 최소 1자 필요 (증거 없는 기록 방지)"
+    description: "CommitmentCreateSheet는 EDIT-007 supersede 내부 경로 전용이다. quote 필드는 기존 source evidence에서 복사되어 읽기 전용으로 표시된다"
     screen: "CommitmentCreateSheet"
-    interaction: "quote 필드 입력"
-    precondition: "CommitmentCreateSheet 열림 (신규 manual 모드)"
-    expected: "quote TextField multi-line 3줄, max 500자, placeholder: '이 약속의 맥락을 기록하세요 (예: 3/15 팀 미팅 중 월요일 보고서 전달 구두 약속)'. 공백만 입력: 헬퍼 텍스트 '약속의 맥락을 최소 1자 이상 입력해주세요'. 500자 초과: '최대 500자까지 입력할 수 있습니다'. supersede 모드에서는 quote가 원본 commitment에서 복사되어 읽기 전용 카드로 표시 + 편집 불가"
+    interaction: "EDIT-007 supersede 진입"
+    precondition: "기존 commitment를 다른 약속으로 교체하는 흐름"
+    expected: "supersedeOf가 없는 빈 생성 모드는 존재하지 않는다. source_type/source_ref/source_event_title/source_event_occurred_at/quote는 원본 commitment에서 상속된다. quote는 읽기 전용 evidence 카드로 표시되고 사용자가 수정할 수 없다"
     source: phase2-acceptance
     tests: []
 
   - id: MAN-003
     type: ui_interaction
-    description: "[저장] 탭 시 Room commitments INSERT + Railway POST /v1/commitments를 실행한다. source_type='manual', source_ref=null, source_event_title=null, source_event_occurred_at=now(), confidence=1.0(사용자 직접 입력으로 확신), sync_status='pending', last_edited_by=user_id, last_edited_at=now(). raw_ingestion_events row는 생성하지 않음 (manual은 원본 이벤트가 없음)"
+    description: "신규 source_type='manual' commitment 생성은 primary UI에서 제거된다. manual source_type은 기존 데이터/서버 contract 호환과 supersede fallback을 위해서만 남는다"
     screen: "CommitmentCreateSheet"
-    interaction: "[저장] 버튼 탭"
-    precondition: "validation 통과 (MAN-005), 신규 manual 모드"
-    expected: "Room commitments INSERT with source_type='manual', confidence=1.0, source_event_occurred_at=now() KST, user-provided 필드(title/direction/quote/person_ref/due_*). sync_status='pending'. Railway POST /v1/commitments body에 동일 payload(server는 source_type='manual'을 수락하도록 enum 확장 필요). 응답 201(durable commit 완료) 시 sync_status='synced'. CommitmentCreateSheet dismiss → CommitmentManagementScreen 목록 상단에 새 카드 반영. supersede 모드 저장 동작은 EDIT-007에서 정의 (old row deleted_at + new row supersedes_commitment_id)"
+    interaction: "일반 Commitments FAB"
+    precondition: "CommitmentManagementScreen 표시됨"
+    expected: "source_type='manual' raw_ingestion_events row는 생성되지 않고, 신규 manual commitment 생성 API 호출도 발생하지 않는다. 새 evidence가 필요하면 message_screenshot/meeting source raw event를 먼저 만들고 LLM extraction 결과로 action/schedule/decision을 저장한다"
     source: phase2-acceptance
     tests: []
 
@@ -55,11 +55,11 @@ behaviors:
 
   - id: MAN-005
     type: ui_interaction
-    description: "Validation 규칙 — title 공백 제거 후 1~200자. direction ∈ ('give','take') 1개 선택 필수. quote 공백 제거 후 최소 1자 최대 500자. person_ref는 공백 제거 후 lowercase 정규화(비워도 허용). due_at 입력 시 유효 ISO8601 KST(과거도 허용 — 지난 약속 추후 기록). 규칙 위반 시 해당 필드 하단 빨간 헬퍼 텍스트 + [저장] 비활성"
+    description: "Supersede 입력 validation 규칙 — title 공백 제거 후 1~200자. direction ∈ ('give','take') 1개 선택 필수. quote는 원본 commitment에서 상속되며 사용자가 입력하지 않는다. person_ref는 공백 제거 후 lowercase 정규화(비워도 허용). due_at 입력 시 유효 ISO8601 KST(과거도 허용). 규칙 위반 시 해당 필드 하단 빨간 헬퍼 텍스트 + 저장 실패"
     screen: "CommitmentCreateSheet"
     interaction: "[저장] 탭 or 필드 blur"
-    precondition: "CommitmentCreateSheet 열림"
-    expected: "title 빈값: '제목을 입력해주세요'. title >200: '최대 200자'. direction 미선택: RadioButton 특성상 하나는 선택되어야 하므로 초기 default는 'give' (본인 제안 약속이 일반적). quote 빈값: '약속의 맥락을 입력해주세요'. quote >500: '최대 500자'. due_at 선택 후 해제 가능(null 허용). person_ref는 TextField에 입력 가능 + Room persons_enrichment match 제안(EDIT-002와 동일 UX). 모든 필드 통과 시에만 [저장] 활성"
+    precondition: "EDIT-007 supersedeOf가 있는 CommitmentCreateSheet 열림"
+    expected: "title 빈값: '제목을 입력해주세요'. title >200: '최대 200자'. direction 미선택: RadioButton 특성상 하나는 선택되어야 하므로 초기 default는 'give'. quote는 원본 evidence text로 표시되고 TextField가 아니다. due_at 선택 후 해제 가능(null 허용). person_ref는 TextField에 입력 가능. 저장 시 source row가 없으면 명시적 오류를 표시하고 repository write를 실행하지 않는다"
     source: phase2-acceptance
     tests: []
 
@@ -74,10 +74,10 @@ behaviors:
     tests: []
 
 invariants:
-  - "수동 약속은 source_type='manual', confidence=1.0, source_ref=null, source_event_title=null로 저장된다"
-  - "source_event_occurred_at은 created_at과 같은 값(now() at save time)으로 기록 — LLM 추출 약속의 '원본 이벤트 발생 시각' 의미와 다름"
-  - "quote는 사용자가 직접 입력하며 최소 1자 최대 500자 — 빈 quote 저장 불가 (증거 없는 기록 방지)"
-  - "수동 약속은 raw_ingestion_events row를 생성하지 않는다 — commitments 테이블에만 존재"
+  - "Commitments 탭 + 버튼은 신규 manual commitment 생성으로 연결되지 않는다"
+  - "CommitmentCreateSheet에는 신규 blank manual mode가 없다. EDIT-007 supersedeOf가 있는 경우에만 저장 가능하다"
+  - "manual source_type은 commitments.source_type compatibility 및 supersede 결과 provenance 값으로만 남고 raw_ingestion_events에는 쓰지 않는다"
+  - "새 evidence 입력은 message_screenshot/meeting raw event를 생성한 뒤 공통 LLM extraction pipeline을 거친다"
   - "LLM 추출 파이프라인(CommitmentExtractionWorker·VoiceExtractionWorker 등)은 source_type='manual' commitment를 재처리하지 않는다"
   - "action_state 전이·편집(commitment-edit.spec.yml)·알림(CMT-008)은 LLM 추출 약속과 완전히 동일하게 동작한다 — source_type만 시각 배지로 구분"
   - "raw_ingestion_events 30일 리텐션 정책은 manual commitment에 영향 없음 (연관 raw event 없음)"

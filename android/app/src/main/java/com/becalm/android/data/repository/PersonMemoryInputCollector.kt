@@ -4,6 +4,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
@@ -135,10 +136,17 @@ public class PersonMemoryInputCollector @Inject constructor(
             sourceRef = "commitment:$id",
             itemType = itemType,
             title = title,
-            status = actionState,
+            status = memoryStatus(),
             quote = quote,
             occurredAt = sourceEventOccurredAt,
         )
+
+    private fun CommitmentEntity.memoryStatus(): String? =
+        when (itemType) {
+            CommitmentItemType.SCHEDULE -> scheduleStatus
+            CommitmentItemType.DECISION -> decisionStatus
+            else -> actionState
+        }
 
     private fun SourceEventParticipantEntity.memorySourceRef(): String =
         "raw:$sourceEventId"

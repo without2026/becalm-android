@@ -49,34 +49,26 @@ import kotlinx.datetime.toLocalDateTime
 // ─── CommitmentCreateSheet ────────────────────────────────────────────────────
 
 /**
- * Bottom-sheet host for the manual-create commitment form (MAN-001..006) and
- * the supersede-create flow (EDIT-007).
+ * Bottom-sheet host for the supersede-create flow (EDIT-007).
  *
  * Opened from:
- * - The `[+ 약속 추가]` FAB on [CommitmentManagementScreen]
- *   (`supersedeOf = null` → plain manual add).
  * - The `[이건 다른 약속입니다]` button on [CommitmentEditSheet]
  *   (`supersedeOf = oldId` → supersede).
  *
- * Both flows ultimately call
- * [com.becalm.android.data.repository.CommitmentRepository.saveManualCommitment]
- * with `source_type = 'manual'`; the entry mode (MANUAL vs SUPERSEDE) only
- * affects sheet-header copy and whether the quote field is editable.
+ * The flow calls [com.becalm.android.data.repository.CommitmentRepository.saveManualCommitment]
+ * with `source_type = 'manual'` as a compatibility provenance for user-corrected
+ * commitments. New blank manual commitments are not a primary UI path.
  *
  * ## Quote in SUPERSEDE mode (EDIT-007 invariant 1)
  *
- * In supersede mode the user is correcting the *interpretation* of an
- * existing event, not inventing a new one. The evidentiary quote string is
- * therefore rendered as a plain [Text] — **never** a [OutlinedTextField] —
- * and [CommitmentCreateViewModel.onSave] copies the old row's quote verbatim
- * into the draft before validation. The VM also silently drops any
- * [CommitmentCreateViewModel.onQuoteChange] call in supersede mode as a
- * defence-in-depth guard against future caller bypasses.
+ * The user is correcting the *interpretation* of an existing event, not
+ * inventing a new one. The evidentiary quote string is therefore rendered as
+ * plain [Text] — never an [OutlinedTextField] — and [CommitmentCreateViewModel.onSave]
+ * copies the old row's quote verbatim into the draft before validation.
  *
- * @param supersedeOf UUID of the commitment being superseded, or `null` for
- *   plain manual add. Threaded via [androidx.lifecycle.SavedStateHandle] into
- *   the VM by Hilt; the parameter exists on the Composable signature so the
- *   nav host can pass it explicitly.
+ * @param supersedeOf UUID of the commitment being superseded. Threaded via
+ *   [androidx.lifecycle.SavedStateHandle] into the VM by Hilt; the parameter
+ *   exists on the Composable signature so the nav host can pass it explicitly.
  * @param onDismiss Invoked whenever the sheet should dismiss itself (swipe,
  *   cancel button, successful save).
  * @param viewModel Hilt-provided ViewModel instance.
@@ -91,7 +83,6 @@ public fun CommitmentCreateSheet(
     dismissEventsOverride: Flow<Unit>? = null,
     onTitleChange: ((String) -> Unit)? = null,
     onDirectionChange: ((String) -> Unit)? = null,
-    onQuoteChange: ((String) -> Unit)? = null,
     onCounterpartyRefChange: ((String) -> Unit)? = null,
     onDueAtMillisChange: ((Long?) -> Unit)? = null,
     onDueHintChange: ((String) -> Unit)? = null,
@@ -107,7 +98,6 @@ public fun CommitmentCreateSheet(
             dismissEventsOverride == null ||
             onTitleChange == null ||
             onDirectionChange == null ||
-            onQuoteChange == null ||
             onCounterpartyRefChange == null ||
             onDueAtMillisChange == null ||
             onDueHintChange == null ||
@@ -140,7 +130,6 @@ public fun CommitmentCreateSheet(
             state = state,
             onTitleChange = onTitleChange ?: requireNotNull(createViewModel)::onTitleChange,
             onDirectionChange = onDirectionChange ?: requireNotNull(createViewModel)::onDirectionChange,
-            onQuoteChange = onQuoteChange ?: requireNotNull(createViewModel)::onQuoteChange,
             onCounterpartyRefChange = onCounterpartyRefChange ?: requireNotNull(createViewModel)::onCounterpartyRefChange,
             onDueAtMillisChange = onDueAtMillisChange ?: requireNotNull(createViewModel)::onDueAtMillisChange,
             onDueHintChange = onDueHintChange ?: requireNotNull(createViewModel)::onDueHintChange,
@@ -159,7 +148,6 @@ internal fun CreateSheetContent(
     state: CreateUiState,
     onTitleChange: (String) -> Unit,
     onDirectionChange: (String) -> Unit,
-    onQuoteChange: (String) -> Unit,
     onCounterpartyRefChange: (String) -> Unit,
     onDueAtMillisChange: (Long?) -> Unit,
     onDueHintChange: (String) -> Unit,
@@ -183,12 +171,8 @@ internal fun CreateSheetContent(
         ) {
             item {
                 Spacer(modifier = Modifier.height(12.dp))
-                val headerRes = when (state.mode) {
-                    CommitmentCreateMode.MANUAL -> R.string.commitment_manual_sheet_title_new
-                    CommitmentCreateMode.SUPERSEDE -> R.string.commitment_manual_sheet_title_supersede
-                }
                 Text(
-                    text = stringResource(headerRes),
+                    text = stringResource(R.string.commitment_manual_sheet_title_supersede),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -232,36 +216,15 @@ internal fun CreateSheetContent(
             }
 
             item {
-                // In SUPERSEDE mode the quote is legally evidentiary (EDIT-007
-                // invariant 1) — render as read-only text, never as TextField.
-                when (state.mode) {
-                    CommitmentCreateMode.MANUAL -> {
-                        OutlinedTextField(
-                            value = state.draft.quote,
-                            onValueChange = onQuoteChange,
-                            label = { Text(text = stringResource(R.string.commitment_manual_quote_hint)) },
-                            isError = state.fieldErrors.containsKey(Field.QUOTE),
-                            supportingText = {
-                                state.fieldErrors[Field.QUOTE]?.let { Text(text = commitmentStringResource(it)) }
-                            },
-                            enabled = !state.saving,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("commitment-create-quote"),
-                        )
-                    }
-                    CommitmentCreateMode.SUPERSEDE -> {
-                        SectionLabel(
-                            text = stringResource(R.string.commitment_manual_supersede_quote_label),
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = state.supersedeSource?.quote.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
+                SectionLabel(
+                    text = stringResource(R.string.commitment_manual_supersede_quote_label),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = state.supersedeSource?.quote.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
             }
 
             item {

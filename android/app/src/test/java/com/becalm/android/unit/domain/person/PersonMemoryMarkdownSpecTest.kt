@@ -30,6 +30,8 @@ class PersonMemoryMarkdownSpecTest {
         assertTrue(markdown.contains("content_hash: $hash"))
         assertRequiredSections(markdown)
         assertTrue(markdown.contains("- email: jane@acme.com"))
+        assertTrue(markdown.contains("### Decisions"))
+        assertTrue(markdown.contains("- Renewal discount approved (decision, approved). [commitment:commitment-decision, 2026-05-05]"))
         assertFalse(markdown.contains("Acme CEO\n-")) // role/title must not appear as identity alias.
 
         val result = PersonMemoryMarkdownValidator.validate(
@@ -197,6 +199,15 @@ class PersonMemoryMarkdownSpecTest {
                     title = "Send revised terms",
                     status = "pending",
                     quote = "Please send revised terms by Friday",
+                    occurredAt = Instant.parse("2026-05-05T00:00:00Z"),
+                ),
+                PersonMemoryCommitment(
+                    commitmentId = "commitment-decision",
+                    sourceRef = "commitment:commitment-decision",
+                    itemType = "decision",
+                    title = "Renewal discount approved",
+                    status = "approved",
+                    quote = "We approved the renewal discount",
                     occurredAt = Instant.parse("2026-05-05T00:00:00Z"),
                 ),
             ),

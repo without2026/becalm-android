@@ -248,41 +248,30 @@ public interface CommitmentRepository {
      */
     public suspend fun supersede(oldId: String, newRow: CommitmentEntity): BecalmResult<String>
 
-    // ── Manual create (MAN-001..006) ─────────────────────────────────────────
+    // ── Supersede correction (EDIT-007) ──────────────────────────────────────
 
     /**
-     * Implements MAN-003: saves a user-created commitment with
-     * `source_type = 'manual'`, `confidence = 1.0`, `source_ref = null`,
-     * `source_event_title = null`, and `source_event_occurred_at = created_at`.
+     * Saves a user correction for EDIT-007 "이건 다른 약속입니다".
+     * The old row is atomically soft-deleted and the new row carries
+     * `supersedes_commitment_id = oldId`.
      *
-     * **No `raw_ingestion_events` row is ever created on this path** — manual
-     * commitments have no originating raw event (spec MAN-003 invariant 4).
-     *
-     * When [supersedeOf] is non-null, the operation delegates to [supersede] so
-     * the old row is atomically soft-deleted and the new row carries
-     * `supersedes_commitment_id = oldId`. This is the EDIT-007 "이건 다른
-     * 약속입니다" path; the same sheet reuses [saveManualCommitment] for both
-     * flows per the manual-commitment spec.
+     * **No `raw_ingestion_events` row is ever created on this path.** The new
+     * row inherits source_type/source_ref/source_event_* and quote from the old
+     * row so evidentiary provenance remains attached to the replacement.
      *
      * Actor id is resolved from
      * [com.becalm.android.data.local.datastore.UserPrefsStore]; a blank id
      * short-circuits to [com.becalm.android.core.result.BecalmError.Unauthorized].
      *
-     * After the local write lands, the repository makes a best-effort
-     * `POST /v1/commitments:batch` for the new row. Non-2xx or IOException
-     * leaves `sync_status = 'pending'` so UploadWorker retries on the next
-     * run — callers always see `Success(id)` when the local write succeeded.
-     *
      * @param input Validated user input (title / direction / quote /
-     *   counterpartyRef / due_*). For supersede mode the caller ignores the draft's
-     *   quote and passes the old row's quote verbatim.
-     * @param supersedeOf UUID of the row being superseded, or null for plain
-     *   manual-create.
+     *   counterpartyRef / due_*). The caller should pass the old row's quote
+     *   verbatim; the repository also copies it from the old row defensively.
+     * @param supersedeOf UUID of the row being superseded.
      * @return `Success(newId)` on success, typed `Failure` on DAO / auth error.
      */
     public suspend fun saveManualCommitment(
         input: ManualCommitmentInput,
-        supersedeOf: String?,
+        supersedeOf: String,
     ): BecalmResult<String>
 
     // ── Sync helpers (SP-29 worker) ──────────────────────────────────────────

@@ -75,6 +75,8 @@ markdown_format:
       - "Summarize current work relationship, open commitments, decisions, and recurring topics."
       - "Every bullet must include source refs."
       - "Do not include full source bodies or transcript passages."
+      - "Action status comes from action_state, schedule status comes from schedule_status, and decision status comes from decision_status. Do not use action_state to summarize decision meaning."
+      - "Decision rows are compact relationship facts for memory/relation context, not primary actionable UI rows."
     Recent_Interactions:
       - "Most recent bounded interaction list, newest first."
       - "Use title/snippet/quote only; never full body."
@@ -160,7 +162,7 @@ prompt_contract:
         source_ref: string
         item_type: "action|schedule|decision"
         title: string
-        status?: string
+        status?: string # action_state for action, schedule_status for schedule, decision_status for decision
         quote: string
         occurred_at: datetime
     matching_feedback:

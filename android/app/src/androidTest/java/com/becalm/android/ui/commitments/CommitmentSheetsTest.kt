@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -145,9 +146,8 @@ class CommitmentSheetsTest {
     }
 
     @Test
-    fun commitment_create_content_shows_required_inputs_direction_and_save() {
+    fun commitment_create_content_shows_supersede_inputs_read_only_quote_and_save() {
         var title: String? = null
-        var quote: String? = null
         var counterpartyRef: String? = null
         var dueHint: String? = null
         var direction: String? = null
@@ -170,7 +170,7 @@ class CommitmentSheetsTest {
                 }
                 CreateSheetContent(
                     state = CreateUiState(
-                        mode = CommitmentCreateMode.MANUAL,
+                        supersedeSource = commitmentEntity(quote = "Please send the deck"),
                         draft = draft,
                     ),
                     onTitleChange = {
@@ -180,10 +180,6 @@ class CommitmentSheetsTest {
                     onDirectionChange = {
                         direction = it
                         draft = draft.copy(direction = it)
-                    },
-                    onQuoteChange = {
-                        quote = it
-                        draft = draft.copy(quote = it)
                     },
                     onCounterpartyRefChange = {
                         counterpartyRef = it
@@ -202,11 +198,10 @@ class CommitmentSheetsTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.commitment_manual_field_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Please send the deck").assertIsDisplayed()
+        composeTestRule.onAllNodesWithTag("commitment-create-quote").assertCountEquals(0)
         composeTestRule.onNodeWithTag("commitment-create-title").performTextInput("New commitment")
         composeTestRule.onNodeWithText(string(R.string.commitment_manual_field_direction_take)).performClick()
-        composeTestRule.onNodeWithTag("commitment-create-form")
-            .performScrollToNode(hasTestTag("commitment-create-quote"))
-        composeTestRule.onNodeWithTag("commitment-create-quote").performTextInput("Please send the deck")
         composeTestRule.onNodeWithTag("commitment-create-form")
             .performScrollToNode(hasTestTag("commitment-create-person-ref"))
         composeTestRule.onNodeWithTag("commitment-create-person-ref").performTextInput("alice@example.com")
@@ -218,7 +213,6 @@ class CommitmentSheetsTest {
 
         composeTestRule.runOnIdle {
             assertEquals("New commitment", title)
-            assertEquals("Please send the deck", quote)
             assertEquals("alice@example.com", counterpartyRef)
             assertEquals("Friday afternoon", dueHint)
             assertEquals("take", direction)
@@ -358,14 +352,14 @@ class CommitmentSheetsTest {
         composeTestRule.setContent {
             BecalmTheme {
                 CommitmentCreateSheet(
-                    supersedeOf = null,
+                    supersedeOf = "old-1",
                     onDismiss = { dismissCount += 1 },
                     stateOverride = CreateUiState(
-                        mode = CommitmentCreateMode.MANUAL,
+                        supersedeSource = commitmentEntity(quote = "Original quote"),
                         draft = ManualCommitmentDraft(
                             title = "",
                             direction = "give",
-                            quote = "",
+                            quote = "Original quote",
                             counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
@@ -375,7 +369,6 @@ class CommitmentSheetsTest {
                     dismissEventsOverride = dismissEvents,
                     onTitleChange = {},
                     onDirectionChange = {},
-                    onQuoteChange = {},
                     onCounterpartyRefChange = {},
                     onDueAtMillisChange = {},
                     onDueHintChange = {},
@@ -509,14 +502,14 @@ class CommitmentSheetsTest {
         composeTestRule.setContent {
             BecalmTheme {
                 CommitmentCreateSheet(
-                    supersedeOf = null,
+                    supersedeOf = "old-1",
                     onDismiss = {},
                     stateOverride = CreateUiState(
-                        mode = CommitmentCreateMode.MANUAL,
+                        supersedeSource = commitmentEntity(quote = "Original quote"),
                         draft = ManualCommitmentDraft(
                             title = "New commitment",
                             direction = "give",
-                            quote = "",
+                            quote = "Original quote",
                             counterpartyRef = null,
                             dueAtMillis = null,
                             dueHint = null,
@@ -526,7 +519,6 @@ class CommitmentSheetsTest {
                     dismissEventsOverride = MutableSharedFlow(extraBufferCapacity = 1),
                     onTitleChange = {},
                     onDirectionChange = {},
-                    onQuoteChange = {},
                     onCounterpartyRefChange = {},
                     onDueAtMillisChange = {},
                     onDueHintChange = {},
@@ -644,6 +636,7 @@ class CommitmentSheetsTest {
         direction: String? = "give",
         scheduleStatus: String? = null,
         decisionStatus: String? = null,
+        quote: String = "Send the deck by Friday",
     ): CommitmentEntity = CommitmentEntity(
         id = "commitment-1",
         userId = "user-1",
@@ -655,7 +648,7 @@ class CommitmentSheetsTest {
         counterpartyRef = "person-1",
         title = "Send proposal",
         description = null,
-        quote = "Send the deck by Friday",
+        quote = quote,
         sourceEventTitle = "Call",
         sourceEventOccurredAt = Instant.parse("2026-04-24T01:00:00Z"),
         dueAt = Instant.parse("2026-04-25T01:00:00Z"),

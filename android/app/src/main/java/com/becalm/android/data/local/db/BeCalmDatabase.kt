@@ -47,8 +47,8 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   `quote_disputed_at`, `deleted_at`, `supersedes_commitment_id` plus two indices
  *   (`idx_commitments_user_deleted`, `idx_commitments_supersedes`). Every SELECT in
  *   [com.becalm.android.data.local.db.dao.CommitmentDao] now filters `deleted_at IS NULL`
- *   per `.spec/contracts/data-model.yml:204-205`. Enables EDIT-001..008 and MAN-001..006
- *   Stage-5 UI flows.
+ *   per `.spec/contracts/data-model.yml:204-205`. Enables EDIT-001..008, including
+ *   supersede correction links.
  * - v6: introduces the `email_body` room-only table (14 columns, 2 indices, FK to
  *   `raw_ingestion_events` with `ON DELETE CASCADE`) and adds `raw_ingestion_events.folder`
  *   (nullable TEXT) as the EMAIL-001 direction hint. The table remains the local owner

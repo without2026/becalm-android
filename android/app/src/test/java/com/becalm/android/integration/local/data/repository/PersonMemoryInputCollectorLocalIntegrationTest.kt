@@ -83,18 +83,37 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
                     kind = "commitment",
                     title = "Send revised terms",
                 ),
+                interaction(
+                    id = "interaction-decision",
+                    personId = PERSON_ID,
+                    sourceRef = "commitment:commitment-decision",
+                    kind = "commitment",
+                    title = "Renewal discount approved",
+                ),
                 interaction(id = "interaction-other", personId = OTHER_PERSON_ID, sourceRef = "raw:raw-other", kind = "email"),
             ),
         )
         db.personIndexDao().upsertCommitmentParticipants(
             listOf(
                 commitmentParticipant(id = "commitment-participant-1", commitmentId = "commitment-1", personId = PERSON_ID),
+                commitmentParticipant(
+                    id = "commitment-participant-decision",
+                    commitmentId = "commitment-decision",
+                    personId = PERSON_ID,
+                ),
                 commitmentParticipant(id = "commitment-participant-other", commitmentId = "commitment-other", personId = OTHER_PERSON_ID),
             ),
         )
         db.commitmentDao().insertAll(
             listOf(
                 commitment(id = "commitment-1", title = "Send revised terms", deletedAt = null),
+                commitment(id = "commitment-decision", title = "Renewal discount approved", deletedAt = null).copy(
+                    itemType = CommitmentItemType.DECISION,
+                    direction = null,
+                    decisionStatus = "approved",
+                    actionState = "pending",
+                    quote = "We approved the renewal discount",
+                ),
                 commitment(id = "commitment-deleted", title = "Deleted work", deletedAt = Instant.parse("2026-05-05T00:00:00Z")),
                 commitment(id = "commitment-other", title = "Other work", deletedAt = null),
             ),
@@ -113,8 +132,12 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
         assertEquals(listOf("raw:raw-1"), input.participants.map { it.sourceRef })
         assertEquals(listOf("Acme"), input.participants.map { it.organization })
         assertEquals(listOf("CEO"), input.participants.map { it.title })
-        assertEquals(setOf("raw:raw-1", "commitment:commitment-1"), input.interactions.map { it.sourceRef }.toSet())
-        assertEquals(listOf("commitment-1"), input.commitments.map { it.commitmentId })
+        assertEquals(
+            setOf("raw:raw-1", "commitment:commitment-1", "commitment:commitment-decision"),
+            input.interactions.map { it.sourceRef }.toSet(),
+        )
+        assertEquals(setOf("commitment-1", "commitment-decision"), input.commitments.map { it.commitmentId }.toSet())
+        assertEquals("approved", input.commitments.single { it.commitmentId == "commitment-decision" }.status)
         assertTrue(input.commitments.none { it.title == "Deleted work" || it.title == "Other work" })
 
         val markdown = PersonMemoryMarkdownBuilder.build(input)

@@ -26,33 +26,13 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// ─── Mode ─────────────────────────────────────────────────────────────────────
-
-/**
- * Entry mode for [CommitmentCreateSheet].
- *
- * - [MANUAL] — plain manual add from the management screen FAB
- *   (`supersedeOf = null`). The user types every field from scratch.
- * - [SUPERSEDE] — EDIT-007 "이건 다른 약속입니다" path. The quote column is
- *   rendered as read-only text seeded from the old row; on save the old row
- *   is soft-deleted and the new row carries `supersedes_commitment_id = oldId`.
- *
- * Both modes ultimately call
- * [CommitmentRepository.saveManualCommitment] with
- * `source_type = 'manual'` — the mode only affects which inputs are editable
- * and which `supersedeOf` is passed.
- */
-public enum class CommitmentCreateMode { MANUAL, SUPERSEDE }
-
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
 /**
- * Immutable UI state for [CommitmentCreateSheet] (MAN-001..006 + EDIT-007).
+ * Immutable UI state for the EDIT-007 supersede-only [CommitmentCreateSheet].
  *
- * @property mode Drives sheet header copy and quote-field editability.
- * @property supersedeSource In [CommitmentCreateMode.SUPERSEDE] mode this is
- *   the old row being superseded — the quote + source columns render from it
- *   verbatim. Null in [CommitmentCreateMode.MANUAL] mode.
+ * @property supersedeSource The old row being superseded. The quote + source
+ *   columns render from it verbatim; saving is blocked until this is loaded.
  * @property draft Raw form state handed to [CommitmentManualValidator].
  * @property fieldErrors Per-field localised error message resources surfaced adjacent
  *   to each input.
@@ -64,7 +44,6 @@ public enum class CommitmentCreateMode { MANUAL, SUPERSEDE }
  *   action row; cleared by [CommitmentCreateViewModel.clearSaveError].
  */
 public data class CreateUiState(
-    val mode: CommitmentCreateMode = CommitmentCreateMode.MANUAL,
     val supersedeSource: CommitmentEntity? = null,
     val draft: ManualCommitmentDraft = ManualCommitmentDraft(
         title = "",
@@ -86,17 +65,15 @@ public data class CreateUiState(
 private const val TAG = "CommitmentCreateVM"
 
 /**
- * ViewModel for [CommitmentCreateSheet] (MAN-001..006 + EDIT-007).
+ * ViewModel for the supersede-only [CommitmentCreateSheet] (EDIT-007).
  *
- * Reads the optional `supersedeOf` nav argument from [SavedStateHandle]; when
- * present the VM loads the referenced commitment via
- * [CommitmentRepository.observeById] and seeds [CreateUiState.supersedeSource]
- * so the sheet can render the old row's quote as read-only. The mode is
- * [CommitmentCreateMode.SUPERSEDE] in that case, else [CommitmentCreateMode.MANUAL].
+ * Reads `supersedeOf` from [SavedStateHandle], loads the referenced commitment
+ * via [CommitmentRepository.observeById], and seeds [CreateUiState.supersedeSource]
+ * so the sheet can render the old row's quote as read-only.
  *
  * Save path ([onSave]):
- * 1. For [CommitmentCreateMode.SUPERSEDE] copy the old row's quote into the
- *    draft so the validator + repository see the evidentiary string verbatim.
+ * 1. Copy the old row's quote into the draft so the validator + repository
+ *    see the evidentiary string verbatim.
  * 2. Run [CommitmentManualValidator.validate]; surface field errors if any.
  * 3. Normalise via [CommitmentManualValidator.normalise] and call
  *    [CommitmentRepository.saveManualCommitment]. On success flip [CreateUiState.saved].
@@ -119,15 +96,7 @@ public class CommitmentCreateViewModel @Inject constructor(
         savedStateHandle.get<String>(BecalmRoute.CommitmentCreate.ARG_SUPERSEDE_OF)
             ?.takeIf { it.isNotBlank() }
 
-    private val _uiState: MutableStateFlow<CreateUiState> = MutableStateFlow(
-        CreateUiState(
-            mode = if (supersedeOf == null) {
-                CommitmentCreateMode.MANUAL
-            } else {
-                CommitmentCreateMode.SUPERSEDE
-            },
-        ),
-    )
+    private val _uiState: MutableStateFlow<CreateUiState> = MutableStateFlow(CreateUiState())
 
     /** Current UI state. */
     public val uiState: StateFlow<CreateUiState> = _uiState.asStateFlow()
@@ -168,19 +137,6 @@ public class CommitmentCreateViewModel @Inject constructor(
         }
     }
 
-    public fun onQuoteChange(value: String) {
-        // In SUPERSEDE mode the quote is read-only by spec — the UI ignores
-        // keystrokes, but we also drop the write defensively in case a future
-        // caller bypasses the composable.
-        if (_uiState.value.mode == CommitmentCreateMode.SUPERSEDE) return
-        _uiState.update {
-            it.copy(
-                draft = it.draft.copy(quote = value),
-                fieldErrors = it.fieldErrors - Field.QUOTE,
-            )
-        }
-    }
-
     public fun onCounterpartyRefChange(value: String) {
         _uiState.update {
             it.copy(
@@ -205,13 +161,20 @@ public class CommitmentCreateViewModel @Inject constructor(
     }
 
     /**
-     * MAN-006: validates the draft, normalises it, and writes via
-     * [CommitmentRepository.saveManualCommitment]. In SUPERSEDE mode the
-     * old row's quote is copied into the draft before validation so the
-     * evidentiary column is preserved verbatim (spec EDIT-007 invariant 1).
+     * Validates the draft, normalises it, and writes via
+     * [CommitmentRepository.saveManualCommitment]. The old row's quote is
+     * copied into the draft before validation so the evidentiary column is
+     * preserved verbatim (spec EDIT-007 invariant 1).
      */
     public fun onSave() {
         val snap = _uiState.value
+        val supersedeTarget = supersedeOf
+        if (supersedeTarget == null) {
+            _uiState.update {
+                it.copy(saveError = CommitmentSaveErrorFormatter.SUPERSEDE_SOURCE_NOT_FOUND)
+            }
+            return
+        }
         val effectiveDraft = CommitmentCreateProjector.effectiveDraft(snap)
         if (effectiveDraft == null) {
             _uiState.update {
@@ -236,7 +199,7 @@ public class CommitmentCreateViewModel @Inject constructor(
             _uiState.update { it.copy(saving = true, saveError = null) }
             val result = commitmentRepository.saveManualCommitment(
                 input = input,
-                supersedeOf = supersedeOf,
+                supersedeOf = supersedeTarget,
             )
             _uiState.update { it.copy(saving = false) }
             when (result) {

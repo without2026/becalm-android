@@ -25,11 +25,16 @@ import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +55,7 @@ import com.becalm.android.ui.components.CounterpartyText
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EvidenceCard
+import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.RelationshipCard
@@ -58,6 +64,11 @@ import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.components.commitmentActionLabelRes
 import com.becalm.android.ui.components.uiMessageStringResource
+import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
+import com.becalm.android.ui.evidence.EvidenceImportSheet
+import com.becalm.android.ui.evidence.EvidenceImportViewModel
+import com.becalm.android.ui.evidence.ManualTextEvidenceDialog
+import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
@@ -91,8 +102,15 @@ import kotlinx.datetime.toLocalDateTime
 public fun TodayTimelineScreen(
     navController: NavHostController,
     viewModel: TodayViewModel = hiltViewModel(),
+    evidenceImportViewModel: EvidenceImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val importMessage = evidenceImportState.message?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(importMessage, snackbarHostState, evidenceImportViewModel::onMessageShown)
+
+    val evidenceImportActions = rememberEvidenceImportActions(evidenceImportViewModel)
 
     CollectFlowEffect(viewModel.effects) { effect ->
         navController.dispatchTodayEffect(effect)
@@ -100,6 +118,7 @@ public fun TodayTimelineScreen(
 
     TodayTimelineContent(
         state = state,
+        snackbarHostState = snackbarHostState,
         onOpenSettings = viewModel::onOpenSettings,
         onPullRefresh = viewModel::onPullRefresh,
         onOpenCommitmentDetail = { commitmentId ->
@@ -108,6 +127,10 @@ public fun TodayTimelineScreen(
         onAddDueTime = { commitmentId ->
             navController.navigate(BecalmRoute.CommitmentEdit(commitmentId).path)
         },
+        onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
+        onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
+        onMeetingTranscriptImport = evidenceImportActions.openMeetingTranscriptPicker,
+        onManualTextImport = evidenceImportActions.submitManualText,
     )
 }
 
@@ -121,12 +144,19 @@ public fun TodayTimelineScreen(
 @Composable
 public fun TodayTimelineContent(
     state: TodayUiState,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onOpenSettings: () -> Unit,
     onPullRefresh: () -> Unit,
     onOpenCommitmentDetail: (String) -> Unit = {},
     onAddDueTime: (String) -> Unit = {},
+    onMessageScreenshotImport: () -> Unit = {},
+    onMeetingAudioImport: () -> Unit = {},
+    onMeetingTranscriptImport: () -> Unit = {},
+    onManualTextImport: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var showImportSheet by rememberSaveable { mutableStateOf(false) }
+    var showManualTextDialog by rememberSaveable { mutableStateOf(false) }
     val pullState = rememberPullRefreshState(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
@@ -144,6 +174,10 @@ public fun TodayTimelineContent(
             MainTabHeaderActions(
                 onOpenSettings = onOpenSettings,
             )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            EvidenceImportFloatingActionButton(onClick = { showImportSheet = true })
         },
     ) { padding ->
         // Single-column calm on every viewport: cap content at the timeline
@@ -214,6 +248,37 @@ public fun TodayTimelineContent(
                 }
             }
         }
+    }
+
+    if (showImportSheet) {
+        EvidenceImportSheet(
+            onDismiss = { showImportSheet = false },
+            onMessageScreenshotImport = {
+                showImportSheet = false
+                onMessageScreenshotImport()
+            },
+            onMeetingAudioImport = {
+                showImportSheet = false
+                onMeetingAudioImport()
+            },
+            onMeetingTranscriptImport = {
+                showImportSheet = false
+                onMeetingTranscriptImport()
+            },
+            onManualTextImport = {
+                showImportSheet = false
+                showManualTextDialog = true
+            },
+        )
+    }
+    if (showManualTextDialog) {
+        ManualTextEvidenceDialog(
+            onDismiss = { showManualTextDialog = false },
+            onSubmit = {
+                showManualTextDialog = false
+                onManualTextImport(it)
+            },
+        )
     }
 }
 

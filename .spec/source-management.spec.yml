@@ -14,7 +14,7 @@ version: 1
 behaviors:
   - id: SMG-001
     type: ui_interaction
-    description: "Settings → Sources 목록 화면에서 8개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 9개 행"
+    description: "Settings → Sources 목록 화면에서 9개 소스의 현재 상태(connected / disconnected / error + 이유)와 '연락처' 의사 소스 행을 표시한다. 총 10개 행"
     screen: "SourcesListScreen"
     interaction: "화면 진입"
     precondition: "설정 화면에서 Sources 항목 탭. Gmail connected, Outlook error(토큰 만료), voice connected, meeting connected, Naver Email disconnected, Daum Email connected, google_calendar connected, outlook_calendar disconnected. READ_CONTACTS 부여됨"

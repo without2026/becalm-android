@@ -13,6 +13,7 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.squareup.moshi.Moshi
@@ -127,15 +128,17 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        processingStatusRepository.recordGemini(entity.sourceType, "Analyzing transcript with Gemini")
+        val inputModality = if (entity.sourceType == SourceType.MANUAL_TEXT) "text" else "transcript"
+        val statusMessage = if (inputModality == "text") "Analyzing manual text with Gemini" else "Analyzing transcript with Gemini"
+        processingStatusRepository.recordGemini(entity.sourceType, statusMessage)
         delegate.uploadRunner().upload(
             SourceExtractionUploadRequest(
                 userId = context.userId,
                 entity = entity,
                 rawEventId = rawEventId,
-                inputModality = "transcript",
+                inputModality = inputModality,
                 bodyText = transcript,
-                nonRetryableErrorMessage = "Transcript rejected",
+                nonRetryableErrorMessage = if (inputModality == "text") "Manual text rejected" else "Transcript rejected",
                 onMarkFailed = { reasonCode -> delegate.markFailed(entity, reasonCode) },
             )
         )
@@ -148,9 +151,14 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
             tag = TAG,
             op = "open transcript stream failed uri=${redact(sourceRef)}",
             block = {
-                appContext.contentResolver.openInputStream(uri)?.use { input ->
-                    val raw = input.readBytes()
-                    if (raw.size > MAX_TRANSCRIPT_BYTES) return null
+                val input = if (uri.scheme == "file") {
+                    java.io.File(requireNotNull(uri.path)).inputStream()
+                } else {
+                    appContext.contentResolver.openInputStream(uri)
+                }
+                input?.use {
+                    val raw = it.readBytes()
+                    if (raw.size > MAX_TEXT_BYTES) return null
                     raw
                 }
             },
@@ -180,6 +188,6 @@ public class MeetingTranscriptUploadWorker @AssistedInject constructor(
         public const val KEY_RAW_EVENT_ID: String = "raw_event_id"
         private const val TAG = "MeetingTranscriptUpload"
         private const val MAX_ATTEMPTS = 3
-        private const val MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
+        private const val MAX_TEXT_BYTES = 10 * 1024 * 1024
     }
 }

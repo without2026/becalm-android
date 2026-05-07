@@ -1,0 +1,68 @@
+# Backend API: external Railway service (becalm-backend repo). This repo is client_primary.
+# Message screenshot ingestion is Android-owned. The app accepts user-selected
+# screenshots from KakaoTalk, Slack, SMS, or other messenger surfaces that cannot be
+# collected automatically for privacy reasons. Screenshots are copied into app-private
+# storage and processed through the same source-neutral extraction endpoint as meeting
+# transcript/audio evidence.
+
+module: message-screenshot-ingestion
+platform: android
+version: 1
+
+behaviors:
+  - id: MSG-001
+    type: ui_interaction
+    description: "CommitmentManagementScreen 우하단 + 버튼은 evidence import bottom sheet를 연다"
+    screen: "CommitmentManagementScreen"
+    interaction: "FAB [+] 탭"
+    precondition: "인증 완료"
+    expected: "Bottom sheet title='증거 추가'. Action rows: '메신저 스크린샷', '회의 녹음', '회의 전사본'. 수동 약속 입력 폼은 열리지 않는다. 각 row는 48dp 이상 touch target, source icon, 한 줄 보조 설명을 가진다"
+    source: user-request
+    tests:
+      - "CommitmentManagementScreenTest.commitment_management_fab_opens_evidence_import_sheet"
+
+  - id: MSG-002
+    type: lifecycle
+    description: "사용자가 메신저 스크린샷을 선택하면 Android가 앱 전용 폴더에 복사하고 source_type='message_screenshot' raw_ingestion_events row를 Room에 INSERT한다"
+    trigger: "evidence import sheet > 메신저 스크린샷 > OS image picker result"
+    precondition: "선택 파일 MIME/확장자가 image/png, image/jpeg, image/webp 중 하나, source image <=25MiB, current_user_id 존재"
+    expected: "앱은 원본 이미지를 삭제·이동하지 않고, OCR 판독성을 유지하는 정규화 JPEG(max_width=1440px, max_pixels=8,000,000, quality=82, output<=10MiB)만 `files/source_imports/message_screenshots/{timestamp}-{sanitized_base}.jpg`에 저장한다. Room raw_ingestion_events에는 {source_type:'message_screenshot', source_ref: app-private normalized JPEG file URI, event_title: original display name, duration_seconds:null, sync_status:'pending' 또는 'awaiting_consent', commitments_extracted_count:0} 1건이 INSERT된다"
+    source: user-request
+    tests:
+      - "SourceImportRepositorySpec.MSG-002 stores screenshot as message_screenshot raw event"
+
+  - id: MSG-003
+    type: lifecycle
+    description: "PIPA 제3자 제공 + 국외 이전 동의가 있으면 MessageScreenshotUploadWorker가 `/v1/extractions/commitments`를 input_modality='image'로 호출한다"
+    trigger: "MSG-002 raw event 생성 또는 consent ON 후 재시도"
+    precondition: "PIPA third-party provision consent true, image URI 접근 가능"
+    expected: "Worker는 image multipart part(name='image')와 raw event metadata를 전송한다. Railway는 image bytes/OCR/model output을 DB·파일시스템·Supabase Storage·로그에 저장하지 않고 request lifetime 안에서만 Vertex AI에 전달한다. 응답 items/source_event_participants를 Android가 Room에 저장하고 PersonInteractionIndexWorker를 enqueue한다"
+    source: user-request
+    tests:
+      - "MessageScreenshotUploadWorkerSpec.MSG-003 uploads image modality"
+
+  - id: MSG-004
+    type: consent
+    description: "PIPA 동의 미수락 상태에서는 스크린샷 extraction이 실행되지 않고 raw event가 awaiting_consent로 대기한다"
+    trigger: "MSG-002 raw event 생성"
+    precondition: "DataStore pipa_third_party_consent=false"
+    expected: "Railway 호출 없음. raw_ingestion_events.sync_status='awaiting_consent'. 동의 ON 시 pending으로 전이되고 MessageScreenshotUploadWorker가 재진입한다"
+    source: user-request
+    tests: []
+
+  - id: MSG-005
+    type: lifecycle
+    description: "Sources와 상태 UI는 메신저 캡처를 user-facing source로 표시한다"
+    screen: "SourcesListScreen | SourceDetailScreen | Today source strip"
+    precondition: "앱 실행"
+    expected: "SourceType.PRODUCT_SOURCES에 message_screenshot이 포함된다. label='메신저 캡처'. Source status default row가 없으면 idle로 표시한다. 최근 이벤트는 source_type='message_screenshot' raw rows를 최신순으로 보여준다"
+    source: user-request
+    tests:
+      - "SourceTypeContractTest includes message_screenshot as product source"
+
+invariants:
+  - "message_screenshot은 raw_ingestion_events와 commitments의 source_type으로 허용된다"
+  - "message_screenshot은 call_recording과 달리 user-facing source status/source detail 대상이다"
+  - "스크린샷 원본 바이트는 앱이 소유하지 않는다. 앱 private files/source_imports/message_screenshots에는 OCR용 정규화 JPEG만 보존된다"
+  - "image bytes와 OCR/full model text는 Supabase/Postgres/Railway filesystem/log에 영속되지 않는다"
+  - "스크린샷 extraction은 `/v1/extractions/commitments`의 source-neutral prompt/schema/validation/persistence path를 재사용한다"
