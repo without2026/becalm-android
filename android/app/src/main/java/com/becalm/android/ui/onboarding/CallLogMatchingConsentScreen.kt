@@ -24,9 +24,9 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Optional onboarding step for local CallLog-based call-recording person matching.
@@ -103,11 +103,9 @@ internal fun CallLogMatchingConsentContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Column(
+        QuietPanel(
             modifier = Modifier
-                .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
+                .fillMaxWidth(),
         ) {
             Text(
                 text = stringResource(R.string.onb_call_log_matching_body),

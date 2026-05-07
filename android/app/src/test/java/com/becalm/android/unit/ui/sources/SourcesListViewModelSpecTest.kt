@@ -12,6 +12,7 @@ import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import com.becalm.android.ui.sources.ContactsSourceDetailEffect
 import com.becalm.android.ui.sources.ContactsSourceDetailViewModel
@@ -90,12 +91,12 @@ class SourcesListViewModelSpecTest {
             assertTrue(rowsByType.containsKey(SourceType.DAUM_IMAP))
             assertTrue(rowsByType.containsKey(SourceType.GOOGLE_CALENDAR))
             assertTrue(rowsByType.containsKey(SourceType.OUTLOOK_CALENDAR))
-            assertEquals(SourceConnectionStatus.CONNECTED.name, rowsByType.getValue(SourceType.VOICE).status)
-            assertEquals(SourceConnectionStatus.CONNECTED.name, rowsByType.getValue(SourceType.GMAIL).status)
-            assertEquals(SourceConnectionStatus.ERROR.name, rowsByType.getValue(SourceType.OUTLOOK_MAIL).status)
-            assertEquals(SourceConnectionStatus.NEVER_CONNECTED.name, rowsByType.getValue(SourceType.NAVER_IMAP).status)
-            assertEquals(SourceConnectionStatus.CONNECTED.name, rowsByType.getValue(SourceType.DAUM_IMAP).status)
-            assertEquals(SourceConnectionStatus.NEVER_CONNECTED.name, rowsByType.getValue(SourceType.OUTLOOK_CALENDAR).status)
+            assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.VOICE).status)
+            assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.GMAIL).status)
+            assertEquals(SourceSyncStatus.Error, rowsByType.getValue(SourceType.OUTLOOK_MAIL).status)
+            assertEquals(SourceSyncStatus.Disconnected, rowsByType.getValue(SourceType.NAVER_IMAP).status)
+            assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.DAUM_IMAP).status)
+            assertEquals(SourceSyncStatus.Disconnected, rowsByType.getValue(SourceType.OUTLOOK_CALENDAR).status)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -114,7 +115,7 @@ class SourcesListViewModelSpecTest {
             if (emission.items.isEmpty()) emission = awaitItem()
 
             val contactsRow = emission.items.first { it.sourceType == "contacts" }
-            assertEquals("CONNECTED", contactsRow.status)
+            assertEquals(SourceSyncStatus.Connected, contactsRow.status)
             assertEquals(lastSync, contactsRow.lastSyncAt)
             assertEquals(2, contactsRow.enrichedCount)
             cancelAndIgnoreRemainingEvents()
@@ -136,7 +137,7 @@ class SourcesListViewModelSpecTest {
             if (emission.items.isEmpty()) emission = awaitItem()
 
             val contactsRow = emission.items.first { it.sourceType == "contacts" }
-            assertEquals("DISCONNECTED", contactsRow.status)
+            assertEquals(SourceSyncStatus.Disconnected, contactsRow.status)
             assertEquals(1, contactsRow.enrichedCount)
             cancelAndIgnoreRemainingEvents()
         }

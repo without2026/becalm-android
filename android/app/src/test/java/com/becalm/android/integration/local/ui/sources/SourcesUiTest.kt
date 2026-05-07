@@ -3,16 +3,19 @@ package com.becalm.android.integration.local.ui.sources
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import com.becalm.android.ui.sources.RecentEventSummary
 import com.becalm.android.ui.sources.SourceDetailScreenContent
 import com.becalm.android.ui.sources.SourceDetailUiState
 import com.becalm.android.ui.sources.SourceStatusRow
 import com.becalm.android.ui.sources.SourcesListScreenContent
 import com.becalm.android.ui.sources.SourcesListUiState
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -40,9 +43,9 @@ class SourcesUiTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),
@@ -91,7 +94,7 @@ class SourcesUiTest {
                 SourceDetailScreenContent(
                     state = SourceDetailUiState(
                         sourceType = "gmail",
-                        status = "CONNECTED",
+                        status = SourceSyncStatus.Connected,
                         lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
                         eventsSyncedCount = 3,
                         showReconnectButton = true,
@@ -121,6 +124,8 @@ class SourcesUiTest {
         composeRule.onNodeWithText("계약 메일").assertExists()
         composeRule.onNodeWithTag("source-detail-reconnect").performClick()
         composeRule.onNodeWithTag("source-detail-sync-now").performClick()
+        composeRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasTestTag("source-detail-disconnect"))
         composeRule.onNodeWithTag("source-detail-disconnect").performClick()
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_disconnect_confirm_title)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-detail-disconnect-cancel").performClick()
@@ -144,7 +149,7 @@ class SourcesUiTest {
                 SourceDetailScreenContent(
                     state = SourceDetailUiState(
                         sourceType = "meeting",
-                        status = "CONNECTED",
+                        status = SourceSyncStatus.Connected,
                         showMeetingAudioAddButton = true,
                         showMeetingTranscriptAddButton = true,
                     ),

@@ -45,6 +45,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
 import com.becalm.android.ui.components.BecalmSheetSkeleton
+import com.becalm.android.ui.components.CommitmentWire
+import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.SheetCloseRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
@@ -223,8 +225,12 @@ internal fun EditSheetContent(
         if (readOnly != null) {
             SectionLabel(text = stringResource(R.string.commitment_edit_readonly_source_label))
             Spacer(modifier = Modifier.height(4.dp))
+            if (!readOnly.isManual && !readOnly.sourceType.isNullOrBlank()) {
+                EventSourceBadge(sourceType = readOnly.sourceType)
+                Spacer(modifier = Modifier.height(6.dp))
+            }
             Text(
-                text = readOnly.sourceLabel,
+                text = commitmentStringResource(readOnly.sourceLabel),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -263,7 +269,7 @@ internal fun EditSheetContent(
             label = { Text(text = stringResource(R.string.commitment_edit_field_title)) },
             isError = state.fieldErrors.containsKey(Field.TITLE),
             supportingText = {
-                state.fieldErrors[Field.TITLE]?.let { Text(text = it) }
+                state.fieldErrors[Field.TITLE]?.let { Text(text = commitmentStringResource(it)) }
             },
             singleLine = true,
             enabled = !state.saving,
@@ -340,7 +346,7 @@ internal fun EditSheetContent(
             placeholder = { Text(text = stringResource(R.string.commitment_edit_field_person_placeholder)) },
             isError = state.fieldErrors.containsKey(Field.PERSON_REF),
             supportingText = {
-                state.fieldErrors[Field.PERSON_REF]?.let { Text(text = it) }
+                state.fieldErrors[Field.PERSON_REF]?.let { Text(text = commitmentStringResource(it)) }
             },
             singleLine = true,
             enabled = !state.saving,
@@ -361,7 +367,7 @@ internal fun EditSheetContent(
         state.fieldErrors[Field.DIRECTION]?.let {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = it,
+                text = commitmentStringResource(it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -371,7 +377,7 @@ internal fun EditSheetContent(
         // ── Save error ──
         state.saveError?.let {
             Text(
-                text = it,
+                text = commitmentStringResource(it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -547,15 +553,15 @@ private fun DirectionRadioRow(
     ) {
         DirectionOption(
             label = stringResource(R.string.commitment_edit_field_direction_give),
-            selected = current == "give",
+            selected = current == CommitmentWire.DIRECTION_GIVE,
             enabled = enabled,
-            onSelect = { onChange("give") },
+            onSelect = { onChange(CommitmentWire.DIRECTION_GIVE) },
         )
         DirectionOption(
             label = stringResource(R.string.commitment_edit_field_direction_take),
-            selected = current == "take",
+            selected = current == CommitmentWire.DIRECTION_TAKE,
             enabled = enabled,
-            onSelect = { onChange("take") },
+            onSelect = { onChange(CommitmentWire.DIRECTION_TAKE) },
         )
     }
 }

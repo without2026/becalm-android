@@ -306,6 +306,27 @@ class OnboardingUiTest {
         }
     }
 
+    @Test
+    fun `cold sync content explains disabled skip and transition failure`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ColdSyncContent(
+                    state = ColdSyncUiState(
+                        overallProgress = 0.2f,
+                        done = false,
+                        skipEnabled = false,
+                        transitionError = true,
+                    ),
+                    onContinue = {},
+                    onSkipForNow = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.onb_cold_sync_skip_disabled)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_cold_sync_transition_error)).assertIsDisplayed()
+    }
+
     private fun string(resId: Int, vararg args: Any): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

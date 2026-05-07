@@ -2,6 +2,7 @@ package com.becalm.android.ui.commitments
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
@@ -9,13 +10,13 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.SystemClock
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
 import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
@@ -46,11 +47,10 @@ import javax.inject.Inject
  * Display filter applied in-memory to the full commitment list.
  *
  * - [ALL]      — no filter; shows every trackable item for the current user.
- * - [ACTION]   — action rows only.
- * - [GIVE]     — action rows where direction == "give".
- * - [TAKE]     — action rows where direction == "take".
+ * - [GIVE]     — open action rows where the wire direction is give.
+ * - [TAKE]     — open action rows where the wire direction is take.
  * - [SCHEDULE] — schedule rows only.
- * - [DECISION] — decision rows only.
+ * - [CLOSED]   — completed or cancelled action rows.
  *
  * Action-specific lifecycle (due-today / overdue / completed / cancelled) is surfaced
  * per-card and in the terminal sections rather than as a top-level filter.
@@ -58,11 +58,10 @@ import javax.inject.Inject
 // spec: CMT-001, CMT-002
 public enum class CommitmentFilter {
     ALL,
-    ACTION,
     GIVE,
     TAKE,
     SCHEDULE,
-    DECISION,
+    CLOSED,
 }
 
 // ─── Row model ────────────────────────────────────────────────────────────────
@@ -184,7 +183,7 @@ public sealed interface CommitmentUndoSnapshot {
  *   flight (CMT-010). Drives the [PullRefreshIndicator] in the UI. Independent
  *   from [loading] — the Room subscription stays hot during a refresh, so the
  *   timeline rows remain on screen.
- * @property error  Human-readable error string from the last failed action, or null.
+ * @property error  Resource-backed error from the last failed action, or null.
  */
 // spec: CMT-001, CMT-010
 public data class CommitmentUiState(
@@ -195,7 +194,7 @@ public data class CommitmentUiState(
     val filter: CommitmentFilter = CommitmentFilter.ALL,
     val loading: Boolean = true,
     val refreshing: Boolean = false,
-    val error: String? = null,
+    val error: UiMessage? = null,
 ) {
     public val activePersonGroups: List<CommitmentPersonGroup>
         get() = buildCommitmentPersonGroups(activeItems)
@@ -322,9 +321,9 @@ public class CommitmentManagementViewModel @Inject constructor(
                     }
                 }
             commitmentsByUser
-                .catch { e ->
+                .catch {
                     _uiState.update {
-                        it.copy(loading = false, error = e.message ?: "load failed")
+                        it.copy(loading = false, error = UiMessage.resource(R.string.commitments_error_load_failed))
                     }
                 }
                 .collect { rows ->
@@ -434,7 +433,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "onPullRefresh failed: ${result.error}")
                     _uiState.update {
-                        it.copy(refreshing = false, error = result.error.toString())
+                        it.copy(refreshing = false, error = UiMessage.resource(R.string.commitments_error_refresh_failed))
                     }
                 }
             }
@@ -578,7 +577,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                         TAG,
                         "onUndo failed id=${hashId(snapshot.commitmentId)}: ${result.error}",
                     )
-                    _uiState.update { it.copy(error = result.error.toString()) }
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_undo_failed)) }
                 }
             }
         }
@@ -620,7 +619,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "$name failed id=${hashId(id)}: ${result.error}")
-                    _uiState.update { it.copy(error = result.error.toString()) }
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
                 }
             }
         }

@@ -34,9 +34,8 @@ public data class ManualCommitmentDraft(
  * - `dueAtMillis` may be null. Any non-null value is acceptable (past is OK
  *   per MAN-005 "지난 약속 추후 기록").
  *
- * Validation error messages are English seed strings to let the unit tests
- * assert exact text without pulling in Android resources; the VM forwards them
- * to localized resources at render time.
+ * Validation emits stable error codes. The UI maps those codes to localized
+ * resources at render time, keeping this domain validator Android-free.
  */
 public object CommitmentManualValidator {
 
@@ -49,9 +48,18 @@ public object CommitmentManualValidator {
      */
     public enum class Field { TITLE, DIRECTION, QUOTE, PERSON_REF }
 
+    public enum class Error {
+        TITLE_REQUIRED,
+        TITLE_TOO_LONG,
+        DIRECTION_INVALID,
+        QUOTE_REQUIRED,
+        QUOTE_TOO_LONG,
+        PERSON_REF_INVALID,
+    }
+
     public sealed interface ValidationResult {
         public data object Ok : ValidationResult
-        public data class Err(val fieldErrors: Map<Field, String>) : ValidationResult
+        public data class Err(val fieldErrors: Map<Field, Error>) : ValidationResult
     }
 
     /**
@@ -59,30 +67,29 @@ public object CommitmentManualValidator {
      * change to drive live error state.
      */
     public fun validate(input: ManualCommitmentDraft): ValidationResult {
-        val errors = mutableMapOf<Field, String>()
+        val errors = mutableMapOf<Field, Error>()
 
         val trimmedTitle = input.title.trim()
         when {
-            trimmedTitle.isEmpty() -> errors[Field.TITLE] = "Title must not be empty"
+            trimmedTitle.isEmpty() -> errors[Field.TITLE] = Error.TITLE_REQUIRED
             trimmedTitle.length > TITLE_MAX ->
-                errors[Field.TITLE] = "Title must be at most $TITLE_MAX characters"
+                errors[Field.TITLE] = Error.TITLE_TOO_LONG
         }
 
         if (input.direction != "give" && input.direction != "take") {
-            errors[Field.DIRECTION] = "Direction must be 'give' or 'take'"
+            errors[Field.DIRECTION] = Error.DIRECTION_INVALID
         }
 
         val trimmedQuote = input.quote.trim()
         when {
-            trimmedQuote.isEmpty() -> errors[Field.QUOTE] = "Quote must not be empty"
+            trimmedQuote.isEmpty() -> errors[Field.QUOTE] = Error.QUOTE_REQUIRED
             trimmedQuote.length > QUOTE_MAX ->
-                errors[Field.QUOTE] = "Quote must be at most $QUOTE_MAX characters"
+                errors[Field.QUOTE] = Error.QUOTE_TOO_LONG
         }
 
         val normalisedRef = CounterpartyRefNormalizer.normalize(input.counterpartyRef)
         if (normalisedRef != null && !CounterpartyRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
-            errors[Field.PERSON_REF] =
-                "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
+            errors[Field.PERSON_REF] = Error.PERSON_REF_INVALID
         }
 
         return if (errors.isEmpty()) ValidationResult.Ok else ValidationResult.Err(errors)

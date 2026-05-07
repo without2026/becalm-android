@@ -65,6 +65,6 @@ internal object PersonsUiProjector {
         interactionCount = projection.eventCount,
         pendingCommitmentCount = projection.pendingCommitmentCount,
         channelSources = projection.channelSources,
-        lastInteractionSnippet = projection.lastInteractionSnippet,
+        lastInteractionSnippet = null,
     )
 }

@@ -3,6 +3,7 @@ package com.becalm.android.ui.persons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -25,14 +26,16 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
+import com.becalm.android.ui.components.EMAIL_SOURCE_TYPES
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.EventTitleText
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.IngestionTimestamp
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Raw event detail screen — extended fields loaded from Room for a single ingestion event.
@@ -81,7 +84,7 @@ public fun RawEventDetailSheet(
             state.error != null -> {
                 ErrorState(
                     title = stringResource(R.string.raw_event_detail_not_found),
-                    message = state.error,
+                    message = uiMessageStringResource(requireNotNull(state.error)),
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -109,11 +112,10 @@ internal fun RawEventDetailContent(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
-        Column(
+        EvidenceCard(
             modifier = Modifier
-                .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
         ) {
             if (state.sourceType in EMAIL_SOURCE_TYPES) {
                 EmailEventDetailSection(

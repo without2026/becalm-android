@@ -4,6 +4,8 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
+import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.components.sourceSyncStatusFor
 
 internal object SourceDetailProjector {
     fun buildUiState(
@@ -12,7 +14,7 @@ internal object SourceDetailProjector {
         sourceEvents: List<RawIngestionEventEntity>,
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
-        actionError: String?,
+        actionError: UiMessage?,
     ): SourceDetailUiState {
         val eventSummaries = sourceEvents.map { entity ->
             RecentEventSummary(
@@ -24,10 +26,10 @@ internal object SourceDetailProjector {
         val connectionButtons = buttonVisibilityFor(status?.status)
         return SourceDetailUiState(
             sourceType = sourceType,
-            status = status?.status?.name ?: "",
+            status = sourceSyncStatusFor(status?.status),
             lastSyncAt = status?.lastSyncedAt,
             eventsSyncedCount = eventSummaries.size,
-            lastError = status?.errorMessage,
+            hasError = status?.status == SourceConnectionStatus.ERROR || status?.errorMessage != null,
             showReconnectButton = connectionButtons.showReconnectButton,
             showDisconnectButton = connectionButtons.showDisconnectButton,
             showManualSyncButton = connectionButtons.showManualSyncButton,

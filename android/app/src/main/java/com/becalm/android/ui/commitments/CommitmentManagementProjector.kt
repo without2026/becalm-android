@@ -5,6 +5,8 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.isGiveDirection
+import com.becalm.android.ui.components.isTakeDirection
 import kotlinx.datetime.Instant
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
@@ -41,29 +43,45 @@ internal object CommitmentManagementProjector {
         filter: CommitmentFilter,
         now: Instant,
     ): List<CommitmentRow> {
+        val rowsWithState = rows.map { row ->
+            ProjectableCommitmentRow(
+                row = row,
+                state = CommitmentState.fromWire(row.actionState),
+            )
+        }
         val filtered = when (filter) {
-            CommitmentFilter.ALL -> rows
-            CommitmentFilter.ACTION -> rows.filter { it.itemType == CommitmentItemType.ACTION }
-            CommitmentFilter.GIVE -> rows.filter {
-                it.itemType == CommitmentItemType.ACTION && it.direction == "give"
+            CommitmentFilter.ALL -> rowsWithState
+            CommitmentFilter.GIVE -> rowsWithState.filter {
+                it.row.itemType == CommitmentItemType.ACTION &&
+                    isGiveDirection(it.row.direction) &&
+                    !it.state.isClosed()
             }
-            CommitmentFilter.TAKE -> rows.filter {
-                it.itemType == CommitmentItemType.ACTION && it.direction == "take"
+            CommitmentFilter.TAKE -> rowsWithState.filter {
+                it.row.itemType == CommitmentItemType.ACTION &&
+                    isTakeDirection(it.row.direction) &&
+                    !it.state.isClosed()
             }
-            CommitmentFilter.SCHEDULE -> rows.filter { it.itemType == CommitmentItemType.SCHEDULE }
-            CommitmentFilter.DECISION -> rows.filter { it.itemType == CommitmentItemType.DECISION }
+            CommitmentFilter.SCHEDULE -> rowsWithState.filter { it.row.itemType == CommitmentItemType.SCHEDULE }
+            CommitmentFilter.CLOSED -> rowsWithState.filter {
+                it.row.itemType == CommitmentItemType.ACTION && it.state.isClosed()
+            }
         }
         return filtered
             .sortedForDisplay(now)
             .map { row -> row.toUiRow() }
     }
 
-    private fun List<CommitmentManagementRow>.sortedForDisplay(now: Instant): List<CommitmentManagementRow> =
+    private data class ProjectableCommitmentRow(
+        val row: CommitmentManagementRow,
+        val state: CommitmentState,
+    )
+
+    private fun List<ProjectableCommitmentRow>.sortedForDisplay(now: Instant): List<ProjectableCommitmentRow> =
         sortedWith(
-            compareBy<CommitmentManagementRow> { it.exactDueSortGroup(now) }
-                .thenBy { it.exactDueDistance(now) }
-                .thenByDescending { row -> row.dueAt?.takeUnless { row.dueIsApproximate } }
-                .thenByDescending { it.sourceOccurredAt },
+            compareBy<ProjectableCommitmentRow> { it.row.exactDueSortGroup(now) }
+                .thenBy { it.row.exactDueDistance(now) }
+                .thenByDescending { item -> item.row.dueAt?.takeUnless { item.row.dueIsApproximate } }
+                .thenByDescending { it.row.sourceOccurredAt },
         )
 
     private fun CommitmentManagementRow.exactDueSortGroup(now: Instant): Int {
@@ -86,9 +104,15 @@ internal object CommitmentManagementProjector {
         return today.daysUntil(dueDate)
     }
 
-    private fun CommitmentManagementRow.toUiRow(): CommitmentRow {
-        val state = CommitmentState.fromWire(actionState)
-        val exactDueAt = dueAt?.takeUnless { dueIsApproximate }
+    private fun ProjectableCommitmentRow.toUiRow(): CommitmentRow {
+        val exactDueAt = row.dueAt?.takeUnless { row.dueIsApproximate }
+        return row.toUiRow(state, exactDueAt)
+    }
+
+    private fun CommitmentManagementRow.toUiRow(
+        state: CommitmentState,
+        exactDueAt: Instant?,
+    ): CommitmentRow {
         return CommitmentRow(
             id = id,
             itemType = itemType,
@@ -125,6 +149,8 @@ internal object CommitmentManagementProjector {
 
     fun isTerminalRow(row: CommitmentRow): Boolean =
         row.itemType == CommitmentItemType.ACTION &&
-            (row.actionState == CommitmentState.COMPLETED ||
-                row.actionState == CommitmentState.CANCELLED)
+            row.actionState.isClosed()
+
+    private fun CommitmentState.isClosed(): Boolean =
+        this == CommitmentState.COMPLETED || this == CommitmentState.CANCELLED
 }

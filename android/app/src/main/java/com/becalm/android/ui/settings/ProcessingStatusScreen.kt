@@ -32,13 +32,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.becalm.android.R
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.ui.components.BecalmScaffold
-import com.becalm.android.ui.theme.glassPanel
+import com.becalm.android.ui.components.EvidenceCard
+import com.becalm.android.ui.components.sourcePresentationFor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -57,9 +57,7 @@ public data class ProcessingStatusUiState(
 @Immutable
 public data class ProcessingStatusRow(
     val sourceType: String,
-    val title: String,
     val phase: ProcessingPhase,
-    val label: String,
     val itemCount: Int,
     val message: String?,
     val updatedAt: Instant?,
@@ -85,9 +83,7 @@ public class ProcessingStatusViewModel @Inject constructor(
     private fun toRow(state: ProcessingSourceState): ProcessingStatusRow =
         ProcessingStatusRow(
             sourceType = state.sourceType,
-            title = sourceTitle(state.sourceType),
             phase = state.phase,
-            label = phaseLabel(state.phase),
             itemCount = state.itemCount,
             message = state.message,
             updatedAt = state.updatedAt,
@@ -140,26 +136,26 @@ internal fun ProcessingStatusContent(
 
 @Composable
 private fun ProcessingStatusItem(row: ProcessingStatusRow) {
-    Row(
+    EvidenceCard(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
     ) {
-        PhaseIndicator(row.phase)
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = row.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = row.statusText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PhaseIndicator(row.phase)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(sourcePresentationFor(row.sourceType).labelRes),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = row.statusText(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -181,35 +177,28 @@ private fun PhaseIndicator(phase: ProcessingPhase) {
     }
 }
 
+@Composable
 private fun ProcessingStatusRow.statusText(): String {
-    val countText = if (itemCount > 0) " · $itemCount item(s)" else ""
+    val countText = if (itemCount > 0) {
+        " · ${stringResource(R.string.processing_status_item_count_fmt, itemCount)}"
+    } else {
+        ""
+    }
     val messageText = message?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
     val timeText = updatedAt?.let { " · ${formatTimeHHmm(it)}" }.orEmpty()
-    return label + countText + messageText + timeText
+    return stringResource(phaseLabelRes(phase)) + countText + messageText + timeText
 }
 
-private fun sourceTitle(sourceType: String): String = when (sourceType) {
-    SourceType.VOICE -> "Voice recordings"
-    SourceType.CALL_RECORDING -> "Call recordings"
-    SourceType.NAVER_IMAP -> "Naver Mail"
-    SourceType.DAUM_IMAP -> "Daum Mail"
-    SourceType.GMAIL -> "Gmail"
-    SourceType.OUTLOOK_MAIL -> "Outlook Mail"
-    SourceType.GOOGLE_CALENDAR -> "Google Calendar"
-    SourceType.OUTLOOK_CALENDAR -> "Outlook Calendar"
-    else -> sourceType
-}
-
-private fun phaseLabel(phase: ProcessingPhase): String = when (phase) {
-    ProcessingPhase.IDLE -> "No recent activity"
-    ProcessingPhase.SCANNING -> "Scanning for new items"
-    ProcessingPhase.NEW_ITEMS -> "New items found"
-    ProcessingPhase.GEMINI -> "Gemini extraction in progress"
-    ProcessingPhase.UPLOADING -> "Uploading and extracting"
-    ProcessingPhase.NO_NEW_ITEMS -> "No new items"
-    ProcessingPhase.SYNCED -> "Processing complete"
-    ProcessingPhase.BLOCKED -> "Blocked"
-    ProcessingPhase.ERROR -> "Error"
+private fun phaseLabelRes(phase: ProcessingPhase): Int = when (phase) {
+    ProcessingPhase.IDLE -> R.string.processing_phase_idle
+    ProcessingPhase.SCANNING -> R.string.processing_phase_scanning
+    ProcessingPhase.NEW_ITEMS -> R.string.processing_phase_new_items
+    ProcessingPhase.GEMINI -> R.string.processing_phase_gemini
+    ProcessingPhase.UPLOADING -> R.string.processing_phase_uploading
+    ProcessingPhase.NO_NEW_ITEMS -> R.string.processing_phase_no_new_items
+    ProcessingPhase.SYNCED -> R.string.processing_phase_synced
+    ProcessingPhase.BLOCKED -> R.string.processing_phase_blocked
+    ProcessingPhase.ERROR -> R.string.processing_phase_error
 }
 
 private fun formatTimeHHmm(at: Instant): String {

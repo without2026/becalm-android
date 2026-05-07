@@ -12,6 +12,7 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.worker.CalendarRelationRefresh
@@ -140,7 +141,7 @@ public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPerson
  *                       (top-bar spinner in [com.becalm.android.ui.today.TodayTimelineScreen]).
  * @param overall  Aggregate sync state driving the TDY-008 banner.
  * @param refreshing True while a user-initiated pull-to-refresh (TDY-006) is in flight.
- * @param error Non-null when an unrecoverable error has occurred (e.g. not authenticated).
+ * @param error Non-null when an unrecoverable error has occurred.
  */
 // spec: TDY-008 — aggregate sync status
 public data class TodayUiState(
@@ -152,7 +153,7 @@ public data class TodayUiState(
     val overall: OverallSyncState = OverallSyncState.Idle,
     val processingPaused: Boolean = false,
     val refreshing: Boolean = false,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 /** One-shot effects emitted by [TodayViewModel]. */
@@ -169,7 +170,7 @@ private const val TAG = "TodayViewModel"
  *
  * Combines action/schedule commitment projection rows due by today, calendar events starting today,
  * per-source sync health, and processing pause state into a
- * single [TodayUiState] flow. If the user is not authenticated the state immediately
+ * single [TodayUiState] flow. If no signed-in user is available, the state immediately
  * shows an error and no downstream repository flows are subscribed.
  *
  * Architecture:

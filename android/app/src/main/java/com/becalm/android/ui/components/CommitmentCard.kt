@@ -1,5 +1,5 @@
 /**
- * SP-48: Frosted card rendering a single commitment with direction badges, D-N badge,
+ * SP-48: Frosted card rendering a single commitment with action labels, D-N badge,
  * and status chip.
  *
  * The card reads from design token spec §4 (direction) and §5 (D-N badges, state
@@ -76,7 +76,7 @@ import kotlinx.datetime.toLocalDateTime
 // ─── CommitmentCard ───────────────────────────────────────────────────────────
 
 /**
- * Renders a single commitment as a frosted relationship card with direction chips,
+ * Renders a single commitment as a frosted relationship card with action labels,
  * a compact D-N urgency badge, an action status chip, and an optional mark-done
  * icon button.
  *
@@ -101,8 +101,8 @@ import kotlinx.datetime.toLocalDateTime
  *                      resolved display label. Never pass a raw email address, phone
  *                      number, or internal identifier — the TalkBack accessibility
  *                      description includes this value verbatim.
- * @param direction     Direction string. `"give"` / `"take"` are rendered as
- *                      inline relationship direction chips when applicable.
+ * @param direction     Direction string. `"give"` / `"take"` are translated to
+ *                      user-facing action labels when applicable.
  * @param derivedStatus Status string driving the chip and card alpha. Accepted values:
  *                      `"PENDING"`, `"REMINDED"`, `"FOLLOWED_UP"`, `"COMPLETED"`,
  *                      `"OVERDUE"`, `"CANCELLED"` (spec-aligned action_state keys,
@@ -176,26 +176,15 @@ public fun CommitmentCard(
     // CMT-009 — the user has closed the row one way or the other. OVERDUE stays at
     // full alpha so it keeps pulling the user's attention (they still need to act).
     val normalized = derivedStatus?.uppercase().orEmpty()
-    val isCompleted = normalized == "COMPLETED"
-    val isCancelled = normalized == "CANCELLED"
+    val isCompleted = normalized == CommitmentWire.ACTION_COMPLETED_UPPER
+    val isCancelled = normalized == CommitmentWire.ACTION_CANCELLED_UPPER
     val isTerminal = isCompleted || isCancelled
     val cardAlpha = if (isTerminal) 0.6f else 1.0f
     // Chip is always shown so the terminal-state reason is visible even when dimmed.
     val showChip = normalizedItemType == CommitmentItemType.ACTION && normalized.isNotBlank()
-    val itemTypeLabel = remember(normalizedItemType) {
-        when (normalizedItemType) {
-            CommitmentItemType.ACTION -> R.string.commitment_item_type_action
-            CommitmentItemType.SCHEDULE -> R.string.commitment_item_type_schedule
-            CommitmentItemType.DECISION -> R.string.commitment_item_type_decision
-            else -> R.string.commitment_item_type_action
-        }
-    }
+    val itemTypeLabel = remember(normalizedItemType) { commitmentItemTypeLabelRes(normalizedItemType) }
     val subtypeLabel = when (normalizedItemType) {
-        CommitmentItemType.ACTION -> when (normalizedDirection) {
-            "give" -> stringResource(R.string.commitments_filter_give)
-            "take" -> stringResource(R.string.commitments_filter_take)
-            else -> null
-        }
+        CommitmentItemType.ACTION -> stringResource(commitmentActionLabelRes(normalizedDirection))
         CommitmentItemType.SCHEDULE -> when (normalizedScheduleStatus) {
             CommitmentScheduleStatus.CONFIRMED -> stringResource(R.string.commitment_subtype_schedule_confirmed)
             CommitmentScheduleStatus.CHANGED -> stringResource(R.string.commitment_subtype_schedule_changed)
@@ -250,7 +239,7 @@ public fun CommitmentCard(
         label to stateColors
     }
 
-    val semanticsDesc = "$direction $title"
+    val semanticsDesc = "${commitmentActionSemanticsLabel(normalizedDirection)} $title"
     val showMarkDone = onMarkDone != null && !isTerminal
 
     // Mark-done confirmation pulse: brief 1.0 → 1.04 → 1.0 scale on the card
@@ -499,12 +488,12 @@ private fun PersonContext(
 
 @Composable
 private fun statusLabel(normalized: String): String = when (normalized) {
-    "PENDING" -> stringResource(R.string.commitment_state_pending)
-    "REMINDED" -> stringResource(R.string.commitment_state_reminded)
-    "FOLLOWED_UP" -> stringResource(R.string.commitment_state_followed_up)
-    "COMPLETED" -> stringResource(R.string.commitment_state_completed)
-    "OVERDUE" -> stringResource(R.string.commitment_state_overdue)
-    "CANCELLED" -> stringResource(R.string.commitment_state_cancelled)
+    CommitmentWire.ACTION_PENDING_UPPER -> stringResource(R.string.commitment_state_pending)
+    CommitmentWire.ACTION_REMINDED_UPPER -> stringResource(R.string.commitment_state_reminded)
+    CommitmentWire.ACTION_FOLLOWED_UPPER -> stringResource(R.string.commitment_state_followed_up)
+    CommitmentWire.ACTION_COMPLETED_UPPER -> stringResource(R.string.commitment_state_completed)
+    CommitmentWire.ACTION_OVERDUE_UPPER -> stringResource(R.string.commitment_state_overdue)
+    CommitmentWire.ACTION_CANCELLED_UPPER -> stringResource(R.string.commitment_state_cancelled)
     else -> normalized
 }
 
@@ -512,12 +501,12 @@ private fun statusLabel(normalized: String): String = when (normalized) {
 private fun statusColors(normalized: String): BecalmStateColors {
     val colors = MaterialTheme.becalmColors
     return when (normalized) {
-        "PENDING" -> colors.actionStatePending
-        "REMINDED" -> colors.actionStateReminded
-        "FOLLOWED_UP" -> colors.actionStateFollowedUp
-        "COMPLETED" -> colors.actionStateCompleted
-        "OVERDUE" -> colors.dayBadgeOverdue
-        "CANCELLED" -> colors.actionStatePending
+        CommitmentWire.ACTION_PENDING_UPPER -> colors.actionStatePending
+        CommitmentWire.ACTION_REMINDED_UPPER -> colors.actionStateReminded
+        CommitmentWire.ACTION_FOLLOWED_UPPER -> colors.actionStateFollowedUp
+        CommitmentWire.ACTION_COMPLETED_UPPER -> colors.actionStateCompleted
+        CommitmentWire.ACTION_OVERDUE_UPPER -> colors.dayBadgeOverdue
+        CommitmentWire.ACTION_CANCELLED_UPPER -> colors.actionStatePending
         else -> colors.actionStatePending
     }
 }
@@ -638,10 +627,10 @@ private fun PreviewCommitmentCardGivePendingD2() {
         CommitmentCard(
             itemType = CommitmentItemType.ACTION,
             title = "Send contract draft",
-            direction = "give",
+            direction = CommitmentWire.DIRECTION_GIVE,
             scheduleStatus = null,
             decisionStatus = null,
-            derivedStatus = "REMINDED",
+            derivedStatus = CommitmentWire.ACTION_REMINDED_UPPER,
             dueAt = Instant.parse("2026-04-18T00:00:00+09:00"),
             counterpartyDisplayName = "Alice Kim",
             onClick = {},
@@ -657,10 +646,10 @@ private fun PreviewCommitmentCardTakeCompleted() {
         CommitmentCard(
             itemType = CommitmentItemType.ACTION,
             title = "Review budget proposal",
-            direction = "take",
+            direction = CommitmentWire.DIRECTION_TAKE,
             scheduleStatus = null,
             decisionStatus = null,
-            derivedStatus = "COMPLETED",
+            derivedStatus = CommitmentWire.ACTION_COMPLETED_UPPER,
             dueAt = null,
             counterpartyDisplayName = "Bob Lee",
         )
@@ -674,10 +663,10 @@ private fun PreviewCommitmentCardOverdueReminded() {
         CommitmentCard(
             itemType = CommitmentItemType.ACTION,
             title = "Submit expense report",
-            direction = "give",
+            direction = CommitmentWire.DIRECTION_GIVE,
             scheduleStatus = null,
             decisionStatus = null,
-            derivedStatus = "OVERDUE",
+            derivedStatus = CommitmentWire.ACTION_OVERDUE_UPPER,
             dueAt = Instant.parse("2026-04-10T00:00:00+09:00"),
             counterpartyDisplayName = null,
             dueIsApproximate = true,
@@ -694,10 +683,10 @@ private fun PreviewCommitmentCardNoDueDate() {
         CommitmentCard(
             itemType = CommitmentItemType.ACTION,
             title = "Follow up on proposal",
-            direction = "take",
+            direction = CommitmentWire.DIRECTION_TAKE,
             scheduleStatus = null,
             decisionStatus = null,
-            derivedStatus = "PENDING",
+            derivedStatus = CommitmentWire.ACTION_PENDING_UPPER,
             dueAt = null,
             counterpartyDisplayName = "Carol Park",
         )

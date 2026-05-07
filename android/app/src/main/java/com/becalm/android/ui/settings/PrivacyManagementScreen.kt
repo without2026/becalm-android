@@ -1,4 +1,5 @@
 package com.becalm.android.ui.settings
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.compose.foundation.layout.Arrangement
@@ -13,8 +14,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,9 +39,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSignOut
 import java.io.IOException
@@ -136,8 +140,9 @@ public fun PrivacyManagementScreen(
             (onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() })()
         }
     }
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(
-        state.error,
+        errorMessage,
         snackbarHostState,
         onErrorDismissed ?: requireNotNull(privacyViewModel)::onErrorDismissed,
     )
@@ -180,17 +185,21 @@ public fun PrivacyManagementScreen(
             title = { Text(stringResource(R.string.privacy_export_title)) },
             text = { Text(stringResource(R.string.privacy_export_confirm_body)) },
             confirmButton = {
-                Button(onClick = {
-                    showExportConfirm = false
-                    (onExportRequested ?: requireNotNull(privacyViewModel)::onExportRequested)()
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.action_confirm),
+                    onClick = {
+                        showExportConfirm = false
+                        (onExportRequested ?: requireNotNull(privacyViewModel)::onExportRequested)()
+                    },
+                    variant = BecalmButtonVariant.Primary,
+                )
             },
             dismissButton = {
-                Button(onClick = { showExportConfirm = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { showExportConfirm = false },
+                    variant = BecalmButtonVariant.Text,
+                )
             },
         )
     }
@@ -214,7 +223,8 @@ public fun PrivacyManagementScreen(
                 }
             },
             confirmButton = {
-                Button(
+                BecalmButton(
+                    text = stringResource(R.string.privacy_source_archive_delete_confirm),
                     enabled = archiveCutoffDate.isNotBlank() && !state.sourceArchiveDeleting,
                     onClick = {
                         showArchiveDeleteConfirm = false
@@ -222,14 +232,15 @@ public fun PrivacyManagementScreen(
                             archiveCutoffDate,
                         )
                     },
-                ) {
-                    Text(stringResource(R.string.privacy_source_archive_delete_confirm))
-                }
+                    variant = BecalmButtonVariant.Secondary,
+                )
             },
             dismissButton = {
-                Button(onClick = { showArchiveDeleteConfirm = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { showArchiveDeleteConfirm = false },
+                    variant = BecalmButtonVariant.Text,
+                )
             },
         )
     }
@@ -274,26 +285,23 @@ internal fun PrivacyManagementScreenContent(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                PrivacyActionCard(
+                SettingsSectionLabel(stringResource(R.string.privacy_data_control_section))
+                SettingsActionRow(
                     title = stringResource(R.string.privacy_export_title),
                     subtitle = stringResource(R.string.privacy_export_subtitle),
                     onClick = onExportClick,
                     enabled = !state.exporting,
-                    testTag = "privacy-export-card",
+                    rowTestTag = "privacy-export-card",
                 )
-                PrivacyActionCard(
+                HorizontalDivider()
+                SettingsActionRow(
                     title = stringResource(R.string.privacy_withdraw_title),
                     subtitle = stringResource(R.string.privacy_withdraw_subtitle),
                     onClick = onOpenConsentWithdraw,
-                    testTag = "privacy-withdraw-card",
+                    rowTestTag = "privacy-withdraw-card",
                 )
-                PrivacyActionCard(
-                    title = stringResource(R.string.privacy_pause_title),
-                    subtitle = stringResource(R.string.privacy_pause_subtitle),
-                    onClick = onOpenProcessingPause,
-                    testTag = "privacy-pause-card",
-                )
-                PrivacyActionCard(
+                HorizontalDivider()
+                SettingsActionRow(
                     title = stringResource(R.string.privacy_source_archive_title),
                     subtitle = if (state.sourceArchiveCount == 0) {
                         stringResource(R.string.privacy_source_archive_empty)
@@ -306,19 +314,31 @@ internal fun PrivacyManagementScreenContent(
                     },
                     onClick = onOpenSourceArchiveDelete,
                     enabled = state.sourceArchiveCount > 0 && !state.sourceArchiveDeleting,
-                    testTag = "privacy-source-archive-card",
+                    rowTestTag = "privacy-source-archive-card",
                 )
-                PrivacyActionCard(
-                    title = stringResource(R.string.privacy_delete_title),
-                    subtitle = stringResource(R.string.privacy_delete_subtitle_fmt, state.commitmentCount, state.enrichmentCount, state.emailCount),
-                    onClick = onOpenAccountDeletion,
-                    testTag = "privacy-delete-card",
+                Spacer(modifier = Modifier.height(12.dp))
+                SettingsSectionLabel(stringResource(R.string.privacy_processing_section))
+                SettingsActionRow(
+                    title = stringResource(R.string.privacy_pause_title),
+                    subtitle = stringResource(R.string.privacy_pause_subtitle),
+                    onClick = onOpenProcessingPause,
+                    rowTestTag = "privacy-pause-card",
                 )
-                PrivacyActionCard(
+                HorizontalDivider()
+                SettingsActionRow(
                     title = stringResource(R.string.privacy_activity_log_title),
                     subtitle = stringResource(R.string.privacy_activity_log_subtitle),
                     onClick = onOpenActivityLog,
-                    testTag = "privacy-activity-log-card",
+                    rowTestTag = "privacy-activity-log-card",
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                SettingsSectionLabel(stringResource(R.string.privacy_danger_section))
+                SettingsActionRow(
+                    title = stringResource(R.string.privacy_delete_title),
+                    subtitle = stringResource(R.string.privacy_delete_subtitle_fmt, state.commitmentCount, state.enrichmentCount, state.emailCount),
+                    onClick = onOpenAccountDeletion,
+                    rowTestTag = "privacy-delete-card",
+                    destructive = true,
                 )
                 Text(
                     text = stringResource(R.string.privacy_correction_guidance),
@@ -343,7 +363,8 @@ internal fun ConsentWithdrawScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
     BecalmScaffold(
         title = stringResource(R.string.privacy_withdraw_title),
         navigationIcon = {
@@ -398,7 +419,8 @@ internal fun AccountDeletionScreen(
             navController.navigateAfterSignOut()
         }
     }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
     BecalmScaffold(
         title = stringResource(R.string.privacy_delete_title),
         navigationIcon = {
@@ -455,43 +477,43 @@ internal fun ConsentWithdrawContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         ConsentToggleRow(
-            label = "Voice auto processing",
+            label = stringResource(R.string.privacy_withdraw_voice_label),
             checked = state.voiceConsentEnabled,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.VOICE) },
             testTag = "privacy-withdraw-voice",
         )
         ConsentToggleRow(
-            label = "Gmail",
+            label = stringResource(R.string.privacy_withdraw_gmail_label),
             checked = state.gmailConnected,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.GMAIL) },
             testTag = "privacy-withdraw-gmail",
         )
         ConsentToggleRow(
-            label = "Outlook Mail",
+            label = stringResource(R.string.privacy_withdraw_outlook_mail_label),
             checked = state.outlookConnected,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.OUTLOOK_MAIL) },
             testTag = "privacy-withdraw-outlook-mail",
         )
         ConsentToggleRow(
-            label = "Naver Email",
+            label = stringResource(R.string.privacy_withdraw_naver_label),
             checked = state.naverConnected,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.NAVER_IMAP) },
             testTag = "privacy-withdraw-naver",
         )
         ConsentToggleRow(
-            label = "Daum Email",
+            label = stringResource(R.string.privacy_withdraw_daum_label),
             checked = state.daumConnected,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.DAUM_IMAP) },
             testTag = "privacy-withdraw-daum",
         )
         ConsentToggleRow(
-            label = "Google Calendar",
+            label = stringResource(R.string.privacy_withdraw_google_calendar_label),
             checked = state.googleCalendarEnabled,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.GOOGLE_CALENDAR) },
             testTag = "privacy-withdraw-google-calendar",
         )
         ConsentToggleRow(
-            label = "Outlook Calendar",
+            label = stringResource(R.string.privacy_withdraw_outlook_calendar_label),
             checked = state.outlookCalendarEnabled,
             onCheckedChange = { checked -> if (!checked) onWithdrawConsent(WithdrawConsentTarget.OUTLOOK_CALENDAR) },
             testTag = "privacy-withdraw-outlook-calendar",
@@ -534,17 +556,21 @@ internal fun ProcessingPauseContent(
             title = { Text(stringResource(R.string.privacy_pause_title)) },
             text = { Text(stringResource(R.string.privacy_pause_confirm_body)) },
             confirmButton = {
-                Button(onClick = {
-                    showPauseConfirm = false
-                    onSetProcessingPaused(true)
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.action_confirm),
+                    onClick = {
+                        showPauseConfirm = false
+                        onSetProcessingPaused(true)
+                    },
+                    variant = BecalmButtonVariant.Primary,
+                )
             },
             dismissButton = {
-                Button(onClick = { showPauseConfirm = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+                BecalmButton(
+                    text = stringResource(R.string.action_cancel),
+                    onClick = { showPauseConfirm = false },
+                    variant = BecalmButtonVariant.Text,
+                )
             },
         )
     }
@@ -585,14 +611,14 @@ internal fun AccountDeletionContent(
                 .fillMaxWidth()
                 .testTag("privacy-delete-keyword"),
         )
-        Button(
+        BecalmButton(
+            text = stringResource(R.string.privacy_delete_confirm),
             onClick = { onConfirmDeletion(emailInput, confirmText) },
+            variant = BecalmButtonVariant.Primary,
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("privacy-delete-confirm"),
-        ) {
-            Text(stringResource(R.string.privacy_delete_confirm))
-        }
+        )
     }
 }
 
@@ -622,31 +648,6 @@ internal fun ActivityLogContent(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun PrivacyActionCard(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    testTag: String? = null,
-) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(title)
-            Spacer(Modifier.height(4.dp))
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

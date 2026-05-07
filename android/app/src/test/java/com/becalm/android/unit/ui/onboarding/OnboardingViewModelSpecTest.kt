@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.onboarding
 
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -707,7 +708,7 @@ class OnboardingViewModelSpecTest {
         advanceUntilIdle()
 
         assertFalse(viewModel.uiState.value.isCompleting)
-        assertTrue(viewModel.uiState.value.error?.contains("Please complete all steps") == true)
+        assertEquals(R.string.onb_error_complete_steps, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
     }
 

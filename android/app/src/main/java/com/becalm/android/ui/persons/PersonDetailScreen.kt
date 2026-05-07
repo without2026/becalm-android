@@ -1,7 +1,9 @@
 package com.becalm.android.ui.persons
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,11 +35,18 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.RecommendationPanel
+import com.becalm.android.ui.components.isCalendarSource
+import com.becalm.android.ui.components.isCallSource
+import com.becalm.android.ui.components.isEmailSource
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 
@@ -59,7 +68,8 @@ public fun PersonDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
 
     val onEventTap: (String) -> Unit = { eventId ->
         navController.navigate(
@@ -98,7 +108,7 @@ public fun PersonDetailScreenContent(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        val hasAnyInteractions = state.sourceEventCards.isNotEmpty() || state.timeline.isNotEmpty()
+        val hasAnyInteractions = state.sourceEventCards.isNotEmpty()
         when {
             state.loading -> {
                 BecalmSheetSkeleton(modifier = Modifier.padding(padding))
@@ -106,7 +116,7 @@ public fun PersonDetailScreenContent(
             state.error != null && !hasAnyInteractions -> {
                 ErrorState(
                     title = stringResource(R.string.error_generic_title),
-                    message = state.error,
+                    message = uiMessageStringResource(requireNotNull(state.error)),
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -160,12 +170,9 @@ private fun PersonDetailList(
     val sourceCards = remember(selectedFilter, state.sourceEventCards) {
         state.sourceEventCards.filter(selectedFilter::matches)
     }
-    val filteredRows = remember(selectedFilter, state.timeline) {
-        state.timeline.filter(selectedFilter::matches)
-    }
     val timelineHeader = stringResource(
         R.string.person_detail_timeline_section_fmt,
-        sourceCards.takeIf { it.isNotEmpty() }?.size ?: filteredRows.size,
+        sourceCards.size,
     )
 
     LazyColumn(
@@ -188,6 +195,15 @@ private fun PersonDetailList(
                 pendingCommitmentCount = state.pendingCommitmentCount,
             )
         }
+        val nextActionCards = sourceCards.filter { it.nextAction != null }
+        if (nextActionCards.isNotEmpty()) {
+            item(key = "next-actions") {
+                PersonNextActionsPanel(
+                    cards = nextActionCards,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
         item(key = "timeline-filters") {
             TimelineFilterRow(
                 selectedFilter = selectedFilter,
@@ -208,28 +224,50 @@ private fun PersonDetailList(
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-        } else if (filteredRows.isEmpty()) {
+        } else {
             item(key = "timeline-empty") {
                 EmptyState(title = stringResource(R.string.person_detail_timeline_filter_empty))
-            }
-        } else {
-            items(
-                items = filteredRows,
-                key = { row -> row.stableTimelineKey() },
-            ) { row ->
-                InteractionHistoryRow(
-                    row = row,
-                    onEventTap = onEventTap,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                )
             }
         }
     }
 }
 
 // ─── Timeline helpers ─────────────────────────────────────────────────────────
+
+@Composable
+private fun PersonNextActionsPanel(
+    cards: List<SourceEventCardProjection>,
+    modifier: Modifier = Modifier,
+) {
+    RecommendationPanel(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("person-detail-next-action-panel"),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.person_detail_next_action_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            cards.take(3).forEach { card ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EventSourceBadge(sourceType = card.sourceType)
+                    Text(
+                        text = stringResource(requireNotNull(card.nextAction).labelRes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
 
 private enum class PersonTimelineFilter {
     ALL,
@@ -272,23 +310,6 @@ private fun TimelineFilterRow(
     }
 }
 
-private fun InteractionRow.stableTimelineKey(): String = when (this) {
-    is InteractionRow.Event -> "event-$id"
-    is InteractionRow.Commitment ->
-        "commitment-${timestamp.toEpochMilliseconds()}-${title.hashCode()}-$itemType-$actionState-$direction"
-    is InteractionRow.CalendarMeeting -> "meeting-${timestamp.toEpochMilliseconds()}-${title.hashCode()}"
-}
-
-private fun PersonTimelineFilter.matches(row: InteractionRow): Boolean = when (this) {
-    PersonTimelineFilter.ALL -> true
-    PersonTimelineFilter.EMAIL -> row is InteractionRow.Event && row.source.isEmailSource()
-    PersonTimelineFilter.CALL -> row is InteractionRow.Event && row.source.isCallSource()
-    PersonTimelineFilter.MEETING ->
-        row is InteractionRow.CalendarMeeting ||
-            (row is InteractionRow.Event && row.source.isCalendarSource())
-    PersonTimelineFilter.COMMITMENT -> row is InteractionRow.Commitment
-}
-
 private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boolean = when (this) {
     PersonTimelineFilter.ALL -> true
     PersonTimelineFilter.EMAIL -> card.sourceType.isEmailSource()
@@ -297,24 +318,6 @@ private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boole
     PersonTimelineFilter.COMMITMENT ->
         card.myActions.isNotEmpty() || card.theirActions.isNotEmpty() || card.schedules.isNotEmpty()
 }
-
-private fun String.isEmailSource(): Boolean =
-    equals("gmail", ignoreCase = true) ||
-        equals("outlook_mail", ignoreCase = true) ||
-        equals("naver_imap", ignoreCase = true) ||
-        equals("daum_imap", ignoreCase = true) ||
-        contains("mail", ignoreCase = true) ||
-        contains("imap", ignoreCase = true)
-
-private fun String.isCallSource(): Boolean =
-    equals("voice", ignoreCase = true) ||
-        equals("call_recording", ignoreCase = true) ||
-        contains("call", ignoreCase = true)
-
-private fun String.isCalendarSource(): Boolean =
-    equals("google_calendar", ignoreCase = true) ||
-        equals("outlook_calendar", ignoreCase = true) ||
-        contains("calendar", ignoreCase = true)
 
 @Composable
 private fun SectionHeader(text: String) {
@@ -361,20 +364,26 @@ private fun PreviewPersonDetailScreenWithHistory() {
                 }
                 items(
                     listOf(
-                        InteractionRow.Commitment(
-                            timestamp = kotlinx.datetime.Clock.System.now(),
-                            title = "Send contract draft",
-                            direction = "give",
-                            actionState = "pending",
-                        ),
-                        InteractionRow.CalendarMeeting(
-                            timestamp = kotlinx.datetime.Clock.System.now(),
+                        SourceEventCardProjection(
+                            sourceEventKey = "preview-meeting",
+                            sourceType = "google_calendar",
+                            rawEventId = null,
+                            occurredAt = kotlinx.datetime.Clock.System.now(),
                             title = "Q2 Planning Meeting",
+                            snippet = "Send contract draft after the meeting.",
+                            myActions = listOf(
+                                PersonDetailCommitmentSummary(
+                                    title = "Send contract draft",
+                                    itemType = CommitmentItemType.ACTION,
+                                    direction = "give",
+                                    status = "pending",
+                                ),
+                            ),
                         ),
                     ),
-                ) { row ->
-                    InteractionHistoryRow(
-                        row = row,
+                ) { card ->
+                    SourceEventCardRow(
+                        card = card,
                         onEventTap = {},
                         modifier = Modifier
                             .fillMaxWidth()

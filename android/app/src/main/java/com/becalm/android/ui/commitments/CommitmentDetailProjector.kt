@@ -1,9 +1,11 @@
 package com.becalm.android.ui.commitments
 
+import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.UiMessage
 
 internal object CommitmentDetailProjector {
     private const val COUNTERPARTY_DISPLAY_MAX = 30
@@ -27,7 +29,7 @@ internal object CommitmentDetailProjector {
         entity = null,
         counterpartyDisplayName = null,
         loading = false,
-        error = CommitmentDetailViewModel.EMPTY_ERROR_KEY,
+        error = UiMessage.resource(R.string.commitment_detail_empty_error),
     )
 
     private fun resolveCounterpartyDisplay(

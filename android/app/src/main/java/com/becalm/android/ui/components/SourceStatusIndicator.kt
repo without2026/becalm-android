@@ -6,65 +6,17 @@
  */
 package com.becalm.android.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.becalmColors
-
-// ─── SourceSyncStatus enum ────────────────────────────────────────────────────
-
-/**
- * Represents the health of a data source's last synchronization.
- *
- * - [Ok]: source synced successfully and is fresh.
- * - [Stale]: source has not synced recently; attention may be needed.
- * - [Error]: sync failed; user action required.
- * - [Unknown]: status cannot be determined (e.g. first-run, no connectivity check yet).
- */
-public enum class SourceSyncStatus {
-    Ok,
-    Stale,
-    Error,
-    Unknown,
-}
-
-// ─── Status-string mapping ────────────────────────────────────────────────────
-
-/**
- * Maps a raw ViewModel status string (e.g. `"CONNECTED"`, `"SYNCING"`, `"ERROR"`,
- * `"NEVER_CONNECTED"`) to the corresponding [SourceSyncStatus] for the indicator.
- *
- * Deduplicated from the per-screen private copies in [SourcesListScreen] and
- * [SourceDetailScreen]; behavior is byte-identical to those prior implementations.
- */
-internal fun statusStringToSyncStatus(raw: String): SourceSyncStatus = when (raw.uppercase()) {
-    "CONNECTED" -> SourceSyncStatus.Ok
-    "SYNCING" -> SourceSyncStatus.Ok
-    "ERROR" -> SourceSyncStatus.Error
-    "NEVER_CONNECTED" -> SourceSyncStatus.Unknown
-    else -> SourceSyncStatus.Stale
-}
-
-// ─── SourceStatusIndicator ────────────────────────────────────────────────────
-
-private val PillShape = RoundedCornerShape(100.dp)
 
 /**
  * Renders a source's synchronization health as a glass pill containing a colored
@@ -75,8 +27,8 @@ private val PillShape = RoundedCornerShape(100.dp)
  *
  * @param status   Sync health level driving the dot color.
  * @param label    Caller-supplied human-readable status text (e.g. "Synced 2m ago").
- *                 Must not include account identifiers, email addresses, or any PII —
- *                 use sync-status phrasing only (e.g. "Synced 2m ago", "Stale — tap to
+ *                 Must not include account identifiers, email addresses, or any PII.
+ *                 Use sync-status phrasing only (e.g. "Synced 2m ago", "Stale, tap to
  *                 retry"). The label is announced verbatim by TalkBack.
  *                 Always used for accessibility, shown visually when [compact] is false.
  * @param modifier Optional [Modifier] applied to the pill container.
@@ -90,41 +42,12 @@ public fun SourceStatusIndicator(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val becalmColors = MaterialTheme.becalmColors
-    val colorScheme = MaterialTheme.colorScheme
-
-    val dotColor = when (status) {
-        SourceSyncStatus.Ok -> becalmColors.sourceStatusOk
-        SourceSyncStatus.Stale -> becalmColors.sourceStatusStale
-        SourceSyncStatus.Error -> becalmColors.sourceStatusError
-        SourceSyncStatus.Unknown -> colorScheme.outline
-    }
-
-    Row(
-        modifier = modifier
-            .semantics { contentDescription = label }
-            .background(color = becalmColors.glassPanelFill, shape = PillShape)
-            .border(width = 1.dp, color = becalmColors.glassBorder, shape = PillShape)
-            .padding(horizontal = if (compact) 6.dp else 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Status dot
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .background(color = dotColor, shape = CircleShape),
-        )
-
-        // Label — hidden in compact mode
-        if (!compact) {
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = colorScheme.onSurface,
-            )
-        }
-    }
+    StatusPill(
+        label = label,
+        tone = sourceStatusToneFor(status),
+        modifier = modifier,
+        compact = compact,
+    )
 }
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
@@ -134,7 +57,7 @@ public fun SourceStatusIndicator(
 private fun PreviewSourceStatusOkFull() {
     BecalmTheme {
         Box(modifier = Modifier.padding(16.dp)) {
-            SourceStatusIndicator(status = SourceSyncStatus.Ok, label = "Synced 2m ago")
+            SourceStatusIndicator(status = SourceSyncStatus.Connected, label = "Synced 2m ago")
         }
     }
 }
@@ -144,7 +67,7 @@ private fun PreviewSourceStatusOkFull() {
 private fun PreviewSourceStatusStaleFull() {
     BecalmTheme {
         Box(modifier = Modifier.padding(16.dp)) {
-            SourceStatusIndicator(status = SourceSyncStatus.Stale, label = "Stale — 2h ago")
+            SourceStatusIndicator(status = SourceSyncStatus.Stale, label = "Stale, 2h ago")
         }
     }
 }
@@ -154,7 +77,7 @@ private fun PreviewSourceStatusStaleFull() {
 private fun PreviewSourceStatusErrorFull() {
     BecalmTheme {
         Box(modifier = Modifier.padding(16.dp)) {
-            SourceStatusIndicator(status = SourceSyncStatus.Error, label = "Failed — tap to retry")
+            SourceStatusIndicator(status = SourceSyncStatus.Error, label = "Failed, tap to retry")
         }
     }
 }
@@ -176,7 +99,7 @@ private fun PreviewSourceStatusCompact() {
         Box(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SourceStatusIndicator(
-                    status = SourceSyncStatus.Ok,
+                    status = SourceSyncStatus.Connected,
                     label = "Synced",
                     compact = true,
                 )

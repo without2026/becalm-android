@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.commitments
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -129,8 +130,8 @@ class CommitmentDetailViewModelSpecTest {
         advanceUntilIdle()
 
         val history = viewModel.uiState.value.history
-        assertEquals("마지막 수정: 4/18 14:30 (본인)", history.lastEditedLabel)
-        assertEquals("⚠️ 이의 제기됨 — 4/18 14:31", history.disputedLabel)
+        assertEquals(Instant.parse("2026-04-18T05:30:00Z"), history.lastEditedAt)
+        assertEquals(Instant.parse("2026-04-18T05:31:00Z"), history.disputeRaisedAt)
         assertTrue(history.showSupersedeLink)
     }
 
@@ -152,7 +153,27 @@ class CommitmentDetailViewModelSpecTest {
         val source = viewModel.uiState.value.source
         assertTrue(source.isManual)
         assertNull(source.sourceTitle)
-        assertEquals("사용자 직접 추가 2026-04-18 14:30 KST", source.sourceLabel)
+        assertEquals(R.string.commitment_detail_manual_source_fmt, source.sourceLabel?.resId)
+        assertEquals(listOf("2026-04-18 14:30"), source.sourceLabel?.args)
+    }
+
+    @Test
+    fun `source label falls back without leaking raw source type`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "source-fallback") } returns flowOf(
+            entity(
+                id = "source-fallback",
+                sourceType = "gmail",
+                sourceEventTitle = null,
+                sourceEventOccurredAt = Instant.parse("2026-04-18T06:00:00Z"),
+            ),
+        )
+
+        val viewModel = buildViewModel("source-fallback")
+        advanceUntilIdle()
+
+        val sourceLabel = viewModel.uiState.value.source.sourceLabel
+        assertEquals(R.string.commitment_detail_llm_source_original_fmt, sourceLabel?.resId)
+        assertEquals(listOf("4/18 15:00"), sourceLabel?.args)
     }
 
     @Test

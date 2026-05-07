@@ -1,14 +1,16 @@
 package com.becalm.android.ui.commitments
 
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 
 internal object CommitmentSaveErrorFormatter {
-    const val SUPERSEDE_SOURCE_NOT_FOUND: String = "원문 commitment를 찾지 못했습니다"
+    val SUPERSEDE_SOURCE_NOT_FOUND: CommitmentText =
+        CommitmentText.resource(R.string.commitment_save_error_supersede_source_not_found)
 
-    fun format(error: BecalmError): String = when (error) {
-        is BecalmError.Unauthorized -> "로그인이 필요합니다"
-        is BecalmError.NotFound -> "삭제된 약속입니다"
-        is BecalmError.Validation -> error.message
-        else -> "저장 실패 — 다시 시도해주세요"
+    fun format(error: BecalmError): CommitmentText = when (error) {
+        is BecalmError.Unauthorized -> CommitmentText.resource(R.string.commitment_save_error_login_required)
+        is BecalmError.NotFound -> CommitmentText.resource(R.string.commitment_save_error_deleted)
+        is BecalmError.Validation -> CommitmentText.resource(R.string.commitment_save_error_validation)
+        else -> CommitmentText.resource(R.string.commitment_save_error_generic)
     }
 }

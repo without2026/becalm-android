@@ -96,11 +96,10 @@ class CommitmentManagementScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_action)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_take)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_schedule)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_decision)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.commitments_filter_closed)).assertIsDisplayed()
         composeTestRule.onNodeWithText("Alice Kim").assertIsDisplayed()
         composeTestRule.onNodeWithText("Schedule change").assertIsDisplayed()
         composeTestRule.onNodeWithText("Active commitment").performClick()

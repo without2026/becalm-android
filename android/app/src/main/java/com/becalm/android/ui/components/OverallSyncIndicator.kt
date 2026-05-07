@@ -19,7 +19,6 @@ import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.SystemClock
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.becalmColors
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -48,11 +47,11 @@ public fun OverallSyncIndicator(
     modifier: Modifier = Modifier,
     clock: Clock = SystemClock,
 ) {
-    val becalmColors = MaterialTheme.becalmColors
     val colorScheme = MaterialTheme.colorScheme
 
     val isPartialFailure = state is OverallSyncState.PartialFailure
-    val textColor: Color = if (isPartialFailure) becalmColors.sourceStatusStale else colorScheme.onSurfaceVariant
+    val attentionColor = statusToneDotColor(StatusTone.Attention)
+    val textColor: Color = if (isPartialFailure) attentionColor else colorScheme.onSurfaceVariant
 
     val label: String = when (state) {
         OverallSyncState.Idle -> ""
@@ -70,7 +69,7 @@ public fun OverallSyncIndicator(
             .fillMaxWidth()
             .background(
                 color = if (isPartialFailure) {
-                    becalmColors.sourceStatusStale.copy(alpha = 0.16f)
+                    attentionColor.copy(alpha = 0.16f)
                 } else {
                     Color.Transparent
                 },

@@ -1,5 +1,6 @@
 package com.becalm.android.ui.today
 
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.KST
@@ -12,6 +13,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.UiMessage
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -108,7 +110,7 @@ internal class TodayScreenStateSource @Inject constructor(
                 emit(
                     TodayUiState(
                         loading = false,
-                        error = e.message ?: "timeline load failed",
+                        error = UiMessage.resource(R.string.today_error_load_failed),
                     ),
                 )
             }

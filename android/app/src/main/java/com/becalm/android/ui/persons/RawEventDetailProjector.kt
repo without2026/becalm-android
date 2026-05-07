@@ -1,8 +1,10 @@
 package com.becalm.android.ui.persons
 
+import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.ArchivedOriginal
+import com.becalm.android.ui.components.UiMessage
 
 internal object RawEventDetailProjector {
     private const val SNIPPET_CHAR_LIMIT: Int = 200
@@ -42,7 +44,7 @@ internal object RawEventDetailProjector {
     }
 
     fun notFoundState(): RawEventDetailUiState =
-        RawEventDetailUiState(loading = false, error = ERROR_EVENT_NOT_FOUND)
+        RawEventDetailUiState(loading = false, error = UiMessage.resource(R.string.raw_event_detail_not_found))
 
     private fun markdownBodyText(markdown: String): String {
         val withoutFrontMatter = if (markdown.startsWith("---")) {

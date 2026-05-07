@@ -21,6 +21,7 @@ import com.becalm.android.ui.auth.LoginScreen
 import com.becalm.android.ui.auth.SplashContent
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsContent
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Assert.assertEquals
@@ -99,7 +100,10 @@ class AuthUiTest {
 
     @Test
     fun `splash screen routes error state to terms`() {
-        assertSplashRoute(AuthUiState.Error(message = "boom"), BecalmRoute.Terms.path)
+        assertSplashRoute(
+            AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed)),
+            BecalmRoute.Terms.path,
+        )
     }
 
     @Test
@@ -119,7 +123,9 @@ class AuthUiTest {
         composeRule.onNodeWithText(string(R.string.login_cta)).performClick()
 
         composeRule.onNodeWithText(string(R.string.login_error_empty_fields)).assertIsDisplayed()
+        composeRule.onNodeWithTag("google-sign-in-button").assertIsNotEnabled()
         composeRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
+        composeRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
     }
 
     @Test

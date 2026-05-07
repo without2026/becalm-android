@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.MutableSharedFlow
 import androidx.navigation.compose.rememberNavController
@@ -106,7 +107,7 @@ class PrivacyManagementScreenTest {
                     stateOverride = PrivacyManagementUiState(
                         loading = false,
                         signedOut = true,
-                        error = "privacy failed",
+                        error = UiMessage.resource(R.string.privacy_export_failed),
                     ),
                     effectsOverride = effects,
                     onNavigateAfterSignOut = { navigateCount += 1 },
@@ -124,7 +125,7 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("privacy failed").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_export_failed)).assertIsDisplayed()
         composeTestRule.runOnIdle {
             assertEquals(1, navigateCount)
             assertEquals(1, dismissCount)

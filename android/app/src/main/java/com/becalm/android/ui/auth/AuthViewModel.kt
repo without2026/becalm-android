@@ -2,15 +2,16 @@ package com.becalm.android.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.onboarding.OnboardingProgressResolver
 import com.becalm.android.worker.AuthenticatedRuntimeBootstrap
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,9 +62,9 @@ public sealed class AuthUiState {
     /**
      * An error occurred during a sign-in or sign-out operation.
      *
-     * @param message Human-readable description of the error.
+     * @param message Resource-backed description of the error.
      */
-    public data class Error(val message: String) : AuthUiState()
+    public data class Error(val message: UiMessage) : AuthUiState()
 }
 
 /** One-shot effects emitted by [AuthViewModel]. */
@@ -75,10 +76,6 @@ public sealed interface AuthEffect {
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "AuthViewModel"
-private const val INVALID_EMAIL_PASSWORD_MESSAGE = "Invalid email or password"
-private const val EMAIL_CONFIRMATION_REQUIRED_MESSAGE = "Check your email to confirm your account, then sign in."
-private const val SIGNUP_FAILED_MESSAGE = "Could not create account"
-
 /**
  * ViewModel for the authentication flow.
  *
@@ -135,11 +132,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-in failed")
-                    val message = when (result.error) {
-                        is BecalmError.Unauthorized -> INVALID_EMAIL_PASSWORD_MESSAGE
-                        else -> result.error.safeMessage
-                    }
-                    _uiState.value = AuthUiState.Error(message)
+                    _uiState.value = AuthUiState.Error(result.error.toAuthMessage())
                 }
             }
         }
@@ -166,11 +159,11 @@ public class AuthViewModel @Inject constructor(
                     val message = when (val error = result.error) {
                         is BecalmError.Validation ->
                             if (error.message == "email_confirmation_required") {
-                                EMAIL_CONFIRMATION_REQUIRED_MESSAGE
+                                UiMessage.resource(R.string.auth_error_email_confirmation_required)
                             } else {
-                                SIGNUP_FAILED_MESSAGE
+                                UiMessage.resource(R.string.auth_error_sign_up_failed)
                             }
-                        else -> error.safeMessage
+                        else -> error.toAuthMessage()
                     }
                     _uiState.value = AuthUiState.Error(message)
                 }
@@ -194,7 +187,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "google sign-in failed")
-                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
+                    _uiState.value = AuthUiState.Error(result.error.toAuthMessage())
                 }
             }
         }
@@ -233,7 +226,7 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "routine sign-out failed")
-                    _uiState.value = AuthUiState.Error(result.error.safeMessage)
+                    _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_sign_out_failed))
                 }
             }
         }
@@ -262,7 +255,7 @@ public class AuthViewModel @Inject constructor(
                 _effects.emit(AuthEffect.NavigateToLogin)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist terms acceptance", e)
-                _uiState.value = AuthUiState.Error(e.message ?: "terms acceptance failed")
+                _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_terms_acceptance_failed))
             }
         }
     }
@@ -283,7 +276,7 @@ public class AuthViewModel @Inject constructor(
                 logger.d(TAG, "startup auth bootstrap resolved to ${uiState.value}")
             } catch (e: Exception) {
                 logger.w(TAG, "startup auth bootstrap failed")
-                _uiState.value = AuthUiState.Error(e.message ?: "session bootstrap failed")
+                _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))
             }
 
             try {
@@ -292,7 +285,7 @@ public class AuthViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                _uiState.value = AuthUiState.Error(e.message ?: "session observation failed")
+                _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))
             }
         }
     }
@@ -364,4 +357,19 @@ public class AuthViewModel @Inject constructor(
     }
 
     private fun authRepository(): AuthRepository = authRepositoryProvider.get()
+}
+
+private fun BecalmError.toAuthMessage(): UiMessage = when (this) {
+    is BecalmError.Network -> UiMessage.resource(R.string.auth_error_network)
+    is BecalmError.Unauthorized -> UiMessage.resource(R.string.auth_error_invalid_credentials)
+    is BecalmError.RateLimited -> UiMessage.resource(R.string.auth_error_rate_limited)
+    is BecalmError.ServerError -> UiMessage.resource(R.string.auth_error_server)
+    is BecalmError.Validation -> UiMessage.resource(R.string.auth_error_validation)
+    is BecalmError.Io -> UiMessage.resource(R.string.auth_error_local_io)
+    is BecalmError.Permission -> UiMessage.resource(R.string.auth_error_permission)
+    is BecalmError.NotFound -> UiMessage.resource(R.string.auth_error_not_found)
+    is BecalmError.Cancelled -> UiMessage.resource(R.string.auth_error_cancelled)
+    is BecalmError.ExtractorUnavailable,
+    is BecalmError.Unknown,
+    -> UiMessage.resource(R.string.auth_error_unknown)
 }

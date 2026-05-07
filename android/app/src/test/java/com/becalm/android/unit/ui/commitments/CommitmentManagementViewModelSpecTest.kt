@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.commitments
 
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
@@ -157,6 +158,8 @@ class CommitmentManagementViewModelSpecTest {
                     direction = null,
                     decisionStatus = "chosen",
                 ),
+                entity(id = "completed-1", direction = "give", actionState = "completed"),
+                entity(id = "cancelled-1", direction = "take", actionState = "cancelled"),
             ),
         )
 
@@ -167,15 +170,17 @@ class CommitmentManagementViewModelSpecTest {
             val initial = awaitItem()
             assertEquals(CommitmentFilter.ALL, initial.filter)
             assertEquals(
-                listOf("give-1", "give-2", "take-1", "schedule-1", "decision-1"),
+                listOf(
+                    "give-1",
+                    "give-2",
+                    "take-1",
+                    "schedule-1",
+                    "decision-1",
+                    "completed-1",
+                    "cancelled-1",
+                ),
                 initial.items.map { it.id },
             )
-
-            viewModel.onFilterChange(CommitmentFilter.ACTION)
-            val actionOnly = awaitItem()
-            assertEquals(CommitmentFilter.ACTION, actionOnly.filter)
-            assertEquals(listOf("give-1", "give-2", "take-1"), actionOnly.items.map { it.id })
-            assertTrue(actionOnly.items.all { it.itemType == "action" })
 
             viewModel.onFilterChange(CommitmentFilter.GIVE)
             val giveOnly = awaitItem()
@@ -195,17 +200,30 @@ class CommitmentManagementViewModelSpecTest {
             assertEquals(listOf("schedule-1"), scheduleOnly.items.map { it.id })
             assertTrue(scheduleOnly.items.all { it.itemType == "schedule" && it.scheduleStatus == "changed" })
 
-            viewModel.onFilterChange(CommitmentFilter.DECISION)
-            val decisionOnly = awaitItem()
-            assertEquals(CommitmentFilter.DECISION, decisionOnly.filter)
-            assertEquals(listOf("decision-1"), decisionOnly.items.map { it.id })
-            assertTrue(decisionOnly.items.all { it.itemType == "decision" && it.decisionStatus == "chosen" })
+            viewModel.onFilterChange(CommitmentFilter.CLOSED)
+            val closedOnly = awaitItem()
+            assertEquals(CommitmentFilter.CLOSED, closedOnly.filter)
+            assertEquals(listOf("completed-1", "cancelled-1"), closedOnly.items.map { it.id })
+            assertTrue(
+                closedOnly.items.all {
+                    it.actionState == CommitmentState.COMPLETED ||
+                        it.actionState == CommitmentState.CANCELLED
+                },
+            )
 
             viewModel.onFilterChange(CommitmentFilter.ALL)
             val allAgain = awaitItem()
             assertEquals(CommitmentFilter.ALL, allAgain.filter)
             assertEquals(
-                listOf("give-1", "give-2", "take-1", "schedule-1", "decision-1"),
+                listOf(
+                    "give-1",
+                    "give-2",
+                    "take-1",
+                    "schedule-1",
+                    "decision-1",
+                    "completed-1",
+                    "cancelled-1",
+                ),
                 allAgain.items.map { it.id },
             )
 
@@ -423,7 +441,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(false, viewModel.uiState.value.refreshing)
-        assertTrue(viewModel.uiState.value.error?.contains("boom") == true)
+        assertEquals(R.string.commitments_error_refresh_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 1) {
             sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = null, since = null)
         }
@@ -479,7 +497,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.onRemind("remind-3")
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.error?.contains("illegal") == true)
+        assertEquals(R.string.commitments_error_action_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
@@ -582,7 +600,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.onUndo(CommitmentUndoSnapshot.Completed("undo-1", CommitmentState.PENDING))
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.error?.contains("undo failed") == true)
+        assertEquals(R.string.commitments_error_undo_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 1) {
             commitmentRepository.updateActionState(
                 id = "undo-1",

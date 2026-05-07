@@ -1,10 +1,11 @@
 package com.becalm.android.ui.sources
 
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.components.UiMessage
 
 internal object SourceDetailActionResolver {
     fun reconnectDestinationFor(sourceType: String): SourceReconnectDestination? =
@@ -41,7 +42,7 @@ internal class SourceDetailActionHandler(
     suspend fun disconnect(
         sourceType: String,
         onSuccess: (SourceDisconnectOutcome) -> Unit,
-        onFailure: (String) -> Unit,
+        onFailure: (UiMessage) -> Unit,
     ) {
         when (val result = sourceAdministrationPort.disconnect(sourceType)) {
             is BecalmResult.Success -> {
@@ -49,11 +50,7 @@ internal class SourceDetailActionHandler(
                 logger.d(TAG, "disconnect completed for sourceType=$sourceType")
             }
             is BecalmResult.Failure -> {
-                val message = when (val error = result.error) {
-                    is BecalmError.Validation -> error.message
-                    else -> error.safeMessage
-                }
-                onFailure(message)
+                onFailure(UiMessage.resource(R.string.source_detail_error_disconnect_failed))
                 logger.w(TAG, "disconnect failed for sourceType=$sourceType")
             }
         }

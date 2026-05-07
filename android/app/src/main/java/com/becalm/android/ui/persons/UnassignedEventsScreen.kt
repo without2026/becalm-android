@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,14 +45,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.IngestionTimestamp
+import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Unassigned events screen — raw events where `person_ref IS NULL`.
@@ -75,7 +78,8 @@ public fun UnassignedEventsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
 
     val context = LocalContext.current
     DisposableEffect(Unit) {
@@ -290,12 +294,10 @@ private fun PersonMatchReviewCard(
     var selectedNickname by remember(event.id) { mutableStateOf(candidate?.displayName.orEmpty()) }
     var nickname by remember(event.id) { mutableStateOf("") }
 
-    Column(
+    EvidenceCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
+            .padding(vertical = 4.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -340,7 +342,8 @@ private fun PersonMatchReviewCard(
                 OutlinedButton(onClick = { manualOpen = true }) {
                     Text(text = stringResource(R.string.person_match_other_person_action))
                 }
-                Button(
+                BecalmButton(
+                    text = stringResource(R.string.person_match_confirm_action),
                     modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
                     onClick = {
                         onConfirm(
@@ -348,9 +351,8 @@ private fun PersonMatchReviewCard(
                             selectedNickname.ifBlank { candidate.displayName },
                         )
                     },
-                ) {
-                    Text(text = stringResource(R.string.person_match_confirm_action))
-                }
+                    variant = BecalmButtonVariant.Primary,
+                )
             }
         } else {
             ManualMatchPanel(
@@ -376,11 +378,10 @@ private fun CandidateRecommendation(
     candidate: PersonMatchCandidateSummary,
     onSelect: () -> Unit,
 ) {
-    Column(
+    QuietPanel(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.small)
-            .padding(12.dp),
+            .fillMaxWidth(),
+        contentPadding = PaddingValues(12.dp),
     ) {
         Text(
             text = stringResource(R.string.person_match_recommendation_label),
@@ -469,12 +470,12 @@ private fun ManualMatchPanel(
         ) {
             Text(text = stringResource(R.string.persons_manual_add_person_action))
         }
-        Button(
+        BecalmButton(
+            text = stringResource(R.string.persons_manual_match_action),
             enabled = personAnchor.isNotBlank(),
             onClick = onConfirm,
-        ) {
-            Text(text = stringResource(R.string.persons_manual_match_action))
-        }
+            variant = BecalmButtonVariant.Primary,
+        )
     }
 }
 

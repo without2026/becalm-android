@@ -2,6 +2,7 @@ package com.becalm.android.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -15,6 +16,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceArtifactRepository
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
@@ -57,7 +59,7 @@ public data class PrivacyManagementUiState(
     val sourceArchiveDeleting: Boolean = false,
     val exporting: Boolean = false,
     val signedOut: Boolean = false,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 public sealed interface PrivacyManagementEffect {
@@ -166,7 +168,7 @@ public class PrivacyManagementViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             val userId = currentUserId()
             if (userId.isNullOrBlank()) {
-                _staticState.value = _staticState.value.copy(error = "no signed-in user")
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_sign_in_required))
                 return@launch
             }
             _staticState.value = _staticState.value.copy(exporting = true, error = null)
@@ -183,7 +185,7 @@ public class PrivacyManagementViewModel @Inject constructor(
                 logger.e(TAG, "export failed", error)
                 _staticState.value = _staticState.value.copy(
                     exporting = false,
-                    error = error.message ?: "export failed",
+                    error = UiMessage.resource(R.string.privacy_export_failed),
                 )
             }
         }
@@ -202,20 +204,24 @@ public class PrivacyManagementViewModel @Inject constructor(
     }
 
     public fun onExportFailed(message: String) {
-        _staticState.value = _staticState.value.copy(exporting = false, error = message)
+        logger.w(TAG, "export document write failed")
+        _staticState.value = _staticState.value.copy(
+            exporting = false,
+            error = UiMessage.resource(R.string.privacy_export_failed),
+        )
     }
 
     public fun onDeleteSourceArchiveBefore(cutoffDateText: String) {
         viewModelScope.launch(ioDispatcher) {
             val userId = currentUserId()
             if (userId.isNullOrBlank()) {
-                _staticState.value = _staticState.value.copy(error = "no signed-in user")
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_sign_in_required))
                 return@launch
             }
             val cutoff = runCatching {
                 LocalDate.parse(cutoffDateText.trim()).atStartOfDayIn(TimeZone.of("Asia/Seoul"))
             }.getOrElse {
-                _staticState.value = _staticState.value.copy(error = "date must be YYYY-MM-DD")
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_date_format))
                 return@launch
             }
             _staticState.value = _staticState.value.copy(sourceArchiveDeleting = true, error = null)
@@ -245,7 +251,7 @@ public class PrivacyManagementViewModel @Inject constructor(
                 logger.e(TAG, "source archive delete failed", error)
                 _staticState.value = _staticState.value.copy(
                     sourceArchiveDeleting = false,
-                    error = error.message ?: "source archive delete failed",
+                    error = UiMessage.resource(R.string.privacy_source_archive_delete_failed),
                 )
             }
         }
@@ -298,11 +304,11 @@ public class PrivacyManagementViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             val expectedEmail = _staticState.value.userEmail
             if (expectedEmail.isNullOrBlank() || emailInput != expectedEmail) {
-                _staticState.value = _staticState.value.copy(error = "email mismatch")
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_email_mismatch))
                 return@launch
             }
             if (confirmationText != "삭제") {
-                _staticState.value = _staticState.value.copy(error = "confirmation text mismatch")
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_confirmation_mismatch))
                 return@launch
             }
             userPrefsStore.appendPipaActionLog(
@@ -316,19 +322,23 @@ public class PrivacyManagementViewModel @Inject constructor(
                     _staticState.value = _staticState.value.copy(signedOut = true, error = null)
                 }
                 is BecalmResult.Failure -> {
-                    _staticState.value = _staticState.value.copy(error = "account deletion failed")
+                    _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_account_deletion_failed))
                 }
             }
         }
     }
 
     private suspend fun withdrawVoiceConsent() {
-        val userId = currentUserId() ?: return
+        val userId = currentUserId()
+        if (userId.isNullOrBlank()) {
+            _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_sign_in_required))
+            return
+        }
         userPrefsStore.setThirdPartyProvisionConsent(false)
         val parkedIds = when (val parked = rawIngestionRepository.parkAndCancelPendingVoice(userId)) {
             is BecalmResult.Success -> parked.value
             is BecalmResult.Failure -> {
-                _staticState.value = _staticState.value.copy(error = parked.error.toString())
+                _staticState.value = _staticState.value.copy(error = UiMessage.resource(R.string.privacy_error_voice_withdraw_failed))
                 return
             }
         }

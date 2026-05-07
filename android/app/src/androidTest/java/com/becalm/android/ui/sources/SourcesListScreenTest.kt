@@ -1,14 +1,17 @@
 package com.becalm.android.ui.sources
 
 import android.content.Context
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -31,9 +34,9 @@ class SourcesListScreenTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),
@@ -64,6 +67,56 @@ class SourcesListScreenTest {
     }
 
     @Test
+    fun sources_list_uses_display_labels_instead_of_raw_source_or_status_ids() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                SourcesListScreenContent(
+                    state = SourcesListUiState(
+                        items = listOf(
+                            SourceStatusRow(
+                                sourceType = "gmail",
+                                status = SourceSyncStatus.Syncing,
+                                lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
+                                hasError = false,
+                            ),
+                            SourceStatusRow(
+                                sourceType = "naver_imap",
+                                status = SourceSyncStatus.Disconnected,
+                                lastSyncAt = null,
+                                hasError = false,
+                            ),
+                            SourceStatusRow(
+                                sourceType = "outlook_mail",
+                                status = SourceSyncStatus.Error,
+                                lastSyncAt = null,
+                                hasError = true,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                    onRowClick = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_gmail)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_naver_imap)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_outlook_mail)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_syncing)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_disconnected)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_last_error_generic)).assertIsDisplayed()
+
+        composeTestRule.onAllNodesWithText("gmail").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("naver_imap").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("outlook_mail").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("SYNCING").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("NEVER_CONNECTED").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("ERROR").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("토큰이 만료되었습니다.").assertCountEquals(0)
+    }
+
+    @Test
     fun sources_list_dispatches_contacts_row_click() {
         var tappedSource: String? = null
 
@@ -74,9 +127,9 @@ class SourcesListScreenTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),

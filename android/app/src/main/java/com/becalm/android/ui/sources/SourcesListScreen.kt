@@ -37,13 +37,14 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
-import com.becalm.android.ui.components.statusStringToSyncStatus
+import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.components.sourceStatusLabelRes
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchSourcesListNavigation
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Sources list screen — user-facing source status rows.
@@ -129,55 +130,48 @@ private fun SourceRowItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val syncStatus = statusStringToSyncStatus(row.status)
-    val statusLabel = when (syncStatus) {
-        SourceSyncStatus.Ok -> stringResource(R.string.sources_status_ok)
-        SourceSyncStatus.Stale -> stringResource(R.string.sources_status_stale)
-        SourceSyncStatus.Error -> stringResource(R.string.sources_status_error)
-        SourceSyncStatus.Unknown -> stringResource(R.string.sources_status_unknown)
-    }
-    Row(
+    val statusLabel = stringResource(sourceStatusLabelRes(row.status))
+    EvidenceCard(
         modifier = modifier
             .testTag("sources-row-${row.sourceType}")
-            .glassPanel(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
-            .padding(12.dp)
             .semantics { role = Role.Button },
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = rowDisplayName(row),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = rowDisplayName(row),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (row.sourceType == "contacts" && row.enrichedCount != null) {
+                    Text(
+                        text = stringResource(R.string.sources_contacts_enriched_fmt, row.enrichedCount),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (row.hasError) {
+                    Text(
+                        text = stringResource(R.string.sources_last_error_generic),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            SourceStatusIndicator(
+                status = row.status,
+                label = statusLabel,
             )
-            if (row.sourceType == "contacts" && row.enrichedCount != null) {
-                Text(
-                    text = stringResource(R.string.sources_contacts_enriched_fmt, row.enrichedCount),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (row.lastError != null) {
-                Text(
-                    text = row.lastError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        SourceStatusIndicator(
-            status = syncStatus,
-            label = statusLabel,
-        )
     }
 }
 
 @Composable
 private fun rowDisplayName(row: SourceStatusRow): String = when (row.sourceType) {
     "contacts" -> stringResource(R.string.sources_contacts_title)
-    else -> row.sourceType.replaceFirstChar { it.uppercase() }
+    else -> stringResource(sourcePresentationFor(row.sourceType).labelRes)
 }
 
 @PreviewLightDark
@@ -203,9 +197,9 @@ private fun PreviewSourcesListScreen() {
             ) {
                 items(
                     listOf(
-                        SourceStatusRow("gmail", "CONNECTED", null, null),
-                        SourceStatusRow("outlook", "ERROR", null, "Auth expired"),
-                        SourceStatusRow("imap", "NEVER_CONNECTED", null, null),
+                        SourceStatusRow("gmail", SourceSyncStatus.Connected, null, false),
+                        SourceStatusRow("outlook", SourceSyncStatus.Error, null, true),
+                        SourceStatusRow("imap", SourceSyncStatus.Disconnected, null, false),
                     ),
                 ) { row ->
                     SourceRowItem(

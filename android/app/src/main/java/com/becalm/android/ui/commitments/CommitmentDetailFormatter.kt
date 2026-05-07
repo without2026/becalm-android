@@ -1,5 +1,6 @@
 package com.becalm.android.ui.commitments
 
+import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.remote.dto.SourceType
 import kotlinx.datetime.Instant
@@ -9,8 +10,9 @@ import kotlinx.datetime.toLocalDateTime
 /**
  * Shared presentation formatting policy for commitment detail surfaces.
  *
- * Centralises the short KST time format and user-facing copy used by both the
- * detail ViewModel and the sheet so copy changes do not drift between layers.
+ * Centralises the short KST time format and string-resource selection used by
+ * detail/edit projections. Compose resolves the final copy via stringResource
+ * so locale changes are applied at render time.
  */
 internal object CommitmentDetailFormatter {
     private val KST_ZONE: TimeZone = TimeZone.of("Asia/Seoul")
@@ -19,12 +21,13 @@ internal object CommitmentDetailFormatter {
         val isManual = entity.sourceType == SourceType.MANUAL
         val occurredAt = if (isManual) entity.createdAt else entity.sourceEventOccurredAt
         val label = if (isManual) {
-            buildManualSourceLabel(entity.createdAt)
+            buildManualSourceText(entity.createdAt)
         } else {
-            buildEventSourceLabel(entity)
+            buildEventSourceText(entity)
         }
         return CommitmentSourcePresentation(
             isManual = isManual,
+            sourceType = entity.sourceType,
             sourceTitle = if (isManual) null else entity.sourceEventTitle,
             sourceOccurredAt = occurredAt,
             sourceLabel = label,
@@ -34,30 +37,38 @@ internal object CommitmentDetailFormatter {
     fun buildHistoryPresentation(entity: CommitmentEntity): CommitmentHistoryPresentation =
         CommitmentHistoryPresentation(
             lastEditedAt = entity.lastEditedAt,
-            lastEditedLabel = entity.lastEditedAt?.let(::buildLastEditedLabel),
             disputeRaisedAt = entity.quoteDisputedAt,
-            disputedLabel = entity.quoteDisputedAt?.let(::buildDisputedLabel),
             showSupersedeLink = entity.supersedesCommitmentId != null,
         )
 
-    fun buildCompactSourceLabel(entity: CommitmentEntity): String =
+    fun buildCompactSourceLabel(entity: CommitmentEntity): CommitmentText =
         if (entity.sourceType == SourceType.MANUAL) {
-            "manual:${formatShortKst(entity.createdAt)}"
+            buildManualSourceText(entity.createdAt)
         } else {
-            buildEventSourceLabel(entity)
+            buildEventSourceText(entity)
         }
 
-    private fun buildManualSourceLabel(createdAt: Instant): String =
-        "사용자 직접 추가 ${formatIsoKst(createdAt)} KST"
+    private fun buildManualSourceText(createdAt: Instant): CommitmentText =
+        CommitmentText(
+            resId = R.string.commitment_detail_manual_source_fmt,
+            args = listOf(formatIsoKst(createdAt)),
+        )
 
-    private fun buildEventSourceLabel(entity: CommitmentEntity): String =
-        "${entity.sourceEventTitle ?: entity.sourceType}:${formatShortKst(entity.sourceEventOccurredAt)}"
-
-    private fun buildLastEditedLabel(editedAt: Instant): String =
-        "마지막 수정: ${formatShortKst(editedAt)} (본인)"
-
-    private fun buildDisputedLabel(disputedAt: Instant): String =
-        "⚠️ 이의 제기됨 — ${formatShortKst(disputedAt)}"
+    private fun buildEventSourceText(entity: CommitmentEntity): CommitmentText {
+        val formattedTime = formatShortKst(entity.sourceEventOccurredAt)
+        val title = entity.sourceEventTitle?.takeIf { it.isNotBlank() }
+        return if (title == null) {
+            CommitmentText(
+                resId = R.string.commitment_detail_llm_source_original_fmt,
+                args = listOf(formattedTime),
+            )
+        } else {
+            CommitmentText(
+                resId = R.string.commitment_detail_llm_source_fmt,
+                args = listOf(title, formattedTime),
+            )
+        }
+    }
 
     fun formatShortKst(instant: Instant): String {
         val ldt = instant.toLocalDateTime(KST_ZONE)

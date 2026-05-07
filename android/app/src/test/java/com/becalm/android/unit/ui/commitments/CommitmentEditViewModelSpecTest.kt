@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.commitments
 
 import app.cash.turbine.test
 import androidx.lifecycle.SavedStateHandle
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -77,7 +78,8 @@ class CommitmentEditViewModelSpecTest {
         assertEquals("내일 오전", state.dueHint)
         assertEquals(true, state.dueIsApproximate)
         assertEquals("quote body", state.readOnly?.quote)
-        assertEquals("Standup:1/1 09:00", state.readOnly?.sourceLabel)
+        assertEquals(R.string.commitment_detail_llm_source_fmt, state.readOnly?.sourceLabel?.resId)
+        assertEquals(listOf("Standup", "1/1 09:00"), state.readOnly?.sourceLabel?.args)
         assertEquals(true, state.readOnly?.quoteDisputed)
     }
 
@@ -106,7 +108,7 @@ class CommitmentEditViewModelSpecTest {
         viewModel.onSave()
         advanceUntilIdle()
 
-        assertEquals("삭제된 약속입니다", viewModel.uiState.value.saveError)
+        assertEquals(R.string.commitment_save_error_deleted, viewModel.uiState.value.saveError?.resId)
     }
 
     @Test

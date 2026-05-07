@@ -2,10 +2,12 @@ package com.becalm.android.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +40,7 @@ import javax.inject.Inject
  * @property storageMb             Local Room DB size in megabytes, or null when unavailable.
  *                                 Populated in future iteration; reserved for UI forward-compat.
  * @property loading               True while the initial load is in progress.
- * @property error                 Human-readable error from the last failed action, or null.
+ * @property error                 Resource-backed error from the last failed action, or null.
  */
 public data class SettingsUiState(
     val userEmail: String? = null,
@@ -49,7 +51,7 @@ public data class SettingsUiState(
     val processingPaused: Boolean = false,
     val storageMb: Long? = null,
     val loading: Boolean = true,
-    val error: String? = null,
+    val error: UiMessage? = null,
     val signedOut: Boolean = false,
 )
 
@@ -169,7 +171,9 @@ public class SettingsViewModel @Inject constructor(
                 logger.d(TAG, "settings loaded, email present=${session != null}")
             } catch (e: Exception) {
                 logger.e(TAG, "loadSettings failed", e)
-                _uiState.update { it.copy(loading = false, error = e.message ?: "load failed") }
+                _uiState.update {
+                    it.copy(loading = false, error = UiMessage.resource(R.string.settings_error_load_failed))
+                }
             }
         }
     }
@@ -206,7 +210,7 @@ public class SettingsViewModel @Inject constructor(
         persistPref(
             opTag = "onChangeLanguage",
             successLog = "language changed to '${lang.ifEmpty { "system" }}'",
-            failureMessage = "language change failed",
+            failureMessage = UiMessage.resource(R.string.settings_error_language_change_failed),
             write = { userPrefsStore.setLocaleTag(lang.ifEmpty { null }) },
             onSuccess = { state -> state.copy(language = lang, error = null) },
         )
@@ -221,7 +225,7 @@ public class SettingsViewModel @Inject constructor(
         persistPref(
             opTag = "onToggleNotifications",
             successLog = "notifications toggled to $enabled",
-            failureMessage = "notifications toggle failed",
+            failureMessage = UiMessage.resource(R.string.settings_error_notifications_toggle_failed),
             write = { userPrefsStore.setNotificationsEnabled(enabled) },
             onSuccess = { state -> state.copy(notificationsEnabled = enabled, error = null) },
         )
@@ -235,7 +239,7 @@ public class SettingsViewModel @Inject constructor(
         persistPref(
             opTag = "onToggleCallLogMatchingConsent",
             successLog = "calllog matching consent toggled to $enabled",
-            failureMessage = "calllog matching consent toggle failed",
+            failureMessage = UiMessage.resource(R.string.settings_error_calllog_matching_toggle_failed),
             write = { userPrefsStore.setCallLogMatchingConsent(enabled) },
             onSuccess = { state ->
                 state.copy(callLogMatchingConsentEnabled = enabled, error = null)
@@ -245,19 +249,19 @@ public class SettingsViewModel @Inject constructor(
 
     /** Surfaces READ_CALL_LOG denial without writing consent. */
     public fun onCallLogPermissionDenied() {
-        _uiState.update { it.copy(error = "통화기록 권한이 필요합니다.") }
+        _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_error_calllog_permission_required)) }
     }
 
     /**
      * [onChangeLanguage] / [onToggleNotifications]의 공통 try/catch·log·state 업데이트
      * 패턴을 통합한다. WorkScheduler 등 외부 부수효과가 없는 "순수 DataStore 쓰기"만
      * 대상이며, 성공 시 logger.d([opTag] 아닌 [successLog] 그대로) + onSuccess 적용,
-     * 실패 시 logger.e("[opTag] failed", e) + error 문자열 surface — 원본 메시지와 동일.
+     * 실패 시 logger.e("[opTag] failed", e) + resource-backed error surface.
      */
     private fun persistPref(
         opTag: String,
         successLog: String,
-        failureMessage: String,
+        failureMessage: UiMessage,
         write: suspend () -> Unit,
         onSuccess: (SettingsUiState) -> SettingsUiState,
     ) {
@@ -268,7 +272,7 @@ public class SettingsViewModel @Inject constructor(
                 logger.d(TAG, successLog)
             } catch (e: Exception) {
                 logger.e(TAG, "$opTag failed", e)
-                _uiState.update { it.copy(error = e.message ?: failureMessage) }
+                _uiState.update { it.copy(error = failureMessage) }
             }
         }
     }
@@ -308,7 +312,12 @@ public class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 logger.e(TAG, "onTogglePipaConsent failed", e)
                 // Revert optimistic UI update on failure.
-                _uiState.update { it.copy(pipaConsentEnabled = !enabled, error = e.message ?: "consent toggle failed") }
+                _uiState.update {
+                    it.copy(
+                        pipaConsentEnabled = !enabled,
+                        error = UiMessage.resource(R.string.settings_error_consent_toggle_failed),
+                    )
+                }
             }
         }
     }

@@ -54,11 +54,14 @@ class CommitmentSheetsTest {
                     entity = commitmentEntity(),
                     quote = "Send the deck by Friday",
                     actionState = CommitmentState.PENDING,
-                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    source = CommitmentSourcePresentation(
+                        sourceLabel = CommitmentText(
+                            R.string.commitment_detail_llm_source_fmt,
+                            listOf("voice", "4/24 10:00"),
+                        ),
+                    ),
                     history = CommitmentHistoryPresentation(
                         lastEditedAt = Instant.parse("2026-04-24T01:30:00Z"),
-                        lastEditedLabel = "Last edited: 4/24 10:30 (me)",
-                        disputedLabel = "Disputed",
                         disputeRaisedAt = Instant.parse("2026-04-24T01:30:00Z"),
                         showSupersedeLink = true,
                     ),
@@ -84,8 +87,10 @@ class CommitmentSheetsTest {
         composeTestRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeTestRule.onNodeWithText("PENDING").assertIsDisplayed()
-        composeTestRule.onNodeWithText("voice:4/24 10:00").assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("Last edited: 4/24 10:30 (me)").assertCountEquals(1)
+        composeTestRule.onNodeWithText(string(R.string.commitment_detail_llm_source_fmt, "voice", "4/24 10:00"))
+            .assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.commitment_detail_last_edited_fmt, "4/24 10:30"))
+            .assertCountEquals(1)
         composeTestRule.onAllNodesWithText(string(R.string.commitment_detail_superseded_link))
             .assertCountEquals(1)
         composeTestRule.onNodeWithTag("commitment-detail-remind")
@@ -111,7 +116,12 @@ class CommitmentSheetsTest {
                     ),
                     quote = "Moved it to 9/19 11:00",
                     actionState = CommitmentState.PENDING,
-                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    source = CommitmentSourcePresentation(
+                        sourceLabel = CommitmentText(
+                            R.string.commitment_detail_llm_source_fmt,
+                            listOf("voice", "4/24 10:00"),
+                        ),
+                    ),
                     history = CommitmentHistoryPresentation(),
                     actionButtons = CommitmentDetailActionState(
                         availableActions = emptySet(),
@@ -231,7 +241,10 @@ class CommitmentSheetsTest {
                             readOnly = EditReadOnly(
                                 quote = "I will send it next week",
                                 quoteDisputed = false,
-                                sourceLabel = "voice · 4/24 10:00 KST",
+                                sourceLabel = CommitmentText(
+                                    R.string.commitment_detail_llm_source_fmt,
+                                    listOf("voice", "4/24 10:00"),
+                                ),
                             ),
                             title = "Existing commitment",
                             dueAtMillis = null,
@@ -291,7 +304,10 @@ class CommitmentSheetsTest {
                         readOnly = EditReadOnly(
                             quote = "I will send it next week",
                             quoteDisputed = false,
-                            sourceLabel = "voice · 4/24 10:00 KST",
+                            sourceLabel = CommitmentText(
+                                R.string.commitment_detail_llm_source_fmt,
+                                listOf("voice", "4/24 10:00"),
+                            ),
                         ),
                         title = "Existing commitment",
                         dueAtMillis = null,
@@ -299,7 +315,9 @@ class CommitmentSheetsTest {
                         dueHint = "",
                         counterpartyRef = "person-1",
                         direction = "give",
-                        fieldErrors = mapOf(CommitmentEditValidator.Field.TITLE to "Title required"),
+                        fieldErrors = mapOf(
+                            CommitmentEditValidator.Field.TITLE to CommitmentText.resource(R.string.commitment_edit_error_title_required),
+                        ),
                     ),
                     onTitleChange = {},
                     onDueAtMillisChange = {},
@@ -395,7 +413,12 @@ class CommitmentSheetsTest {
                         quote = "Send the deck by Friday",
                         counterpartyDisplayName = "Alice Kim",
                         actionState = CommitmentState.PENDING,
-                        source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                        source = CommitmentSourcePresentation(
+                            sourceLabel = CommitmentText(
+                                R.string.commitment_detail_llm_source_fmt,
+                                listOf("voice", "4/24 10:00"),
+                            ),
+                        ),
                         actionButtons = CommitmentDetailActionState(),
                         history = CommitmentHistoryPresentation(),
                         loading = false,
@@ -438,7 +461,12 @@ class CommitmentSheetsTest {
                         quote = "Send the deck by Friday",
                         counterpartyDisplayName = "Alice Kim",
                         actionState = CommitmentState.PENDING,
-                        source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                        source = CommitmentSourcePresentation(
+                            sourceLabel = CommitmentText(
+                                R.string.commitment_detail_llm_source_fmt,
+                                listOf("voice", "4/24 10:00"),
+                            ),
+                        ),
                         actionButtons = CommitmentDetailActionState(
                             availableActions = setOf(
                                 CommitmentSheetAction.REMIND,
@@ -573,7 +601,10 @@ class CommitmentSheetsTest {
                         readOnly = EditReadOnly(
                             quote = "I will send it next week",
                             quoteDisputed = false,
-                            sourceLabel = "voice · 4/24 10:00 KST",
+                            sourceLabel = CommitmentText(
+                                R.string.commitment_detail_llm_source_fmt,
+                                listOf("voice", "4/24 10:00"),
+                            ),
                         ),
                         title = "Existing commitment",
                         dueAtMillis = null,
@@ -646,6 +677,6 @@ class CommitmentSheetsTest {
         supersedesCommitmentId = "old-1",
     )
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

@@ -1,16 +1,22 @@
 package com.becalm.android.ui.auth
 
 import android.view.WindowManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,12 +42,13 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
+import com.becalm.android.ui.components.GoogleSignInButton
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.StepStatus
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 
 /**
@@ -111,6 +118,7 @@ public fun LoginScreen(
     // Navigate away when session is established. The onboarding VM is resolved only
     // after SignedIn so the public Login shell can render pre-auth without runtime owners.
     val signedInState = state as? AuthUiState.SignedIn
+    val authErrorMessage = (state as? AuthUiState.Error)?.message?.let { uiMessageStringResource(it) }
     if (signedInState != null) {
         LoginSignedInNavigationEffect(
             signedIn = signedInState,
@@ -124,7 +132,7 @@ public fun LoginScreen(
     LaunchedEffect(state) {
         if (state is AuthUiState.Error) {
             scope.launch {
-                snackbarHostState.showSnackbar((state as AuthUiState.Error).message)
+                snackbarHostState.showSnackbar(requireNotNull(authErrorMessage))
                 onErrorDismissed?.invoke() ?: requireNotNull(authViewModel).onErrorDismissed()
             }
         }
@@ -232,80 +240,146 @@ internal fun LoginForm(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
     ) {
-    Column(
+        Column(
+            modifier = Modifier
+                .widthIn(max = LoginFormMaxContentWidth)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            LoginProviderSection(
+                googleSignInEnabled = googleSignInEnabled && !isLoading,
+                onGoogleSignIn = onGoogleSignIn,
+            )
+            LoginDivider(modifier = Modifier.padding(vertical = 20.dp))
+            LoginEmailFields(
+                email = email,
+                password = password,
+                showEmptyError = showEmptyError,
+                onEmailChange = { email = it; showEmptyError = false },
+                onPasswordChange = { password = it; showEmptyError = false },
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            LoginActionButtons(
+                isLoading = isLoading,
+                onSignIn = {
+                    if (email.isBlank() || password.isBlank()) {
+                        showEmptyError = true
+                    } else {
+                        onSignIn(email, password)
+                    }
+                },
+                onSignUp = {
+                    if (email.isBlank() || password.isBlank()) {
+                        showEmptyError = true
+                    } else {
+                        onSignUp(email, password)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoginProviderSection(
+    googleSignInEnabled: Boolean,
+    onGoogleSignIn: () -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.login_framing),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(20.dp))
+    GoogleSignInButton(
+        text = stringResource(R.string.login_google_cta),
+        onClick = onGoogleSignIn,
+        enabled = googleSignInEnabled,
+        loading = false,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun LoginEmailFields(
+    email: String,
+    password: String,
+    showEmptyError: Boolean,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+) {
+    BecalmTextField(
+        value = email,
+        onValueChange = onEmailChange,
+        label = stringResource(R.string.login_email_label),
+        placeholder = stringResource(R.string.login_email_placeholder),
+        keyboardType = KeyboardType.Email,
+        imeAction = ImeAction.Next,
         modifier = Modifier
             .fillMaxWidth()
-            .widthIn(max = LoginFormMaxContentWidth)
-            .padding(horizontal = 16.dp, vertical = 32.dp)
-            .glassPanel()
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .testTag("login-email"),
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+    BecalmTextField(
+        value = password,
+        onValueChange = onPasswordChange,
+        label = stringResource(R.string.login_password_label),
+        placeholder = stringResource(R.string.login_password_placeholder),
+        keyboardType = KeyboardType.Password,
+        imeAction = ImeAction.Done,
+        visualTransformation = PasswordVisualTransformation(),
+        isError = showEmptyError && password.isBlank(),
+        supportingText = if (showEmptyError && password.isBlank()) {
+            stringResource(R.string.login_error_empty_fields)
+        } else {
+            null
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("login-password"),
+    )
+}
+
+@Composable
+private fun LoginActionButtons(
+    isLoading: Boolean,
+    onSignIn: () -> Unit,
+    onSignUp: () -> Unit,
+) {
+    BecalmButton(
+        text = stringResource(R.string.login_cta),
+        onClick = onSignIn,
+        variant = BecalmButtonVariant.Primary,
+        loading = isLoading,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    BecalmButton(
+        text = stringResource(R.string.login_signup_cta),
+        onClick = onSignUp,
+        variant = BecalmButtonVariant.Text,
+        enabled = !isLoading,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun LoginDivider(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        BecalmTextField(
-            value = email,
-            onValueChange = { email = it; showEmptyError = false },
-            label = stringResource(R.string.login_email_label),
-            placeholder = stringResource(R.string.login_email_placeholder),
-            keyboardType = KeyboardType.Email,
-            imeAction = ImeAction.Next,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("login-email"),
+        HorizontalDivider(modifier = Modifier.weight(1f))
+        Text(
+            text = stringResource(R.string.login_email_section_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        BecalmTextField(
-            value = password,
-            onValueChange = { password = it; showEmptyError = false },
-            label = stringResource(R.string.login_password_label),
-            placeholder = stringResource(R.string.login_password_placeholder),
-            keyboardType = KeyboardType.Password,
-            imeAction = ImeAction.Done,
-            visualTransformation = PasswordVisualTransformation(),
-            isError = showEmptyError && password.isBlank(),
-            supportingText = if (showEmptyError && password.isBlank()) {
-                stringResource(R.string.login_error_empty_fields)
-            } else null,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("login-password"),
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        BecalmButton(
-            text = stringResource(R.string.login_cta),
-            onClick = {
-                if (email.isBlank() || password.isBlank()) {
-                    showEmptyError = true
-                } else {
-                    onSignIn(email, password)
-                }
-            },
-            variant = BecalmButtonVariant.Primary,
-            loading = isLoading,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        BecalmButton(
-            text = stringResource(R.string.login_google_cta),
-            onClick = onGoogleSignIn,
-            variant = BecalmButtonVariant.Secondary,
-            enabled = googleSignInEnabled && !isLoading,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        BecalmButton(
-            text = stringResource(R.string.login_signup_cta),
-            onClick = {
-                if (email.isBlank() || password.isBlank()) {
-                    showEmptyError = true
-                } else {
-                    onSignUp(email, password)
-                }
-            },
-            variant = BecalmButtonVariant.Text,
-            enabled = !isLoading,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+        HorizontalDivider(modifier = Modifier.weight(1f))
     }
 }
 

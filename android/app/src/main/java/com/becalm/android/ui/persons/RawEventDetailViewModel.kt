@@ -3,6 +3,7 @@ package com.becalm.android.ui.persons
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -10,6 +11,7 @@ import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceOriginalResolver
+import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -62,14 +64,13 @@ public data class RawEventDetailUiState(
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
     val loading: Boolean = true,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 private const val TAG = "RawEventDetailViewModel"
 internal const val ARG_EVENT_ID = "event_id"
-internal const val ERROR_EVENT_NOT_FOUND = "Event not found"
 
 /**
  * ViewModel for RawEventDetailScreen (SRC-008).
@@ -104,7 +105,10 @@ public class RawEventDetailViewModel @Inject constructor(
 
     init {
         if (eventId.isEmpty()) {
-            _uiState.value = RawEventDetailUiState(loading = false, error = "Event ID missing")
+            _uiState.value = RawEventDetailUiState(
+                loading = false,
+                error = UiMessage.resource(R.string.raw_event_detail_error_missing_id),
+            )
         } else {
             loadEvent()
         }

@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.today
 
 import app.cash.turbine.ReceiveTurbine
 import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -225,6 +226,18 @@ class ColdSyncViewModelSpecTest {
     }
 
     @Test
+    fun `COLD-001 stage1 start failure projects visible transition error`() = runTest {
+        runtimeCoordinator.startStage1Result = BecalmResult.Failure(BecalmError.Io("boom"))
+        val viewModel = buildViewModel()
+
+        viewModel.onScreenVisible()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.transitionError)
+        assertFalse(viewModel.state.value.transitioning)
+    }
+
+    @Test
     fun `COLD-003 onStage1Completed emits navigate effect after lifecycle handoff succeeds`() = runTest {
         val at = Instant.parse("2026-04-23T00:00:00Z")
         val snapshot = ColdSyncTransitionSnapshot(
@@ -270,6 +283,19 @@ class ColdSyncViewModelSpecTest {
 
         assertEquals(snapshot, viewModel.state.value.lastTransition)
         assertFalse(viewModel.state.value.transitioning)
+    }
+
+    @Test
+    fun `COLD-008 stage1 completion failure projects visible transition error`() = runTest {
+        lifecycleCoordinator.completeStage1Result = BecalmResult.Failure(BecalmError.Io("boom"))
+        val viewModel = buildViewModel()
+
+        viewModel.onStage1Completed(Instant.parse("2026-04-23T00:00:00Z"))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.transitionError)
+        assertFalse(viewModel.state.value.transitioning)
+        assertNull(viewModel.state.value.lastTransition)
     }
 
     @Test
@@ -339,6 +365,22 @@ class ColdSyncViewModelSpecTest {
 
         assertEquals(snapshot, viewModel.state.value.lastTransition)
         assertFalse(viewModel.state.value.transitioning)
+    }
+
+    @Test
+    fun `COLD-008 skip branch failure projects visible transition error`() = runTest {
+        lifecycleCoordinator.deferStage1Result = BecalmResult.Failure(BecalmError.Io("boom"))
+        val viewModel = buildViewModel()
+        viewModel.onScreenVisible()
+        advanceTimeBy(5_000)
+        advanceUntilIdle()
+
+        viewModel.onSkipForNow(Instant.parse("2026-04-23T00:05:00Z"))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.transitionError)
+        assertFalse(viewModel.state.value.transitioning)
+        assertNull(viewModel.state.value.lastTransition)
     }
 
     @Test
@@ -420,12 +462,13 @@ class ColdSyncViewModelSpecTest {
         val userProfileReady = MutableStateFlow(false)
         val startStage1Calls = mutableListOf<Instant>()
         val startStage2Calls = mutableListOf<Instant>()
+        var startStage1Result: BecalmResult<Unit> = BecalmResult.Success(Unit)
 
         override fun observeUserProfileReady() = userProfileReady
 
         override suspend fun startStage1(now: Instant): BecalmResult<Unit> {
             startStage1Calls += now
-            return BecalmResult.Success(Unit)
+            return startStage1Result
         }
 
         override suspend fun startStage2(now: Instant): BecalmResult<Unit> {

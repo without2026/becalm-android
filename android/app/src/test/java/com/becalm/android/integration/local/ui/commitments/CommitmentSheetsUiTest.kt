@@ -33,6 +33,7 @@ import com.becalm.android.ui.commitments.CommitmentDetailActionState
 import com.becalm.android.ui.commitments.CommitmentHistoryPresentation
 import com.becalm.android.ui.commitments.CommitmentSheetAction
 import com.becalm.android.ui.commitments.CommitmentSourcePresentation
+import com.becalm.android.ui.commitments.CommitmentText
 import com.becalm.android.ui.commitments.CreateSheetContent
 import com.becalm.android.ui.commitments.CreateUiState
 import com.becalm.android.ui.commitments.DetailSheetContent
@@ -66,11 +67,14 @@ class CommitmentSheetsUiTest {
                     entity = commitmentEntity(),
                     quote = "금요일까지 보내겠습니다",
                     actionState = CommitmentState.PENDING,
-                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    source = CommitmentSourcePresentation(
+                        sourceLabel = CommitmentText(
+                            R.string.commitment_detail_llm_source_fmt,
+                            listOf("voice", "4/24 10:00"),
+                        ),
+                    ),
                     history = CommitmentHistoryPresentation(
                         lastEditedAt = Instant.parse("2026-04-24T01:30:00Z"),
-                        lastEditedLabel = "마지막 수정: 4/24 10:30 (본인)",
-                        disputedLabel = "이의 제기됨",
                         disputeRaisedAt = Instant.parse("2026-04-24T01:30:00Z"),
                         showSupersedeLink = true,
                     ),
@@ -96,8 +100,10 @@ class CommitmentSheetsUiTest {
         composeRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeRule.onNodeWithText("PENDING").assertIsDisplayed()
-        composeRule.onNodeWithText("voice:4/24 10:00").assertIsDisplayed()
-        composeRule.onAllNodesWithText("마지막 수정: 4/24 10:30 (본인)").assertCountEquals(1)
+        composeRule.onNodeWithText(string(R.string.commitment_detail_llm_source_fmt, "voice", "4/24 10:00"))
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.commitment_detail_last_edited_fmt, "4/24 10:30"))
+            .assertCountEquals(1)
         composeRule.onAllNodesWithText(string(R.string.commitment_detail_superseded_link)).assertCountEquals(1)
         composeRule.onNodeWithTag("commitment-detail-remind").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("commitment-detail-edit").performSemanticsAction(SemanticsActions.OnClick)
@@ -120,7 +126,12 @@ class CommitmentSheetsUiTest {
                     ),
                     quote = "9월 19일 11시로 바꿨어요",
                     actionState = CommitmentState.PENDING,
-                    source = CommitmentSourcePresentation(sourceLabel = "voice:4/24 10:00"),
+                    source = CommitmentSourcePresentation(
+                        sourceLabel = CommitmentText(
+                            R.string.commitment_detail_llm_source_fmt,
+                            listOf("voice", "4/24 10:00"),
+                        ),
+                    ),
                     history = CommitmentHistoryPresentation(),
                     actionButtons = CommitmentDetailActionState(
                         availableActions = emptySet(),
@@ -239,7 +250,10 @@ class CommitmentSheetsUiTest {
                             readOnly = EditReadOnly(
                                 quote = "다음주까지 전달할게요",
                                 quoteDisputed = false,
-                                sourceLabel = "voice · 4/24 10:00 KST",
+                                sourceLabel = CommitmentText(
+                                    R.string.commitment_detail_llm_source_fmt,
+                                    listOf("voice", "4/24 10:00"),
+                                ),
                             ),
                             title = "기존 약속",
                             dueAtMillis = null,
@@ -299,7 +313,10 @@ class CommitmentSheetsUiTest {
                         readOnly = EditReadOnly(
                             quote = "다음주까지 전달할게요",
                             quoteDisputed = false,
-                            sourceLabel = "voice · 4/24 10:00 KST",
+                            sourceLabel = CommitmentText(
+                                R.string.commitment_detail_llm_source_fmt,
+                                listOf("voice", "4/24 10:00"),
+                            ),
                         ),
                         title = "기존 약속",
                         dueAtMillis = null,
@@ -307,7 +324,9 @@ class CommitmentSheetsUiTest {
                         dueHint = "",
                         counterpartyRef = "person-1",
                         direction = "give",
-                        fieldErrors = mapOf(CommitmentEditValidator.Field.TITLE to "제목 필요"),
+                        fieldErrors = mapOf(
+                            CommitmentEditValidator.Field.TITLE to CommitmentText.resource(R.string.commitment_edit_error_title_required),
+                        ),
                     ),
                     onTitleChange = {},
                     onDueAtMillisChange = {},
@@ -375,6 +394,6 @@ class CommitmentSheetsUiTest {
         supersedesCommitmentId = "old-1",
     )
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

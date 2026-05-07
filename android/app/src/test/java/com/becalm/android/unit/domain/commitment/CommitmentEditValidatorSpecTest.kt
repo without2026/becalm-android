@@ -37,7 +37,7 @@ class CommitmentEditValidatorSpecTest {
 
         assertEquals(
             CommitmentEditValidator.ValidationResult.Err(
-                mapOf(CommitmentEditValidator.Field.TITLE to "Title must not be empty"),
+                mapOf(CommitmentEditValidator.Field.TITLE to CommitmentEditValidator.Error.TITLE_REQUIRED),
             ),
             result,
         )
@@ -51,7 +51,7 @@ class CommitmentEditValidatorSpecTest {
         )
         assertEquals(
             CommitmentEditValidator.ValidationResult.Err(
-                mapOf(CommitmentEditValidator.Field.TITLE to "Title must be at most 200 characters"),
+                mapOf(CommitmentEditValidator.Field.TITLE to CommitmentEditValidator.Error.TITLE_TOO_LONG),
             ),
             CommitmentEditValidator.validate(validDraft(title = "a".repeat(201))),
         )
@@ -104,8 +104,7 @@ class CommitmentEditValidatorSpecTest {
         assertEquals(
             CommitmentEditValidator.ValidationResult.Err(
                 mapOf(
-                    CommitmentEditValidator.Field.PERSON_REF to
-                        "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)",
+                    CommitmentEditValidator.Field.PERSON_REF to CommitmentEditValidator.Error.PERSON_REF_INVALID,
                 ),
             ),
             result,
@@ -118,7 +117,7 @@ class CommitmentEditValidatorSpecTest {
 
         assertEquals(
             CommitmentEditValidator.ValidationResult.Err(
-                mapOf(CommitmentEditValidator.Field.DIRECTION to "Direction must be 'give' or 'take'"),
+                mapOf(CommitmentEditValidator.Field.DIRECTION to CommitmentEditValidator.Error.DIRECTION_INVALID),
             ),
             result,
         )

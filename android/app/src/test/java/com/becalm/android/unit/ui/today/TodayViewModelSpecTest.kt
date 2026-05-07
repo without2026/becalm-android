@@ -23,6 +23,7 @@ import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.today.TimelineItem
 import com.becalm.android.ui.today.TodayCommitmentRowTreatment
@@ -436,7 +437,7 @@ class TodayViewModelSpecTest {
             while (emission.loading) emission = awaitItem()
 
             assertEquals(true, emission.overallSyncing)
-            assertEquals("SYNCING", emission.sourceStatus.getValue("gmail").statusLabel)
+            assertEquals(SourceSyncStatus.Syncing, emission.sourceStatus.getValue("gmail").status)
             assertEquals("token expired", emission.sourceStatus.getValue("outlook_mail").errorMessage)
             cancelAndIgnoreRemainingEvents()
         }

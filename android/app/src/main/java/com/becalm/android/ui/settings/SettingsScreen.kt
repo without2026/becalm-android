@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,11 +51,13 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSignOut
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Settings root screen.
@@ -143,8 +146,9 @@ public fun SettingsScreen(
         }
     }
 
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(
-        state.error,
+        errorMessage,
         snackbarHostState,
         onErrorDismissed ?: requireNotNull(settingsViewModel)::onErrorDismissed,
     )
@@ -342,15 +346,16 @@ public fun SettingsScreenContent(
 private fun SettingsStatusBanner(
     message: String,
 ) {
-    Text(
-        text = message,
+    EvidenceCard(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
+            .fillMaxWidth(),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }
 
 @Composable
@@ -397,25 +402,63 @@ internal fun SettingsNavigationRow(
     rowTestTag: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    SettingsActionRow(
+        title = label,
+        onClick = onClick,
+        rowTestTag = rowTestTag,
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun SettingsActionRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+    rowTestTag: String? = null,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier
             .then(if (rowTestTag != null) Modifier.testTag(rowTestTag) else Modifier)
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .defaultMinSize(minHeight = if (subtitle == null) 48.dp else 64.dp)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = 8.dp)
-            .semantics { role = Role.Button },
+            .semantics(mergeDescendants = true) {
+                if (enabled) role = Role.Button
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                    destructive -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.outline
+            },
         )
     }
 }
@@ -443,11 +486,9 @@ private fun PreviewSettingsScreen() {
             ) {
                 SettingsSectionLabel("Account")
                 Spacer(modifier = Modifier.height(8.dp))
-                Column(
+                QuietPanel(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .glassPanel(MaterialTheme.shapes.medium)
-                        .padding(16.dp),
+                        .fillMaxWidth(),
                 ) {
                     Text(
                         text = "name@example.com",

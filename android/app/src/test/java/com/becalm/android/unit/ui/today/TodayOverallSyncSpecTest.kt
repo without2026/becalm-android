@@ -3,7 +3,7 @@ package com.becalm.android.ui.today
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
-import com.becalm.android.ui.components.ChipState
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.main.CHIP_ORDER
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusAttention
@@ -129,13 +129,13 @@ class TodayOverallSyncSpecTest {
     fun `buildChips emits connected and syncing chips and hides failed or disconnected sources`() {
         val chips = buildChips(
             mapOf(
-                SourceType.VOICE to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 8_000),
-                SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = "401", lastSyncedAt = 9_000),
-                SourceType.OUTLOOK_MAIL to sourceUi(syncing = true, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = null),
-                SourceType.NAVER_IMAP to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 3_000),
-                SourceType.DAUM_IMAP to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 4_000),
-                SourceType.GOOGLE_CALENDAR to sourceUi(syncing = false, statusLabel = "NEVER_CONNECTED", errorMessage = null, lastSyncedAt = null),
-                SourceType.OUTLOOK_CALENDAR to sourceUi(syncing = false, statusLabel = "NEVER_CONNECTED", errorMessage = null, lastSyncedAt = null),
+                SourceType.VOICE to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 8_000),
+                SourceType.GMAIL to sourceUi(status = SourceSyncStatus.Connected, errorMessage = "401", lastSyncedAt = 9_000),
+                SourceType.OUTLOOK_MAIL to sourceUi(status = SourceSyncStatus.Syncing, errorMessage = null, lastSyncedAt = null),
+                SourceType.NAVER_IMAP to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 3_000),
+                SourceType.DAUM_IMAP to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 4_000),
+                SourceType.GOOGLE_CALENDAR to sourceUi(status = SourceSyncStatus.Disconnected, errorMessage = null, lastSyncedAt = null),
+                SourceType.OUTLOOK_CALENDAR to sourceUi(status = SourceSyncStatus.Disconnected, errorMessage = null, lastSyncedAt = null),
             ),
         )
 
@@ -146,10 +146,11 @@ class TodayOverallSyncSpecTest {
         assertFalse(chips.any { it.sourceType == SourceType.GMAIL })
         assertFalse(chips.any { it.sourceType == SourceType.GOOGLE_CALENDAR })
         assertFalse(chips.any { it.sourceType == SourceType.OUTLOOK_CALENDAR })
-        assertEquals(ChipState.Syncing, chips.single { it.sourceType == SourceType.OUTLOOK_MAIL }.state)
+        assertEquals(SourceSyncStatus.Syncing, chips.single { it.sourceType == SourceType.OUTLOOK_MAIL }.status)
+        assertEquals(SourceSyncStatus.Connected, chips.single { it.sourceType == SourceType.VOICE }.status)
         assertEquals(
-            ChipState.Synced(Instant.fromEpochMilliseconds(8_000)),
-            chips.single { it.sourceType == SourceType.VOICE }.state,
+            Instant.fromEpochMilliseconds(8_000),
+            chips.single { it.sourceType == SourceType.VOICE }.lastSyncedAt,
         )
     }
 
@@ -157,13 +158,14 @@ class TodayOverallSyncSpecTest {
     fun `TDY-003 buildChips hides missing rows instead of showing fake idle chips`() {
         val chips = buildChips(
             mapOf(
-                SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 9_000),
+                SourceType.GMAIL to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 9_000),
             ),
         )
 
         assertEquals(listOf(SourceType.GMAIL), chips.map { it.sourceType })
         assertEquals(1, chips.size)
-        assertEquals(ChipState.Synced(Instant.fromEpochMilliseconds(9_000)), chips.single { it.sourceType == SourceType.GMAIL }.state)
+        assertEquals(SourceSyncStatus.Connected, chips.single { it.sourceType == SourceType.GMAIL }.status)
+        assertEquals(Instant.fromEpochMilliseconds(9_000), chips.single { it.sourceType == SourceType.GMAIL }.lastSyncedAt)
         assertFalse(chips.any { it.sourceType == SourceType.CALL_RECORDING })
     }
 
@@ -171,14 +173,14 @@ class TodayOverallSyncSpecTest {
     fun `buildChips does not expose call recording as a separate user-facing chip`() {
         val chips = buildChips(
             mapOf(
-                SourceType.VOICE to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 8_000),
-                SourceType.CALL_RECORDING to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 9_000),
-                SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 3_000),
-                SourceType.OUTLOOK_MAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 4_000),
-                SourceType.NAVER_IMAP to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 5_000),
-                SourceType.DAUM_IMAP to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 6_000),
-                SourceType.GOOGLE_CALENDAR to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 7_000),
-                SourceType.OUTLOOK_CALENDAR to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 10_000),
+                SourceType.VOICE to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 8_000),
+                SourceType.CALL_RECORDING to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 9_000),
+                SourceType.GMAIL to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 3_000),
+                SourceType.OUTLOOK_MAIL to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 4_000),
+                SourceType.NAVER_IMAP to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 5_000),
+                SourceType.DAUM_IMAP to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 6_000),
+                SourceType.GOOGLE_CALENDAR to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 7_000),
+                SourceType.OUTLOOK_CALENDAR to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 10_000),
             ),
         )
 
@@ -191,9 +193,9 @@ class TodayOverallSyncSpecTest {
     fun `buildSourceStatusAttention reports disconnected and failed sources for warning banner`() {
         val attention = buildSourceStatusAttention(
             mapOf(
-                SourceType.VOICE to sourceUi(syncing = false, statusLabel = "NEVER_CONNECTED", errorMessage = null, lastSyncedAt = null),
-                SourceType.GMAIL to sourceUi(syncing = false, statusLabel = "ERROR", errorMessage = "expired", lastSyncedAt = null),
-                SourceType.OUTLOOK_MAIL to sourceUi(syncing = false, statusLabel = "CONNECTED", errorMessage = null, lastSyncedAt = 1_000),
+                SourceType.VOICE to sourceUi(status = SourceSyncStatus.Disconnected, errorMessage = null, lastSyncedAt = null),
+                SourceType.GMAIL to sourceUi(status = SourceSyncStatus.Error, errorMessage = "expired", lastSyncedAt = null),
+                SourceType.OUTLOOK_MAIL to sourceUi(status = SourceSyncStatus.Connected, errorMessage = null, lastSyncedAt = 1_000),
             ),
         )
 
@@ -213,13 +215,11 @@ class TodayOverallSyncSpecTest {
     )
 
     private fun sourceUi(
-        syncing: Boolean,
-        statusLabel: String,
+        status: SourceSyncStatus,
         errorMessage: String?,
         lastSyncedAt: Long?,
     ): SourceStatusUi = SourceStatusUi(
-        syncing = syncing,
-        statusLabel = statusLabel,
+        status = status,
         errorMessage = errorMessage,
         lastSyncedAt = lastSyncedAt?.let(Instant::fromEpochMilliseconds),
     )
