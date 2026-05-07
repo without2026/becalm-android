@@ -1,0 +1,5 @@
+Physical size: 1080x2400
+Physical density: 320
+1.0
+Night mode: no
+Locales for com.becalm.android for user 0 are [ko-KR]

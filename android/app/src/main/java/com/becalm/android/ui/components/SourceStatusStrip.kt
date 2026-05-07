@@ -41,34 +41,22 @@ import kotlinx.datetime.toLocalDateTime
 // ─── Public types ────────────────────────────────────────────────────────────
 
 /**
- * Visual state for a single chip in [SourceStatusStrip].
- *
- * Four mutually-exclusive states mirroring the TDY-003 spec:
- * - [Idle]    — neutral gray (source has never connected or is quiescent).
- * - [Syncing] — animated spinner while the adapter is in flight.
- * - [Synced]  — green check + wall-clock HH:mm of the last successful sync.
- * - [Error]   — red dot + short description for TalkBack (not shown visually).
- */
-public sealed interface ChipState {
-    public data object Idle : ChipState
-    public data object Syncing : ChipState
-    public data class Synced(val at: Instant) : ChipState
-    public data class Error(val message: String) : ChipState
-}
-
-/**
  * Stable data class for a single chip row in [SourceStatusStrip].
  *
  * `@Immutable` + stable parameter types so Compose skips recomposition when parent
  * state changes but the chip list did not (rubric D7 stable parameters).
  *
  * @param sourceType One of the seven user-facing [SourceType] constants used in the strip.
- * @param state      Current visual state of this chip.
+ * @param status     Current source sync status. The strip usually receives only
+ *                   [SourceSyncStatus.Connected] and [SourceSyncStatus.Syncing];
+ *                   failed/disconnected sources are shown by the attention banner.
+ * @param lastSyncedAt Last successful sync time, rendered only when present.
  */
 @Immutable
 public data class SourceStatusChip(
     val sourceType: String,
-    val state: ChipState,
+    val status: SourceSyncStatus,
+    val lastSyncedAt: Instant? = null,
 )
 
 // ─── Composable ──────────────────────────────────────────────────────────────
@@ -122,14 +110,14 @@ private fun SourceStatusChipView(
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChipStateIndicator(state = chip.state)
+        SourceChipStatusIndicator(status = chip.status)
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = sourceDisplayName(chip.sourceType),
             style = MaterialTheme.typography.labelMedium,
             color = colorScheme.onSurface,
         )
-        val timeLabel = (chip.state as? ChipState.Synced)?.let { formatTimeHHmm(it.at) }
+        val timeLabel = chip.lastSyncedAt?.let(::formatTimeHHmm)
         if (timeLabel != null) {
             Spacer(modifier = Modifier.width(4.dp))
             Text(
@@ -142,46 +130,42 @@ private fun SourceStatusChipView(
 }
 
 @Composable
-private fun ChipStateIndicator(state: ChipState) {
-    val becalmColors = MaterialTheme.becalmColors
-    val colorScheme = MaterialTheme.colorScheme
+private fun SourceChipStatusIndicator(status: SourceSyncStatus) {
+    val toneColor = statusToneDotColor(sourceStatusToneFor(status))
 
-    when (state) {
-        ChipState.Idle -> {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(color = colorScheme.outline, shape = CircleShape),
-            )
-        }
-        ChipState.Syncing -> {
-            // Static halo dot — fill α=0.40 of sourceStatusOk + 1dp ring at full
-            // alpha. Communicates "active + healthy" distinct from Idle (solid
+    when (status) {
+        SourceSyncStatus.Syncing -> {
+            // Static halo dot uses the shared progress tone at reduced fill plus
+            // a 1dp ring. Communicates "active + healthy" distinct from idle (solid
             // outline dot) and Synced (Check icon) without ambient motion. See
             // DESIGN.md Process-Hidden Rule — first-line surfaces never spin.
             Box(
                 modifier = Modifier
                     .size(10.dp)
-                    .border(width = 1.dp, color = becalmColors.sourceStatusOk, shape = CircleShape)
+                    .border(width = 1.dp, color = toneColor, shape = CircleShape)
                     .background(
-                        color = becalmColors.sourceStatusOk.copy(alpha = 0.4f),
+                        color = toneColor.copy(alpha = 0.4f),
                         shape = CircleShape,
                     ),
             )
         }
-        is ChipState.Synced -> {
+        SourceSyncStatus.Connected -> {
             Icon(
                 imageVector = Icons.Filled.Check,
                 contentDescription = null,
-                tint = becalmColors.sourceStatusOk,
+                tint = toneColor,
                 modifier = Modifier.size(12.dp),
             )
         }
-        is ChipState.Error -> {
+        SourceSyncStatus.Error,
+        SourceSyncStatus.Stale,
+        SourceSyncStatus.Disconnected,
+        SourceSyncStatus.Unknown,
+        -> {
             Box(
                 modifier = Modifier
                     .size(8.dp)
-                    .background(color = becalmColors.sourceStatusError, shape = CircleShape),
+                    .background(color = toneColor, shape = CircleShape),
             )
         }
     }
@@ -207,13 +191,17 @@ private fun PreviewSourceStatusStripMixed() {
         Box(modifier = Modifier.background(Color.DarkGray).padding(8.dp)) {
             SourceStatusStrip(
                 sources = listOf(
-                    SourceStatusChip(SourceType.VOICE, ChipState.Syncing),
-                    SourceStatusChip(SourceType.GMAIL, ChipState.Synced(Instant.fromEpochMilliseconds(1_713_430_200_000L))),
-                    SourceStatusChip(SourceType.OUTLOOK_MAIL, ChipState.Error("auth expired")),
-                    SourceStatusChip(SourceType.NAVER_IMAP, ChipState.Syncing),
-                    SourceStatusChip(SourceType.DAUM_IMAP, ChipState.Idle),
-                    SourceStatusChip(SourceType.GOOGLE_CALENDAR, ChipState.Idle),
-                    SourceStatusChip(SourceType.OUTLOOK_CALENDAR, ChipState.Idle),
+                    SourceStatusChip(SourceType.VOICE, SourceSyncStatus.Syncing),
+                    SourceStatusChip(
+                        sourceType = SourceType.GMAIL,
+                        status = SourceSyncStatus.Connected,
+                        lastSyncedAt = Instant.fromEpochMilliseconds(1_713_430_200_000L),
+                    ),
+                    SourceStatusChip(SourceType.OUTLOOK_MAIL, SourceSyncStatus.Error),
+                    SourceStatusChip(SourceType.NAVER_IMAP, SourceSyncStatus.Syncing),
+                    SourceStatusChip(SourceType.DAUM_IMAP, SourceSyncStatus.Connected),
+                    SourceStatusChip(SourceType.GOOGLE_CALENDAR, SourceSyncStatus.Disconnected),
+                    SourceStatusChip(SourceType.OUTLOOK_CALENDAR, SourceSyncStatus.Unknown),
                 ),
             )
         }

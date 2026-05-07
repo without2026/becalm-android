@@ -2,6 +2,7 @@ package com.becalm.android.ui.components
 
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.SourceConnectionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -9,21 +10,39 @@ import org.junit.Test
 class SourceStatusPresentationSpecTest {
 
     @Test
-    fun `source sync status keeps active disconnected and unknown states distinct`() {
-        assertEquals(SourceSyncStatus.Connected, statusStringToSyncStatus("CONNECTED"))
-        assertEquals(SourceSyncStatus.Syncing, statusStringToSyncStatus("SYNCING"))
-        assertEquals(SourceSyncStatus.Error, statusStringToSyncStatus("ERROR"))
-        assertEquals(SourceSyncStatus.Disconnected, statusStringToSyncStatus("NEVER_CONNECTED"))
-        assertEquals(SourceSyncStatus.Unknown, statusStringToSyncStatus(""))
+    fun `repository source status maps to typed UI status once`() {
+        assertEquals(SourceSyncStatus.Connected, sourceSyncStatusFor(SourceConnectionStatus.CONNECTED))
+        assertEquals(SourceSyncStatus.Syncing, sourceSyncStatusFor(SourceConnectionStatus.SYNCING))
+        assertEquals(SourceSyncStatus.Error, sourceSyncStatusFor(SourceConnectionStatus.ERROR))
+        assertEquals(SourceSyncStatus.Disconnected, sourceSyncStatusFor(SourceConnectionStatus.NEVER_CONNECTED))
+        assertEquals(SourceSyncStatus.Unknown, sourceSyncStatusFor(null))
 
         assertNotEquals(
-            statusStringToSyncStatus("SYNCING"),
-            statusStringToSyncStatus("CONNECTED"),
+            sourceSyncStatusFor(SourceConnectionStatus.SYNCING),
+            sourceSyncStatusFor(SourceConnectionStatus.CONNECTED),
         )
         assertNotEquals(
-            statusStringToSyncStatus("NEVER_CONNECTED"),
-            statusStringToSyncStatus(""),
+            sourceSyncStatusFor(SourceConnectionStatus.NEVER_CONNECTED),
+            sourceSyncStatusFor(null),
         )
+    }
+
+    @Test
+    fun `source state presentation owns label tone and recommended action`() {
+        assertEquals(R.string.sources_status_connected, sourceStatePresentationFor(SourceSyncStatus.Connected).labelRes)
+        assertEquals(StatusTone.Success, sourceStatePresentationFor(SourceSyncStatus.Connected).tone)
+        assertEquals(null, sourceStatePresentationFor(SourceSyncStatus.Connected).recommendedCtaRes)
+
+        assertEquals(R.string.sources_status_syncing, sourceStatePresentationFor(SourceSyncStatus.Syncing).labelRes)
+        assertEquals(StatusTone.Progress, sourceStatePresentationFor(SourceSyncStatus.Syncing).tone)
+
+        assertEquals(R.string.action_reconnect, sourceStatePresentationFor(SourceSyncStatus.Error).recommendedCtaRes)
+        assertEquals(StatusTone.Error, sourceStatePresentationFor(SourceSyncStatus.Error).tone)
+        assertEquals(true, sourceStatePresentationFor(SourceSyncStatus.Error).actionRequired)
+
+        assertEquals(R.string.action_connect, sourceStatePresentationFor(SourceSyncStatus.Disconnected).recommendedCtaRes)
+        assertEquals(StatusTone.Muted, sourceStatePresentationFor(SourceSyncStatus.Disconnected).tone)
+        assertEquals(true, sourceStatePresentationFor(SourceSyncStatus.Disconnected).terminal)
     }
 
     @Test

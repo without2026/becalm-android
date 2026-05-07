@@ -24,9 +24,9 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Onboarding step: battery optimization exemption for reliable background capture.
@@ -111,11 +111,9 @@ internal fun BatteryOptimizationContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Column(
+        QuietPanel(
             modifier = Modifier
-                .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
+                .fillMaxWidth(),
         ) {
             Text(
                 text = stringResource(R.string.onb_battery_body),

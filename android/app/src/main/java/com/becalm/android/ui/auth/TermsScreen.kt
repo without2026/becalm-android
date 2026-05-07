@@ -1,5 +1,6 @@
 package com.becalm.android.ui.auth
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
@@ -30,6 +32,7 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 
@@ -98,75 +101,83 @@ internal fun TermsContent(
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    Box(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .fillMaxWidth(),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        Text(
-            text = stringResource(R.string.terms_subtitle),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        TermsChecklist()
-        Spacer(modifier = Modifier.height(32.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+        Column(
+            modifier = Modifier
+                .widthIn(max = TermsMaxContentWidth)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Checkbox(
-                checked = accepted,
-                onCheckedChange = onAcceptedChange,
-                modifier = Modifier.testTag("terms-checkbox"),
-            )
             Text(
-                text = stringResource(R.string.terms_accept_checkbox),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = stringResource(R.string.terms_subtitle),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            TermsChecklist()
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Checkbox(
+                    checked = accepted,
+                    onCheckedChange = onAcceptedChange,
+                    modifier = Modifier.testTag("terms-checkbox"),
+                )
+                Text(
+                    text = stringResource(R.string.terms_accept_checkbox),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            BecalmButton(
+                text = stringResource(R.string.terms_cta),
+                onClick = onContinue,
+                enabled = accepted,
+                variant = BecalmButtonVariant.Primary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            BecalmButton(
+                text = stringResource(R.string.terms_decline_cta),
+                onClick = onDecline,
+                variant = BecalmButtonVariant.Secondary,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(modifier = Modifier.height(24.dp))
-        BecalmButton(
-            text = stringResource(R.string.terms_cta),
-            onClick = onContinue,
-            enabled = accepted,
-            variant = BecalmButtonVariant.Primary,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        BecalmButton(
-            text = stringResource(R.string.terms_decline_cta),
-            onClick = onDecline,
-            variant = BecalmButtonVariant.Secondary,
-            modifier = Modifier.fillMaxWidth(),
-        )
     }
 }
 
 @Composable
 private fun TermsChecklist() {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        TermsChecklistItem(
-            label = stringResource(R.string.terms_required_label),
-            text = stringResource(R.string.terms_check_terms_privacy),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        TermsChecklistItem(
-            label = stringResource(R.string.terms_required_label),
-            text = stringResource(R.string.terms_check_local_first),
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = stringResource(R.string.terms_pipa_notice),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            TermsChecklistItem(
+                label = stringResource(R.string.terms_required_label),
+                text = stringResource(R.string.terms_check_terms_privacy),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            TermsChecklistItem(
+                label = stringResource(R.string.terms_required_label),
+                text = stringResource(R.string.terms_check_local_first),
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.terms_pipa_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -191,6 +202,8 @@ private fun TermsChecklistItem(label: String, text: String) {
         )
     }
 }
+
+private val TermsMaxContentWidth: androidx.compose.ui.unit.Dp = 520.dp
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
 

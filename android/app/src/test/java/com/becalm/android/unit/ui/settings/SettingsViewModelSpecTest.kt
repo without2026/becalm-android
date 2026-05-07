@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.settings
 
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.R
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -152,7 +153,7 @@ class SettingsViewModelSpecTest {
         advanceUntilIdle()
 
         assertFalse(viewModel.uiState.value.pipaConsentEnabled)
-        assertEquals("write failed", viewModel.uiState.value.error)
+        assertEquals(R.string.settings_error_consent_toggle_failed, viewModel.uiState.value.error?.resId)
     }
 
     @Test

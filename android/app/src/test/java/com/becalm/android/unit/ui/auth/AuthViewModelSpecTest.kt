@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.auth
 
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -113,7 +114,7 @@ class AuthViewModelSpecTest {
         viewModel.onEmailSignIn("bad@user.com", "wrong")
         advanceUntilIdle()
 
-        assertEquals(AuthUiState.Error("Invalid email or password"), viewModel.uiState.value)
+        assertEquals(R.string.auth_error_invalid_credentials, (viewModel.uiState.value as AuthUiState.Error).message.resId)
     }
 
     @Test
@@ -170,8 +171,8 @@ class AuthViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(
-            AuthUiState.Error("Check your email to confirm your account, then sign in."),
-            viewModel.uiState.value,
+            R.string.auth_error_email_confirmation_required,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
         )
         coVerify(exactly = 1) { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") }
     }
@@ -316,7 +317,7 @@ class AuthViewModelSpecTest {
         viewModel.onSignOut()
         advanceUntilIdle()
 
-        assertEquals(AuthUiState.Error("Network error (503)"), viewModel.uiState.value)
+        assertEquals(R.string.auth_error_sign_out_failed, (viewModel.uiState.value as AuthUiState.Error).message.resId)
     }
 
     @Test

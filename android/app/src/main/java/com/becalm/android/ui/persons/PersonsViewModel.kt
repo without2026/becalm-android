@@ -2,11 +2,12 @@ package com.becalm.android.ui.persons
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.result.safeMessage
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -107,7 +108,7 @@ public data class PersonsUiState(
     val refreshing: Boolean = false,
     val lastRefreshSnapshot: PersonsRefreshSnapshot? = null,
     val loading: Boolean = true,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -187,7 +188,7 @@ public class PersonsViewModel @Inject constructor(
         viewModelScope.launch(ioDispatcher) {
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) {
-                _uiState.update { it.copy(error = "Sign in required") }
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_sign_in_required)) }
                 return@launch
             }
             val result = manualMatchRepository.matchInteraction(
@@ -199,7 +200,7 @@ public class PersonsViewModel @Inject constructor(
                 nickname = nickname,
             )
             if (result is BecalmResult.Failure) {
-                _uiState.update { it.copy(error = result.error.safeMessage) }
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
             }
         }
     }
@@ -212,8 +213,8 @@ public class PersonsViewModel @Inject constructor(
                 queryFlow = _query,
                 pageSize = PERSONS_PAGE_SIZE,
                 queryDebounceMs = QUERY_DEBOUNCE_MS,
-            ).catch { e ->
-                _uiState.update { it.copy(loading = false, error = e.message ?: "load failed") }
+            ).catch {
+                _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.persons_error_load_failed)) }
             }.collect { state ->
                 _uiState.value = state
             }

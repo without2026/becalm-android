@@ -15,6 +15,7 @@ import com.becalm.android.ui.sources.SourceDetailUiState
 import com.becalm.android.ui.sources.SourceStatusRow
 import com.becalm.android.ui.sources.SourcesListScreenContent
 import com.becalm.android.ui.sources.SourcesListUiState
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -42,9 +43,9 @@ class SourcesUiTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),
@@ -93,7 +94,7 @@ class SourcesUiTest {
                 SourceDetailScreenContent(
                     state = SourceDetailUiState(
                         sourceType = "gmail",
-                        status = "CONNECTED",
+                        status = SourceSyncStatus.Connected,
                         lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
                         eventsSyncedCount = 3,
                         showReconnectButton = true,
@@ -148,7 +149,7 @@ class SourcesUiTest {
                 SourceDetailScreenContent(
                     state = SourceDetailUiState(
                         sourceType = "meeting",
-                        status = "CONNECTED",
+                        status = SourceSyncStatus.Connected,
                         showMeetingAudioAddButton = true,
                         showMeetingTranscriptAddButton = true,
                     ),

@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.sources
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -20,6 +21,7 @@ import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourceDetailViewModel
 import com.becalm.android.ui.sources.SourceDisconnectOutcome
 import com.becalm.android.ui.sources.SourceReconnectDestination
+import com.becalm.android.ui.components.SourceSyncStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -71,14 +73,14 @@ class SourceDetailViewModelSpecTest {
     fun `blank source arg yields explicit error state`() = runTest {
         val viewModel = buildViewModel("")
 
-        assertEquals("sourceType argument is missing or blank", viewModel.state.value.error)
+        assertEquals(R.string.source_detail_error_missing_source_message, viewModel.state.value.error?.resId)
     }
 
     @Test
     fun `unknown source arg is rejected before any repository subscription`() = runTest {
         val viewModel = buildViewModel("unsupported_source")
 
-        assertEquals("Invalid source type", viewModel.state.value.error)
+        assertEquals(R.string.source_detail_error_invalid_source, viewModel.state.value.error?.resId)
         verify(exactly = 0) { sourceStatusRepository.observeFor(any()) }
         verify(exactly = 0) { rawIngestionRepository.observeForSourceType(any(), any(), any()) }
     }
@@ -87,7 +89,7 @@ class SourceDetailViewModelSpecTest {
     fun `contacts pseudo source has no detail route and is rejected before subscription`() = runTest {
         val viewModel = buildViewModel("contacts")
 
-        assertEquals("Invalid source type", viewModel.state.value.error)
+        assertEquals(R.string.source_detail_error_invalid_source, viewModel.state.value.error?.resId)
         verify(exactly = 0) { sourceStatusRepository.observeFor(any()) }
         verify(exactly = 0) { rawIngestionRepository.observeForSourceType(any(), any(), any()) }
     }
@@ -117,15 +119,15 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank() || state.eventsSyncedCount == null || state.recentEvents.isEmpty()) {
+            while (state.status == SourceSyncStatus.Unknown || state.eventsSyncedCount == null || state.recentEvents.isEmpty()) {
                 state = awaitItem()
             }
 
             assertEquals(SourceType.GMAIL, state.sourceType)
-            assertEquals(SourceConnectionStatus.CONNECTED.name, state.status)
+            assertEquals(SourceSyncStatus.Connected, state.status)
             assertEquals(lastSync, state.lastSyncAt)
             assertEquals(2, state.eventsSyncedCount)
-            assertNull(state.lastError)
+            assertFalse(state.hasError)
             assertFalse(state.showReconnectButton)
             assertTrue(state.showDisconnectButton)
             assertTrue(state.showManualSyncButton)
@@ -151,12 +153,12 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
-            assertEquals(SourceConnectionStatus.ERROR.name, state.status)
-            assertEquals("token expired", state.lastError)
+            assertEquals(SourceSyncStatus.Error, state.status)
+            assertTrue(state.hasError)
             assertTrue(state.showReconnectButton)
             assertFalse(state.showDisconnectButton)
             assertFalse(state.showManualSyncButton)
@@ -237,7 +239,7 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
@@ -272,7 +274,7 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
@@ -315,7 +317,7 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
@@ -329,7 +331,7 @@ class SourceDetailViewModelSpecTest {
 
             assertFalse(state.showDisconnectConfirmDialog)
             assertNull(state.disconnectOutcome)
-            assertEquals("disconnect failed", state.actionError)
+            assertEquals(R.string.source_detail_error_disconnect_failed, state.actionError?.resId)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -360,7 +362,7 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
@@ -398,11 +400,11 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank()) {
+            while (state.status == SourceSyncStatus.Unknown) {
                 state = awaitItem()
             }
 
-            assertEquals(SourceConnectionStatus.CONNECTED.name, state.status)
+            assertEquals(SourceSyncStatus.Connected, state.status)
             assertEquals(initialSyncAt, state.lastSyncAt)
 
             viewModel.onManualSync()
@@ -417,7 +419,7 @@ class SourceDetailViewModelSpecTest {
             )
             advanceUntilIdle()
             state = awaitItem()
-            assertEquals(SourceConnectionStatus.SYNCING.name, state.status)
+            assertEquals(SourceSyncStatus.Syncing, state.status)
             assertEquals(initialSyncAt, state.lastSyncAt)
 
             statuses.value = SourceStatus(
@@ -428,7 +430,7 @@ class SourceDetailViewModelSpecTest {
             )
             advanceUntilIdle()
             state = awaitItem()
-            assertEquals(SourceConnectionStatus.CONNECTED.name, state.status)
+            assertEquals(SourceSyncStatus.Connected, state.status)
             assertEquals(refreshedSyncAt, state.lastSyncAt)
             cancelAndIgnoreRemainingEvents()
         }
@@ -449,11 +451,11 @@ class SourceDetailViewModelSpecTest {
         viewModel.setUserId("user-1")
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank() || state.recentEvents.isEmpty()) {
+            while (state.status == SourceSyncStatus.Unknown || state.recentEvents.isEmpty()) {
                 state = awaitItem()
             }
 
-            assertEquals(SourceConnectionStatus.ERROR.name, state.status)
+            assertEquals(SourceSyncStatus.Error, state.status)
             assertEquals(50, state.recentEvents.size)
             assertEquals(50, state.eventsSyncedCount)
             assertTrue(state.recentEvents.all { it.id.startsWith("gmail-") })
@@ -478,7 +480,7 @@ class SourceDetailViewModelSpecTest {
 
         viewModel.state.test {
             var state = awaitItem()
-            while (state.status.isBlank() || state.recentEvents.isEmpty()) {
+            while (state.status == SourceSyncStatus.Unknown || state.recentEvents.isEmpty()) {
                 state = awaitItem()
             }
 

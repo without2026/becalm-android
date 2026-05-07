@@ -1,11 +1,13 @@
 package com.becalm.android.ui.onboarding
 
+import com.becalm.android.R
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.ui.components.UiMessage
 import kotlinx.coroutines.flow.first
 
 internal class OnboardingEmailActionHandler(
@@ -19,7 +21,7 @@ internal class OnboardingEmailActionHandler(
         providers: List<EmailPipaProvider>,
         granted: Boolean,
         updateState: ((OnboardingUiState) -> OnboardingUiState) -> Unit,
-        setError: (String) -> Unit,
+        setError: (UiMessage) -> Unit,
     ): Boolean {
         require(providers.isNotEmpty()) { "providers must be non-empty" }
         return try {
@@ -50,7 +52,7 @@ internal class OnboardingEmailActionHandler(
             true
         } catch (e: Exception) {
             logger.e(TAG, "pipa email consent write failed", e)
-            setError(e.message ?: "consent write failed")
+            setError(UiMessage.resource(R.string.onb_error_consent_write_failed))
             false
         }
     }

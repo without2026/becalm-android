@@ -23,7 +23,7 @@ import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -51,8 +51,10 @@ import com.becalm.android.R
 import com.becalm.android.core.util.KST
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CommitmentCard
+import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.ExpandableSectionHeader
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
@@ -60,15 +62,17 @@ import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.dispatchCommitmentManagementNavigation
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Instant
 import kotlinx.datetime.toLocalDateTime
+
+private val CommitmentListBottomPadding = 144.dp
 
 /**
  * Commitment management screen — full list with filter tabs.
@@ -103,7 +107,8 @@ public fun CommitmentManagementScreen(
         onRefresh = viewModel::onPullRefresh,
     )
 
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
 
     // CMT-013 — collect one-shot undo snapshots emitted by [onComplete] / [onCancel]
     // and present a `[복구]` snackbar with a 5 s window. Material3 does not expose a
@@ -182,20 +187,18 @@ public fun CommitmentManagementScreenContent(
             // C9 / MAN-001 — Manual add FAB. Navigates to the create sheet with
             // supersedeOf=null; edit-sheet supersede path reuses the same destination
             // with supersedeOf bound to the old row id.
-            ExtendedFloatingActionButton(
+            FloatingActionButton(
                 onClick = onOpenCreate,
                 modifier = Modifier.testTag("commitment-fab-add"),
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp, pressedElevation = 2.dp),
-                icon = {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = stringResource(R.string.commitment_fab_add_content_desc),
-                    )
-                },
-                text = { Text(text = stringResource(R.string.commitment_fab_add)) },
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.commitment_fab_add_content_desc),
+                )
+            }
         },
     ) { padding ->
         Column(
@@ -239,7 +242,12 @@ public fun CommitmentManagementScreenContent(
                             state.cancelledSection.count,
                         )
                         LazyColumn(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                top = 8.dp,
+                                end = 16.dp,
+                                bottom = CommitmentListBottomPadding,
+                            ),
                             modifier = Modifier
                                 .fillMaxSize()
                                 .testTag("commitment-list"),
@@ -336,42 +344,47 @@ private fun CommitmentListSkeleton(modifier: Modifier = Modifier) {
     val avatarColor = becalmSkeletonColor()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = 8.dp,
+            end = 16.dp,
+            bottom = CommitmentListBottomPadding,
+        ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(count = 3, key = { index -> "commitments-skeleton-$index" }) {
-            Column(
+            EvidenceCard(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(avatarColor),
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.45f).height(10.dp))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(avatarColor),
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.45f).height(10.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
+                            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(8.dp))
+                        }
+                        SkeletonBlock(
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .width(36.dp)
+                                .height(18.dp),
+                        )
                     }
-                    SkeletonBlock(
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .width(36.dp)
-                            .height(18.dp),
-                    )
-                }
-                SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SkeletonBlock(modifier = Modifier.width(48.dp).height(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    SkeletonBlock(modifier = Modifier.width(56.dp).height(16.dp))
+                    SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SkeletonBlock(modifier = Modifier.width(48.dp).height(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        SkeletonBlock(modifier = Modifier.width(56.dp).height(16.dp))
+                    }
                 }
             }
         }
@@ -529,8 +542,8 @@ private fun PreviewCommitmentManagementScreenPopulated() {
                 ) {
                     items(
                         listOf(
-                            "give" to "Send contract draft" to "REMINDED",
-                            "take" to "Review budget proposal" to "FOLLOWED_UP",
+                            CommitmentWire.DIRECTION_GIVE to "Send contract draft" to CommitmentWire.ACTION_REMINDED_UPPER,
+                            CommitmentWire.DIRECTION_TAKE to "Review budget proposal" to CommitmentWire.ACTION_FOLLOWED_UPPER,
                         ),
                     ) { (dirTitlePair, status) ->
                         val (dir, title) = dirTitlePair

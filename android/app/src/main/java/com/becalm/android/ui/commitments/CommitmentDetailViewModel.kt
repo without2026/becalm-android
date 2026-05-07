@@ -3,6 +3,7 @@ package com.becalm.android.ui.commitments
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -10,6 +11,7 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -48,14 +50,12 @@ public data class CommitmentSourcePresentation(
     val sourceType: String? = null,
     val sourceTitle: String? = null,
     val sourceOccurredAt: Instant? = null,
-    val sourceLabel: String = "",
+    val sourceLabel: CommitmentText? = null,
 )
 
 public data class CommitmentHistoryPresentation(
     val lastEditedAt: Instant? = null,
-    val lastEditedLabel: String? = null,
     val disputeRaisedAt: Instant? = null,
-    val disputedLabel: String? = null,
     val showSupersedeLink: Boolean = false,
 )
 
@@ -88,7 +88,7 @@ public data class DetailUiState(
     val actionButtons: CommitmentDetailActionState = CommitmentDetailActionState(),
     val history: CommitmentHistoryPresentation = CommitmentHistoryPresentation(),
     val loading: Boolean = true,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ public class CommitmentDetailViewModel @Inject constructor(
     init {
         if (id.isEmpty()) {
             _uiState.update {
-                it.copy(loading = false, error = "commitment id missing")
+                it.copy(loading = false, error = UiMessage.resource(R.string.commitment_detail_error_missing_id))
             }
         } else {
             observe()
@@ -184,7 +184,7 @@ public class CommitmentDetailViewModel @Inject constructor(
                 .catch { e ->
                     logger.e(TAG, "observe failed id=${hashId(id)}", e)
                     _uiState.update {
-                        it.copy(loading = false, error = e.message ?: "load failed")
+                        it.copy(loading = false, error = UiMessage.resource(R.string.commitment_detail_error_load_failed))
                     }
                 }
                 .collect { state ->
@@ -195,13 +195,4 @@ public class CommitmentDetailViewModel @Inject constructor(
 
     private fun hashId(id: String): String = "%08x".format(id.hashCode())
 
-    public companion object {
-        /**
-         * Sentinel string emitted in [DetailUiState.error] when the commitment is
-         * missing or soft-deleted. The composable substitutes the localized string
-         * resource `commitment_detail_empty_error` when this exact value is observed;
-         * kept as a stable key so the VM stays Context-free.
-         */
-        public const val EMPTY_ERROR_KEY: String = "deleted-commitment"
-    }
 }

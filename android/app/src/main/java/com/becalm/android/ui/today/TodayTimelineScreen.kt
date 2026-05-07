@@ -49,17 +49,19 @@ import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
+import com.becalm.android.ui.components.RelationshipCard
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.components.commitmentActionLabelRes
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchTodayEffect
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -159,16 +161,17 @@ public fun TodayTimelineContent(
                     .widthIn(max = TimelineMaxContentWidth),
             ) {
                 if (state.processingPaused) {
-                    Text(
-                        text = stringResource(R.string.processing_paused_banner),
+                    EvidenceCard(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                            .glassPanel(MaterialTheme.shapes.medium)
-                            .padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.processing_paused_banner),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 }
                 MainTabStatusHeader(state = headerState)
                 Box(
@@ -183,7 +186,7 @@ public fun TodayTimelineContent(
                         state.error != null -> {
                             ErrorState(
                                 title = stringResource(R.string.error_generic_title),
-                                message = state.error,
+                                message = uiMessageStringResource(requireNotNull(state.error)),
                             )
                         }
                         state.timeline.isEmpty() -> {
@@ -222,7 +225,7 @@ private val TimelineMaxContentWidth: Dp = 600.dp
 /**
  * Static skeleton placeholder rows shown during the cold-start no-data window.
  *
- * Matches the timeline row geometry (84dp min height, glassPanel card body,
+ * Matches the timeline row geometry (84dp min height, evidence card body,
  * rail, time column) so real data lands in place without layout pop. No
  * animation: motion is intentional only in this system, and a "loading
  * shimmer" reads as process-noise on the first-line surface (DESIGN.md
@@ -252,16 +255,16 @@ private fun TimelineSkeletonRow(modifier: Modifier = Modifier) {
         modifier = modifier.heightIn(min = 84.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Column(
+        EvidenceCard(
             modifier = Modifier
-                .weight(1f)
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .weight(1f),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(10.dp))
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
-            SkeletonBlock(modifier = Modifier.fillMaxWidth(0.55f).height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SkeletonBlock(modifier = Modifier.fillMaxWidth(0.4f).height(10.dp))
+                SkeletonBlock(modifier = Modifier.fillMaxWidth(0.85f).height(14.dp))
+                SkeletonBlock(modifier = Modifier.fillMaxWidth(0.55f).height(10.dp))
+            }
         }
         Column(
             modifier = Modifier
@@ -390,24 +393,24 @@ private fun TodayPersonFocusPanel(
     modifier: Modifier = Modifier,
 ) {
     val totalCommitments = people.sumOf { it.commitmentCount }
-    Column(
-        modifier = modifier
-            .glassPanel(MaterialTheme.shapes.large)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    RelationshipCard(
+        modifier = modifier,
+        contentPadding = PaddingValues(14.dp),
     ) {
-        Text(
-            text = stringResource(R.string.today_person_focus_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(R.string.today_person_focus_subtitle_fmt, people.size, totalCommitments),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        people.forEach { person ->
-            TodayPersonFocusRow(person = person)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = stringResource(R.string.today_person_focus_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.today_person_focus_subtitle_fmt, people.size, totalCommitments),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            people.forEach { person ->
+                TodayPersonFocusRow(person = person)
+            }
         }
     }
 }
@@ -530,22 +533,21 @@ private fun TimelineCard(
     } else {
         Modifier
     }
-    // Surface = glassPanel only. Action ownership is signalled by the leading label.
+    // Surface is intentionally neutral. Action ownership is signalled by the leading label.
     // Tinting the surface itself was double-signal and used wrong colors for take.
-    Column(
+    EvidenceCard(
         modifier = modifier
-            .then(clickModifier)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(
-                horizontal = 12.dp,
-                vertical = if (item is TimelineItem.Commitment &&
-                    item.rowTreatment == TodayCommitmentRowTreatment.SCHEDULE
-                ) {
-                    8.dp
-                } else {
-                    10.dp
-                },
-            ),
+            .then(clickModifier),
+        contentPadding = PaddingValues(
+            horizontal = 12.dp,
+            vertical = if (item is TimelineItem.Commitment &&
+                item.rowTreatment == TodayCommitmentRowTreatment.SCHEDULE
+            ) {
+                8.dp
+            } else {
+                10.dp
+            },
+        ),
     ) {
         Text(
             text = typeLabelFor(item),

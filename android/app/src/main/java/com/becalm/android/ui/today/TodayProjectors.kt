@@ -1,10 +1,12 @@
 package com.becalm.android.ui.today
 
+import com.becalm.android.R
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.main.buildSourceStatusUiMap
 import com.becalm.android.ui.main.deriveOverallState
 
@@ -18,7 +20,7 @@ internal object TodayTimelineProjector {
         val scheduleCommitmentKeys = commitments
             .filter { row ->
                 row.itemType == CommitmentItemType.SCHEDULE &&
-                    row.sourceType in CALENDAR_SOURCE_TYPES &&
+                    row.sourceType?.isCalendarSource() == true &&
                     !row.sourceRef.isNullOrBlank()
             }
             .mapTo(mutableSetOf()) { row -> row.sourceType to row.sourceRef }
@@ -69,11 +71,6 @@ internal object TodayTimelineProjector {
                 sortKey = startAt,
             )
         }
-
-    private val CALENDAR_SOURCE_TYPES = setOf(
-        SourceType.GOOGLE_CALENDAR,
-        SourceType.OUTLOOK_CALENDAR,
-    )
 }
 
 internal object TodaySyncProjector {
@@ -86,7 +83,7 @@ internal object TodaySyncProjector {
                 loading = false,
                 processingPaused = snapshot.processingPaused,
                 refreshing = refreshing,
-                error = "not authenticated",
+                error = UiMessage.resource(R.string.today_error_sign_in_required),
             )
         }
         val statusMap = buildSourceStatusUiMap(snapshot.sourceStatuses)

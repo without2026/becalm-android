@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -33,9 +34,9 @@ class SourcesListScreenTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),
@@ -74,21 +75,21 @@ class SourcesListScreenTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "gmail",
-                                status = "SYNCING",
+                                status = SourceSyncStatus.Syncing,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                             ),
                             SourceStatusRow(
                                 sourceType = "naver_imap",
-                                status = "NEVER_CONNECTED",
+                                status = SourceSyncStatus.Disconnected,
                                 lastSyncAt = null,
-                                lastError = null,
+                                hasError = false,
                             ),
                             SourceStatusRow(
                                 sourceType = "outlook_mail",
-                                status = "ERROR",
+                                status = SourceSyncStatus.Error,
                                 lastSyncAt = null,
-                                lastError = "토큰이 만료되었습니다.",
+                                hasError = true,
                             ),
                         ),
                     ),
@@ -104,6 +105,7 @@ class SourcesListScreenTest {
         composeTestRule.onNodeWithText(string(R.string.sources_status_syncing)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.sources_status_disconnected)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_last_error_generic)).assertIsDisplayed()
 
         composeTestRule.onAllNodesWithText("gmail").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("naver_imap").assertCountEquals(0)
@@ -111,6 +113,7 @@ class SourcesListScreenTest {
         composeTestRule.onAllNodesWithText("SYNCING").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("NEVER_CONNECTED").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("ERROR").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("토큰이 만료되었습니다.").assertCountEquals(0)
     }
 
     @Test
@@ -124,9 +127,9 @@ class SourcesListScreenTest {
                         items = listOf(
                             SourceStatusRow(
                                 sourceType = "contacts",
-                                status = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
-                                lastError = null,
+                                hasError = false,
                                 enrichedCount = 7,
                             ),
                         ),

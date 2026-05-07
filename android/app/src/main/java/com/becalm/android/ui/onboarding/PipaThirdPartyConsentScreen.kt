@@ -25,8 +25,8 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Onboarding step 3 of 13: PIPA 제3자 제공 + 국외 이전 동의.
@@ -116,11 +116,9 @@ internal fun PipaThirdPartyConsentContent(
             Spacer(modifier = Modifier.height(20.dp))
 
             // ── 6 disclosure bullets (ONB-PIPA mandatory) ──────────────────
-            Column(
+            QuietPanel(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .glassPanel(MaterialTheme.shapes.medium)
-                    .padding(16.dp),
+                    .fillMaxWidth(),
             ) {
                 val bullets = listOf(
                     R.string.onb_pipa_bullet_1_label to R.string.onb_pipa_bullet_1_value,

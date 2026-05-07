@@ -3,13 +3,13 @@ package com.becalm.android.ui.main
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
-import com.becalm.android.ui.components.ChipState
 import com.becalm.android.ui.components.SourceStatusChip
+import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.sourceSyncStatusFor
 import kotlinx.datetime.Instant
 
 public data class SourceStatusUi(
-    val syncing: Boolean,
-    val statusLabel: String,
+    val status: SourceSyncStatus,
     val errorMessage: String?,
     val lastSyncedAt: Instant?,
 )
@@ -34,8 +34,7 @@ internal val CHIP_ORDER: List<String> = listOf(
 internal fun buildSourceStatusUiMap(statuses: List<SourceStatus>): Map<String, SourceStatusUi> =
     statuses.associate { status ->
         status.sourceType to SourceStatusUi(
-            syncing = status.status == SourceConnectionStatus.SYNCING,
-            statusLabel = status.status.name,
+            status = sourceSyncStatusFor(status.status),
             errorMessage = status.errorMessage,
             lastSyncedAt = status.lastSyncedAt,
         )
@@ -66,16 +65,18 @@ internal fun deriveOverallState(sources: List<SourceStatus>): OverallSyncState {
 internal fun buildChips(sourceStatus: Map<String, SourceStatusUi>): List<SourceStatusChip> =
     CHIP_ORDER.mapNotNull { sourceType ->
         val ui = sourceStatus[sourceType]
-        val chipState: ChipState = when {
+        val chipStatus: SourceSyncStatus = when {
             ui == null -> return@mapNotNull null
             ui.errorMessage != null -> return@mapNotNull null
-            ui.syncing -> ChipState.Syncing
-            ui.statusLabel == "CONNECTED" && ui.lastSyncedAt != null ->
-                ChipState.Synced(ui.lastSyncedAt)
-            ui.statusLabel == "CONNECTED" -> ChipState.Idle
+            ui.status == SourceSyncStatus.Syncing -> SourceSyncStatus.Syncing
+            ui.status == SourceSyncStatus.Connected -> SourceSyncStatus.Connected
             else -> return@mapNotNull null
         }
-        SourceStatusChip(sourceType = sourceType, state = chipState)
+        SourceStatusChip(
+            sourceType = sourceType,
+            status = chipStatus,
+            lastSyncedAt = ui.lastSyncedAt,
+        )
     }
 
 internal data class SourceStatusAttention(
@@ -91,8 +92,8 @@ internal fun buildSourceStatusAttention(sourceStatus: Map<String, SourceStatusUi
     CHIP_ORDER.forEach { sourceType ->
         val ui = sourceStatus[sourceType] ?: return@forEach
         when {
-            ui.errorMessage != null || ui.statusLabel == "ERROR" -> failedCount += 1
-            ui.statusLabel == "NEVER_CONNECTED" -> disconnectedCount += 1
+            ui.errorMessage != null || ui.status == SourceSyncStatus.Error -> failedCount += 1
+            ui.status == SourceSyncStatus.Disconnected -> disconnectedCount += 1
         }
     }
     return SourceStatusAttention(

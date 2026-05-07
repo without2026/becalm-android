@@ -26,10 +26,10 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Onboarding step: recording folder / READ_MEDIA_AUDIO + Recordings SAF tree grant.
@@ -152,11 +152,9 @@ internal fun RecordingFolderContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        Column(
+        QuietPanel(
             modifier = Modifier
-                .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
+                .fillMaxWidth(),
         ) {
             Text(
                 text = stringResource(R.string.onb_recording_folder_body),

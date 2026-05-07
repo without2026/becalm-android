@@ -2,6 +2,7 @@ package com.becalm.android.integration.local.ui.commitments
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
@@ -187,9 +188,10 @@ class CommitmentLocalIntegrationTest {
 
             assertEquals("김철수", state.counterpartyDisplayName)
             assertTrue(state.source.isManual)
-            assertEquals("사용자 직접 추가 2026-04-18 14:30 KST", state.source.sourceLabel)
-            assertEquals("마지막 수정: 4/18 14:30 (본인)", state.history.lastEditedLabel)
-            assertEquals("⚠️ 이의 제기됨 — 4/18 15:00", state.history.disputedLabel)
+            assertEquals(R.string.commitment_detail_manual_source_fmt, state.source.sourceLabel?.resId)
+            assertEquals(listOf("2026-04-18 14:30"), state.source.sourceLabel?.args)
+            assertEquals(Instant.parse("2026-04-18T05:30:00Z"), state.history.lastEditedAt)
+            assertEquals(Instant.parse("2026-04-18T06:00:00Z"), state.history.disputeRaisedAt)
             assertTrue(state.history.showSupersedeLink)
             assertTrue(state.actionButtons.editEnabled)
             cancelAndIgnoreRemainingEvents()

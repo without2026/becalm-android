@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -47,7 +48,7 @@ class SourceDetailScreenTest {
     fun source_detail_connected_source_keeps_recovery_cta_quiet() {
         setScreen(
             state = baseState(
-                status = "CONNECTED",
+                status = SourceSyncStatus.Connected,
                 showReconnectButton = false,
                 showDisconnectButton = true,
                 showManualSyncButton = true,
@@ -66,8 +67,8 @@ class SourceDetailScreenTest {
     fun source_detail_error_source_prioritizes_reconnect_recovery() {
         setScreen(
             state = baseState(
-                status = "ERROR",
-                lastError = "권한이 만료되었습니다.",
+                status = SourceSyncStatus.Error,
+                hasError = true,
                 showReconnectButton = true,
                 showDisconnectButton = false,
                 showManualSyncButton = false,
@@ -75,7 +76,8 @@ class SourceDetailScreenTest {
         )
 
         composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("권한이 만료되었습니다.", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.source_detail_last_error_generic)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("권한이 만료되었습니다.", substring = true).assertCountEquals(0)
         composeTestRule.onNodeWithText(string(R.string.action_reconnect)).assertIsDisplayed()
         composeTestRule.onAllNodesWithText(string(R.string.action_sync_now)).assertCountEquals(0)
         composeTestRule.onAllNodesWithText(string(R.string.action_disconnect)).assertCountEquals(0)
@@ -135,8 +137,8 @@ class SourceDetailScreenTest {
     }
 
     private fun baseState(
-        status: String = "CONNECTED",
-        lastError: String? = null,
+        status: SourceSyncStatus = SourceSyncStatus.Connected,
+        hasError: Boolean = false,
         showReconnectButton: Boolean = true,
         showDisconnectButton: Boolean = true,
         showManualSyncButton: Boolean = true,
@@ -146,7 +148,7 @@ class SourceDetailScreenTest {
         status = status,
         lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
         eventsSyncedCount = 12,
-        lastError = lastError,
+        hasError = hasError,
         showReconnectButton = showReconnectButton,
         showDisconnectButton = showDisconnectButton,
         showManualSyncButton = showManualSyncButton,

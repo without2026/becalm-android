@@ -3,6 +3,7 @@ package com.becalm.android.ui.onboarding
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -12,6 +13,7 @@ import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -174,13 +176,13 @@ public sealed interface ContactsPermissionEffect {
  * @param currentStepIndex Index into [OnboardingViewModel.steps] for the currently displayed step.
  * @param stepStates       Per-step status map; defaults to [StepStatus.NOT_STARTED] for every step.
  * @param isCompleting     `true` while [OnboardingViewModel.onCompleteOnboarding] is in flight.
- * @param error            Non-null when the last action produced an error message to display.
+ * @param error            Non-null when the last action produced a resource-backed error to display.
  */
 public data class OnboardingUiState(
     val currentStepIndex: Int = 0,
     val stepStates: Map<OnboardingStep, StepStatus> = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED },
     val isCompleting: Boolean = false,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -787,7 +789,7 @@ public class OnboardingViewModel @Inject constructor(
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaved(granted = granted))
             } catch (e: Exception) {
                 logger.e(TAG, "$caller: DataStore write failed", e)
-                _uiState.update { it.copy(error = e.message ?: "consent write failed") }
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_consent_write_failed)) }
                 _pipaConsentEvents.emit(PipaConsentEvent.PipaConsentSaveFailed(e.message ?: "consent write failed"))
             }
         }
@@ -849,7 +851,7 @@ public class OnboardingViewModel @Inject constructor(
             if (!isTerminalGatePassed(stepStates)) {
                 logger.d(TAG, "onCompleteOnboarding: blocked — not all steps finished; stepStates=$stepStates")
                 _uiState.update {
-                    it.copy(isCompleting = false, error = "Please complete all steps before finishing")
+                    it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_complete_steps))
                 }
                 return@launch
             }
@@ -865,7 +867,7 @@ public class OnboardingViewModel @Inject constructor(
                 persistStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist onboarding completion", e)
-                _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
+                _uiState.update { it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed)) }
             }
         }
     }
@@ -910,7 +912,7 @@ public class OnboardingViewModel @Inject constructor(
                 _uiState.update { it.copy(isCompleting = false, error = null) }
             } catch (e: Exception) {
                 logger.e(TAG, "failed to complete compact onboarding setup", e)
-                _uiState.update { it.copy(isCompleting = false, error = e.message ?: "Unknown error") }
+                _uiState.update { it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed)) }
             }
         }
     }

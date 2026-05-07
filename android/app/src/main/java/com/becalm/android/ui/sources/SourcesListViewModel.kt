@@ -7,6 +7,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.ui.components.SourceSyncStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -27,16 +28,16 @@ import javax.inject.Inject
  * A single row in the sources list (SMG-001..005).
  *
  * @param sourceType One of the [com.becalm.android.data.remote.dto.SourceType] string constants.
- * @param status Human-readable connection status label derived from
- *   [com.becalm.android.data.repository.SourceConnectionStatus.name].
+ * @param status Typed UI status used by shared source-status indicators.
  * @param lastSyncAt Wall-clock instant of the last successful sync, or null if never synced.
- * @param lastError Human-readable error from the last failed sync, or null when healthy.
+ * @param hasError True when the repository reported a failure; raw error copy is not carried
+ *   into UI state.
  */
 public data class SourceStatusRow(
     val sourceType: String,
-    val status: String,
+    val status: SourceSyncStatus,
     val lastSyncAt: Instant?,
-    val lastError: String?,
+    val hasError: Boolean,
     val enrichedCount: Int? = null,
 )
 

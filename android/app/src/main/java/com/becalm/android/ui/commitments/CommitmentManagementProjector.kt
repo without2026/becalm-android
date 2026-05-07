@@ -5,6 +5,8 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.isGiveDirection
+import com.becalm.android.ui.components.isTakeDirection
 import kotlinx.datetime.Instant
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
@@ -51,12 +53,12 @@ internal object CommitmentManagementProjector {
             CommitmentFilter.ALL -> rowsWithState
             CommitmentFilter.GIVE -> rowsWithState.filter {
                 it.row.itemType == CommitmentItemType.ACTION &&
-                    it.row.direction == "give" &&
+                    isGiveDirection(it.row.direction) &&
                     !it.state.isClosed()
             }
             CommitmentFilter.TAKE -> rowsWithState.filter {
                 it.row.itemType == CommitmentItemType.ACTION &&
-                    it.row.direction == "take" &&
+                    isTakeDirection(it.row.direction) &&
                     !it.state.isClosed()
             }
             CommitmentFilter.SCHEDULE -> rowsWithState.filter { it.row.itemType == CommitmentItemType.SCHEDULE }

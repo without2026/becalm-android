@@ -10,10 +10,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
-import com.becalm.android.ui.components.ChipState
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusChip
 import com.becalm.android.ui.components.SourceStatusStrip
+import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.main.OverallSyncState
 import com.becalm.android.ui.main.SourceStatusUi
 import com.becalm.android.ui.theme.BecalmTheme
@@ -48,26 +49,22 @@ class TodayTimelineUiTest {
                         overallSyncing = true,
                         sourceStatus = mapOf(
                             "voice" to SourceStatusUi(
-                                syncing = true,
-                                statusLabel = "SYNCING",
+                                status = SourceSyncStatus.Syncing,
                                 errorMessage = null,
                                 lastSyncedAt = null,
                             ),
                             "gmail" to SourceStatusUi(
-                                syncing = false,
-                                statusLabel = "CONNECTED",
+                                status = SourceSyncStatus.Connected,
                                 errorMessage = null,
                                 lastSyncedAt = Instant.parse("2026-04-24T01:00:00Z"),
                             ),
                             "outlook_mail" to SourceStatusUi(
-                                syncing = false,
-                                statusLabel = "ERROR",
+                                status = SourceSyncStatus.Error,
                                 errorMessage = "token expired",
                                 lastSyncedAt = null,
                             ),
                             "naver_imap" to SourceStatusUi(
-                                syncing = false,
-                                statusLabel = "NEVER_CONNECTED",
+                                status = SourceSyncStatus.Disconnected,
                                 errorMessage = null,
                                 lastSyncedAt = null,
                             ),
@@ -100,7 +97,7 @@ class TodayTimelineUiTest {
                 TodayTimelineContent(
                     state = TodayUiState(
                         loading = false,
-                        error = "network timeout",
+                        error = UiMessage.resource(R.string.today_error_load_failed),
                     ),
                     onOpenSettings = {},
                     onPullRefresh = {},
@@ -108,7 +105,7 @@ class TodayTimelineUiTest {
             }
         }
 
-        composeRule.onNodeWithText("network timeout").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.today_error_load_failed)).assertIsDisplayed()
     }
 
     @Test
@@ -162,8 +159,8 @@ class TodayTimelineUiTest {
             BecalmTheme {
                 SourceStatusStrip(
                     sources = listOf(
-                        SourceStatusChip("voice", ChipState.Syncing),
-                        SourceStatusChip("gmail", ChipState.Idle),
+                        SourceStatusChip("voice", SourceSyncStatus.Syncing),
+                        SourceStatusChip("gmail", SourceSyncStatus.Connected),
                     ),
                 )
             }

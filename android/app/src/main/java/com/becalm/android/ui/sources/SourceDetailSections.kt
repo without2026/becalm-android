@@ -17,9 +17,12 @@ import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.DangerZone
+import com.becalm.android.ui.components.EvidenceCard
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
-import com.becalm.android.ui.theme.glassPanel
+import com.becalm.android.ui.components.uiMessageStringResource
 import kotlinx.datetime.Instant
 
 @Composable
@@ -43,11 +46,9 @@ internal fun SourceStatusSummarySection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Column(
+        QuietPanel(
             modifier = Modifier
-                .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
+                .fillMaxWidth(),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -97,10 +98,10 @@ private fun SourceStatusMeta(state: SourceDetailUiState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    state.lastError?.let { lastError ->
+    if (state.hasError) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.source_detail_last_error_fmt, lastError),
+            text = stringResource(R.string.source_detail_last_error_generic),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -108,7 +109,7 @@ private fun SourceStatusMeta(state: SourceDetailUiState) {
     state.actionError?.let { actionError ->
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = actionError,
+            text = uiMessageStringResource(actionError),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -209,12 +210,10 @@ internal fun SourceDetailSectionHeader(text: String) {
 
 @Composable
 internal fun RecentSourceEventRow(event: RecentEventSummary) {
-    Column(
+    EvidenceCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         Text(
             text = event.timestamp.toString(),
@@ -234,38 +233,18 @@ internal fun RecentSourceEventRow(event: RecentEventSummary) {
 
 @Composable
 internal fun SourceDangerZone(onDisconnectClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+    DangerZone(
+        title = stringResource(R.string.source_detail_danger_zone_title),
+        body = stringResource(R.string.source_detail_disconnect_body),
     ) {
-        Text(
-            text = stringResource(R.string.source_detail_danger_zone_title),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Column(
+        BecalmButton(
+            text = stringResource(R.string.action_disconnect),
+            onClick = onDisconnectClick,
+            variant = BecalmButtonVariant.Text,
             modifier = Modifier
                 .fillMaxWidth()
-                .glassPanel(MaterialTheme.shapes.medium)
-                .padding(16.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.source_detail_disconnect_body),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            BecalmButton(
-                text = stringResource(R.string.action_disconnect),
-                onClick = onDisconnectClick,
-                variant = BecalmButtonVariant.Text,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("source-detail-disconnect"),
-            )
-        }
+                .testTag("source-detail-disconnect"),
+        )
     }
 }
 

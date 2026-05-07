@@ -1,7 +1,9 @@
 package com.becalm.android
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
+import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -36,7 +38,10 @@ public class MainActivity : ComponentActivity() {
         // so the first Compose frame renders against Theme.Becalm, not Theme.Becalm.Splash.
         setTheme(R.style.Theme_Becalm)
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
 
         pendingDeepLinkRoute.value = intent?.let(AppDeepLinks::routeFrom)
 

@@ -36,9 +36,11 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.BecalmSheetSkeleton
+import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.SheetCloseRow
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import kotlinx.coroutines.flow.Flow
 
@@ -132,11 +134,8 @@ public fun CommitmentDetailSheet(
                 BecalmSheetSkeleton(modifier = Modifier.heightIn(min = 160.dp))
             }
             state.error != null || entity == null -> {
-                val errorLabel = if (state.error == CommitmentDetailViewModel.EMPTY_ERROR_KEY) {
-                    stringResource(R.string.commitment_detail_empty_error)
-                } else {
-                    state.error ?: stringResource(R.string.commitment_detail_empty_error)
-                }
+                val errorLabel = state.error?.let { uiMessageStringResource(it) }
+                    ?: stringResource(R.string.commitment_detail_empty_error)
                 ErrorState(
                     title = stringResource(R.string.commitment_detail_empty_error),
                     message = errorLabel,
@@ -237,7 +236,10 @@ internal fun DetailSheetContent(
         if (history.disputeRaisedAt != null) {
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = history.disputedLabel.orEmpty(),
+                text = stringResource(
+                    R.string.commitment_detail_disputed_label_fmt,
+                    CommitmentDetailFormatter.formatShortKst(history.disputeRaisedAt),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -251,7 +253,7 @@ internal fun DetailSheetContent(
             Spacer(modifier = Modifier.height(6.dp))
         }
         Text(
-            text = source.sourceLabel,
+            text = source.sourceLabel?.let { commitmentStringResource(it) }.orEmpty(),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -302,7 +304,10 @@ internal fun DetailSheetContent(
         // 8. Footer — last-edited banner + supersede backlink
         if (history.lastEditedAt != null) {
             Text(
-                text = history.lastEditedLabel.orEmpty(),
+                text = stringResource(
+                    R.string.commitment_detail_last_edited_fmt,
+                    CommitmentDetailFormatter.formatShortKst(history.lastEditedAt),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -412,12 +417,12 @@ private fun SimpleChip(text: String) {
 }
 
 private fun stringForActionState(state: CommitmentState): String = when (state) {
-    CommitmentState.PENDING -> "PENDING"
-    CommitmentState.REMINDED -> "REMINDED"
-    CommitmentState.FOLLOWED_UP -> "FOLLOWED_UP"
-    CommitmentState.COMPLETED -> "COMPLETED"
-    CommitmentState.OVERDUE -> "OVERDUE"
-    CommitmentState.CANCELLED -> "CANCELLED"
+    CommitmentState.PENDING -> CommitmentWire.ACTION_PENDING_UPPER
+    CommitmentState.REMINDED -> CommitmentWire.ACTION_REMINDED_UPPER
+    CommitmentState.FOLLOWED_UP -> CommitmentWire.ACTION_FOLLOWED_UPPER
+    CommitmentState.COMPLETED -> CommitmentWire.ACTION_COMPLETED_UPPER
+    CommitmentState.OVERDUE -> CommitmentWire.ACTION_OVERDUE_UPPER
+    CommitmentState.CANCELLED -> CommitmentWire.ACTION_CANCELLED_UPPER
 }
 
 @Composable
@@ -431,8 +436,8 @@ private fun itemTypeLabel(entity: CommitmentEntity): String = when (entity.itemT
 @Composable
 private fun subtypeLabel(entity: CommitmentEntity): String? = when (entity.itemType) {
     CommitmentItemType.ACTION -> when (entity.direction?.lowercase()) {
-        "give" -> stringResource(R.string.commitments_filter_give)
-        "take" -> stringResource(R.string.commitments_filter_take)
+        CommitmentWire.DIRECTION_GIVE -> stringResource(R.string.commitments_filter_give)
+        CommitmentWire.DIRECTION_TAKE -> stringResource(R.string.commitments_filter_take)
         else -> null
     }
     CommitmentItemType.SCHEDULE -> when (entity.scheduleStatus) {

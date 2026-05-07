@@ -51,11 +51,13 @@ import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSignOut
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Settings root screen.
@@ -144,8 +146,9 @@ public fun SettingsScreen(
         }
     }
 
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(
-        state.error,
+        errorMessage,
         snackbarHostState,
         onErrorDismissed ?: requireNotNull(settingsViewModel)::onErrorDismissed,
     )
@@ -343,15 +346,16 @@ public fun SettingsScreenContent(
 private fun SettingsStatusBanner(
     message: String,
 ) {
-    Text(
-        text = message,
+    EvidenceCard(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
+            .fillMaxWidth(),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }
 
 @Composable
@@ -482,11 +486,9 @@ private fun PreviewSettingsScreen() {
             ) {
                 SettingsSectionLabel("Account")
                 Spacer(modifier = Modifier.height(8.dp))
-                Column(
+                QuietPanel(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .glassPanel(MaterialTheme.shapes.medium)
-                        .padding(16.dp),
+                        .fillMaxWidth(),
                 ) {
                     Text(
                         text = "name@example.com",

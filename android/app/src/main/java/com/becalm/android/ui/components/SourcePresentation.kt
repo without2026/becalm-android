@@ -78,13 +78,3 @@ internal fun sourcePresentationFor(sourceType: String): SourcePresentation = whe
         accentColor = Color(0xFF76726A),
     )
 }
-
-@StringRes
-internal fun sourceStatusLabelRes(status: SourceSyncStatus): Int = when (status) {
-    SourceSyncStatus.Connected -> R.string.sources_status_connected
-    SourceSyncStatus.Syncing -> R.string.sources_status_syncing
-    SourceSyncStatus.Stale -> R.string.sources_status_stale
-    SourceSyncStatus.Error -> R.string.sources_status_error
-    SourceSyncStatus.Disconnected -> R.string.sources_status_disconnected
-    SourceSyncStatus.Unknown -> R.string.sources_status_unknown
-}

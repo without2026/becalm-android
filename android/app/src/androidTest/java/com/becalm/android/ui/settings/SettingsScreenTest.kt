@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.theme.BecalmTheme
 import androidx.navigation.compose.rememberNavController
 import org.junit.Assert.assertEquals
@@ -103,7 +104,7 @@ class SettingsScreenTest {
                     stateOverride = SettingsUiState(
                         loading = false,
                         signedOut = true,
-                        error = "settings failed",
+                        error = UiMessage.resource(R.string.settings_error_load_failed),
                     ),
                     onNavigateAfterSignOut = { navigateCount += 1 },
                     onErrorDismissed = { dismissCount += 1 },
@@ -117,7 +118,7 @@ class SettingsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("settings failed").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.settings_error_load_failed)).assertIsDisplayed()
         composeTestRule.runOnIdle {
             assertEquals(1, navigateCount)
             assertEquals(1, dismissCount)

@@ -1,0 +1,5 @@
+orig_size=Physical size: 1080x2400
+orig_density=Physical density: 320
+orig_font=1.0
+orig_night=Night mode: no
+orig_locales=Locales for com.becalm.android for user 0 are [ko-KR]

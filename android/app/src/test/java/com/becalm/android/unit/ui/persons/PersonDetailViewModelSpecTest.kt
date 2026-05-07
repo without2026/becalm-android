@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
+import com.becalm.android.R
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -12,7 +13,6 @@ import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.ui.persons.ARG_PERSON_ID
-import com.becalm.android.ui.persons.InteractionRow
 import com.becalm.android.ui.persons.PersonDetailViewModel
 import io.mockk.every
 import io.mockk.mockk
@@ -62,7 +62,7 @@ class PersonDetailViewModelSpecTest {
     fun `missing person id yields immediate error state`() = runTest {
         val viewModel = buildViewModel(personId = "")
 
-        assertEquals("Person ID missing", viewModel.uiState.value.error)
+        assertEquals(R.string.person_detail_error_missing_id, viewModel.uiState.value.error?.resId)
         assertFalse(viewModel.uiState.value.loading)
     }
 
@@ -110,7 +110,7 @@ class PersonDetailViewModelSpecTest {
                         id = "give",
                         personId = personId,
                         sourceType = SourceType.GMAIL,
-                        sourceRef = "commitment:give-1",
+                        sourceRef = "raw:raw-mail-1",
                         interactionKind = "commitment",
                         role = CommitmentItemType.ACTION,
                         direction = "give",
@@ -122,7 +122,7 @@ class PersonDetailViewModelSpecTest {
                         id = "schedule",
                         personId = personId,
                         sourceType = SourceType.GMAIL,
-                        sourceRef = "commitment:schedule-1",
+                        sourceRef = "raw:raw-mail-1",
                         interactionKind = "commitment",
                         role = CommitmentItemType.SCHEDULE,
                         status = "confirmed",
@@ -145,8 +145,12 @@ class PersonDetailViewModelSpecTest {
         assertEquals(1, state.emailInteractionCount)
         assertEquals(2, state.pendingCommitmentCount)
         assertEquals(setOf(SourceType.GMAIL), state.channelSources)
-        assertEquals(listOf("자료 보내기", "데모 미팅"), state.timeline.filterIsInstance<InteractionRow.Commitment>().map { it.title })
-        assertEquals("raw-mail-1", (state.timeline.filterIsInstance<InteractionRow.Event>().single()).rawEventId)
+        val mailCard = state.sourceEventCards.single { it.sourceEventKey == "raw:raw-mail-1" }
+        assertEquals("raw-mail-1", mailCard.rawEventId)
+        assertEquals(
+            listOf("자료 보내기", "데모 미팅"),
+            mailCard.myActions.map { it.title } + mailCard.schedules.map { it.title },
+        )
     }
 
     @Test
@@ -179,10 +183,35 @@ class PersonDetailViewModelSpecTest {
         val viewModel = buildViewModel(personId = personId)
         advanceUntilIdle()
 
-        val titles = viewModel.uiState.value.timeline
-            .filterIsInstance<InteractionRow.CalendarMeeting>()
-            .map { it.title }
+        val titles = viewModel.uiState.value.sourceEventCards.map { it.title }
         assertEquals(listOf("yesterday"), titles)
+    }
+
+    @Test
+    fun `source artifact filename is not used as person detail primary event title`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "transcript",
+                        personId = personId,
+                        sourceType = SourceType.MEETING,
+                        sourceRef = "raw:raw-meeting-1",
+                        interactionKind = "call",
+                        title = "becalm-live-e2e-transcript-3.txt",
+                        snippet = "다음 주 수요일 정오까지 갱신 견적서를 보내주세요.",
+                        occurredAt = Instant.fromEpochMilliseconds(3_000),
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val row = viewModel.uiState.value.sourceEventCards.single()
+        assertEquals("다음 주 수요일 정오까지 갱신 견적서를 보내주세요.", row.title)
+        assertNull(row.snippet)
     }
 
     @Test
@@ -195,7 +224,6 @@ class PersonDetailViewModelSpecTest {
         val state = viewModel.uiState.value
         assertFalse(state.loading)
         assertEquals(personId, state.displayName)
-        assertTrue(state.timeline.isEmpty())
         assertTrue(state.sourceEventCards.isEmpty())
     }
 
@@ -209,7 +237,7 @@ class PersonDetailViewModelSpecTest {
         val viewModel = buildViewModel(personId = personId)
         advanceUntilIdle()
 
-        assertEquals("observe failed", viewModel.uiState.value.error)
+        assertEquals(R.string.person_detail_error_load_failed, viewModel.uiState.value.error?.resId)
         viewModel.onErrorDismissed()
         assertNull(viewModel.uiState.value.error)
     }

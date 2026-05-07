@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui.commitments
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -150,7 +151,10 @@ class CommitmentCreateViewModelSpecTest {
         viewModel.onSave()
         advanceUntilIdle()
 
-        assertEquals("원문 commitment를 찾지 못했습니다", viewModel.uiState.value.saveError)
+        assertEquals(
+            R.string.commitment_save_error_supersede_source_not_found,
+            viewModel.uiState.value.saveError?.resId,
+        )
         assertFalse(viewModel.uiState.value.saved)
         coVerify(exactly = 0) { commitmentRepository.saveManualCommitment(any(), any()) }
     }
@@ -166,9 +170,23 @@ class CommitmentCreateViewModelSpecTest {
         viewModel.onSave()
         advanceUntilIdle()
 
-        assertEquals("저장 실패 — 다시 시도해주세요", viewModel.uiState.value.saveError)
+        assertEquals(R.string.commitment_save_error_generic, viewModel.uiState.value.saveError?.resId)
         viewModel.clearSaveError()
         assertNull(viewModel.uiState.value.saveError)
+    }
+
+    @Test
+    fun `save validation failure uses localized generic validation copy`() = runTest {
+        coEvery { commitmentRepository.saveManualCommitment(any(), null) } returns
+            BecalmResult.Failure(BecalmError.Validation("title", "Title cannot be empty"))
+
+        val viewModel = buildViewModel()
+        viewModel.onTitleChange("Title")
+        viewModel.onQuoteChange("Quote")
+        viewModel.onSave()
+        advanceUntilIdle()
+
+        assertEquals(R.string.commitment_save_error_validation, viewModel.uiState.value.saveError?.resId)
     }
 
     private fun buildViewModel(supersedeOf: String? = null): CommitmentCreateViewModel =

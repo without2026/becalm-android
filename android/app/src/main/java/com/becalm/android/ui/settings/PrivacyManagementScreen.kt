@@ -44,6 +44,7 @@ import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.HandleSnackbarMessage
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSignOut
 import java.io.IOException
@@ -139,8 +140,9 @@ public fun PrivacyManagementScreen(
             (onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() })()
         }
     }
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
     HandleSnackbarMessage(
-        state.error,
+        errorMessage,
         snackbarHostState,
         onErrorDismissed ?: requireNotNull(privacyViewModel)::onErrorDismissed,
     )
@@ -361,7 +363,8 @@ internal fun ConsentWithdrawScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
     BecalmScaffold(
         title = stringResource(R.string.privacy_withdraw_title),
         navigationIcon = {
@@ -416,7 +419,8 @@ internal fun AccountDeletionScreen(
             navController.navigateAfterSignOut()
         }
     }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
     BecalmScaffold(
         title = stringResource(R.string.privacy_delete_title),
         navigationIcon = {

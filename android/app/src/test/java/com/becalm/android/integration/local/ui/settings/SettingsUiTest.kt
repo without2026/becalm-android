@@ -3,15 +3,22 @@ package com.becalm.android.integration.local.ui.settings
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.ui.settings.ProcessingStatusContent
+import com.becalm.android.ui.settings.ProcessingStatusRow
+import com.becalm.android.ui.settings.ProcessingStatusUiState
 import com.becalm.android.ui.settings.PrivacyManagementScreenContent
 import com.becalm.android.ui.settings.PrivacyManagementUiState
 import com.becalm.android.ui.settings.SettingsScreenContent
@@ -158,6 +165,42 @@ class SettingsUiTest {
             assertEquals(1, deleteClicks)
             assertEquals(0, activityLogClicks)
         }
+    }
+
+    @Test
+    fun `processing status content uses shared source labels and localized phase copy`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.VOICE,
+                                phase = ProcessingPhase.SYNCED,
+                                itemCount = 3,
+                                message = null,
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = "raw_source_type",
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = "retry required",
+                                updatedAt = null,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.raw_event_source_badge_voice)).assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "${string(R.string.processing_phase_synced)} · ${string(R.string.processing_status_item_count_fmt, 3)}",
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_source_badge_unknown)).assertIsDisplayed()
+        composeRule.onAllNodesWithText("raw_source_type").assertCountEquals(0)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

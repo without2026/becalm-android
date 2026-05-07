@@ -63,12 +63,28 @@
     <string name="login_cta">Sign In</string>
     <string name="login_signup_cta">Create account</string>
     <string name="login_google_cta">Continue with Google</string>
+    <string name="login_email_section_label">Or sign in with email</string>
     <string name="login_framing">Quietly organize conversations and commitments by person.</string>
     <string name="login_google_error_no_credentials">No Google account found on this device. Add one from Settings → Accounts and try again.</string>
     <string name="login_google_error_unknown">Google sign-in failed. Please try again or use email.</string>
     <string name="login_error_empty_fields">Please enter your email and password.</string>
     <string name="login_signup_check_email">Check your email to confirm your account, then sign in.</string>
     <string name="login_signup_failed">Couldn\'t create that account. Try signing in or use a different email.</string>
+    <string name="auth_error_invalid_credentials">Invalid email or password.</string>
+    <string name="auth_error_email_confirmation_required">Check your email to confirm your account, then sign in.</string>
+    <string name="auth_error_sign_up_failed">Could not create account.</string>
+    <string name="auth_error_network">Network connection failed. Please try again.</string>
+    <string name="auth_error_rate_limited">Too many attempts. Please wait and try again.</string>
+    <string name="auth_error_server">Server error. Please try again later.</string>
+    <string name="auth_error_validation">Please check the entered information.</string>
+    <string name="auth_error_local_io">Local storage error. Please try again.</string>
+    <string name="auth_error_permission">Required permission was not granted.</string>
+    <string name="auth_error_not_found">Requested account data was not found.</string>
+    <string name="auth_error_cancelled">Request was cancelled.</string>
+    <string name="auth_error_unknown">Something went wrong. Please try again.</string>
+    <string name="auth_error_sign_out_failed">Sign out failed. Please try again.</string>
+    <string name="auth_error_terms_acceptance_failed">Terms acceptance could not be saved.</string>
+    <string name="auth_error_session_restore_failed">Session could not be restored. Please sign in again.</string>
 
     <!-- Onboarding: recording folder -->
     <string name="onb_recording_folder_title">Recording Folder</string>
@@ -104,6 +120,9 @@
     <string name="onb_setup_notifications_title">알림</string>
     <string name="onb_setup_notifications_body">오늘 처리해야 할 약속을 제때 알려드립니다.</string>
     <string name="onb_setup_start">BeCalm 시작하기</string>
+    <string name="onb_error_complete_steps">Complete the remaining setup items before finishing.</string>
+    <string name="onb_error_completion_failed">Setup could not be completed. Please try again.</string>
+    <string name="onb_error_consent_write_failed">Consent could not be saved. Please try again.</string>
 
     <!-- Onboarding: source connections -->
     <string name="onb_sources_title">Sources</string>
@@ -134,7 +153,7 @@
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
     <string name="onb_gmail_headline">Connect Gmail</string>
-    <string name="onb_gmail_body">BeCalm accesses your Gmail to detect commitments in email threads. We request read-only access. Only commitment-relevant metadata is synced — full email bodies are never uploaded.</string>
+    <string name="onb_gmail_body">BeCalm accesses your Gmail to detect commitments in email threads. We request read-only access. Only commitment-relevant metadata is synced; full email bodies are never uploaded.</string>
 
     <!-- Onboarding: Outlook Mail OAuth -->
     <string name="onb_outlook_mail_title">Outlook Mail</string>
@@ -169,7 +188,7 @@
     <string name="onb_imap_username_hint_naver">naver.com ID</string>
     <string name="onb_imap_username_hint_daum">daum.net / hanmail.net ID</string>
     <string name="onb_imap_error_save_failed">Couldn\'t save credentials. Please try again.</string>
-    <string name="onb_imap_error_network">Network error — check your connection and try again.</string>
+    <string name="onb_imap_error_network">Network error. Check your connection and try again.</string>
 
     <!-- Onboarding: Gmail OAuth errors (S6-F) -->
     <string name="onb_gmail_error_network">Couldn\'t reach Google. Please check your connection and try again.</string>
@@ -239,6 +258,8 @@
     <string name="today_title">Today</string>
     <string name="today_empty_title">Clear day ahead</string>
     <string name="today_empty_message">No commitments or meetings scheduled for today.</string>
+    <string name="today_error_sign_in_required">Please sign in again to see today.</string>
+    <string name="today_error_load_failed">Today could not be loaded.</string>
     <string name="today_section_commitments">Commitments</string>
     <string name="today_section_meetings">Meetings</string>
     <string name="today_section_events">Events</string>
@@ -269,6 +290,9 @@
     <string name="persons_manual_match_nickname_hint">Nickname to remember next time</string>
     <string name="persons_manual_add_person_action">Add new person</string>
     <string name="persons_manual_match_action">Match person</string>
+    <string name="persons_error_sign_in_required">Please sign in again to match people.</string>
+    <string name="persons_error_manual_match_failed">Person match could not be saved.</string>
+    <string name="persons_error_load_failed">People could not be loaded.</string>
     <string name="person_match_review_heading">사람 확인</string>
     <string name="person_match_review_summary">%1$d개 항목이 확인을 기다립니다.</string>
     <string name="person_match_filter_recommended">추천 있음 %1$d</string>
@@ -294,6 +318,7 @@
     <string name="contacts_source_enriched_count_fmt">Enriched contacts: %1$d</string>
     <string name="sources_contacts_title">Contacts</string>
     <string name="sources_contacts_enriched_fmt">%1$d contacts enriched</string>
+    <string name="sources_last_error_generic">Connection failed</string>
 
     <!-- Person detail -->
     <string name="person_detail_commitments_section">Commitments</string>
@@ -312,9 +337,14 @@
     <string name="person_detail_bucket_my_actions">What I need to do</string>
     <string name="person_detail_bucket_their_actions">What they need to do</string>
     <string name="person_detail_next_action_title">Recommended next action</string>
+    <string name="person_detail_next_action_call">Call</string>
+    <string name="person_detail_next_action_email_reply">Email reply</string>
+    <string name="person_detail_next_action_schedule">Schedule</string>
+    <string name="person_detail_error_missing_id">Person information is missing. Please go back and try again.</string>
+    <string name="person_detail_error_load_failed">Person timeline could not be loaded.</string>
     <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
     <string name="source_detail_events_synced_fmt">%1$d recent items shown</string>
-    <string name="source_detail_last_error_fmt">Last error: %1$s</string>
+    <string name="source_detail_last_error_generic">Last error: connection failed. Check Settings.</string>
     <string name="source_detail_disconnect_confirm_title">Disconnect source?</string>
     <string name="source_detail_disconnect_confirm_body">This removes the current source connection. Existing imported data stays on device.</string>
 
@@ -324,6 +354,7 @@
     <string name="raw_event_detail_timestamp">Recorded</string>
     <string name="raw_event_detail_not_found">Event not found.</string>
     <string name="raw_event_detail_no_title">(No title)</string>
+    <string name="raw_event_detail_error_missing_id">Event information is missing. Please go back and try again.</string>
 
     <!-- Raw event detail — email branch (S5-D ui-raw-event-email-rendering) -->
     <string name="raw_event_attachments_count">📎 %1$d attachments</string>
@@ -399,6 +430,10 @@
     <string name="commitment_source_manual">Manual entry</string>
     <string name="commitments_empty_title">No commitments found yet</string>
     <string name="commitments_empty_message">Sync is working, but no actionable promises, schedules, or decisions have been detected yet. New items from email, calls, and calendar events will appear here by person.</string>
+    <string name="commitments_error_load_failed">Commitments could not be loaded.</string>
+    <string name="commitments_error_refresh_failed">Commitments could not be refreshed.</string>
+    <string name="commitments_error_action_failed">Commitment update failed. Please try again.</string>
+    <string name="commitments_error_undo_failed">Undo failed. Please try again.</string>
     <string name="commitments_person_group_count_fmt">%1$d commitments</string>
 
     <!-- Commitment action_state labels (CMT-005..012) -->
@@ -416,10 +451,14 @@
     <string name="commitment_detail_due_label">마감</string>
     <string name="commitment_detail_last_edited_fmt">마지막 수정: %1$s (본인)</string>
     <string name="commitment_detail_disputed_badge_fmt">⚠ 원문 이의 제기됨 (%1$s)</string>
+    <string name="commitment_detail_disputed_label_fmt">Source disputed, %1$s</string>
     <string name="commitment_detail_superseded_link">이전 약속 보기</string>
     <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
     <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
+    <string name="commitment_detail_llm_source_original_fmt">Original · %1$s KST</string>
     <string name="commitment_detail_empty_error">삭제된 약속</string>
+    <string name="commitment_detail_error_missing_id">Commitment information is missing. Please go back and try again.</string>
+    <string name="commitment_detail_error_load_failed">Commitment detail could not be loaded.</string>
 
     <!-- Commitment action buttons (CMT-005..012 + EDIT-001) -->
     <string name="commitment_action_remind">리마인드</string>
@@ -451,7 +490,12 @@
     <string name="commitment_manual_field_due_pick">마감 선택</string>
     <string name="commitment_manual_field_due_hint">원문 표현 (예: 월말)</string>
     <string name="commitment_manual_field_due_approximate">대략적</string>
-    <string name="commitment_manual_save_failure">저장 실패 — 다시 시도해주세요</string>
+    <string name="commitment_manual_save_failure">저장에 실패했습니다. 다시 시도해 주세요</string>
+    <string name="commitment_save_error_supersede_source_not_found">Source commitment could not be found.</string>
+    <string name="commitment_save_error_login_required">Please sign in.</string>
+    <string name="commitment_save_error_deleted">This commitment was deleted.</string>
+    <string name="commitment_save_error_validation">Check the commitment details and try again.</string>
+    <string name="commitment_save_error_generic">Could not save. Try again.</string>
 
     <!-- Commitment edit sheet (EDIT-001..008) -->
     <string name="commitment_edit_title">약속 편집</string>
@@ -467,7 +511,7 @@
     <string name="commitment_edit_field_direction_give">내가 한 약속</string>
     <string name="commitment_edit_field_direction_take">상대가 한 약속</string>
     <string name="commitment_edit_readonly_source_label">출처 정보</string>
-    <string name="commitment_edit_readonly_quote_label">원문 (수정 불가 — 법적 증거)</string>
+    <string name="commitment_edit_readonly_quote_label">원문 (수정 불가, 법적 증거)</string>
     <string name="commitment_edit_readonly_quote_disputed">이의 제기됨</string>
     <string name="commitment_edit_toggle_dispute">원문 이의 제기 토글</string>
     <string name="commitment_edit_toggle_dispute_on">이의 제기</string>
@@ -519,6 +563,16 @@
     <string name="settings_wipe_confirm_title">Wipe all data?</string>
     <string name="settings_wipe_confirm_message">This will permanently delete all locally stored personal data and sign you out. This action cannot be undone.</string>
     <string name="settings_sign_out_pipa_note">Sign out does not delete local data. For permanent deletion, use Privacy Management → Delete Account.</string>
+    <string name="settings_error_load_failed">Settings could not be loaded. Please try again.</string>
+    <string name="settings_error_language_change_failed">Language setting could not be saved.</string>
+    <string name="settings_error_notifications_toggle_failed">Notification setting could not be saved.</string>
+    <string name="settings_error_calllog_matching_toggle_failed">Call log matching setting could not be saved.</string>
+    <string name="settings_error_calllog_permission_required">Call log permission is required for person matching.</string>
+    <string name="settings_error_consent_toggle_failed">Consent setting could not be saved.</string>
+    <string name="settings_error_voice_release_failed">Pending voice items could not be resumed.</string>
+    <string name="settings_error_voice_park_failed">Pending voice items could not be paused.</string>
+    <string name="settings_error_sign_out_failed">Sign out failed. Please try again.</string>
+    <string name="settings_error_wipe_failed">Local data could not be deleted. Please try again.</string>
 
     <!-- Sources list -->
     <string name="sources_title">Data Sources</string>
@@ -554,7 +608,7 @@
     <string name="onb_pipa_bullet_4_value">us-central1 (미국 중부)</string>
     <!-- Bullet 5: 보유 및 이용 기간 -->
     <string name="onb_pipa_bullet_5_label">보유 및 이용 기간</string>
-    <string name="onb_pipa_bullet_5_value">요청 처리 후 즉시 삭제 (ZDR — Zero Data Retention)</string>
+    <string name="onb_pipa_bullet_5_value">요청 처리 후 즉시 삭제 (ZDR, Zero Data Retention)</string>
     <!-- Bullet 6: 거부 권리 및 불이익 -->
     <string name="onb_pipa_bullet_6_label">거부 권리 및 불이익</string>
     <string name="onb_pipa_bullet_6_value">동의 거부 시 음성 자동 처리 기능만 비활성화되며, 나머지 앱 기능(이메일·캘린더 연동, 수동 입력)은 정상 사용 가능합니다. 설정에서 언제든지 변경하실 수 있습니다.</string>
@@ -588,6 +642,13 @@
     <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX only</string>
     <string name="source_detail_empty_events">No events recorded from this source yet.</string>
     <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
+    <string name="source_detail_error_missing_source_message">Source information is missing. Please go back and try again.</string>
+    <string name="source_detail_error_invalid_source">This source is not supported.</string>
+    <string name="source_detail_error_manual_sync_failed">Sync could not be started. Please try again.</string>
+    <string name="source_detail_error_meeting_audio_import_failed">Meeting audio could not be added.</string>
+    <string name="source_detail_error_meeting_transcript_import_failed">Meeting transcript could not be added.</string>
+    <string name="source_detail_error_disconnect_failed">Source could not be disconnected.</string>
+    <string name="source_detail_error_folder_probe_failed">Saved meeting folders could not be checked.</string>
     <string name="source_detail_danger_zone_title">Danger zone</string>
     <string name="source_detail_disconnect_body">Disconnect only this source. Existing local data stays on this device.</string>
 
@@ -596,13 +657,13 @@
     <string name="privacy_data_control_section">Data Control</string>
     <string name="privacy_processing_section">Processing</string>
     <string name="privacy_danger_section">Danger Zone</string>
-    <string name="privacy_export_title">내 데이터 다운로드 — 열람권(제35조)</string>
+    <string name="privacy_export_title">내 데이터 다운로드 (열람권, 제35조)</string>
     <string name="privacy_export_subtitle">Save the current on-device BeCalm data as a ZIP file.</string>
-    <string name="privacy_withdraw_title">동의 철회 — 동의철회권(제39조)</string>
+    <string name="privacy_withdraw_title">동의 철회 (동의철회권, 제39조)</string>
     <string name="privacy_withdraw_subtitle">Withdraw consent source-by-source and stop future automatic processing.</string>
-    <string name="privacy_pause_title">데이터 처리 일시중단 — 처리정지권(제37조)</string>
+    <string name="privacy_pause_title">데이터 처리 일시중단 (처리정지권, 제37조)</string>
     <string name="privacy_pause_subtitle">Temporarily pause background processing and resume with a catch-up sync later.</string>
-    <string name="privacy_delete_title">계정 삭제 — 삭제권(제36조)</string>
+    <string name="privacy_delete_title">계정 삭제 (삭제권, 제36조)</string>
     <string name="privacy_delete_subtitle_fmt">Deletes local account data. Current local summary: commitments %1$d, contact enrichment %2$d, email rows %3$d.</string>
     <string name="privacy_activity_log_title">활동 내역</string>
     <string name="privacy_activity_log_subtitle">Review local-only PIPA rights activity history.</string>
@@ -616,6 +677,12 @@
     <string name="privacy_correction_guidance">정정은 각 상세 편집 화면에서 처리됩니다. 약속 수정은 편집 화면, 연락처 보강은 원본 이벤트 또는 연락처 경로를 이용하세요.</string>
     <string name="privacy_export_cancelled">Export was cancelled.</string>
     <string name="privacy_export_failed">Could not write the export ZIP.</string>
+    <string name="privacy_error_sign_in_required">Please sign in again to continue.</string>
+    <string name="privacy_error_date_format">Enter the date as YYYY-MM-DD.</string>
+    <string name="privacy_error_email_mismatch">The email address does not match this account.</string>
+    <string name="privacy_error_confirmation_mismatch">Type 삭제 to confirm deletion.</string>
+    <string name="privacy_error_account_deletion_failed">Account deletion failed. Please try again.</string>
+    <string name="privacy_error_voice_withdraw_failed">Voice processing consent could not be withdrawn.</string>
     <string name="privacy_export_confirm_body">데이터를 ZIP 파일로 저장하시겠습니까?</string>
     <string name="privacy_pause_description">When processing is paused, BeCalm keeps your local data but skips all background ingestion and upload work until you resume it.</string>
     <string name="privacy_pause_switch_label">Pause all processing</string>
@@ -635,4 +702,14 @@
     <string name="privacy_withdraw_outlook_calendar_label">Outlook Calendar</string>
     <string name="processing_paused_banner">처리 일시중단 중</string>
     <string name="processing_status_title">Processing Status</string>
+    <string name="processing_phase_idle">No recent activity</string>
+    <string name="processing_phase_scanning">Scanning for new items</string>
+    <string name="processing_phase_new_items">New items found</string>
+    <string name="processing_phase_gemini">Gemini extraction in progress</string>
+    <string name="processing_phase_uploading">Uploading and extracting</string>
+    <string name="processing_phase_no_new_items">No new items</string>
+    <string name="processing_phase_synced">Processing complete</string>
+    <string name="processing_phase_blocked">Blocked</string>
+    <string name="processing_phase_error">Error</string>
+    <string name="processing_status_item_count_fmt">%1$d item(s)</string>
 </resources>

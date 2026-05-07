@@ -14,6 +14,7 @@ internal object CommitmentEditProjector {
             quote = entity.quote,
             quoteDisputed = entity.quoteDisputed,
             sourceLabel = buildSourceLabel(entity),
+            sourceType = entity.sourceType,
             sourceTitle = entity.sourceEventTitle,
             sourceOccurredAt = if (entity.sourceType == SourceType.MANUAL) {
                 entity.createdAt
@@ -41,8 +42,8 @@ internal object CommitmentEditProjector {
         direction = state.direction,
     )
 
-    fun toSaveError(error: BecalmError): String = CommitmentSaveErrorFormatter.format(error)
+    fun toSaveError(error: BecalmError): CommitmentText = CommitmentSaveErrorFormatter.format(error)
 
-    private fun buildSourceLabel(entity: CommitmentEntity): String =
+    private fun buildSourceLabel(entity: CommitmentEntity): CommitmentText =
         CommitmentDetailFormatter.buildCompactSourceLabel(entity)
 }

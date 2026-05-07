@@ -1,11 +1,13 @@
 package com.becalm.android.ui.settings
 
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.WorkScheduler
 import kotlinx.coroutines.flow.first
 
@@ -33,6 +35,7 @@ internal class SettingsPipaConsentHandler(
             val releasedIds = unwrapIdsOrShowError(
                 result = rawIngestionRepository.releaseAwaitingConsentVoiceAndReturnIds(userId),
                 failureLogPrefix = "releaseAwaitingConsentVoiceAndReturnIds failed",
+                failureMessage = UiMessage.resource(R.string.settings_error_voice_release_failed),
                 updateState = updateState,
             )
             val enqueuedCount = reenqueueReleasedVoice(userId, releasedIds)
@@ -41,6 +44,7 @@ internal class SettingsPipaConsentHandler(
             val parkedIds = unwrapIdsOrShowError(
                 result = rawIngestionRepository.parkAndCancelPendingVoice(userId),
                 failureLogPrefix = "parkAndCancelPendingVoice failed",
+                failureMessage = UiMessage.resource(R.string.settings_error_voice_park_failed),
                 updateState = updateState,
             )
             for (id in parkedIds) {
@@ -58,12 +62,13 @@ internal class SettingsPipaConsentHandler(
     private fun unwrapIdsOrShowError(
         result: BecalmResult<List<String>>,
         failureLogPrefix: String,
+        failureMessage: UiMessage,
         updateState: ((SettingsUiState) -> SettingsUiState) -> Unit,
     ): List<String> = when (result) {
         is BecalmResult.Success -> result.value
         is BecalmResult.Failure -> {
             logger.e(TAG, "$failureLogPrefix: ${result.error}")
-            updateState { it.copy(error = result.error.toString()) }
+            updateState { it.copy(error = failureMessage) }
             emptyList()
         }
     }
@@ -109,6 +114,7 @@ internal class SettingsSessionActionHandler(
 
     suspend fun runAuthOp(
         failureLogPrefix: String,
+        failureMessage: UiMessage,
         op: suspend () -> BecalmResult<Unit>,
         onSuccess: () -> Unit,
         updateState: ((SettingsUiState) -> SettingsUiState) -> Unit,
@@ -118,7 +124,7 @@ internal class SettingsSessionActionHandler(
             is BecalmResult.Success -> onSuccess()
             is BecalmResult.Failure -> {
                 logger.w(TAG, "$failureLogPrefix: ${result.error}")
-                updateState { it.copy(loading = false, error = result.error.toString()) }
+                updateState { it.copy(loading = false, error = failureMessage) }
             }
         }
     }
@@ -127,6 +133,7 @@ internal class SettingsSessionActionHandler(
         updateState: ((SettingsUiState) -> SettingsUiState) -> Unit,
     ) = runAuthOp(
         failureLogPrefix = "sign-out failed",
+        failureMessage = UiMessage.resource(R.string.settings_error_sign_out_failed),
         op = { authRepository.invalidateSession() },
         onSuccess = {
             logger.d(TAG, "sign-out completed (session invalidated, Room preserved)")
@@ -139,6 +146,7 @@ internal class SettingsSessionActionHandler(
         updateState: ((SettingsUiState) -> SettingsUiState) -> Unit,
     ) = runAuthOp(
         failureLogPrefix = "PIPA wipe failed",
+        failureMessage = UiMessage.resource(R.string.settings_error_wipe_failed),
         op = { authRepository.signOut() },
         onSuccess = {
             logger.d(TAG, "PIPA wipe and sign-out completed")

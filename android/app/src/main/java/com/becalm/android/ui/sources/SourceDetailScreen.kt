@@ -39,9 +39,10 @@ import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.ErrorState
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.sourceStatusLabelRes
-import com.becalm.android.ui.components.statusStringToSyncStatus
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchSourceDetailEffect
@@ -108,7 +109,7 @@ public fun SourceDetailScreen(
             state.error != null -> {
                 ErrorState(
                     title = stringResource(R.string.source_detail_error_missing_source),
-                    message = state.error,
+                    message = uiMessageStringResource(requireNotNull(state.error)),
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -165,8 +166,7 @@ public fun SourceDetailScreenContent(
     onMeetingAudioAdd: () -> Unit,
     onMeetingTranscriptAdd: () -> Unit,
 ) {
-    val syncStatus = statusStringToSyncStatus(state.status)
-    val statusLabel = stringResource(sourceStatusLabelRes(syncStatus))
+    val statusLabel = stringResource(sourceStatusLabelRes(state.status))
 
     LazyColumn(
         contentPadding = contentPadding,
@@ -177,7 +177,7 @@ public fun SourceDetailScreenContent(
         item {
             SourceStatusSummarySection(
                 state = state,
-                syncStatus = syncStatus,
+                syncStatus = state.status,
                 statusLabel = statusLabel,
                 onReconnect = onReconnect,
                 onManualSync = onManualSync,
@@ -256,7 +256,7 @@ private fun PreviewSourceDetailScreenWithEvents() {
             SourceDetailScreenContent(
                 state = SourceDetailUiState(
                     sourceType = "gmail",
-                    status = "CONNECTED",
+                    status = SourceSyncStatus.Connected,
                     recentEvents = listOf(
                         RecentEventSummary(
                             id = "evt1",

@@ -1,6 +1,8 @@
 package com.becalm.android.unit.ui.auth
 
+import com.becalm.android.R
 import com.becalm.android.ui.auth.AuthUiState
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.auth.splashDestinationFor
 import com.becalm.android.ui.navigation.BecalmRoute
 import org.junit.Assert.assertEquals
@@ -67,7 +69,7 @@ class SplashRouteResolverSpecTest {
     fun `error routes to terms fallback`() {
         assertEquals(
             BecalmRoute.Terms.path,
-            splashDestinationFor(AuthUiState.Error("boom")),
+            splashDestinationFor(AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))),
         )
     }
 }

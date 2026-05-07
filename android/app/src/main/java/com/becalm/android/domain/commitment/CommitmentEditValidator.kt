@@ -37,9 +37,8 @@ public data class CommitmentEditDraft(
  *   empty initial state.
  *
  * Returns [ValidationResult.Ok] on success or [ValidationResult.Err] with a
- * [Field]-keyed map of human-readable error messages. The VM forwards these to
- * localized resources; the validator emits English seed strings so the unit
- * tests can assert without pulling in Android resources.
+ * [Field]-keyed map of stable error codes. The UI maps these codes to
+ * localized resources, keeping the validator Android-free.
  *
  * Spec refs: `.spec/commitment-edit.spec.yml` EDIT-004.
  */
@@ -54,9 +53,16 @@ public object CommitmentEditValidator {
      */
     public enum class Field { TITLE, DUE_AT, PERSON_REF, DIRECTION }
 
+    public enum class Error {
+        TITLE_REQUIRED,
+        TITLE_TOO_LONG,
+        PERSON_REF_INVALID,
+        DIRECTION_INVALID,
+    }
+
     public sealed interface ValidationResult {
         public data object Ok : ValidationResult
-        public data class Err(val fieldErrors: Map<Field, String>) : ValidationResult
+        public data class Err(val fieldErrors: Map<Field, Error>) : ValidationResult
     }
 
     /**
@@ -64,13 +70,13 @@ public object CommitmentEditValidator {
      * change to drive live error state.
      */
     public fun validate(input: CommitmentEditDraft): ValidationResult {
-        val errors = mutableMapOf<Field, String>()
+        val errors = mutableMapOf<Field, Error>()
 
         val trimmedTitle = input.title.trim()
         when {
-            trimmedTitle.isEmpty() -> errors[Field.TITLE] = "Title must not be empty"
+            trimmedTitle.isEmpty() -> errors[Field.TITLE] = Error.TITLE_REQUIRED
             trimmedTitle.length > TITLE_MAX ->
-                errors[Field.TITLE] = "Title must be at most $TITLE_MAX characters"
+                errors[Field.TITLE] = Error.TITLE_TOO_LONG
         }
 
         // dueAtMillis: null is allowed. Any non-null Long is a valid Instant — we
@@ -78,12 +84,11 @@ public object CommitmentEditValidator {
 
         val normalisedRef = CounterpartyRefNormalizer.normalize(input.counterpartyRef)
         if (normalisedRef != null && !CounterpartyRefNormalizer.isValidPhoneShapeOrFreeForm(normalisedRef)) {
-            errors[Field.PERSON_REF] =
-                "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)"
+            errors[Field.PERSON_REF] = Error.PERSON_REF_INVALID
         }
 
         if (input.direction != "give" && input.direction != "take") {
-            errors[Field.DIRECTION] = "Direction must be 'give' or 'take'"
+            errors[Field.DIRECTION] = Error.DIRECTION_INVALID
         }
 
         return if (errors.isEmpty()) ValidationResult.Ok else ValidationResult.Err(errors)

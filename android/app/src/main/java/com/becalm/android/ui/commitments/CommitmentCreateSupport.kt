@@ -22,6 +22,6 @@ internal object CommitmentCreateProjector {
             }
         }
 
-    fun saveError(error: BecalmError): String =
+    fun saveError(error: BecalmError): CommitmentText =
         CommitmentSaveErrorFormatter.format(error)
 }

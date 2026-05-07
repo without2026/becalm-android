@@ -67,3 +67,9 @@ public data class SourceConnectionItemUi(
     val consentCopy: String?,
     val state: SourceConnectionState,
 )
+
+internal enum class SourceConnectionsEntryPoint {
+    Setup,
+    Onboarding,
+    Settings,
+}

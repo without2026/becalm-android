@@ -28,7 +28,6 @@ import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.ui.persons.ARG_EVENT_ID
 import com.becalm.android.ui.persons.ARG_PERSON_ID
-import com.becalm.android.ui.persons.InteractionRow
 import com.becalm.android.ui.persons.PersonDetailViewModel
 import com.becalm.android.ui.persons.RawEventDetailViewModel
 import com.becalm.android.ui.persons.RoomBackedRawEventDetailProjectionPort
@@ -199,8 +198,8 @@ class PersonDetailLocalIntegrationTest {
                 indexedInteraction(personId, SourceType.GMAIL, "raw:event-1", "email", "counterparty", null, null, Instant.parse("2026-04-23T03:00:00Z"), "메일 제목", "메일 미리보기"),
                 indexedInteraction(personId, SourceType.GOOGLE_CALENDAR, "calendar:meeting-1", "calendar", "attendee", null, null, Instant.parse("2026-04-23T02:30:00Z"), "캘린더 미팅", PERSON_REF),
                 indexedInteraction(personId, SourceType.VOICE, "raw:event-2", "call", "counterparty", null, null, Instant.parse("2026-04-23T02:00:00Z"), "음성 메모", "음성 메모 미리보기"),
-                indexedInteraction(personId, SourceType.GMAIL, "commitment:c-pending", "commitment", CommitmentItemType.ACTION, "give", "pending", Instant.parse("2026-04-23T03:00:00Z"), "미완료 약속", "quote"),
-                indexedInteraction(personId, SourceType.VOICE, "commitment:c-completed", "commitment", CommitmentItemType.ACTION, "give", "completed", Instant.parse("2026-04-23T01:00:00Z"), "완료된 약속", "quote"),
+                indexedInteraction(personId, SourceType.GMAIL, "raw:event-1", "commitment", CommitmentItemType.ACTION, "give", "pending", Instant.parse("2026-04-23T03:00:00Z"), "미완료 약속", "quote"),
+                indexedInteraction(personId, SourceType.VOICE, "raw:event-2", "commitment", CommitmentItemType.ACTION, "give", "completed", Instant.parse("2026-04-23T01:00:00Z"), "완료된 약속", "quote"),
             ),
         )
 
@@ -227,14 +226,16 @@ class PersonDetailLocalIntegrationTest {
             assertEquals(1, state.pendingCommitmentCount)
             assertEquals(setOf(SourceType.GMAIL, SourceType.VOICE, SourceType.GOOGLE_CALENDAR), state.channelSources)
             assertEquals(
-                listOf("미완료 약속", "메일 제목", "캘린더 미팅", "음성 메모", "완료된 약속"),
-                state.timeline.map { row ->
-                    when (row) {
-                        is InteractionRow.Event -> row.summary
-                        is InteractionRow.CalendarMeeting -> row.title
-                        is InteractionRow.Commitment -> row.title
-                    }
-                },
+                listOf("메일 제목", "캘린더 미팅", "음성 메모"),
+                state.sourceEventCards.map { it.title },
+            )
+            assertEquals(
+                listOf("미완료 약속"),
+                state.sourceEventCards.single { it.sourceEventKey == "raw:event-1" }.myActions.map { it.title },
+            )
+            assertEquals(
+                listOf("완료된 약속"),
+                state.sourceEventCards.single { it.sourceEventKey == "raw:event-2" }.myActions.map { it.title },
             )
             cancelAndIgnoreRemainingEvents()
         }

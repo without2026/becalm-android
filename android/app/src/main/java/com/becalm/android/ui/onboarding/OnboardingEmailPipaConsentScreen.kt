@@ -39,10 +39,10 @@ import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -461,11 +461,9 @@ private fun EmailPipaDisclosureHeader(copy: EmailPipaCopy) {
 
 @Composable
 private fun EmailPipaDisclosurePanel(copy: EmailPipaCopy) {
-    Column(
+    QuietPanel(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
+            .fillMaxWidth(),
     ) {
         PipaBulletLine(labelRes = R.string.onb_pipa_email_recipient, valueRes = copy.recipientRes)
         Spacer(modifier = Modifier.height(8.dp))

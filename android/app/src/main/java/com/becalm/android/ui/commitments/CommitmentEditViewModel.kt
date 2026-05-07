@@ -11,6 +11,7 @@ import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.domain.commitment.CommitmentEditDraft
 import com.becalm.android.domain.commitment.CommitmentEditValidator
 import com.becalm.android.domain.commitment.CommitmentEditValidator.Field
+import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.domain.commitment.CommitmentEditValidator.ValidationResult
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,12 +39,13 @@ import kotlinx.datetime.Instant
  *
  * @property quote Verbatim source quote; never mutable from this screen.
  * @property quoteDisputed Current value of `quote_disputed` (EDIT-005).
- * @property sourceLabel Human-readable source line (e.g. "manual", "voice · 3/12 14:05 KST").
+ * @property sourceLabel Human-readable source line resource with formatted args.
  */
 public data class EditReadOnly(
     val quote: String,
     val quoteDisputed: Boolean,
-    val sourceLabel: String,
+    val sourceLabel: CommitmentText,
+    val sourceType: String? = null,
     val sourceTitle: String? = null,
     val sourceOccurredAt: Instant? = null,
     val isManual: Boolean = false,
@@ -56,8 +58,8 @@ public data class EditReadOnly(
  *   types (the form does not re-flip to loading on every keystroke).
  * - [saving] is true while a repository write is in flight — the save button
  *   uses this to show a spinner and disable itself.
- * - [fieldErrors] keyed by [Field] so the Composable can render per-field
- *   helper text without string-matching.
+ * - [fieldErrors] keyed by [Field] so the Composable can render localized
+ *   per-field helper text without string-matching.
  * - [notFound] flips true when the repository reports `NotFound` on load —
  *   the Sheet dismisses itself in that case.
  * - [saveError] is a single-shot human-readable message; the Sheet displays
@@ -73,9 +75,9 @@ public data class EditUiState(
     val dueIsApproximate: Boolean = false,
     val dueHint: String = "",
     val counterpartyRef: String = "",
-    val direction: String = "give",
-    val fieldErrors: Map<Field, String> = emptyMap(),
-    val saveError: String? = null,
+    val direction: String = CommitmentWire.DIRECTION_GIVE,
+    val fieldErrors: Map<Field, CommitmentText> = emptyMap(),
+    val saveError: CommitmentText? = null,
 )
 
 /**
@@ -198,7 +200,11 @@ public class CommitmentEditViewModel @Inject constructor(
         val draft = CommitmentEditProjector.toDraft(snap)
         when (val v = CommitmentEditValidator.validate(draft)) {
             is ValidationResult.Err -> {
-                _uiState.update { it.copy(fieldErrors = v.fieldErrors) }
+                _uiState.update {
+                    it.copy(fieldErrors = v.fieldErrors.mapValues { entry ->
+                        editValidationErrorText(entry.value)
+                    })
+                }
                 return
             }
             is ValidationResult.Ok -> Unit

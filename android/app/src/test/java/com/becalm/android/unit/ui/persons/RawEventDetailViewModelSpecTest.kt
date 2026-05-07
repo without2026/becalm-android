@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
+import com.becalm.android.R
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
@@ -67,7 +68,7 @@ class RawEventDetailViewModelSpecTest {
     fun `missing event id yields immediate error state`() = runTest {
         val viewModel = buildViewModel(eventId = "")
 
-        assertEquals("Event ID missing", viewModel.uiState.value.error)
+        assertEquals(R.string.raw_event_detail_error_missing_id, viewModel.uiState.value.error?.resId)
         assertFalse(viewModel.uiState.value.loading)
     }
 
@@ -78,7 +79,7 @@ class RawEventDetailViewModelSpecTest {
         val viewModel = buildViewModel(eventId = "evt-1")
         advanceUntilIdle()
 
-        assertEquals("Event not found", viewModel.uiState.value.error)
+        assertEquals(R.string.raw_event_detail_not_found, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 0) { rawIngestionRepository.findById(any(), any()) }
     }
 

@@ -8,6 +8,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.domain.commitment.CommitmentManualValidator
 import com.becalm.android.domain.commitment.CommitmentManualValidator.Field
 import com.becalm.android.domain.commitment.CommitmentManualValidator.ValidationResult
@@ -53,7 +54,7 @@ public enum class CommitmentCreateMode { MANUAL, SUPERSEDE }
  *   the old row being superseded — the quote + source columns render from it
  *   verbatim. Null in [CommitmentCreateMode.MANUAL] mode.
  * @property draft Raw form state handed to [CommitmentManualValidator].
- * @property fieldErrors Per-field localised error messages surfaced adjacent
+ * @property fieldErrors Per-field localised error message resources surfaced adjacent
  *   to each input.
  * @property saving True while the repository write is in flight — the save
  *   button shows a spinner and disables itself.
@@ -67,17 +68,17 @@ public data class CreateUiState(
     val supersedeSource: CommitmentEntity? = null,
     val draft: ManualCommitmentDraft = ManualCommitmentDraft(
         title = "",
-        direction = "give",
+        direction = CommitmentWire.DIRECTION_GIVE,
         quote = "",
         counterpartyRef = null,
         dueAtMillis = null,
         dueHint = null,
         dueIsApproximate = false,
     ),
-    val fieldErrors: Map<Field, String> = emptyMap(),
+    val fieldErrors: Map<Field, CommitmentText> = emptyMap(),
     val saving: Boolean = false,
     val saved: Boolean = false,
-    val saveError: String? = null,
+    val saveError: CommitmentText? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -220,7 +221,11 @@ public class CommitmentCreateViewModel @Inject constructor(
         }
         when (val v = CommitmentManualValidator.validate(effectiveDraft)) {
             is ValidationResult.Err -> {
-                _uiState.update { it.copy(fieldErrors = v.fieldErrors) }
+                _uiState.update {
+                    it.copy(fieldErrors = v.fieldErrors.mapValues { entry ->
+                        manualValidationErrorText(entry.value)
+                    })
+                }
                 return
             }
             is ValidationResult.Ok -> Unit

@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.commitments
 
 import app.cash.turbine.test
+import com.becalm.android.R
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
@@ -440,7 +441,7 @@ class CommitmentManagementViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(false, viewModel.uiState.value.refreshing)
-        assertTrue(viewModel.uiState.value.error?.contains("boom") == true)
+        assertEquals(R.string.commitments_error_refresh_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 1) {
             sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = null, since = null)
         }
@@ -496,7 +497,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.onRemind("remind-3")
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.error?.contains("illegal") == true)
+        assertEquals(R.string.commitments_error_action_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
@@ -599,7 +600,7 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.onUndo(CommitmentUndoSnapshot.Completed("undo-1", CommitmentState.PENDING))
         advanceUntilIdle()
 
-        assertTrue(viewModel.uiState.value.error?.contains("undo failed") == true)
+        assertEquals(R.string.commitments_error_undo_failed, viewModel.uiState.value.error?.resId)
         coVerify(exactly = 1) {
             commitmentRepository.updateActionState(
                 id = "undo-1",

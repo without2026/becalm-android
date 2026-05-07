@@ -34,6 +34,7 @@ import com.becalm.android.ui.sources.SourceDetailViewModel
 import com.becalm.android.ui.sources.SourceSyncPort
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
+import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.worker.ingestion.ImapNaverWorker
 import io.mockk.every
 import io.mockk.mockk
@@ -169,16 +170,16 @@ class SourcesLocalIntegrationTest {
             }
 
             assertEquals(CONTACTS_SOURCE_TYPE, state.items.first().sourceType)
-            assertEquals("CONNECTED", state.items.first().status)
+            assertEquals(SourceSyncStatus.Connected, state.items.first().status)
             assertEquals(2, state.items.first().enrichedCount)
             assertEquals(Instant.parse("2026-04-23T03:00:00Z"), state.items.first().lastSyncAt)
 
             val voice = state.items.first { it.sourceType == SourceType.VOICE }
-            assertEquals("CONNECTED", voice.status)
+            assertEquals(SourceSyncStatus.Connected, voice.status)
 
             val naver = state.items.first { it.sourceType == SourceType.NAVER_IMAP }
-            assertEquals("ERROR", naver.status)
-            assertEquals("reauth required", naver.lastError)
+            assertEquals(SourceSyncStatus.Error, naver.status)
+            assertTrue(naver.hasError)
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -239,7 +240,7 @@ class SourcesLocalIntegrationTest {
             }
 
             assertEquals(SourceType.GMAIL, state.sourceType)
-            assertEquals(SourceConnectionStatus.CONNECTED.name, state.status)
+            assertEquals(SourceSyncStatus.Connected, state.status)
             assertEquals(2, state.eventsSyncedCount)
             assertEquals(syncedAt, state.lastSyncAt)
             assertTrue(state.showDisconnectButton)
@@ -326,14 +327,14 @@ class SourcesLocalIntegrationTest {
 
         sourceDetailViewModel.state.test {
             var state = awaitItem()
-            while (state.status != SourceConnectionStatus.CONNECTED.name || state.recentEvents.isEmpty()) {
+            while (state.status != SourceSyncStatus.Connected || state.recentEvents.isEmpty()) {
                 state = awaitItem()
             }
 
             sourceDetailViewModel.onDisconnectClick()
             sourceDetailViewModel.onDisconnectConfirm()
 
-            while (state.disconnectOutcome == null || state.status != SourceConnectionStatus.NEVER_CONNECTED.name) {
+            while (state.disconnectOutcome == null || state.status != SourceSyncStatus.Disconnected) {
                 state = awaitItem()
             }
 

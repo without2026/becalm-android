@@ -28,9 +28,9 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchContactsSourceDetailEffect
-import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Settings detail screen for the contacts pseudo-source.
@@ -72,11 +72,9 @@ internal fun ContactsSourceDetailContent(
     onPermissionAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    QuietPanel(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
             .padding(16.dp),
     ) {
         Text(

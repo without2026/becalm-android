@@ -4,15 +4,16 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.becalm.android.core.result.BecalmError
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
-import com.becalm.android.core.result.safeMessage
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.meeting.MeetingImportFolderKind
+import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,16 +58,16 @@ public data class RecentEventSummary(
  * UI state for the source detail screen (SMG-003..005).
  *
  * @param sourceType The [com.becalm.android.data.remote.dto.SourceType] string for this screen.
- * @param status Human-readable connection status label.
+ * @param status Typed UI status used by shared source-status indicators.
  * @param recentEvents Up to 50 most-recent raw ingestion events for this source, newest-first.
  * @param error Non-null when the sourceType argument is absent or blank.
  */
 public data class SourceDetailUiState(
     val sourceType: String = "",
-    val status: String = "",
+    val status: SourceSyncStatus = SourceSyncStatus.Unknown,
     val lastSyncAt: Instant? = null,
     val eventsSyncedCount: Int? = null,
-    val lastError: String? = null,
+    val hasError: Boolean = false,
     val showReconnectButton: Boolean = false,
     val showDisconnectButton: Boolean = false,
     val showManualSyncButton: Boolean = false,
@@ -76,9 +77,9 @@ public data class SourceDetailUiState(
     val meetingTranscriptPickerInitialUri: String? = null,
     val showDisconnectConfirmDialog: Boolean = false,
     val disconnectOutcome: SourceDisconnectOutcome? = null,
-    val actionError: String? = null,
+    val actionError: UiMessage? = null,
     val recentEvents: List<RecentEventSummary> = emptyList(),
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 /** UI-neutral reconnect destinations emitted by [SourceDetailViewModel]. */
@@ -175,10 +176,7 @@ public class SourceDetailViewModel @Inject constructor(
                 is BecalmResult.Success -> _actionError.value = null
                 is BecalmResult.Failure -> {
                     _disconnectOutcome.value = null
-                    _actionError.value = when (val error = result.error) {
-                        is BecalmError.Validation -> error.message
-                        else -> error.safeMessage
-                    }
+                    _actionError.value = UiMessage.resource(R.string.source_detail_error_manual_sync_failed)
                 }
             }
         }
@@ -190,7 +188,7 @@ public class SourceDetailViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = meetingImportRepository.importAudio(uri)) {
                 is BecalmResult.Success -> _actionError.value = null
-                is BecalmResult.Failure -> _actionError.value = result.error.safeMessage
+                is BecalmResult.Failure -> _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed)
             }
         }
     }
@@ -201,7 +199,7 @@ public class SourceDetailViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = meetingImportRepository.importTranscript(uri)) {
                 is BecalmResult.Success -> _actionError.value = null
-                is BecalmResult.Failure -> _actionError.value = result.error.safeMessage
+                is BecalmResult.Failure -> _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_transcript_import_failed)
             }
         }
     }
@@ -257,7 +255,7 @@ public class SourceDetailViewModel @Inject constructor(
     }
     private val _dialogState = MutableStateFlow(false)
     private val _disconnectOutcome = MutableStateFlow<SourceDisconnectOutcome?>(null)
-    private val _actionError = MutableStateFlow<String?>(null)
+    private val _actionError = MutableStateFlow<UiMessage?>(null)
     private val _meetingPickerFolders = MutableStateFlow(MeetingPickerFolders())
     private val meetingPickerStateFlow = combine(
         _actionError,
@@ -274,14 +272,14 @@ public class SourceDetailViewModel @Inject constructor(
      */
     public val state: StateFlow<SourceDetailUiState> = if (sourceType.isBlank()) {
         MutableStateFlow(
-            SourceDetailUiState(error = "sourceType argument is missing or blank"),
+            SourceDetailUiState(error = UiMessage.resource(R.string.source_detail_error_missing_source_message)),
         )
     } else if (!hasValidSourceType) {
         // Schema-level guard — any value not declared in data-model.yml's source_type
         // enum is rejected. We use ALL (not PRODUCT_SOURCES) so deep links to VOICE or
         // (future) CALL_RECORDING detail routes remain navigable once their UI ships.
         MutableStateFlow(
-            SourceDetailUiState(error = "Invalid source type"),
+            SourceDetailUiState(error = UiMessage.resource(R.string.source_detail_error_invalid_source)),
         )
     } else {
         combine(
@@ -327,7 +325,7 @@ public class SourceDetailViewModel @Inject constructor(
         sourceEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
-        actionError: String?,
+        actionError: UiMessage?,
         pickerFolders: MeetingPickerFolders,
     ): SourceDetailUiState {
         val base = SourceDetailProjector.buildUiState(
@@ -357,7 +355,7 @@ public class SourceDetailViewModel @Inject constructor(
             _meetingPickerFolders.value = MeetingPickerFolders(audioUri, transcriptUri)
             val firstFailure = listOf(audio, transcript).filterIsInstance<BecalmResult.Failure>().firstOrNull()
             if (firstFailure != null) {
-                _actionError.value = firstFailure.error.safeMessage
+                _actionError.value = UiMessage.resource(R.string.source_detail_error_folder_probe_failed)
             }
         }
     }

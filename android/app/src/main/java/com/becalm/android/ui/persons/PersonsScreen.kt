@@ -34,10 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -46,18 +42,20 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmTextField
+import com.becalm.android.ui.components.ContactRow
 import com.becalm.android.ui.components.EmptyState
+import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.MainTabHeaderActions
 import com.becalm.android.ui.components.MainTabStatusHeader
 import com.becalm.android.ui.components.SkeletonBlock
 import com.becalm.android.ui.components.becalmSkeletonColor
 import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.main.MainTabHeaderViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
-import com.becalm.android.ui.theme.glassPanel
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -80,7 +78,8 @@ public fun PersonsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val headerState by headerViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    HandleSnackbarMessage(state.error, snackbarHostState, viewModel::onErrorDismissed)
+    val errorMessage = state.error?.let { uiMessageStringResource(it) }
+    HandleSnackbarMessage(errorMessage, snackbarHostState, viewModel::onErrorDismissed)
 
     PersonsScreenContent(
         state = state,
@@ -178,36 +177,35 @@ private fun MatchingRequiredBanner(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    EvidenceCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(onClick = onClick),
     ) {
-        Icon(
-            imageVector = Icons.Filled.Warning,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(28.dp),
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.person_matching_required_banner_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(28.dp),
             )
-            Text(
-                text = stringResource(R.string.person_matching_required_banner_body, count),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        TextButton(onClick = onClick) {
-            Text(text = stringResource(R.string.person_matching_required_banner_action))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.person_matching_required_banner_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.person_matching_required_banner_body, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onClick) {
+                Text(text = stringResource(R.string.person_matching_required_banner_action))
+            }
         }
     }
 }
@@ -339,43 +337,18 @@ private fun PersonRowItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .background(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f),
-                shape = MaterialTheme.shapes.medium,
-            )
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.medium,
-            )
-            .clickable(onClick = onClick)
-            .padding(16.dp)
-            .semantics { role = Role.Button },
-        verticalAlignment = Alignment.CenterVertically,
+    ContactRow(
+        headline = buildDisplayHeadline(person),
+        metadata = person.interactionCount
+            .takeIf { it > 0 }
+            ?.let { stringResource(R.string.persons_interactions_count, it) },
+        attentionLabel = person.pendingCommitmentCount
+            .takeIf { it > 0 }
+            ?.let { stringResource(R.string.persons_pending_commitments_fmt, it) },
+        onClick = onClick,
+        modifier = modifier,
     ) {
         PersonAvatar(person = person)
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = buildDisplayHeadline(person),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (person.pendingCommitmentCount > 0) {
-                PendingCommitmentBadge(count = person.pendingCommitmentCount)
-            }
-            if (person.interactionCount > 0) {
-                Text(
-                    text = stringResource(R.string.persons_interactions_count, person.interactionCount),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
@@ -405,50 +378,33 @@ private fun PersonAvatar(person: PersonRow) {
 }
 
 @Composable
-private fun PendingCommitmentBadge(count: Int) {
-    Text(
-        text = stringResource(R.string.persons_pending_commitments_fmt, count),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier
-            .padding(top = 4.dp)
-            .background(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.extraSmall,
-            )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
-}
-
-@Composable
 private fun UnassignedEventRow(
     event: UnassignedEventSummary,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    EvidenceCard(
         modifier = modifier
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = Icons.Filled.Person,
-            contentDescription = null,
-            modifier = Modifier.size(36.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = event.title ?: stringResource(R.string.raw_event_detail_no_title),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Filled.Person,
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = stringResource(sourcePresentationFor(event.sourceType).labelRes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = event.title ?: stringResource(R.string.raw_event_detail_no_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(sourcePresentationFor(event.sourceType).labelRes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -460,16 +416,17 @@ private fun OfflineBadge(lastSyncAt: Instant?) {
     } else {
         stringResource(R.string.persons_offline_badge_fmt, lastSyncAt.toHourMinuteLabel())
     }
-    Text(
-        text = copy,
+    EvidenceCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(12.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = copy,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }
 
 private fun avatarInitial(seed: String): String =

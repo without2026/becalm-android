@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.becalm.android.R
 import com.becalm.android.domain.commitment.CommitmentManualValidator.Field
+import com.becalm.android.ui.components.CommitmentWire
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -200,7 +201,7 @@ internal fun CreateSheetContent(
                     label = { Text(text = stringResource(R.string.commitment_manual_field_title)) },
                     isError = state.fieldErrors.containsKey(Field.TITLE),
                     supportingText = {
-                        state.fieldErrors[Field.TITLE]?.let { Text(text = it) }
+                        state.fieldErrors[Field.TITLE]?.let { Text(text = commitmentStringResource(it)) }
                     },
                     singleLine = true,
                     enabled = !state.saving,
@@ -222,7 +223,7 @@ internal fun CreateSheetContent(
                     state.fieldErrors[Field.DIRECTION]?.let {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = it,
+                            text = commitmentStringResource(it),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -241,7 +242,7 @@ internal fun CreateSheetContent(
                             label = { Text(text = stringResource(R.string.commitment_manual_quote_hint)) },
                             isError = state.fieldErrors.containsKey(Field.QUOTE),
                             supportingText = {
-                                state.fieldErrors[Field.QUOTE]?.let { Text(text = it) }
+                                state.fieldErrors[Field.QUOTE]?.let { Text(text = commitmentStringResource(it)) }
                             },
                             enabled = !state.saving,
                             modifier = Modifier
@@ -273,7 +274,7 @@ internal fun CreateSheetContent(
                     },
                     isError = state.fieldErrors.containsKey(Field.PERSON_REF),
                     supportingText = {
-                        state.fieldErrors[Field.PERSON_REF]?.let { Text(text = it) }
+                        state.fieldErrors[Field.PERSON_REF]?.let { Text(text = commitmentStringResource(it)) }
                     },
                     singleLine = true,
                     enabled = !state.saving,
@@ -352,7 +353,7 @@ internal fun CreateSheetContent(
 
         state.saveError?.let {
             Text(
-                text = it,
+                text = commitmentStringResource(it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -431,15 +432,15 @@ private fun DirectionRow(
     ) {
         DirectionOption(
             label = stringResource(R.string.commitment_manual_field_direction_give),
-            selected = current == "give",
+            selected = current == CommitmentWire.DIRECTION_GIVE,
             enabled = enabled,
-            onSelect = { onChange("give") },
+            onSelect = { onChange(CommitmentWire.DIRECTION_GIVE) },
         )
         DirectionOption(
             label = stringResource(R.string.commitment_manual_field_direction_take),
-            selected = current == "take",
+            selected = current == CommitmentWire.DIRECTION_TAKE,
             enabled = enabled,
-            onSelect = { onChange("take") },
+            onSelect = { onChange(CommitmentWire.DIRECTION_TAKE) },
         )
     }
 }

@@ -37,13 +37,13 @@ class CommitmentManualValidatorSpecTest {
     fun `MAN-005 rejects blank title and blank quote after trim`() {
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
-                mapOf(CommitmentManualValidator.Field.TITLE to "Title must not be empty"),
+                mapOf(CommitmentManualValidator.Field.TITLE to CommitmentManualValidator.Error.TITLE_REQUIRED),
             ),
             CommitmentManualValidator.validate(validDraft(title = "  ")),
         )
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
-                mapOf(CommitmentManualValidator.Field.QUOTE to "Quote must not be empty"),
+                mapOf(CommitmentManualValidator.Field.QUOTE to CommitmentManualValidator.Error.QUOTE_REQUIRED),
             ),
             CommitmentManualValidator.validate(validDraft(quote = "  ")),
         )
@@ -57,13 +57,13 @@ class CommitmentManualValidatorSpecTest {
         )
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
-                mapOf(CommitmentManualValidator.Field.TITLE to "Title must be at most 200 characters"),
+                mapOf(CommitmentManualValidator.Field.TITLE to CommitmentManualValidator.Error.TITLE_TOO_LONG),
             ),
             CommitmentManualValidator.validate(validDraft(title = "a".repeat(201))),
         )
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
-                mapOf(CommitmentManualValidator.Field.QUOTE to "Quote must be at most 500 characters"),
+                mapOf(CommitmentManualValidator.Field.QUOTE to CommitmentManualValidator.Error.QUOTE_TOO_LONG),
             ),
             CommitmentManualValidator.validate(validDraft(quote = "q".repeat(501))),
         )
@@ -73,15 +73,14 @@ class CommitmentManualValidatorSpecTest {
     fun `MAN-005 rejects invalid direction and invalid phone-shaped person ref`() {
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
-                mapOf(CommitmentManualValidator.Field.DIRECTION to "Direction must be 'give' or 'take'"),
+                mapOf(CommitmentManualValidator.Field.DIRECTION to CommitmentManualValidator.Error.DIRECTION_INVALID),
             ),
             CommitmentManualValidator.validate(validDraft(direction = "other")),
         )
         assertEquals(
             CommitmentManualValidator.ValidationResult.Err(
                 mapOf(
-                    CommitmentManualValidator.Field.PERSON_REF to
-                        "Phone-shaped person reference must be valid E.164 (e.g. +821012345678)",
+                    CommitmentManualValidator.Field.PERSON_REF to CommitmentManualValidator.Error.PERSON_REF_INVALID,
                 ),
             ),
             CommitmentManualValidator.validate(validDraft(counterpartyRef = "010-2222-3333")),

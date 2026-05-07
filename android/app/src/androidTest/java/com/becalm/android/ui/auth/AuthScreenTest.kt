@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -153,7 +154,7 @@ class AuthScreenTest {
             BecalmTheme {
                 SplashScreen(
                     navController = rememberNavController(),
-                    stateOverride = AuthUiState.Error("session failed"),
+                    stateOverride = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed)),
                     onNavigate = { destination = it },
                 )
             }
@@ -181,7 +182,9 @@ class AuthScreenTest {
         composeTestRule.onNodeWithText(string(R.string.login_cta)).performClick()
 
         composeTestRule.onNodeWithText(string(R.string.login_error_empty_fields)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("google-sign-in-button").assertIsNotEnabled()
         composeTestRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
+        composeTestRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
     }
 
     @Test
@@ -316,7 +319,7 @@ class AuthScreenTest {
             BecalmTheme {
                 LoginScreen(
                     navController = rememberNavController(),
-                    stateOverride = AuthUiState.Error("bad credentials"),
+                    stateOverride = AuthUiState.Error(UiMessage.resource(R.string.auth_error_unknown)),
                     onEmailSignIn = { _, _ -> },
                     onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,

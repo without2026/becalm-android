@@ -1,19 +1,14 @@
 package com.becalm.android.ui.onboarding
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -26,7 +21,8 @@ import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
-import com.becalm.android.ui.theme.glassPanel
+import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.StatusPill
 
 @Composable
 internal fun RequiredSetupSummary() {
@@ -60,48 +56,47 @@ internal fun SetupConnectionRow(
     onSkip: () -> Unit,
     skipLabel: String,
 ) {
-    Column(
+    QuietPanel(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (item.detail != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = item.detail,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = item.description,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (item.detail != null) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = item.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+                SourceConnectionStatusPill(state = item.state)
             }
-            SourceConnectionStatusPill(state = item.state)
-        }
-        if (!item.state.isTerminal) {
-            SourceConnectionActions(
-                primaryLabel = connectLabel(item.state, requiresConsent = false),
-                onPrimary = onConnect,
-                onSkip = onSkip,
-                skipLabel = skipLabel,
-            )
+            if (!item.state.isTerminal) {
+                SourceConnectionActions(
+                    primaryLabel = connectLabel(item.state, requiresConsent = false),
+                    onPrimary = onConnect,
+                    onSkip = onSkip,
+                    skipLabel = skipLabel,
+                )
+            }
         }
     }
 }
@@ -138,51 +133,50 @@ private fun SourceConnectionRow(
     onSkip: () -> Unit,
     skipLabel: String,
 ) {
-    Column(
+    QuietPanel(
         modifier = Modifier
-            .fillMaxWidth()
-            .glassPanel(MaterialTheme.shapes.medium)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .fillMaxWidth(),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = item.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                SourceConnectionStatusPill(state = item.state)
+            }
+            if (item.consentCopy != null && item.state == SourceConnectionState.ConsentRequired) {
                 Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = item.consentCopy,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            SourceConnectionStatusPill(state = item.state)
-        }
-        if (item.consentCopy != null && item.state == SourceConnectionState.ConsentRequired) {
-            Text(
-                text = item.consentCopy,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (!item.state.isTerminal) {
-            SourceConnectionActions(
-                primaryLabel = connectLabel(item.state, item.consentCopy != null),
-                onPrimary = onConnect,
-                primaryEnabled = item.state != SourceConnectionState.Connecting &&
-                    item.state != SourceConnectionState.PendingExternalAuth,
-                primaryLoading = item.state == SourceConnectionState.Connecting ||
-                    item.state == SourceConnectionState.PendingExternalAuth,
-                onSkip = onSkip,
-                skipLabel = skipLabel,
-            )
+            if (!item.state.isTerminal) {
+                SourceConnectionActions(
+                    primaryLabel = connectLabel(item.state, item.consentCopy != null),
+                    onPrimary = onConnect,
+                    primaryEnabled = item.state != SourceConnectionState.Connecting &&
+                        item.state != SourceConnectionState.PendingExternalAuth,
+                    primaryLoading = item.state == SourceConnectionState.Connecting ||
+                        item.state == SourceConnectionState.PendingExternalAuth,
+                    onSkip = onSkip,
+                    skipLabel = skipLabel,
+                )
+            }
         }
     }
 }
@@ -217,66 +211,22 @@ private fun SourceConnectionActions(
 
 @Composable
 private fun SourceConnectionStatusPill(state: SourceConnectionState) {
-    val colors = MaterialTheme.colorScheme
-    val dot = when (state) {
-        SourceConnectionState.Connected -> colors.primary
-        SourceConnectionState.Connecting,
-        SourceConnectionState.PendingExternalAuth,
-        -> colors.tertiary
-        SourceConnectionState.Failed -> colors.error
-        SourceConnectionState.Skipped -> colors.outline
-        SourceConnectionState.ConsentRequired -> colors.secondary
-        SourceConnectionState.Idle -> colors.outlineVariant
-    }
-    val container = when (state) {
-        SourceConnectionState.Failed -> colors.errorContainer.copy(alpha = 0.45f)
-        SourceConnectionState.Connected -> colors.primaryContainer.copy(alpha = 0.45f)
-        else -> colors.surfaceVariant.copy(alpha = 0.5f)
-    }
-    Surface(
-        shape = RoundedCornerShape(100.dp),
-        color = container,
-        contentColor = colors.onSurface,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .background(dot, CircleShape),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = stateLabel(state),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
+    val presentation = sourceConnectionPresentationFor(state)
+    StatusPill(
+        label = stringResource(presentation.labelRes),
+        tone = presentation.tone,
+    )
 }
 
 @Composable
-private fun connectLabel(state: SourceConnectionState, requiresConsent: Boolean): String =
-    when {
-        state == SourceConnectionState.Failed -> stringResource(R.string.onb_sources_retry)
-        requiresConsent -> stringResource(R.string.onb_sources_connect_with_consent)
-        else -> stringResource(R.string.action_connect)
+private fun connectLabel(state: SourceConnectionState, requiresConsent: Boolean): String {
+    val resId = if (requiresConsent && state != SourceConnectionState.Failed) {
+        R.string.onb_sources_connect_with_consent
+    } else {
+        sourceConnectionPresentationFor(state).recommendedCtaRes ?: R.string.action_connect
     }
-
-@Composable
-private fun stateLabel(state: SourceConnectionState): String =
-    stringResource(
-        when (state) {
-            SourceConnectionState.Idle -> R.string.onb_sources_status_ready
-            SourceConnectionState.ConsentRequired -> R.string.onb_sources_status_consent
-            SourceConnectionState.Connecting -> R.string.onb_sources_status_connecting
-            SourceConnectionState.PendingExternalAuth -> R.string.onb_sources_status_waiting
-            SourceConnectionState.Connected -> R.string.onb_sources_status_connected
-            SourceConnectionState.Skipped -> R.string.onb_sources_status_skipped
-            SourceConnectionState.Failed -> R.string.onb_sources_status_failed
-        },
-    )
+    return stringResource(resId)
+}
 
 private val SourceConnectionState.isTerminal: Boolean
     get() = this == SourceConnectionState.Connected || this == SourceConnectionState.Skipped

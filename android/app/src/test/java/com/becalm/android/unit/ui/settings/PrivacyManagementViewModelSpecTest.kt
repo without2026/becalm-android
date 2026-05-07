@@ -1,5 +1,6 @@
 package com.becalm.android.unit.ui.settings
 
+import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
@@ -102,6 +103,17 @@ class PrivacyManagementViewModelSpecTest {
         effect as PrivacyManagementEffect.CreateExportDocument
         assertEquals("becalm_export.zip", effect.fileName)
         assertEquals(3, effect.bytes.size)
+    }
+
+    @Test
+    fun `export document write failure uses localized generic copy`() = runTest {
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onExportFailed("vendor write failed")
+        advanceUntilIdle()
+
+        assertEquals(R.string.privacy_export_failed, viewModel.uiState.value.error?.resId)
     }
 
     @Test

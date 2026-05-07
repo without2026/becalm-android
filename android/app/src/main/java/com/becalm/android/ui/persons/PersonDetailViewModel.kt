@@ -1,18 +1,20 @@
 package com.becalm.android.ui.persons
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
-import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
-import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.components.isCalendarSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -35,70 +37,6 @@ import kotlinx.datetime.plus
 
 // ─── UI models ────────────────────────────────────────────────────────────────
 
-/**
- * A single row in the person's interaction timeline, discriminated by source type.
- */
-public sealed class InteractionRow {
-
-    /**
-     * A raw ingestion event (voice, email, etc.) linked to this person.
-     *
-     * @property id Primary-key of the raw ingestion event. Required so the row can
-     *   navigate to [com.becalm.android.ui.navigation.BecalmRoute.RawEventDetail]
-     *   on tap (SRC-004).
-     * @property timestamp When the event was recorded.
-     * @property source Source type string (e.g. "voice", "gmail").
-     * @property summary Event title when available; null otherwise.
-     * @property snippet Truncated body preview from
-     *   [RawIngestionEventEntity.eventSnippet] — rendered as secondary text on
-     *   [InteractionHistoryRow] per `.spec/contracts/ui-map.yml:206-210`.
-     * @property commitmentsExtractedCount Mirror of
-     *   [RawIngestionEventEntity.commitmentsExtractedCount] — drives the
-     *   "약속 추출 N건" badge on [InteractionHistoryRow] per SRC-008.
-     */
-    public data class Event(
-        val id: String,
-        val rawEventId: String? = id,
-        val timestamp: Instant,
-        val source: String,
-        val summary: String?,
-        val snippet: String?,
-        val commitmentsExtractedCount: Int = 0,
-    ) : InteractionRow()
-
-    /**
-     * A persisted trackable item linked to this person.
-     *
-     * @property timestamp When the source event occurred.
-     * @property title Normalized item text/title.
-     * @property itemType `action | schedule | decision`.
-     * @property direction Action-only direction.
-     * @property actionState Action-only lifecycle state.
-     * @property scheduleStatus Schedule-only subtype.
-     * @property decisionStatus Decision-only subtype.
-     */
-    public data class Commitment(
-        val timestamp: Instant,
-        val title: String,
-        val itemType: String = CommitmentItemType.ACTION,
-        val direction: String? = null,
-        val actionState: String? = null,
-        val scheduleStatus: String? = null,
-        val decisionStatus: String? = null,
-    ) : InteractionRow()
-
-    /**
-     * A calendar meeting where this person appeared as an attendee.
-     *
-     * @property timestamp Meeting start time.
-     * @property title Meeting title.
-     */
-    public data class CalendarMeeting(
-        val timestamp: Instant,
-        val title: String,
-    ) : InteractionRow()
-}
-
 /** Compact commitment summary rendered inside one source-event card. */
 public data class PersonDetailCommitmentSummary(
     val title: String,
@@ -109,7 +47,7 @@ public data class PersonDetailCommitmentSummary(
 
 /** Projection-only connector from one source-event card to the next interaction. */
 public data class PersonDetailNextAction(
-    val label: String,
+    @StringRes val labelRes: Int,
     val nextSourceEventKey: String,
 )
 
@@ -138,7 +76,8 @@ public data class SourceEventCardProjection(
  * @property displayName Display-safe contact name from on-device enrichment, or null.
  * @property companyName Display-safe company name from on-device enrichment, or null.
  * @property jobTitle Display-safe job title from on-device enrichment, or null.
- * @property timeline Commitments, raw events, and meetings sorted newest-first.
+ * @property sourceEventCards Source-event cards sorted newest-first. This is the single
+ *   rendering path for person detail history.
  * @property loading True while the initial flow collection is in progress.
  * @property error Non-null when an error should be surfaced to the user.
  */
@@ -154,10 +93,9 @@ public data class PersonDetailUiState(
     val meetingCount: Int = 0,
     val pendingCommitmentCount: Int = 0,
     val channelSources: Set<String> = emptySet(),
-    val timeline: List<InteractionRow> = emptyList(),
     val sourceEventCards: List<SourceEventCardProjection> = emptyList(),
     val loading: Boolean = true,
-    val error: String? = null,
+    val error: UiMessage? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -197,7 +135,7 @@ public class PersonDetailViewModel @Inject constructor(
 
     init {
         if (personId.isEmpty()) {
-            _uiState.update { it.copy(loading = false, error = "Person ID missing") }
+            _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.person_detail_error_missing_id)) }
         } else {
             observeDetail()
         }
@@ -243,7 +181,7 @@ public class PersonDetailViewModel @Inject constructor(
                                 PersonDetailUiState(
                                     personId = personId,
                                     loading = false,
-                                    error = e.message ?: "observe failed",
+                                    error = UiMessage.resource(R.string.person_detail_error_load_failed),
                                 ),
                             )
                         }
@@ -266,12 +204,5 @@ public class PersonDetailViewModel @Inject constructor(
         }
 
     private fun PersonInteractionEntity.isCalendarLike(): Boolean =
-        interactionKind == "calendar" || sourceType in CALENDAR_SOURCE_TYPES
-
-    private companion object {
-        val CALENDAR_SOURCE_TYPES: Set<String> = setOf(
-            SourceType.GOOGLE_CALENDAR,
-            SourceType.OUTLOOK_CALENDAR,
-        )
-    }
+        interactionKind == "calendar" || sourceType.isCalendarSource()
 }
