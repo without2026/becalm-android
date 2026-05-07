@@ -32,4 +32,20 @@ class AppDeepLinksSpecTest {
         assertNull(AppDeepLinks.routeFrom(Uri.parse("https://example.com/persons/unassigned")))
         assertNull(AppDeepLinks.routeFrom(Intent(Intent.ACTION_SEND)))
     }
+
+    @Test
+    fun `e2e 071 commitment deep link routes valid ids and rejects invalid ids`() {
+        val validIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("becalm://commitments/cmt-123"),
+        )
+
+        assertEquals(
+            BecalmRoute.CommitmentDetail("cmt-123").path,
+            AppDeepLinks.routeFrom(validIntent),
+        )
+        assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://commitments/")))
+        assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://commitments")))
+        assertNull(AppDeepLinks.routeFrom(Uri.parse("becalm://unknown/cmt-123")))
+    }
 }

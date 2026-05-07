@@ -26,8 +26,12 @@ class E2eScenarioCatalogSpecTest {
             assertTrue("${scenario.id} should declare isolated test data in Background or scenario", scenarioCatalogHasIsolation)
         }
 
-        assertNotNull(scenarios.singleOrNull { it.id == "E2E-006" && "@person-memory" in it.tags })
-        assertNotNull(scenarios.singleOrNull { it.id == "E2E-007" && "@regression" in it.tags })
+        assertNotNull(scenarios.singleOrNull { it.id == "E2E-006" && "@routing" in it.tags })
+        assertNotNull(scenarios.singleOrNull { it.id == "E2E-008" && "@regression" in it.tags })
+        assertNotNull(scenarios.singleOrNull { it.id == "E2E-063" && "@memory" in it.tags })
+        REQUIRED_DOMAIN_TAGS.forEach { tag ->
+            assertTrue("Catalog must cover domain tag $tag", scenarios.any { tag in it.tags })
+        }
         assertTrue(scenarios.count { "@error" in it.tags } >= MIN_ERROR_PATH_COUNT)
         assertTrue(scenarios.count { "@happy" in it.tags } >= MIN_HAPPY_PATH_COUNT)
     }
@@ -102,9 +106,24 @@ class E2eScenarioCatalogSpecTest {
     )
 
     private companion object {
-        private const val EXPECTED_SCENARIO_COUNT = 10
-        private const val MIN_HAPPY_PATH_COUNT = 6
-        private const val MIN_ERROR_PATH_COUNT = 4
+        private const val EXPECTED_SCENARIO_COUNT = 72
+        private const val MIN_HAPPY_PATH_COUNT = 50
+        private const val MIN_ERROR_PATH_COUNT = 20
+        private val REQUIRED_DOMAIN_TAGS = setOf(
+            "@auth",
+            "@onboarding",
+            "@sources",
+            "@sync",
+            "@import",
+            "@pipeline",
+            "@people",
+            "@commitments",
+            "@today",
+            "@notifications",
+            "@memory",
+            "@privacy",
+            "@settings",
+        )
         private val SCENARIO_ID = Regex("E2E-\\d{3}")
         private val STEP_KEYWORDS = listOf("Given", "When", "Then")
     }

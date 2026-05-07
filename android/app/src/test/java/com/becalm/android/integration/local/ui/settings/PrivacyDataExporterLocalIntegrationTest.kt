@@ -77,6 +77,32 @@ class PrivacyDataExporterLocalIntegrationTest {
         assertFalse(entries["datastore.json"].orEmpty().contains("refresh-token"))
     }
 
+    @Test
+    fun `e2e 066 export is readable and excludes unsupported source secrets`() = runTest {
+        prefs.setCurrentUserId(USER_ID)
+        prefs.setRecordingFolderTreeUri("content://tree/recordings")
+        prefs.appendPipaActionLog(
+            PipaActionLogEntry(
+                action = "data_export",
+                timestampIso = "2026-05-07T03:00:00Z",
+                details = mapOf("status" to "ok"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(rawEvent())
+
+        val payload = exporter.export(USER_ID, nowEpochMs = 1_777_777_777_000)
+        val entries = unzipEntries(payload.bytes)
+        val allText = entries.values.joinToString("\n")
+
+        assertTrue(payload.fileName.endsWith(".zip"))
+        assertTrue(entries["README.txt"].orEmpty().contains("BeCalm personal data export"))
+        assertTrue(entries["raw_ingestion_events.json"].orEmpty().contains("Mail subject"))
+        assertFalse(allText.contains("access-token"))
+        assertFalse(allText.contains("refresh-token"))
+        assertFalse(allText.contains("39GJ6BL4QPEF"))
+        assertFalse(allText.contains("app_password"))
+    }
+
     private fun unzipEntries(bytes: ByteArray): Map<String, String> {
         val result = linkedMapOf<String, String>()
         ZipInputStream(bytes.inputStream()).use { zip ->

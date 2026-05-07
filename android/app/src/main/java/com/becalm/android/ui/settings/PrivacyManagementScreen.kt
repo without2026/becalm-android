@@ -1,5 +1,6 @@
 package com.becalm.android.ui.settings
 
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.compose.foundation.layout.Arrangement
@@ -627,6 +628,7 @@ internal fun ActivityLogContent(
     state: PrivacyManagementUiState,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -637,19 +639,49 @@ internal fun ActivityLogContent(
         if (state.activityLog.isEmpty()) {
             Text(stringResource(R.string.privacy_activity_log_empty))
         } else {
+            Text(
+                text = stringResource(R.string.privacy_activity_log_local_only_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             state.activityLog.forEach { entry ->
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(entry.action, style = MaterialTheme.typography.titleSmall)
+                    Text(pipaActionLabel(context, entry.action), style = MaterialTheme.typography.titleSmall)
                     Text(entry.timestampIso, style = MaterialTheme.typography.bodySmall)
                     if (entry.details.isNotEmpty()) {
-                        Text(entry.details.entries.joinToString(), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            entry.details.entries.joinToString { (key, value) ->
+                                "${pipaDetailLabel(context, key)}: $value"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+private fun pipaActionLabel(context: Context, action: String): String = when (action) {
+    "data_export" -> context.getString(R.string.privacy_activity_action_data_export)
+    "source_archive_delete_before" -> context.getString(R.string.privacy_activity_action_source_archive_delete_before)
+    "processing_pause" -> context.getString(R.string.privacy_activity_action_processing_pause)
+    "processing_resume" -> context.getString(R.string.privacy_activity_action_processing_resume)
+    "consent_withdraw" -> context.getString(R.string.privacy_activity_action_consent_withdraw)
+    "account_delete_initiated" -> context.getString(R.string.privacy_activity_action_account_delete_initiated)
+    else -> action
+}
+
+private fun pipaDetailLabel(context: Context, key: String): String = when (key) {
+    "cutoff_date" -> context.getString(R.string.privacy_activity_detail_cutoff_date)
+    "deleted_count" -> context.getString(R.string.privacy_activity_detail_deleted_count)
+    "failed_count" -> context.getString(R.string.privacy_activity_detail_failed_count)
+    "source" -> context.getString(R.string.privacy_activity_detail_source)
+    "consent_type" -> context.getString(R.string.privacy_activity_detail_consent_type)
+    "status" -> context.getString(R.string.privacy_activity_detail_status)
+    else -> key
 }
 
 @Composable

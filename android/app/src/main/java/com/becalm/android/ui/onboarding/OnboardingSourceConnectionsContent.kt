@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -41,7 +42,7 @@ internal fun SourceConnectionsContent(
     val mailSection = stringResource(R.string.onb_sources_mail_section)
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
     LazyColumn(
-        modifier = modifier,
+        modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
