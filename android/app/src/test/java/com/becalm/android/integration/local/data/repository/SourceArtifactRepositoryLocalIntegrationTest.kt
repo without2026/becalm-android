@@ -1,6 +1,7 @@
 package com.becalm.android.integration.local.data.repository
 
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.EmailOriginalArchiveInput
 import com.becalm.android.data.repository.SourceArchiveStore
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
@@ -84,6 +85,35 @@ class SourceArtifactRepositoryLocalIntegrationTest {
         assertNull(repository.findMarkdownOriginal(USER_ID, "raw-old"))
         assertNotNull(repository.findMarkdownOriginal(USER_ID, "raw-new"))
         assertEquals(1, repository.summary(USER_ID).count)
+    }
+
+    @Test
+    fun `e2e 065 archive delete removes originals without deleting structured rows`() = runTest {
+        db.rawIngestionEventDao().insert(
+            RawIngestionEventEntity(
+                id = "raw-old-structured",
+                userId = USER_ID,
+                clientEventId = "client-raw-old-structured",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "message-old-structured",
+                eventTitle = "계약서 확인",
+                timestamp = Instant.parse("2026-04-01T00:00:00Z"),
+            ),
+        )
+        repository.archiveEmailOriginal(
+            input(
+                rawEventId = "raw-old-structured",
+                sourceRef = "message-old-structured",
+                occurredAt = Instant.parse("2026-04-01T00:00:00Z"),
+                bodyPlain = "old body",
+            ),
+        )
+
+        val result = repository.deleteBefore(USER_ID, Instant.parse("2026-04-10T00:00:00Z"))
+
+        assertEquals(1, result.deletedCount)
+        assertNull(repository.findMarkdownOriginal(USER_ID, "raw-old-structured"))
+        assertNotNull(db.rawIngestionEventDao().findById("raw-old-structured", USER_ID))
     }
 
     @Test

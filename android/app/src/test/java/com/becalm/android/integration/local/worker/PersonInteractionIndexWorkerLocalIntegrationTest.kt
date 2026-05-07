@@ -107,6 +107,43 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `e2e 063 person memory is enqueued after graph projection changes`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-memory-1",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-memory-1",
+                    sourceEventId = "raw-memory-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-memory-1",
+                    personId = personId,
+                    email = CUSTOMER_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(
+            listOf("raw:raw-memory-1"),
+            db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
+                .map { it.sourceRef },
+        )
+        assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
+    }
+
+    @Test
     fun `raw commitments and calendar rows without relation rows do not create people index rows`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(

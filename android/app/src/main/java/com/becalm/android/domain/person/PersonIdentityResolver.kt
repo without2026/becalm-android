@@ -1,5 +1,6 @@
 package com.becalm.android.domain.person
 
+import com.becalm.android.core.util.PhoneNumberUtils
 import java.util.Locale
 import java.security.MessageDigest
 import java.nio.ByteBuffer
@@ -102,6 +103,7 @@ public object PersonIdentityResolver {
 
     public fun normalizePhoneAnchor(raw: String?): String? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        PhoneNumberUtils.toE164OrNull(value)?.let { return it }
         return value.replace(PHONE_CHARS, "")
             .takeIf { it.length >= 7 && it.any(Char::isDigit) }
     }

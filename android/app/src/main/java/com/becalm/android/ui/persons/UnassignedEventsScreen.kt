@@ -339,7 +339,13 @@ private fun PersonMatchReviewCard(
                 TextButton(onClick = onLater) {
                     Text(text = stringResource(R.string.person_match_later_action))
                 }
-                OutlinedButton(onClick = { manualOpen = true }) {
+                OutlinedButton(
+                    onClick = {
+                        personAnchor = ""
+                        selectedNickname = ""
+                        manualOpen = true
+                    },
+                ) {
                     Text(text = stringResource(R.string.person_match_other_person_action))
                 }
                 BecalmButton(

@@ -5,8 +5,10 @@ package com.becalm.android.ui.commitments
 import android.content.Context
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -101,9 +103,9 @@ class CommitmentManagementScreenTest {
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_take)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_schedule)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-filter-schedule").assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_closed)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("Alice Kim").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("Alice Kim").assertCountEquals(2)
         composeTestRule.onNodeWithText("Schedule change").assertIsDisplayed()
         composeTestRule.onNodeWithText("Active commitment").performClick()
         composeTestRule.onNodeWithTag("commitment-filter-schedule").performClick()

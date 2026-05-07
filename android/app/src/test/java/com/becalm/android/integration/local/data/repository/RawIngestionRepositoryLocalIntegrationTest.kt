@@ -64,6 +64,26 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    fun `e2e 072 retry after process death does not duplicate source events`() = runTest {
+        val firstAttempt = rawEvent(id = "raw-process-1", clientEventId = "client-process-1")
+        val resumedAttempt = rawEvent(id = "raw-process-2", clientEventId = "client-process-1")
+
+        val firstResult = repository.insertLocal(firstAttempt)
+        val resumedResult = repository.insertLocal(resumedAttempt)
+
+        assertTrue(firstResult is BecalmResult.Success)
+        assertTrue(resumedResult is BecalmResult.Success)
+        assertEquals("raw-process-1", (firstResult as BecalmResult.Success).value)
+        assertEquals("raw-process-1", (resumedResult as BecalmResult.Success).value)
+        db.rawIngestionEventDao()
+            .observeRecentForSourceType(USER_ID, SourceType.NAVER_IMAP, limit = 10)
+            .test {
+                assertEquals(listOf("raw-process-1"), awaitItem().map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
+    }
+
+    @Test
     fun `refreshSince mirrors backend raw mail rows as synced local events`() = runTest {
         coEvery {
             api.getRawIngestionEvents(

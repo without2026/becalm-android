@@ -102,6 +102,22 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `e2e 064 offline mirror failure leaves local memory retryable`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        seedPersonGraph()
+
+        val result = newWorker(
+            personId = PERSON_ID,
+            remoteResult = BecalmResult.Failure(BecalmError.Network(0, "offline")),
+        ).doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_UPLOAD_PENDING, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
+        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
+        assertEquals(PERSON_ID, result.outputData.getString(ProfileMemoryWorker.KEY_PERSON_ID))
+    }
+
+    @Test
     fun `skips without writing when user is absent`() = runTest {
         seedPersonGraph()
 

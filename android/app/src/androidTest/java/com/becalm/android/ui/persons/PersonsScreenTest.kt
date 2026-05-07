@@ -62,7 +62,8 @@ class PersonsScreenTest {
 
         composeTestRule.onNodeWithText(appString(R.string.persons_unassigned_title)).assertIsDisplayed()
         composeTestRule.onNodeWithText("미분류 이벤트").assertIsDisplayed()
-        composeTestRule.onNodeWithText("오프라인", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText(appString(R.string.persons_offline_badge_no_sync), substring = true)
+            .assertIsDisplayed()
     }
 
     @Test
@@ -94,7 +95,7 @@ class PersonsScreenTest {
 
         composeTestRule.onNodeWithText("김철수").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("김철수 · ABC Corp · 팀장").assertCountEquals(0)
-        composeTestRule.onNodeWithText("미이행 2건").assertIsDisplayed()
+        composeTestRule.onNodeWithText(appString(R.string.persons_pending_commitments_fmt, 2)).assertIsDisplayed()
         composeTestRule.onAllNodesWithText("계약서 검토 요청").assertCountEquals(0)
     }
 
@@ -150,4 +151,7 @@ class PersonsScreenTest {
 
     private fun appString(resId: Int): String =
         ApplicationProvider.getApplicationContext<android.content.Context>().getString(resId)
+
+    private fun appString(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<android.content.Context>().getString(resId, *args)
 }
