@@ -34,7 +34,8 @@ public interface SourceExtractionApi {
 
     /**
      * Uploads normalized source content to Railway for server-side business-item extraction via
-     * Vertex AI Gemini 2.5 Flash. Audio sources pass [audio], text sources pass [bodyText].
+     * Vertex AI Gemini 2.5 Flash. Audio sources pass [audio], image sources pass [image],
+     * and text sources pass [bodyText].
      *
      * The audio bytes are streamed from a [ContentResolver] input stream directly into this
      * multipart part — no temp-file copy on device (VOI-007).
@@ -51,7 +52,9 @@ public interface SourceExtractionApi {
      *
      * @param audio          Optional audio file as a multipart binary part (name="audio").
      *                       Content type should be "audio/m4a" or "audio/&#42;".
-     * @param inputModality  One of audio, transcript, email, text.
+     * @param image          Optional image file as a multipart binary part (name="image").
+     *                       Content type should be image/png, image/jpeg, or image/webp.
+     * @param inputModality  One of audio, image, transcript, email, text.
      * @param sourceType     Source type of the raw event.
      * @param clientEventId  UUID idempotency key matching the raw_ingestion_event row.
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
@@ -67,6 +70,7 @@ public interface SourceExtractionApi {
     @POST("v1/extractions/commitments")
     public suspend fun commitmentExtract(
         @Part audio: MultipartBody.Part?,
+        @Part image: MultipartBody.Part?,
         @Part("input_modality") inputModality: RequestBody,
         @Part("source_type") sourceType: RequestBody,
         @Part("client_event_id") clientEventId: RequestBody,

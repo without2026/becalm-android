@@ -1,13 +1,16 @@
 package com.becalm.android.integration.local.ui.today
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.ui.components.OverallSyncIndicator
@@ -110,6 +113,8 @@ class TodayTimelineUiTest {
 
     @Test
     fun `today content shows empty state`() {
+        var screenshotImports = 0
+
         composeRule.setContent {
             BecalmTheme {
                 TodayTimelineContent(
@@ -119,12 +124,22 @@ class TodayTimelineUiTest {
                     ),
                     onOpenSettings = {},
                     onPullRefresh = {},
+                    onMessageScreenshotImport = { screenshotImports += 1 },
                 )
             }
         }
 
         composeRule.onNodeWithText(string(R.string.today_empty_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_empty_message)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("evidence-import-message-screenshot")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(1, screenshotImports)
+        }
     }
 
     @Test

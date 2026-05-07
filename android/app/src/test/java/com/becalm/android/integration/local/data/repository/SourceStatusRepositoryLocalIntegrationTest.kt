@@ -45,13 +45,15 @@ class SourceStatusRepositoryLocalIntegrationTest {
     )
 
     @Test
-    fun `SMG-001 and TDY-003 observeAll emits eight product sources including meeting and excluding call recording`() = runTest {
+    fun `SMG-001 and TDY-003 observeAll emits product sources including imports and excluding call recording`() = runTest {
         repository.observeAll().test {
             val initial = awaitItem()
 
             assertEquals(SourceType.PRODUCT_SOURCES, initial.map { it.sourceType }.toSet())
-            assertEquals(8, initial.size)
+            assertEquals(10, initial.size)
             assertTrue(initial.any { it.sourceType == SourceType.MEETING })
+            assertTrue(initial.any { it.sourceType == SourceType.MESSAGE_SCREENSHOT })
+            assertTrue(initial.any { it.sourceType == SourceType.MANUAL_TEXT })
             assertFalse(initial.any { it.sourceType == SourceType.CALL_RECORDING })
             assertTrue(initial.all { it.status == SourceConnectionStatus.NEVER_CONNECTED })
 

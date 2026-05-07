@@ -85,8 +85,8 @@ public data class RawIngestionEventEntity(
 
     /**
      * Source of this event.
-     * Valid values: voice | gmail | outlook_mail | naver_imap | daum_imap |
-     * google_calendar | outlook_calendar.
+     * Valid values: voice | call_recording | meeting | message_screenshot | manual_text |
+     * gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar.
      */
     @ColumnInfo(name = "source_type")
     val sourceType: String,
@@ -108,7 +108,8 @@ public data class RawIngestionEventEntity(
     val counterpartyRef: String? = null,
 
     /**
-     * Voice: MediaStore TITLE; email: subject; calendar: event title.
+     * Voice/meeting/message_screenshot/manual_text: file display name or note title;
+     * email: subject; calendar: event title.
      * Populated at ingestion time. Null if the source does not produce a title.
      */
     @ColumnInfo(name = "event_title")
@@ -181,7 +182,7 @@ public data class RawIngestionEventEntity(
      * - "pending"           — ready for Railway upload.
      * - "synced"            — successfully uploaded to Railway/Supabase.
      * - "failed"            — upload exhausted max retries; event quarantined.
-     * - "awaiting_consent"  — voice source only. pipa_third_party_consent=false at worker
+     * - "awaiting_consent"  — device-owned extraction sources. pipa_third_party_consent=false at worker
      *                         run time; upload blocked until consent is granted (VOI-004).
      *                         Transitions to "pending" when [com.becalm.android.data.local.db.dao.RawIngestionEventDao.releaseAwaitingConsentVoiceAndReturnIds] is called.
      */

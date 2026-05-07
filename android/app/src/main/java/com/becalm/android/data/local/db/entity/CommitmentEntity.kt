@@ -85,8 +85,8 @@ public object CommitmentDecisionStatus {
  *   Valid values: "voice" | "call_recording" | "gmail" | "outlook_mail" | "naver_imap" |
  *   "daum_imap" | "google_calendar" | "outlook_calendar" | "manual".
  *   Inherited verbatim from [RawIngestionEventEntity.sourceType] per VOI-001
- *   (voice-pipeline.spec.yml:18); "manual" is reserved for user-created commitments
- *   via CommitmentCreateSheet (MAN-001..006) which have no raw ingestion row.
+ *   (voice-pipeline.spec.yml:18); "manual" is retained for existing/user-corrected
+ *   commitments that have no raw ingestion row.
  * @property sourceRef Source-system reference linking back to the originating raw event.
  *   Null when no stable external reference exists.
  * @property confidence LLM confidence score for this extraction, in [0.0, 1.0].
@@ -109,8 +109,8 @@ public object CommitmentDecisionStatus {
  * @property lastEditedBy Supabase auth.users UUID of the user who most recently edited
  *   this commitment's mutable fields (title / description / due_at / counterparty_ref /
  *   direction). Null when the row has never been user-edited — i.e. values are
- *   exactly as the LLM extractor or manual-create flow first produced them. Populated
- *   by the Stage-5 edit UI (EDIT-001..008) and by MAN-001..006 manual-create flows.
+ *   exactly as the LLM extractor first produced them. Populated by the Stage-5
+ *   edit UI (EDIT-001..008) and EDIT-007 supersede corrections.
  *   Mirrors `.spec/contracts/data-model.yml:188-210` last_edited_by column. The Room
  *   converter maps nullable TEXT ↔ String?.
  * @property lastEditedAt Timestamp of the most recent user edit. Paired with

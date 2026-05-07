@@ -151,7 +151,9 @@ routes:
     auth: required
     # Prototype-aligned person detail: profile header + derived stats(이메일/통화/미팅/약속)
     # + unified source timeline. Filters: All / Email / Call / Meeting / Commitment.
-    # Stats and timeline are derived from Room person index projection, with legacy Room rows only as migration fallback.
+    # Stats and timeline are derived from Room person index projection.
+    # decision items are not rendered as primary action buckets by default; they are
+    # preserved as source-backed relationship facts in person_memory.md / relation context.
     # person_memory.md may provide optional compact description text, but this route
     # must render from structured Room data when the artifact is missing or stale.
 

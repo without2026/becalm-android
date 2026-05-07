@@ -322,6 +322,7 @@ public interface PersonIndexDao {
             SUM(
                 CASE
                     WHEN i.interaction_kind = 'commitment'
+                     AND COALESCE(LOWER(i.role), '') != 'decision'
                      AND COALESCE(LOWER(i.status), '') NOT IN ('completed', 'cancelled')
                     THEN 1
                     ELSE 0

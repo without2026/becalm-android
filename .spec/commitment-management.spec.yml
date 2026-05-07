@@ -6,21 +6,21 @@ version: 1
 behaviors:
   - id: CMT-001
     type: ui_interaction
-    description: "CommitmentManagementScreen 진입 시 전체 tracked item 목록이 표시된다. 기본 탭: '전체'. 각 카드는 프로토타입처럼 person_ref 기반 표시명과 source_event_* 맥락을 먼저 인지할 수 있게 표시하고, item_type(action|schedule|decision), subtype(direction|schedule_status|decision_status), title, due_at(KST 표시) 또는 due_hint, 그리고 action item일 때만 action_state를 표시한다. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
+    description: "CommitmentManagementScreen 진입 시 actionable tracked item 목록이 표시된다. 기본 탭: '전체'. 각 카드는 프로토타입처럼 person_ref 기반 표시명과 source_event_* 맥락을 먼저 인지할 수 있게 표시하고, item_type(action|schedule), subtype(direction|schedule_status), title, due_at(KST 표시) 또는 due_hint, 그리고 action item일 때만 action_state를 표시한다. decision row는 canonical DB에 남지만 기본 약속관리 feed에는 렌더링하지 않고 person_memory.md / relation context에서 소비한다. due_is_approximate=true인 경우 due_at 앞에 '~' 마크와 함께 due_hint도 보조 표시('~4/24 (월말)')"
     screen: "CommitmentManagementScreen"
     interaction: "하단 탭 '약속관리' 탭"
     precondition: "인증 완료, Room에 trackable item 5건(action give 2건 + action take 1건 + schedule 1건 + decision 1건) 존재"
-    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/액션/내가 한/상대가 한/일정/결정) 표시됨. 5건 모두 표시됨. 각 카드에 person_ref 기반 표시명 + source_event_title/source_type 맥락 + type chip + subtype chip + title + due_at(M/d HH:mm KST) 또는 due_hint 표시됨. action item은 action_state와 direction(give/take) 표시, schedule item은 schedule_status 표시, decision item은 decision_status 표시"
+    expected: "CommitmentManagementScreen 표시됨. 상단에 CommitmentFilterTabs(전체/내가 한/상대가 한/일정/닫힘) 표시됨. action/schedule 4건만 표시됨. decision 1건은 목록에 표시되지 않고 memory generation input에 포함됨. 각 카드에 person_ref 기반 표시명 + source_event_title/source_type 맥락 + type chip + subtype chip + title + due_at(M/d HH:mm KST) 또는 due_hint 표시됨. action item은 action_state와 direction(give/take) 표시, schedule item은 schedule_status 표시"
     source: phase2-acceptance
     tests: []
 
   - id: CMT-002
     type: ui_interaction
-    description: "CommitmentFilterTabs — type/action subtype 기준으로 목록을 필터링한다. action은 direction='give'|'take'로 세부 필터 가능하다"
+    description: "CommitmentFilterTabs — type/action subtype 기준으로 actionable 목록을 필터링한다. action은 direction='give'|'take'로 세부 필터 가능하다. decision은 person memory/relation context 전용이므로 기본 필터 탭에 포함하지 않는다"
     screen: "CommitmentManagementScreen"
-    interaction: "'액션' / '내가 한' / '상대가 한' / '일정' / '결정' 탭 탭"
+    interaction: "'내가 한' / '상대가 한' / '일정' / '닫힘' 탭 탭"
     precondition: "CommitmentManagementScreen 표시됨, Room에 action give 2건 + action take 1건 + schedule 1건 + decision 1건"
-    expected: "'액션' 탭 시 action 3건만 표시됨. '내가 한' 탭 시 direction='give' action 2건만 표시됨. '상대가 한' 탭 시 direction='take' action 1건만 표시됨. '일정' 탭 시 schedule 1건만 표시됨. '결정' 탭 시 decision 1건만 표시됨. '전체' 탭 탭 시 5건 복원됨"
+    expected: "'내가 한' 탭 시 direction='give' action 2건만 표시됨. '상대가 한' 탭 시 direction='take' action 1건만 표시됨. '일정' 탭 시 schedule 1건만 표시됨. '닫힘' 탭 시 completed/cancelled action만 표시됨. decision 1건은 어떤 기본 feed 필터에도 표시되지 않음. '전체' 탭 탭 시 action/schedule 4건 복원됨"
     source: phase2-acceptance
     tests: []
 

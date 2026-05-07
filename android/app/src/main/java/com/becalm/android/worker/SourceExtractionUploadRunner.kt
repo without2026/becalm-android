@@ -21,6 +21,7 @@ internal data class SourceExtractionUploadRequest(
     val rawEventId: String,
     val inputModality: String,
     val audioPart: MultipartBody.Part? = null,
+    val imagePart: MultipartBody.Part? = null,
     val durationSecondsFallback: RequestBody? = null,
     val bodyText: String? = null,
     val nonRetryableErrorMessage: String,
@@ -48,6 +49,7 @@ internal class SourceExtractionUploadRunner(
         val response = try {
             sourceExtractionApi.commitmentExtract(
                 audio = request.audioPart,
+                image = request.imagePart,
                 inputModality = request.inputModality.toPlainRequestBody(),
                 sourceType = parts.sourceType,
                 clientEventId = parts.clientEventId,

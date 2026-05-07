@@ -12,8 +12,8 @@ version: 1
 # Today/Settings의 SourceStatusStrip, SourcesList, OverallSyncIndicator는 Railway `GET /v1/source_status`
 # 값을 우선 merge하고, 네트워크/서버 실패 시 Android local-derived state로 fallback한다. voice처럼 Android-only
 # runtime 상태가 더 정확한 source는 로컬 기록(recordSyncStart/Success/Error)이 동일 cache를 갱신한다.
-# 사용자-facing status 대상 source는 8개(voice, meeting, gmail, outlook_mail, naver_imap, daum_imap,
-# google_calendar, outlook_calendar)이며, call_recording은 voice pipeline provenance subtype으로만 남고
+# 사용자-facing status 대상 source는 10개(voice, meeting, message_screenshot, manual_text, gmail, outlook_mail,
+# naver_imap, daum_imap, google_calendar, outlook_calendar)이며, call_recording은 voice pipeline provenance subtype으로만 남고
 # 별도 status chip을 만들지 않는다.
 #
 # Error envelope for all Railway endpoints:
@@ -23,6 +23,17 @@ version: 1
 #   - HTTP 200/201 = durable commit completed in user-scoped server storage.
 #   - HTTP 202 = accepted/queued only and MUST NOT be treated as synced by Android.
 #   - Batch write endpoints MUST return row-level results keyed by client-generated ids; count-only ack is forbidden.
+#
+# REST + CRUD ownership pattern:
+#   - Android Room/local files are the canonical client-side source of truth for user-visible data.
+#   - Resource endpoints are CRUD mirrors/coordinators. Android writes locally first, marks rows
+#     sync_status='pending', then mirrors via Railway REST. UI reads Room projections first.
+#   - Resource create/update/delete must be represented as POST/PATCH/DELETE-or-soft-delete on
+#     resource endpoints, never as ad hoc command endpoints.
+#   - Command endpoints are reserved for non-resource work such as extraction, provider sync,
+#     rebuild, and generation. They use POST /v1/{resource}:{action} and do not own canonical rows.
+#   - Raw/private bytes, OCR text, full transcript, and raw LLM output are never REST resources
+#     and must not be persisted in Supabase/Railway.
 
 base_path: ${BECALM_API_BASE_URL}
 auth: bearer_jwt
@@ -42,8 +53,8 @@ types:
 
   SourceStatusItem:
     owner: railway_first_with_android_fallback
-    source_id: string           # voice | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-    label: string               # Voice | Meetings | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
+    source_id: string           # voice | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+    label: string               # Voice | Meetings | Messenger Captures | Gmail | Outlook Mail | Naver Email | Daum Email | Google Calendar | Outlook Calendar
     connection_state: string    # connected | disconnected | error
     visual_state: string        # idle | syncing | error | synced
     last_sync_at?: datetime
@@ -195,8 +206,8 @@ endpoints:
     body:
       events:
         - client_event_id: uuid       # Idempotency key (UUID v4, Android-generated)
-          source_type: string         # voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
-                                     # UI label mapping: meeting -> 'Meetings', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 8 user-facing sources: voice, meeting, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
+          source_type: string         # voice | call_recording | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+                                     # UI label mapping: meeting -> 'Meetings', message_screenshot -> 'Messenger Captures', manual_text -> 'Manual Notes', naver_imap -> 'Naver Email', daum_imap -> 'Daum Email'. SourceStatusStrip/OverallSyncIndicator count 10 user-facing sources: voice, meeting, message_screenshot, manual_text, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar. call_recording is not a separate status chip.
           source_ref?: string
           counterparty_ref?: string   # Compatibility seed only. New source adapters MUST also send participants[].
           event_title?: string        # voice: MediaStore title / email: subject / calendar: title
@@ -236,9 +247,10 @@ endpoints:
     content_type: multipart/form-data
     idempotency: client_event_id   # 동일 raw event에 대한 추출 재시도 dedupe 키. 이 endpoint는 draft extraction only이며 DB write authority를 갖지 않는다.
     body:
-      input_modality: string       # audio | transcript | email | text
-      source_type: string          # voice | call_recording | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+      input_modality: string       # audio | image | transcript | email | text
+      source_type: string          # voice | call_recording | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
       audio?: binary               # input_modality=audio only. .m4a/.mp4/.aac/.mp3/.wav. 서버는 파일시스템/Supabase Storage에 저장하지 않음
+      image?: binary               # input_modality=image only. .png/.jpg/.jpeg/.webp. 서버는 파일시스템/Supabase Storage에 저장하지 않음
       body_text?: string           # input_modality=transcript/email/text only. request lifetime transient
       client_event_id: uuid        # raw_ingestion_events의 멱등 키와 동일
       raw_event_id: uuid
@@ -251,6 +263,7 @@ endpoints:
       previous_thread_context?: string
     constraints:
       max_body_bytes: 62914560     # 60 MiB. 60분 AAC 128kbps 상한. 초과 시 413
+      max_image_bytes: 10485760    # 10 MiB. 초과 시 413
       max_duration_seconds: 7200   # 120분. 초과 시 422 — client가 파일 분할 후 재업로드
       max_text_bytes: 10485760
     response:
@@ -276,10 +289,11 @@ endpoints:
       503: { error: string, message: string }    # Vertex AI 일시 downstream 장애 — retryable
     notes:
       - "서버는 Vertex AI 호출을 us-central1 엔드포인트로 수행하고 ZDR(Zero Data Retention) 정책을 적용한다"
-      - "오디오 바이트·body_text·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
+      - "오디오 바이트·이미지 바이트·body_text·Gemini 응답은 요청 핸들러 스코프 내에서만 존재하며 Postgres·파일시스템·Supabase Storage·애플리케이션 로그에 영속화되지 않는다"
       - "이 endpoint는 draft extraction only다. Railway는 commitments/raw_ingestion_events를 직접 write하지 않고, Android가 응답을 받아 로컬 Room을 먼저 갱신한 뒤 별도 batch mirror로 서버에 반영한다"
       - "source_type은 multipart body에 포함한다. Android는 raw_event.source_type을 그대로 전달하고, returned items를 해당 source_type commitment로 저장한다"
       - "미팅 전사본(.txt/.md)은 같은 endpoint를 input_modality=transcript + body_text로 호출한다. full transcript 저장은 금지된다"
+      - "메신저 캡처(.png/.jpg/.jpeg/.webp)는 Android에서 OCR용 정규화 JPEG(max_width=1440px, max_pixels=8,000,000, quality=82, output<=10MiB)로 변환한 뒤 같은 endpoint를 input_modality=image + image part로 호출한다. OCR text와 image bytes 저장은 금지된다"
       - "오디오 처리 전략: 청크 분할 없이 전체 파일을 단일 Gemini 호출로 전달 — cross-boundary commitment와 화자 맥락 손실 방지. max_duration_seconds=7200(120분) 상한은 단일 호출 안전 범위(입력 1M 토큰 / 출력 8192 토큰 여유)를 기준으로 설정. 상한 초과는 클라이언트에서 quarantine."
     spec_refs: [VOI-001, VOI-002, VOI-003, VOI-006, VOI-007]
 
@@ -445,7 +459,7 @@ endpoints:
     response:
       200:
         sources:
-          - source_type: string   # voice | meeting | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
+          - source_type: string   # voice | meeting | message_screenshot | manual_text | gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar
             state: string         # idle | syncing | synced | error
             last_sync_at?: datetime
             last_error?: string
@@ -646,6 +660,7 @@ endpoints:
       - "Railway writes Supabase Storage bucket `person-memory` object `{user_id}/{person_id}/memory.md` with metadata user_id, person_id, schema_version, content_hash, generated_at."
       - "No Supabase table is created for person memory. It is a derived artifact, not canonical person data."
       - "content_markdown must not include full email body, full transcript, source_artifacts original Markdown, audio transcript, or raw_model_text."
+      - "Decision commitments are consumed here as compact relationship facts using decision_status, not action_state."
       - "UI rendering, source ingestion, person matching, and person_interactions rebuild must not depend on upload success."
     spec_refs: [PMEM-001, PMEM-002, PMEM-003, PMEM-004, PMEM-005]
 

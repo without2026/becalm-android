@@ -1,7 +1,6 @@
 package com.becalm.android.unit.ui.commitments
 
 import androidx.lifecycle.SavedStateHandle
-import app.cash.turbine.test
 import com.becalm.android.R
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
@@ -10,9 +9,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.repository.CommitmentRepository
-import com.becalm.android.domain.commitment.CommitmentManualValidator
 import com.becalm.android.domain.commitment.ManualCommitmentInput
-import com.becalm.android.ui.commitments.CommitmentCreateMode
 import com.becalm.android.ui.commitments.CommitmentCreateViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
 import io.mockk.coEvery
@@ -33,7 +30,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -57,60 +53,6 @@ class CommitmentCreateViewModelSpecTest {
     }
 
     @Test
-    fun `MAN-001 manual mode starts blank with give default and validation blocks save`() = runTest {
-        val viewModel = buildViewModel()
-
-        val initial = viewModel.uiState.value
-        assertEquals(CommitmentCreateMode.MANUAL, initial.mode)
-        assertEquals("give", initial.draft.direction)
-        assertEquals("", initial.draft.title)
-        assertEquals("", initial.draft.quote)
-        assertNull(initial.supersedeSource)
-
-        viewModel.onSave()
-        advanceUntilIdle()
-
-        val state = viewModel.uiState.value
-        assertEquals(CommitmentCreateMode.MANUAL, state.mode)
-        assertTrue(state.fieldErrors.containsKey(CommitmentManualValidator.Field.TITLE))
-        assertTrue(state.fieldErrors.containsKey(CommitmentManualValidator.Field.QUOTE))
-        assertFalse(state.saved)
-        coVerify(exactly = 0) { commitmentRepository.saveManualCommitment(any(), any()) }
-    }
-
-    @Test
-    fun `MAN-003 valid manual save forwards normalized draft and emits dismiss`() = runTest {
-        coEvery { commitmentRepository.saveManualCommitment(any(), null) } returns
-            BecalmResult.Success("new-id")
-
-        val viewModel = buildViewModel()
-        viewModel.onTitleChange("Send proposal")
-        viewModel.onDirectionChange("take")
-        viewModel.onQuoteChange("Please send me the proposal by Friday.")
-        viewModel.onCounterpartyRefChange("  alice@example.com  ")
-        viewModel.onDueHintChange("Friday afternoon")
-        viewModel.onApproxChange(true)
-
-        viewModel.dismiss.test {
-            viewModel.onSave()
-            advanceUntilIdle()
-            awaitItem()
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        val input = slot<ManualCommitmentInput>()
-        coVerify(exactly = 1) { commitmentRepository.saveManualCommitment(capture(input), null) }
-        assertEquals("Send proposal", input.captured.title)
-        assertEquals("take", input.captured.direction)
-        assertEquals("Please send me the proposal by Friday.", input.captured.quote)
-        assertEquals("alice@example.com", input.captured.counterpartyRef)
-        assertEquals("Friday afternoon", input.captured.dueHint)
-        assertTrue(input.captured.dueIsApproximate)
-        assertTrue(viewModel.uiState.value.saved)
-        assertNull(viewModel.uiState.value.saveError)
-    }
-
-    @Test
     fun `EDIT-007 supersede mode keeps quote immutable and carries source contract into save`() = runTest {
         every { commitmentRepository.observeByIdForUser("user-1", "old-1") } returns
             flowOf(entity(id = "old-1", quote = "Old evidentiary quote"))
@@ -121,7 +63,6 @@ class CommitmentCreateViewModelSpecTest {
         advanceUntilIdle()
 
         val initial = viewModel.uiState.value
-        assertEquals(CommitmentCreateMode.SUPERSEDE, initial.mode)
         assertEquals("Old evidentiary quote", initial.draft.quote)
         assertEquals(
             setOf("quote", "sourceEventOccurredAt", "sourceEventTitle"),
@@ -131,7 +72,6 @@ class CommitmentCreateViewModelSpecTest {
         )
 
         viewModel.onTitleChange("Replacement commitment")
-        viewModel.onQuoteChange("tampered")
         viewModel.onSave()
         advanceUntilIdle()
 
@@ -161,12 +101,14 @@ class CommitmentCreateViewModelSpecTest {
 
     @Test
     fun `save failure surfaces message and clearSaveError clears one-shot banner`() = runTest {
-        coEvery { commitmentRepository.saveManualCommitment(any(), null) } returns
+        every { commitmentRepository.observeByIdForUser("user-1", "old-1") } returns
+            flowOf(entity(id = "old-1", quote = "Original quote"))
+        coEvery { commitmentRepository.saveManualCommitment(any(), "old-1") } returns
             BecalmResult.Failure(BecalmError.Network(0, "offline"))
 
-        val viewModel = buildViewModel()
+        val viewModel = buildViewModel(supersedeOf = "old-1")
+        advanceUntilIdle()
         viewModel.onTitleChange("Title")
-        viewModel.onQuoteChange("Quote")
         viewModel.onSave()
         advanceUntilIdle()
 
@@ -177,12 +119,14 @@ class CommitmentCreateViewModelSpecTest {
 
     @Test
     fun `save validation failure uses localized generic validation copy`() = runTest {
-        coEvery { commitmentRepository.saveManualCommitment(any(), null) } returns
+        every { commitmentRepository.observeByIdForUser("user-1", "old-1") } returns
+            flowOf(entity(id = "old-1", quote = "Original quote"))
+        coEvery { commitmentRepository.saveManualCommitment(any(), "old-1") } returns
             BecalmResult.Failure(BecalmError.Validation("title", "Title cannot be empty"))
 
-        val viewModel = buildViewModel()
+        val viewModel = buildViewModel(supersedeOf = "old-1")
+        advanceUntilIdle()
         viewModel.onTitleChange("Title")
-        viewModel.onQuoteChange("Quote")
         viewModel.onSave()
         advanceUntilIdle()
 

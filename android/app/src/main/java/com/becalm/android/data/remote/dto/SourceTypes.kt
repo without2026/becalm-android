@@ -21,6 +21,12 @@ public object SourceType {
     /** User-imported meeting audio or transcript saved under `Recordings/BeCalm Meetings/`. */
     public const val MEETING: String = "meeting"
 
+    /** User-imported messenger screenshot saved in app-private source import storage. */
+    public const val MESSAGE_SCREENSHOT: String = "message_screenshot"
+
+    /** User-authored text evidence saved in app-private source import storage. */
+    public const val MANUAL_TEXT: String = "manual_text"
+
     /** Gmail message via Google Gmail API. */
     public const val GMAIL: String = "gmail"
 
@@ -40,19 +46,19 @@ public object SourceType {
     public const val OUTLOOK_CALENDAR: String = "outlook_calendar"
 
     /**
-     * User-created commitment via CommitmentCreateSheet. No associated raw_ingestion_events row.
-     * See manual-commitment.spec.yml MAN-001..006.
+     * User-corrected/superseded commitment provenance. No associated raw_ingestion_events row.
      *
-     * Valid ONLY on [CommitmentEntity.sourceType] — raw_ingestion_events never uses "manual"
-     * (MAN-003 invariant). Out-of-wire-scope for POST /v1/raw_ingestion_events:batch.
+     * Valid ONLY on CommitmentEntity.sourceType — raw_ingestion_events never uses "manual"
+     * (MAN-003 invariant). Commitments tab no longer exposes blank manual creation;
+     * this value remains for EDIT-007 supersede compatibility and existing rows.
      */
     public const val MANUAL: String = "manual"
 
     /**
      * **Raw-ingestion source set** — every `source_type` value that can appear on a
      * [RawIngestionEventDto] / [CalendarEventDto] coming off the wire or being cached
-     * from Room. Intentionally EXCLUDES [MANUAL] because manual-created commitments
-     * have no backing `raw_ingestion_events` row (MAN-003 invariant at
+     * from Room. Intentionally EXCLUDES [MANUAL] because user-corrected manual
+     * commitments have no backing `raw_ingestion_events` row (MAN-003 invariant at
      * `.spec/manual-commitment.spec.yml`); allowing `manual` here would cause
      * deep-link routes like `/sources/manual` to render a bogus source-detail screen
      * and any server-emitted `manual` status item to be cached as if it were a
@@ -70,6 +76,8 @@ public object SourceType {
         VOICE,
         CALL_RECORDING,
         MEETING,
+        MESSAGE_SCREENSHOT,
+        MANUAL_TEXT,
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,
@@ -79,7 +87,7 @@ public object SourceType {
     )
 
     /**
-     * **Product-UI source set** — the seven user-facing sources shown in Sources and Today.
+     * **Product-UI source set** — the user-facing sources shown in Sources and Today.
      *
      * Includes [VOICE] because the product treats recorder ingestion as a first-class
      * user-facing source (Today chips / Sources list / overall sync), but continues to
@@ -90,6 +98,8 @@ public object SourceType {
     public val PRODUCT_SOURCES: Set<String> = setOf(
         VOICE,
         MEETING,
+        MESSAGE_SCREENSHOT,
+        MANUAL_TEXT,
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,

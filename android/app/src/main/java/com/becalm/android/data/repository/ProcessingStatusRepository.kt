@@ -152,6 +152,8 @@ public class ProcessingStatusRepository @Inject constructor(
         private val DISPLAY_SOURCES: List<String> = listOf(
             SourceType.VOICE,
             SourceType.CALL_RECORDING,
+            SourceType.MEETING,
+            SourceType.MESSAGE_SCREENSHOT,
             SourceType.NAVER_IMAP,
             SourceType.DAUM_IMAP,
             SourceType.GMAIL,

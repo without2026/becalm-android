@@ -129,6 +129,30 @@ class PersonDetailViewModelSpecTest {
                         title = "데모 미팅",
                         occurredAt = Instant.fromEpochMilliseconds(3_000),
                     ),
+                    interaction(
+                        id = "decision",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "raw:raw-mail-1",
+                        interactionKind = "commitment",
+                        role = CommitmentItemType.DECISION,
+                        direction = null,
+                        status = "approved",
+                        title = "가격안 승인",
+                        occurredAt = Instant.fromEpochMilliseconds(3_000),
+                    ),
+                    interaction(
+                        id = "decision-only",
+                        personId = personId,
+                        sourceType = SourceType.GMAIL,
+                        sourceRef = "commitment:decision-only",
+                        interactionKind = "commitment",
+                        role = CommitmentItemType.DECISION,
+                        direction = null,
+                        status = "chosen",
+                        title = "단독 결정",
+                        occurredAt = Instant.fromEpochMilliseconds(4_000),
+                    ),
                 ),
             )
 
@@ -145,11 +169,17 @@ class PersonDetailViewModelSpecTest {
         assertEquals(1, state.emailInteractionCount)
         assertEquals(2, state.pendingCommitmentCount)
         assertEquals(setOf(SourceType.GMAIL), state.channelSources)
+        assertEquals(1, state.sourceEventCards.size)
         val mailCard = state.sourceEventCards.single { it.sourceEventKey == "raw:raw-mail-1" }
         assertEquals("raw-mail-1", mailCard.rawEventId)
         assertEquals(
             listOf("자료 보내기", "데모 미팅"),
             mailCard.myActions.map { it.title } + mailCard.schedules.map { it.title },
+        )
+        assertTrue(mailCard.theirActions.isEmpty())
+        assertFalse(
+            (mailCard.myActions + mailCard.theirActions + mailCard.schedules)
+                .any { it.title == "가격안 승인" },
         )
     }
 

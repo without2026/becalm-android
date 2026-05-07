@@ -49,10 +49,19 @@ internal class SettingsPipaConsentHandler(
             )
             for (id in parkedIds) {
                 val entity = rawIngestionRepository.findById(id = id, userId = userId)
-                if (entity?.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript()) {
-                    workScheduler.cancelMeetingTranscriptUpload(rawEventId = id)
-                } else {
-                    workScheduler.cancelVoiceUpload(rawEventId = id)
+                when {
+                    entity?.sourceType == SourceType.MESSAGE_SCREENSHOT -> {
+                        workScheduler.cancelMessageScreenshotUpload(rawEventId = id)
+                    }
+                    entity?.sourceType == SourceType.MANUAL_TEXT -> {
+                        workScheduler.cancelManualTextUpload(rawEventId = id)
+                    }
+                    entity?.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript() -> {
+                        workScheduler.cancelMeetingTranscriptUpload(rawEventId = id)
+                    }
+                    else -> {
+                        workScheduler.cancelVoiceUpload(rawEventId = id)
+                    }
                 }
             }
             logger.d(TAG, "parked and cancelled ${parkedIds.size} voice uploads after consent withdrawal")
@@ -86,10 +95,19 @@ internal class SettingsPipaConsentHandler(
                 logger.w(TAG, "released voice row id=$id has null sourceRef — skipping enqueue")
                 continue
             }
-            if (entity.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript()) {
-                workScheduler.enqueueMeetingTranscriptUpload(rawEventId = id)
-            } else {
-                workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
+            when {
+                entity.sourceType == SourceType.MESSAGE_SCREENSHOT -> {
+                    workScheduler.enqueueMessageScreenshotUpload(rawEventId = id)
+                }
+                entity.sourceType == SourceType.MANUAL_TEXT -> {
+                    workScheduler.enqueueManualTextUpload(rawEventId = id)
+                }
+                entity.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript() -> {
+                    workScheduler.enqueueMeetingTranscriptUpload(rawEventId = id)
+                }
+                else -> {
+                    workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
+                }
             }
             enqueuedCount++
         }

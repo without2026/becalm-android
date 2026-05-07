@@ -14,12 +14,8 @@ internal object CommitmentCreateProjector {
     )
 
     fun effectiveDraft(state: CreateUiState): ManualCommitmentDraft? =
-        if (state.mode == CommitmentCreateMode.MANUAL) {
-            state.draft
-        } else {
-            state.supersedeSource?.let { source ->
-                state.draft.copy(quote = source.quote)
-            }
+        state.supersedeSource?.let { source ->
+            state.draft.copy(quote = source.quote)
         }
 
     fun saveError(error: BecalmError): CommitmentText =

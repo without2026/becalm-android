@@ -239,7 +239,7 @@ public interface RailwayApi {
      * Fetches per-source sync health from Railway and merges it with Android's local
      * source-status cache.
      *
-     * The product-facing strip has seven sources:
+     * The product-facing strip uses SourceType.PRODUCT_SOURCES:
      * voice, gmail, outlook_mail, naver_imap, daum_imap, google_calendar, outlook_calendar.
      * The server may return only the sources it can authoritatively observe; omitted sources
      * keep their current local-derived values (for example, voice runtime state is recorded

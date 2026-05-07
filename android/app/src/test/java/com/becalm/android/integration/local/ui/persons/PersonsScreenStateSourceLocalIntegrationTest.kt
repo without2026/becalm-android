@@ -262,7 +262,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `persons aggregate counts schedule and decision rows as pending trackables`() = runTest {
+    fun `persons aggregate counts action and schedule rows but excludes decision context`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -332,7 +332,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             while (state.people.isEmpty()) {
                 state = awaitItem()
             }
-            assertEquals(3, state.people.single().pendingCommitmentCount)
+            assertEquals(2, state.people.single().pendingCommitmentCount)
             cancelAndIgnoreRemainingEvents()
         }
     }

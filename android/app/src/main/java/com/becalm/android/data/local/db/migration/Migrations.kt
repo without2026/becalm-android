@@ -194,7 +194,7 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
 //
 // Adds the six user-facing lifecycle columns from `.spec/contracts/data-model.yml:188-210`
 // plus the two supporting indices from `.spec/contracts/data-model.yml:219-225`. Unlocks
-// Stage-5 flows EDIT-001..008 and MAN-001..006. The SQL mirrors
+// Stage-5 flows EDIT-001..008, including supersede corrections. The SQL mirrors
 // `.spec/contracts/data-model.yml:484` 1:1 so Android (Room) ↔ Postgres (Supabase) drift
 // is trivially diff-checkable.
 //

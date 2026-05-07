@@ -4,6 +4,7 @@ import com.becalm.android.core.util.KST
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.isGiveDirection
 import com.becalm.android.ui.components.isTakeDirection
@@ -50,7 +51,9 @@ internal object CommitmentManagementProjector {
             )
         }
         val filtered = when (filter) {
-            CommitmentFilter.ALL -> rowsWithState
+            CommitmentFilter.ALL -> rowsWithState.filter {
+                CommitmentDisplayPolicy.isPrimaryFeedItem(it.row.itemType)
+            }
             CommitmentFilter.GIVE -> rowsWithState.filter {
                 it.row.itemType == CommitmentItemType.ACTION &&
                     isGiveDirection(it.row.direction) &&

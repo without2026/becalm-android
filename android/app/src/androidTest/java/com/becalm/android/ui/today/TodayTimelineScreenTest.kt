@@ -1,13 +1,16 @@
 package com.becalm.android.ui.today
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -106,6 +109,8 @@ class TodayTimelineScreenTest {
 
     @Test
     fun today_content_shows_empty_state() {
+        var screenshotImports = 0
+
         composeTestRule.setContent {
             BecalmTheme {
                 TodayTimelineContent(
@@ -115,12 +120,22 @@ class TodayTimelineScreenTest {
                     ),
                     onOpenSettings = {},
                     onPullRefresh = {},
+                    onMessageScreenshotImport = { screenshotImports += 1 },
                 )
             }
         }
 
         composeTestRule.onNodeWithText(string(R.string.today_empty_title)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_empty_message)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeTestRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("evidence-import-message-screenshot")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, screenshotImports)
+        }
     }
 
     @Test

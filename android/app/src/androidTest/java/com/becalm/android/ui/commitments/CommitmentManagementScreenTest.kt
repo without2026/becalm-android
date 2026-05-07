@@ -39,7 +39,10 @@ class CommitmentManagementScreenTest {
                     snackbarHostState = SnackbarHostState(),
                     pullState = pullState,
                     onFilterChange = {},
-                    onOpenCreate = {},
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    onMeetingTranscriptImport = {},
+                    onManualTextImport = {},
                     onOpenDetail = {},
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -53,7 +56,6 @@ class CommitmentManagementScreenTest {
     @Test
     fun commitment_management_shows_filters_sections_fab_and_detail_tap() {
         var selectedFilter: CommitmentFilter? = null
-        var openCreateCount = 0
         var openedDetailId: String? = null
 
         composeTestRule.setContent {
@@ -65,12 +67,10 @@ class CommitmentManagementScreenTest {
                         items = listOf(
                             activeRow("active-1", "Active commitment"),
                             scheduleRow("schedule-1", "Schedule change"),
-                            decisionRow("decision-1", "Decision chosen"),
                         ),
                         activeItems = listOf(
                             activeRow("active-1", "Active commitment"),
                             scheduleRow("schedule-1", "Schedule change"),
-                            decisionRow("decision-1", "Decision chosen"),
                         ),
                         completedSection = CommitmentSectionUiState(
                             expanded = false,
@@ -87,7 +87,10 @@ class CommitmentManagementScreenTest {
                     snackbarHostState = SnackbarHostState(),
                     pullState = pullState,
                     onFilterChange = { selectedFilter = it },
-                    onOpenCreate = { openCreateCount += 1 },
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    onMeetingTranscriptImport = {},
+                    onManualTextImport = {},
                     onOpenDetail = { openedDetailId = it },
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -103,13 +106,50 @@ class CommitmentManagementScreenTest {
         composeTestRule.onNodeWithText("Alice Kim").assertIsDisplayed()
         composeTestRule.onNodeWithText("Schedule change").assertIsDisplayed()
         composeTestRule.onNodeWithText("Active commitment").performClick()
-        composeTestRule.onNodeWithTag("commitment-fab-add").performClick()
         composeTestRule.onNodeWithTag("commitment-filter-schedule").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("active-1", openedDetailId)
-            assertEquals(1, openCreateCount)
             assertEquals(CommitmentFilter.SCHEDULE, selectedFilter)
+        }
+    }
+
+    @Test
+    fun commitment_management_fab_opens_evidence_import_sheet() {
+        var screenshotImports = 0
+        var meetingAudioImports = 0
+        var meetingTranscriptImports = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
+                CommitmentManagementScreenContent(
+                    state = CommitmentUiState(
+                        loading = false,
+                        items = emptyList(),
+                    ),
+                    snackbarHostState = SnackbarHostState(),
+                    pullState = pullState,
+                    onFilterChange = {},
+                    onMessageScreenshotImport = { screenshotImports += 1 },
+                    onMeetingAudioImport = { meetingAudioImports += 1 },
+                    onMeetingTranscriptImport = { meetingTranscriptImports += 1 },
+                    onManualTextImport = {},
+                    onOpenDetail = {},
+                    onToggleCompletedSection = {},
+                    onToggleCancelledSection = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeTestRule.onNodeWithText("증거 추가").assertIsDisplayed()
+        composeTestRule.onNodeWithText("메신저 스크린샷").performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, screenshotImports)
+            assertEquals(0, meetingAudioImports)
+            assertEquals(0, meetingTranscriptImports)
         }
     }
 
@@ -142,22 +182,6 @@ class CommitmentManagementScreenTest {
         dueIsApproximate = false,
         dueHint = null,
         counterpartyDisplayName = "Carol Park",
-        isManual = false,
-    )
-
-    private fun decisionRow(id: String, title: String): CommitmentRow = CommitmentRow(
-        id = id,
-        itemType = "decision",
-        title = title,
-        direction = null,
-        scheduleStatus = null,
-        decisionStatus = "chosen",
-        derivedStatus = null,
-        actionState = com.becalm.android.domain.commitment.CommitmentState.PENDING,
-        dueAt = null,
-        dueIsApproximate = false,
-        dueHint = null,
-        counterpartyDisplayName = "Bob Lee",
         isManual = false,
     )
 
