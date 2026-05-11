@@ -154,24 +154,30 @@ public class VoiceUploadWorker @AssistedInject constructor(
         }
         val rawEventId = inputData.getString(KEY_RAW_EVENT_ID)
         val audioUriString = inputData.getString(KEY_AUDIO_URI)
+        val selfSpeakerId = inputData.getString(KEY_SELF_SPEAKER_ID)
+        val speakerMappingsJson = inputData.getString(KEY_SPEAKER_MAPPINGS_JSON)
+        val speakerPreviewId = inputData.getString(KEY_SPEAKER_PREVIEW_ID)
 
         if (rawEventId.isNullOrBlank() || audioUriString.isNullOrBlank()) {
             logger.e(TAG, "missing input keys rawEventId=${redact(rawEventId ?: "")} audioUri=${redact(audioUriString ?: "")}")
             return@withContext Result.failure()
         }
 
-        // VOI-005: permission gate — failure (not retry) because onboarding gates enqueue
-        val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            android.Manifest.permission.READ_MEDIA_AUDIO
-        } else {
-            android.Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-        if (ContextCompat.checkSelfPermission(
-                appContext, audioPermission,
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            logger.e(TAG, "audio permission not granted ($audioPermission) — failing (not retrying; onboarding gate violated)")
-            return@withContext Result.failure()
+        val hasServerPreview = !speakerPreviewId.isNullOrBlank()
+        if (!hasServerPreview) {
+            // VOI-005: permission gate — failure (not retry) because onboarding gates enqueue.
+            val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                android.Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            if (ContextCompat.checkSelfPermission(
+                    appContext, audioPermission,
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                logger.e(TAG, "audio permission not granted ($audioPermission) — failing (not retrying; onboarding gate violated)")
+                return@withContext Result.failure()
+            }
         }
 
         val delegate = extractionDelegate()
@@ -196,16 +202,20 @@ public class VoiceUploadWorker @AssistedInject constructor(
         // temporary URI permission expired after device restart. When openInputStream fails,
         // retrying won't help — the URI is permanently gone — so quarantine the row directly
         // instead of wasting the remaining WorkManager retry attempts.
-        val audioPart = buildAudioPart(audioUri)
-            ?: run {
-                logger.e(
-                    TAG,
-                    "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
-                )
-                processingStatusRepository.recordError(entity.sourceType, "Audio file unavailable")
-                markFailed(delegate, entity, reasonCode = "audio_unavailable")
-                return@withContext Result.success()
-            }
+        val audioPart = if (hasServerPreview) {
+            null
+        } else {
+            buildAudioPart(audioUri)
+                ?: run {
+                    logger.e(
+                        TAG,
+                        "cannot open audio stream uri=${redact(audioUriString)} — URI no longer accessible; quarantining",
+                    )
+                    processingStatusRepository.recordError(entity.sourceType, "Audio file unavailable")
+                    markFailed(delegate, entity, reasonCode = "audio_unavailable")
+                    return@withContext Result.success()
+                }
+        }
 
         // VOI-004: second PIPA gate — consent may have been withdrawn while this job was queued
         // or while buildAudioPart was running. Check immediately before the network call so no
@@ -232,8 +242,21 @@ public class VoiceUploadWorker @AssistedInject constructor(
                         "HTTP 429 id=${redact(rawEventId)} retryAfter=${retryAfterSec}s " +
                             "rateLimitedAttempt=$rateLimitedAttempt",
                     )
-                    handleRateLimited(delegate, entity, rawEventId, audioUriString, retryAfterSec, rateLimitedAttempt)
+                    handleRateLimited(
+                        delegate = delegate,
+                        entity = entity,
+                        rawEventId = rawEventId,
+                        audioUri = audioUriString,
+                        retryAfterSec = retryAfterSec,
+                        rateLimitedAttempt = rateLimitedAttempt,
+                        selfSpeakerId = selfSpeakerId,
+                        speakerMappingsJson = speakerMappingsJson,
+                        speakerPreviewId = speakerPreviewId,
+                    )
                 },
+                selfSpeakerId = selfSpeakerId,
+                speakerMappingsJson = speakerMappingsJson,
+                speakerPreviewId = speakerPreviewId,
             )
         )
     }
@@ -264,29 +287,49 @@ public class VoiceUploadWorker @AssistedInject constructor(
      * Returns null when [ContentResolver.openInputStream] fails (e.g. URI revoked).
      */
     private fun buildAudioPart(uri: Uri): MultipartBody.Part? {
-        val inputStream = runCatchingNonCancel(
+        runCatchingNonCancel(
             logger = logger,
             tag = TAG,
             op = "openInputStream failed uri=${redact(uri.toString())}",
-            block = { appContext.contentResolver.openInputStream(uri) ?: return null },
+            block = { appContext.contentResolver.openInputStream(uri)?.close() ?: return null },
             onFailure = { return null },
         )
 
         val streamingBody = object : RequestBody() {
-            override fun contentType() = "audio/m4a".toMediaTypeOrNull()
+            override fun contentType() = audioMediaType(uri).toMediaTypeOrNull()
 
             override fun writeTo(sink: BufferedSink) {
-                inputStream.use { stream ->
+                val stream = appContext.contentResolver.openInputStream(uri)
+                    ?: throw java.io.FileNotFoundException("Unable to open audio stream: $uri")
+                stream.use {
                     val buffer = ByteArray(STREAM_BUFFER_BYTES)
                     var bytesRead: Int
-                    while (stream.read(buffer).also { bytesRead = it } != -1) {
+                    while (it.read(buffer).also { bytesRead = it } != -1) {
                         sink.write(buffer, 0, bytesRead)
                     }
                 }
             }
         }
 
-        return MultipartBody.Part.createFormData("audio", "audio.m4a", streamingBody)
+        return MultipartBody.Part.createFormData("audio", audioFileName(uri), streamingBody)
+    }
+
+    private fun audioMediaType(uri: Uri): String =
+        when (uri.lastPathSegment?.substringAfterLast('/', "")?.substringAfterLast('.', "")?.lowercase()) {
+            "wav" -> "audio/wav"
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/m4a"
+            "aac" -> "audio/aac"
+            "mp4" -> "audio/mp4"
+            "3gp" -> "audio/3gpp"
+            else -> appContext.contentResolver.getType(uri) ?: "audio/m4a"
+        }
+
+    private fun audioFileName(uri: Uri): String {
+        val lastPath = uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.takeIf { it.isNotBlank() }
+        return lastPath ?: "audio.m4a"
     }
 
     /**
@@ -322,6 +365,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
         audioUri: String,
         retryAfterSec: Long?,
         rateLimitedAttempt: Int,
+        selfSpeakerId: String?,
+        speakerMappingsJson: String?,
+        speakerPreviewId: String?,
     ): Result {
         // Quarantine when the *next* re-enqueue would push the counter past the budget,
         // i.e. the current execution is already the MAX_RATE_LIMITED_ATTEMPTSth.
@@ -349,6 +395,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
                 audioUri = audioUri,
                 initialDelaySec = delaySec,
                 rateLimitedAttempt = nextAttempt,
+                selfSpeakerId = selfSpeakerId,
+                speakerMappingsJson = speakerMappingsJson,
+                speakerPreviewId = speakerPreviewId,
             )
             Result.success()
         }
@@ -413,5 +462,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
          * Defaults to 0 on the first execution.
          */
         public const val KEY_RATE_LIMITED_ATTEMPT: String = "rate_limited_attempt"
+
+        public const val KEY_SELF_SPEAKER_ID: String = "self_speaker_id"
+
+        public const val KEY_SPEAKER_MAPPINGS_JSON: String = "speaker_mappings_json"
+
+        public const val KEY_SPEAKER_PREVIEW_ID: String = "speaker_preview_id"
     }
 }

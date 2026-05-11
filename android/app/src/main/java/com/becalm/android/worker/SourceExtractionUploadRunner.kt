@@ -26,6 +26,9 @@ internal data class SourceExtractionUploadRequest(
     val nonRetryableErrorMessage: String,
     val onMarkFailed: suspend (reasonCode: String?) -> Unit,
     val onRateLimited: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
+    val selfSpeakerId: String? = null,
+    val speakerMappingsJson: String? = null,
+    val speakerPreviewId: String? = null,
 )
 
 internal class SourceExtractionUploadRunner(
@@ -59,6 +62,9 @@ internal class SourceExtractionUploadRunner(
                 folder = parts.folder,
                 conversationRef = null,
                 previousThreadContext = null,
+                selfSpeakerId = request.selfSpeakerId?.toPlainRequestBody(),
+                speakerMappings = request.speakerMappingsJson?.toPlainRequestBody(),
+                speakerPreviewId = request.speakerPreviewId?.toPlainRequestBody(),
             )
         } catch (e: IOException) {
             logger.w(tag, "network error id=${redact(request.rawEventId)} attempt=$runAttemptCount: ${e.message}")

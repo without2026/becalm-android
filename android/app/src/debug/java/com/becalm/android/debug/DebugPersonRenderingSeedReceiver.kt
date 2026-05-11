@@ -3,6 +3,7 @@ package com.becalm.android.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
@@ -23,11 +24,13 @@ import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import timber.log.Timber
@@ -41,18 +44,98 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
     @Inject lateinit var workScheduler: WorkScheduler
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION) return
+        if (intent.action != ACTION && intent.action != ACTION_ENQUEUE_CLOVA_AUDIO_E2E) return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
-                seedDemoData()
+                when (intent.action) {
+                    ACTION -> seedDemoData()
+                    ACTION_ENQUEUE_CLOVA_AUDIO_E2E -> enqueueClovaAudioE2e(intent)
+                }
             }.onSuccess {
-                Timber.i("Debug person rendering seed completed")
+                Timber.i("Debug action completed action=${intent.action}")
             }.onFailure { error ->
-                Timber.e(error, "Debug person rendering seed failed")
+                Timber.e(error, "Debug action failed action=${intent.action}")
             }
             pending.finish()
         }
+    }
+
+    private suspend fun enqueueClovaAudioE2e(intent: Intent) {
+        val userId = ensureE2eSession(intent)
+        val audioPath = intent.getStringExtra(EXTRA_AUDIO_PATH)?.takeIf { it.isNotBlank() }
+            ?: error("Missing $EXTRA_AUDIO_PATH")
+        val audioFile = File(audioPath)
+        require(audioFile.exists()) { "Audio file does not exist: $audioPath" }
+        val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0)
+        require(durationSeconds > 0) { "$EXTRA_DURATION_SECONDS must be positive" }
+        val sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE)?.takeIf { it.isNotBlank() }
+            ?: SourceType.MEETING
+        require(sourceType in setOf(SourceType.MEETING, SourceType.VOICE, SourceType.CALL_RECORDING)) {
+            "Unsupported audio source_type for Clova E2E: $sourceType"
+        }
+
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val title = intent.getStringExtra(EXTRA_EVENT_TITLE)?.takeIf { it.isNotBlank() }
+            ?: audioFile.name
+        val sourceRef = Uri.fromFile(audioFile).toString()
+        val rawEventId = UUID.randomUUID().toString()
+
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        userPrefsStore.setThirdPartyProvisionConsent(true)
+        userPrefsStore.setSourceEnabled(sourceType, true)
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+
+        val entity = RawIngestionEventEntity(
+            id = rawEventId,
+            userId = userId,
+            clientEventId = UUID.nameUUIDFromBytes(
+                "debug-clova-e2e:$sourceType:$sourceRef:${now.toEpochMilliseconds()}".toByteArray(),
+            ).toString(),
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            counterpartyRef = intent.getStringExtra(EXTRA_COUNTERPARTY_REF)?.takeIf { it.isNotBlank() },
+            eventTitle = title,
+            eventSnippet = null,
+            durationSeconds = durationSeconds,
+            timestamp = now,
+            syncStatus = "pending",
+        )
+        val inserted = db.rawIngestionEventDao().insert(entity)
+        require(inserted != -1L) { "Raw event insert ignored for clientEventId=${entity.clientEventId}" }
+        workScheduler.enqueueVoiceUpload(rawEventId = rawEventId, audioUri = sourceRef)
+        Timber.i(
+            "Debug Clova audio E2E enqueued rawEventId=$rawEventId " +
+                "sourceType=$sourceType durationSeconds=$durationSeconds sourceRef=$sourceRef",
+        )
+    }
+
+    private suspend fun ensureE2eSession(intent: Intent): String {
+        val existingUserId = userPrefsStore.observeCurrentUserId().first()?.takeIf { it.isNotBlank() }
+        val providedUserId = intent.getStringExtra(EXTRA_USER_ID)?.takeIf { it.isNotBlank() }
+        val accessToken = intent.getStringExtra(EXTRA_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }
+        if (accessToken != null && providedUserId != null) {
+            val expiresAtMillis = intent.getLongExtra(
+                EXTRA_EXPIRES_AT_EPOCH_MS,
+                System.currentTimeMillis() + 60L * 60L * 1000L,
+            )
+            userPrefsStore.setCurrentUserId(providedUserId)
+            sessionStore.save(
+                SupabaseSession(
+                    accessToken = accessToken,
+                    refreshToken = intent.getStringExtra(EXTRA_REFRESH_TOKEN).orEmpty(),
+                    userId = providedUserId,
+                    email = intent.getStringExtra(EXTRA_EMAIL)?.takeIf { it.isNotBlank() }
+                        ?: "adb-clova-e2e@becalm.local",
+                    expiresAt = Instant.fromEpochMilliseconds(expiresAtMillis),
+                ),
+            )
+            return providedUserId
+        }
+        return existingUserId
+            ?: error("No active userId. Sign in or provide $EXTRA_USER_ID + $EXTRA_ACCESS_TOKEN before running Clova audio E2E.")
     }
 
     private suspend fun seedDemoData() {
@@ -567,6 +650,17 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
 
     private companion object {
         const val ACTION = "com.becalm.android.DEBUG_SEED_PERSON_RENDERING"
+        const val ACTION_ENQUEUE_CLOVA_AUDIO_E2E = "com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E"
+        const val EXTRA_AUDIO_PATH = "audio_path"
+        const val EXTRA_DURATION_SECONDS = "duration_seconds"
+        const val EXTRA_SOURCE_TYPE = "source_type"
+        const val EXTRA_EVENT_TITLE = "event_title"
+        const val EXTRA_COUNTERPARTY_REF = "counterparty_ref"
+        const val EXTRA_USER_ID = "user_id"
+        const val EXTRA_ACCESS_TOKEN = "access_token"
+        const val EXTRA_REFRESH_TOKEN = "refresh_token"
+        const val EXTRA_EMAIL = "email"
+        const val EXTRA_EXPIRES_AT_EPOCH_MS = "expires_at_epoch_ms"
         const val USER_ID = "00000000-0000-4000-8000-000000000001"
         const val PERSON_KIM_HYUNSOO = "qa-person-kim-hyunsoo"
         const val PERSON_KIM_YOUNGKYUNG = "qa-person-kim-youngkyung"

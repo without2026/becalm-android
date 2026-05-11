@@ -113,12 +113,21 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.cancelEnrichmentPeriodicPlan())
     }
 
-    override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) {
+    override fun enqueueVoiceUpload(
+        rawEventId: String,
+        audioUri: String,
+        selfSpeakerId: String?,
+        speakerMappingsJson: String?,
+        speakerPreviewId: String?,
+    ) {
         enqueueVoiceUploadInternal(
             rawEventId = rawEventId,
             audioUri = audioUri,
             initialDelaySec = 0L,
             rateLimitedAttempt = 0,
+            selfSpeakerId = selfSpeakerId,
+            speakerMappingsJson = speakerMappingsJson,
+            speakerPreviewId = speakerPreviewId,
         )
     }
 
@@ -131,12 +140,18 @@ public class WorkSchedulerImpl @Inject constructor(
         audioUri: String,
         initialDelaySec: Long,
         rateLimitedAttempt: Int,
+        selfSpeakerId: String?,
+        speakerMappingsJson: String?,
+        speakerPreviewId: String?,
     ) {
         enqueueVoiceUploadInternal(
             rawEventId = rawEventId,
             audioUri = audioUri,
             initialDelaySec = initialDelaySec.coerceAtLeast(0L),
             rateLimitedAttempt = rateLimitedAttempt.coerceAtLeast(0),
+            selfSpeakerId = selfSpeakerId,
+            speakerMappingsJson = speakerMappingsJson,
+            speakerPreviewId = speakerPreviewId,
         )
     }
 
@@ -145,12 +160,18 @@ public class WorkSchedulerImpl @Inject constructor(
         audioUri: String,
         initialDelaySec: Long,
         rateLimitedAttempt: Int,
+        selfSpeakerId: String? = null,
+        speakerMappingsJson: String? = null,
+        speakerPreviewId: String? = null,
     ) {
         oneShotEnqueuer.enqueueVoiceUpload(
             rawEventId = rawEventId,
             audioUri = audioUri,
             initialDelaySec = initialDelaySec,
             rateLimitedAttempt = rateLimitedAttempt,
+            selfSpeakerId = selfSpeakerId,
+            speakerMappingsJson = speakerMappingsJson,
+            speakerPreviewId = speakerPreviewId,
         )
     }
 

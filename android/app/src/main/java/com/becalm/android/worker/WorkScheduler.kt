@@ -98,7 +98,13 @@ public interface WorkScheduler {
      *
      * Spec refs: VOI-001, VOI-005, VOI-007.
      */
-    public fun enqueueVoiceUpload(rawEventId: String, audioUri: String)
+    public fun enqueueVoiceUpload(
+        rawEventId: String,
+        audioUri: String,
+        selfSpeakerId: String? = null,
+        speakerMappingsJson: String? = null,
+        speakerPreviewId: String? = null,
+    )
 
     public fun enqueueMessageScreenshotUpload(rawEventId: String)
 
@@ -129,6 +135,9 @@ public interface WorkScheduler {
         audioUri: String,
         initialDelaySec: Long,
         rateLimitedAttempt: Int = 0,
+        selfSpeakerId: String? = null,
+        speakerMappingsJson: String? = null,
+        speakerPreviewId: String? = null,
     )
 
     /**

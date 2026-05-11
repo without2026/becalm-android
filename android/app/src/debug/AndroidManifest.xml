@@ -7,6 +7,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.becalm.android.DEBUG_SEED_PERSON_RENDERING" />
+                <action android:name="com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E" />
             </intent-filter>
         </receiver>
     </application>

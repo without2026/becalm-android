@@ -39,8 +39,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -86,7 +88,7 @@ class VoiceUploadWorkerNotificationSpecTest {
     fun setUp() {
         every { appContext.applicationContext } returns appContext
         every { appContext.contentResolver } returns contentResolver
-        every { contentResolver.openInputStream(any()) } returns ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        every { contentResolver.openInputStream(any()) } answers { ByteArrayInputStream(byteArrayOf(1, 2, 3)) }
         mockkStatic(ContextCompat::class)
         mockkStatic(Uri::class)
         every { ContextCompat.checkSelfPermission(any(), any()) } returns android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -118,6 +120,9 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
         coEvery {
             sourceExtractionApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
                 any(),
                 any(),
                 any(),
@@ -187,6 +192,9 @@ class VoiceUploadWorkerNotificationSpecTest {
                 any(),
                 any(),
                 any(),
+                any(),
+                any(),
+                any(),
             )
         } returns Response.success(
             SourceExtractionResponse(
@@ -206,6 +214,73 @@ class VoiceUploadWorkerNotificationSpecTest {
         assertEquals("pending", updatedSlot.captured.syncStatus)
         assertEquals(false, updatedSlot.captured.lastAttemptAt == null)
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `VOI-007 uploads wav evidence with wav multipart metadata`() = runTest {
+        val entity = RawIngestionEventEntity(
+            id = "raw-1",
+            userId = "user-1",
+            clientEventId = "client-1",
+            sourceType = SourceType.MEETING,
+            sourceRef = "file:///data/data/com.becalm.android/files/qa/clova/meeting.wav",
+            eventTitle = "회의 녹음",
+            durationSeconds = 90,
+            timestamp = Instant.parse("2026-04-23T00:00:00Z"),
+            syncStatus = "pending",
+        )
+        val audioPart = slot<MultipartBody.Part>()
+        every { parsedUri.lastPathSegment } returns "/data/data/com.becalm.android/files/qa/clova/meeting.wav"
+        every { contentResolver.getType(parsedUri) } returns null
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
+        coEvery {
+            sourceExtractionApi.commitmentExtract(
+                capture(audioPart),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns Response.success(
+            SourceExtractionResponse(
+                rawEventId = "raw-1",
+                items = emptyList(),
+                sourceEventParticipants = emptyList(),
+                model = "clova-speech+gemini-2.5-flash",
+                region = "us-central1",
+                rawModelText = """{"items":[],"source_event_participants":[]}""",
+            ),
+        )
+
+        val result = buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals("audio/wav", audioPart.captured.body.contentType().toString())
+        assertEquals(
+            "form-data; name=\"audio\"; filename=\"meeting.wav\"",
+            audioPart.captured.headers?.get("Content-Disposition"),
+        )
+        val firstWrite = Buffer()
+        val secondWrite = Buffer()
+        audioPart.captured.body.writeTo(firstWrite)
+        audioPart.captured.body.writeTo(secondWrite)
+        assertEquals(3L, firstWrite.size)
+        assertEquals(3L, secondWrite.size)
     }
 
     private fun buildWorker(): VoiceUploadWorker = VoiceUploadWorker(

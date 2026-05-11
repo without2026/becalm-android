@@ -32,6 +32,12 @@ public data class MeetingImportResult(
     val savedUri: String,
 )
 
+public data class MeetingSpeakerReviewContext(
+    val selfSpeakerId: String,
+    val speakerMappingsJson: String,
+    val speakerPreviewId: String,
+)
+
 @Singleton
 public class MeetingImportRepository @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -40,8 +46,11 @@ public class MeetingImportRepository @Inject constructor(
     private val workScheduler: WorkScheduler,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
-    public suspend fun importAudio(uri: Uri): BecalmResult<MeetingImportResult> =
-        import(kind = ImportKind.Audio, uri = uri)
+    public suspend fun importAudio(
+        uri: Uri,
+        speakerReviewContext: MeetingSpeakerReviewContext? = null,
+    ): BecalmResult<MeetingImportResult> =
+        import(kind = ImportKind.Audio, uri = uri, speakerReviewContext = speakerReviewContext)
 
     public suspend fun ensureTargetFolder(kind: MeetingImportFolderKind): BecalmResult<String> =
         withContext(ioDispatcher) {
@@ -63,7 +72,11 @@ public class MeetingImportRepository @Inject constructor(
             }
         }
 
-    private suspend fun import(kind: ImportKind, uri: Uri): BecalmResult<MeetingImportResult> =
+    private suspend fun import(
+        kind: ImportKind,
+        uri: Uri,
+        speakerReviewContext: MeetingSpeakerReviewContext?,
+    ): BecalmResult<MeetingImportResult> =
         withContext(ioDispatcher) {
             try {
                 val resolver = context.contentResolver
@@ -110,7 +123,13 @@ public class MeetingImportRepository @Inject constructor(
                 if (inserted is BecalmResult.Failure) return@withContext inserted
 
                 if (rawEvent.syncStatus == "pending") {
-                    workScheduler.enqueueVoiceUpload(rawEvent.id, savedFile.uri.toString())
+                    workScheduler.enqueueVoiceUpload(
+                        rawEventId = rawEvent.id,
+                        audioUri = savedFile.uri.toString(),
+                        selfSpeakerId = speakerReviewContext?.selfSpeakerId,
+                        speakerMappingsJson = speakerReviewContext?.speakerMappingsJson,
+                        speakerPreviewId = speakerReviewContext?.speakerPreviewId,
+                    )
                 }
 
                 BecalmResult.Success(MeetingImportResult(rawEvent.id, savedFile.uri.toString()))

@@ -193,13 +193,16 @@ class ColdSyncLocalIntegrationTest {
         override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) = Unit
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
-        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
+        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
             initialDelaySec: Long,
             rateLimitedAttempt: Int,
+            selfSpeakerId: String?,
+            speakerMappingsJson: String?,
+            speakerPreviewId: String?,
         ) = Unit
 
         override fun scheduleRetentionSweep() = Unit

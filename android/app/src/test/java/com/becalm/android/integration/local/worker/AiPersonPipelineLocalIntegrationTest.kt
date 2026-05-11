@@ -114,6 +114,9 @@ class AiPersonPipelineLocalIntegrationTest {
                 folder = any(),
                 conversationRef = any(),
                 previousThreadContext = any(),
+                selfSpeakerId = any(),
+                speakerMappings = any(),
+                speakerPreviewId = any(),
             )
         } returns Response.success(aiVoiceResponse())
 

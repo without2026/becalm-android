@@ -60,6 +60,7 @@ import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
 import com.becalm.android.ui.evidence.EvidenceImportSheetHost
+import com.becalm.android.ui.evidence.EvidenceImportUiState
 import com.becalm.android.ui.evidence.EvidenceImportViewModel
 import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
@@ -160,6 +161,10 @@ public fun CommitmentManagementScreen(
             evidenceImportActions.openMessageScreenshotPicker()
         },
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
+        evidenceImportState = evidenceImportState,
+        onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
+        onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
+        onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
         onOpenSettings = onOpenSettings,
         onOpenDetail = viewModel::onCommitmentSelected,
         onToggleCompletedSection = viewModel::onToggleCompletedSection,
@@ -177,6 +182,10 @@ public fun CommitmentManagementScreenContent(
     onFilterChange: (CommitmentFilter) -> Unit,
     onMessageScreenshotImport: () -> Unit,
     onMeetingAudioImport: () -> Unit,
+    evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
+    onMeetingSelfSpeakerSelected: (String) -> Unit = {},
+    onMeetingSpeakerReviewConfirmed: () -> Unit = {},
+    onMeetingSpeakerReviewCancelled: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenDetail: (String) -> Unit,
     onToggleCompletedSection: () -> Unit,
@@ -326,6 +335,10 @@ public fun CommitmentManagementScreenContent(
         controller = evidenceImportController,
         onMessageScreenshotImport = onMessageScreenshotImport,
         onMeetingAudioImport = onMeetingAudioImport,
+        state = evidenceImportState,
+        onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
+        onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
+        onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
     )
 }
 

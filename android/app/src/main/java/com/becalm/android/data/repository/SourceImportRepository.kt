@@ -2,6 +2,7 @@ package com.becalm.android.data.repository
 
 import android.content.ContentResolver
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.becalm.android.core.di.IoDispatcher
@@ -9,7 +10,10 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -23,10 +27,21 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okio.BufferedSink
 
 public data class SourceImportResult(
     val rawEventId: String,
     val savedUri: String,
+)
+
+public data class MeetingSpeakerPreviewResult(
+    val rawEventId: String,
+    val speakerPreviewId: String,
+    val speakers: List<MeetingSpeakerPreviewDto>,
+    val billableSeconds: Int,
 )
 
 @Singleton
@@ -35,11 +50,53 @@ public class SourceImportRepository @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionRepository: RawIngestionRepository,
     private val meetingImportRepository: MeetingImportRepository,
+    private val sourceExtractionApi: SourceExtractionApi,
     private val workScheduler: WorkScheduler,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
-    public suspend fun importMeetingAudio(uri: Uri): BecalmResult<MeetingImportResult> =
-        meetingImportRepository.importAudio(uri)
+    public suspend fun previewMeetingAudioSpeakers(uri: Uri): BecalmResult<MeetingSpeakerPreviewResult> =
+        withContext(ioDispatcher) {
+            try {
+                val resolver = context.contentResolver
+                val meta = resolver.readOpenableMeta(uri, fallbackName = "meeting-audio")
+                val mimeType = resolver.getType(uri)
+                if (!MeetingImportFilePolicy.isAllowedAudio(mimeType, meta.displayName)) {
+                    return@withContext BecalmResult.Failure(
+                        BecalmError.Validation("file", "unsupported meeting file format"),
+                    )
+                }
+                val rawEventId = UUID.randomUUID().toString()
+                val response = sourceExtractionApi.meetingSpeakerPreview(
+                    audio = buildAudioPart(uri, meta.displayName, mimeType ?: "audio/m4a"),
+                    rawEventId = rawEventId.toPlainRequestBody(),
+                    durationSeconds = (readAudioDurationSeconds(uri) ?: 0).toString().toPlainRequestBody(),
+                )
+                if (!response.isSuccessful) {
+                    return@withContext BecalmResult.Failure(BecalmError.Network(response.code(), "meeting speaker preview failed"))
+                }
+                val body = response.body()
+                    ?: return@withContext BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("empty preview response")))
+                BecalmResult.Success(
+                    MeetingSpeakerPreviewResult(
+                        rawEventId = body.rawEventId,
+                        speakerPreviewId = body.speakerPreviewId,
+                        speakers = body.speakers,
+                        billableSeconds = body.billableSeconds,
+                    ),
+                )
+            } catch (e: IOException) {
+                BecalmResult.Failure(BecalmError.Io(e::class.simpleName ?: "I/O error"))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                BecalmResult.Failure(BecalmError.Unknown(t))
+            }
+        }
+
+    public suspend fun importMeetingAudio(
+        uri: Uri,
+        speakerReviewContext: MeetingSpeakerReviewContext? = null,
+    ): BecalmResult<MeetingImportResult> =
+        meetingImportRepository.importAudio(uri, speakerReviewContext)
 
     public suspend fun importMessageScreenshot(uri: Uri): BecalmResult<SourceImportResult> =
         withContext(ioDispatcher) {
@@ -131,6 +188,39 @@ public class SourceImportRepository @Inject constructor(
         return SavedLocalFile(file = target, displayName = targetName)
     }
 
+    private fun buildAudioPart(uri: Uri, fileName: String, mimeType: String): MultipartBody.Part {
+        val streamingBody = object : RequestBody() {
+            override fun contentType() = mimeType.toMediaTypeOrNull()
+
+            override fun writeTo(sink: BufferedSink) {
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw IOException("Unable to open meeting audio")
+                input.use { stream ->
+                    val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                    var bytesRead: Int
+                    while (stream.read(buffer).also { bytesRead = it } != -1) {
+                        sink.write(buffer, 0, bytesRead)
+                    }
+                }
+            }
+        }
+        return MultipartBody.Part.createFormData("audio", fileName, streamingBody)
+    }
+
+    private fun readAudioDurationSeconds(uri: Uri): Int? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.let { ((it + 999L) / 1000L).toInt() }
+        } catch (_: RuntimeException) {
+            null
+        } finally {
+            retriever.release()
+        }
+    }
+
     private fun ContentResolver.readOpenableMeta(uri: Uri, fallbackName: String): OpenableMeta {
         query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null).use { cursor ->
             if (cursor != null && cursor.moveToFirst()) {
@@ -186,6 +276,7 @@ public class SourceImportRepository @Inject constructor(
         private const val STATUS_AWAITING_CONSENT = "awaiting_consent"
         private const val MESSAGE_SCREENSHOT_DIR = "source_imports/message_screenshots"
         private const val MAX_FILE_NAME_CHARS = 96
+        private const val STREAM_BUFFER_BYTES = 65536
         private val IMAGE_MIME_TYPES = setOf("image/png", "image/jpeg", "image/jpg", "image/webp")
         private val IMAGE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".webp")
     }
