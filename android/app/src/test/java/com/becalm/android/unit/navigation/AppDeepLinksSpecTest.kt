@@ -22,6 +22,10 @@ class AppDeepLinksSpecTest {
             AppDeepLinks.routeFrom(Uri.parse("becalm://commitments/commitment-1")),
         )
         assertEquals(
+            BecalmRoute.Persons.path,
+            AppDeepLinks.routeFrom(Uri.parse(AppDeepLinks.PERSONS_URI)),
+        )
+        assertEquals(
             BecalmRoute.PersonsUnassigned.path,
             AppDeepLinks.routeFrom(Uri.parse(AppDeepLinks.PERSONS_UNASSIGNED_URI)),
         )

@@ -1,0 +1,36 @@
+{
+  "debugUser": {
+    "userId": "00000000-0000-4000-8000-000000000001",
+    "email": "debug.person.rendering@becalm.local"
+  },
+  "connectedSources": [
+    "voice",
+    "meeting",
+    "message_screenshot",
+    "gmail",
+    "outlook_mail",
+    "naver_imap",
+    "daum_imap",
+    "google_calendar",
+    "outlook_calendar"
+  ],
+  "seededPeople": [
+    {
+      "name": "김민수",
+      "email": "minsu.kim@acme.kr",
+      "phone": "+821012345678",
+      "sources": ["gmail", "call_recording"]
+    },
+    {
+      "name": "박서연",
+      "email": "seoyeon.park@becalm.ai",
+      "sources": ["message_screenshot", "meeting"]
+    }
+  ],
+  "expectedQaFocus": [
+    "People tab shows 김민수 and 박서연 as contact-style rows.",
+    "Person detail shows source timeline cards plus give/take/schedule buckets.",
+    "The global add button opens evidence import actions.",
+    "Messenger screenshot opens Android Photo Picker, not transcript/document picker."
+  ]
+}

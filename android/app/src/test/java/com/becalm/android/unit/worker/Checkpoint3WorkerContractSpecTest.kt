@@ -51,15 +51,9 @@ class Checkpoint3WorkerContractSpecTest {
 
     @Test
     fun e2e_029_single_extraction_uses_shared_normalized_worker_requests() {
-        val meeting = WorkSchedulerRequests.meetingTranscriptUploadRequest("raw-meeting")
-        val manualText = WorkSchedulerRequests.manualTextUploadRequest("raw-manual")
         val screenshot = WorkSchedulerRequests.messageScreenshotUploadRequest("raw-shot")
 
-        assertEquals(MeetingTranscriptUploadWorker::class.java.name, meeting.workSpec.workerClassName)
-        assertEquals(MeetingTranscriptUploadWorker::class.java.name, manualText.workSpec.workerClassName)
         assertEquals(MessageScreenshotUploadWorker::class.java.name, screenshot.workSpec.workerClassName)
-        assertEquals("raw-meeting", meeting.workSpec.input.getString(MeetingTranscriptUploadWorker.KEY_RAW_EVENT_ID))
-        assertEquals("raw-manual", manualText.workSpec.input.getString(MeetingTranscriptUploadWorker.KEY_RAW_EVENT_ID))
         assertEquals("raw-shot", screenshot.workSpec.input.getString(MessageScreenshotUploadWorker.KEY_RAW_EVENT_ID))
     }
 

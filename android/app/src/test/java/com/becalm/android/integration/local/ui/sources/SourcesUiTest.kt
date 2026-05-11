@@ -1,10 +1,12 @@
 package com.becalm.android.integration.local.ui.sources
 
 import android.content.Context
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -116,7 +118,6 @@ class SourcesUiTest {
                     onDisconnectDismiss = { dismissClicks += 1 },
                     onDisconnectConfirm = { confirmClicks += 1 },
                     onMeetingAudioAdd = {},
-                    onMeetingTranscriptAdd = {},
                 )
             }
         }
@@ -140,9 +141,8 @@ class SourcesUiTest {
     }
 
     @Test
-    fun `meeting source detail shows format-scoped add buttons`() {
+    fun `meeting source detail exposes audio import only`() {
         var audioClicks = 0
-        var transcriptClicks = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -151,7 +151,6 @@ class SourcesUiTest {
                         sourceType = "meeting",
                         status = SourceSyncStatus.Connected,
                         showMeetingAudioAddButton = true,
-                        showMeetingTranscriptAddButton = true,
                     ),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(),
                     onReconnect = {},
@@ -160,21 +159,17 @@ class SourcesUiTest {
                     onDisconnectDismiss = {},
                     onDisconnectConfirm = {},
                     onMeetingAudioAdd = { audioClicks += 1 },
-                    onMeetingTranscriptAdd = { transcriptClicks += 1 },
                 )
             }
         }
 
         composeRule.onNodeWithTag("source-detail-meeting-audio-add").assertIsDisplayed()
-        composeRule.onNodeWithTag("source-detail-meeting-transcript-add").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("source-detail-meeting-transcript-add").assertCountEquals(0)
         composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_meeting_audio_formats)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_meeting_transcript_formats)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-detail-meeting-audio-add").performClick()
-        composeRule.onNodeWithTag("source-detail-meeting-transcript-add").performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, audioClicks)
-            assertEquals(1, transcriptClicks)
         }
     }
 

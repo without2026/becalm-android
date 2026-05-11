@@ -99,7 +99,6 @@ class PersonsUiTest {
     fun `persons search input routes typed query`() {
         var typedQuery: String? = null
         var screenshotImports = 0
-        var manualText: String? = null
 
         composeRule.setContent {
             BecalmTheme {
@@ -119,7 +118,6 @@ class PersonsUiTest {
                     onQueryChange = { typedQuery = it },
                     onPersonClick = {},
                     onMessageScreenshotImport = { screenshotImports += 1 },
-                    onManualTextImport = { manualText = it },
                 )
             }
         }
@@ -130,18 +128,10 @@ class PersonsUiTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("evidence-import-message-screenshot")
             .performSemanticsAction(SemanticsActions.OnClick)
-        composeRule.onNodeWithTag("evidence-import-fab").performClick()
-        composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("evidence-import-manual-text")
-            .performSemanticsAction(SemanticsActions.OnClick)
-        composeRule.onNodeWithTag("evidence-import-manual-text-input").performTextInput("견적서를 내일까지 보낸다")
-        composeRule.onNodeWithTag("evidence-import-manual-text-save").performClick()
 
         composeRule.runOnIdle {
             assertEquals("김", typedQuery)
             assertEquals(1, screenshotImports)
-            assertEquals("견적서를 내일까지 보낸다", manualText)
         }
     }
 
@@ -279,7 +269,7 @@ class PersonsUiTest {
         }
 
         composeRule.onNodeWithTag("person-detail-next-action-panel").assertIsDisplayed()
-        composeRule.onAllNodesWithText("Email reply").assertCountEquals(1)
+        composeRule.onAllNodesWithText(string(R.string.person_detail_next_action_email_reply)).assertCountEquals(1)
     }
 
     @Test

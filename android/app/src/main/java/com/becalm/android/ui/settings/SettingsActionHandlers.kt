@@ -53,12 +53,6 @@ internal class SettingsPipaConsentHandler(
                     entity?.sourceType == SourceType.MESSAGE_SCREENSHOT -> {
                         workScheduler.cancelMessageScreenshotUpload(rawEventId = id)
                     }
-                    entity?.sourceType == SourceType.MANUAL_TEXT -> {
-                        workScheduler.cancelManualTextUpload(rawEventId = id)
-                    }
-                    entity?.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript() -> {
-                        workScheduler.cancelMeetingTranscriptUpload(rawEventId = id)
-                    }
                     else -> {
                         workScheduler.cancelVoiceUpload(rawEventId = id)
                     }
@@ -99,12 +93,6 @@ internal class SettingsPipaConsentHandler(
                 entity.sourceType == SourceType.MESSAGE_SCREENSHOT -> {
                     workScheduler.enqueueMessageScreenshotUpload(rawEventId = id)
                 }
-                entity.sourceType == SourceType.MANUAL_TEXT -> {
-                    workScheduler.enqueueManualTextUpload(rawEventId = id)
-                }
-                entity.sourceType == SourceType.MEETING && entity.looksLikeTextTranscript() -> {
-                    workScheduler.enqueueMeetingTranscriptUpload(rawEventId = id)
-                }
                 else -> {
                     workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
                 }
@@ -112,12 +100,6 @@ internal class SettingsPipaConsentHandler(
             enqueuedCount++
         }
         return enqueuedCount
-    }
-
-    private fun com.becalm.android.data.local.db.entity.RawIngestionEventEntity.looksLikeTextTranscript(): Boolean {
-        val name = eventTitle ?: sourceRef.orEmpty()
-        val extension = name.substringBefore('?').substringAfterLast('.', missingDelimiterValue = "").lowercase()
-        return extension == "txt" || extension == "md"
     }
 
     private companion object {

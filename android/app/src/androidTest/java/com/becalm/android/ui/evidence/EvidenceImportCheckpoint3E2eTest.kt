@@ -1,13 +1,15 @@
 package com.becalm.android.ui.evidence
 
 import android.content.Context
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -38,25 +40,25 @@ class EvidenceImportCheckpoint3E2eTest {
     }
 
     @Test
-    fun e2e_031_user_imports_meeting_transcript_from_global_evidence_sheet() {
-        var transcriptImports = 0
+    fun e2e_031_global_evidence_sheet_blocks_transcript_and_manual_text_paths() {
+        renderSheet()
 
-        renderSheet(onMeetingTranscriptImport = { transcriptImports += 1 })
-
-        composeTestRule.onNodeWithTag("evidence-import-meeting-transcript").performClick()
-
-        composeTestRule.runOnIdle {
-            assertEquals(1, transcriptImports)
-        }
+        composeTestRule.onAllNodesWithTag("evidence-import-meeting-transcript").assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("evidence-import-manual-text").assertCountEquals(0)
+        composeTestRule.onNodeWithText(string(R.string.evidence_import_meeting_audio)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.evidence_import_message_screenshot)).assertIsDisplayed()
     }
 
     @Test
     fun e2e_033_user_imports_messenger_screenshot_from_global_evidence_sheet() {
         var screenshotImports = 0
 
-        renderSheet(onMessageScreenshotImport = { screenshotImports += 1 })
+        renderSheet(
+            onMessageScreenshotImport = { screenshotImports += 1 },
+        )
 
-        composeTestRule.onNodeWithTag("evidence-import-message-screenshot").performClick()
+        composeTestRule.onNodeWithTag("evidence-import-message-screenshot")
+            .performSemanticsAction(SemanticsActions.OnClick)
 
         composeTestRule.runOnIdle {
             assertEquals(1, screenshotImports)
@@ -64,62 +66,64 @@ class EvidenceImportCheckpoint3E2eTest {
     }
 
     @Test
-    fun e2e_035_user_imports_manual_text_evidence() {
-        var submittedText: String? = null
+    fun e2e_037_evidence_import_sheet_has_visible_back_action() {
+        var dismissed = 0
 
-        composeTestRule.setContent {
-            BecalmTheme {
-                ManualTextEvidenceDialog(
-                    onDismiss = {},
-                    onSubmit = { submittedText = it },
-                )
-            }
-        }
+        renderSheet(onDismiss = { dismissed += 1 })
 
-        composeTestRule.onNodeWithText(string(R.string.evidence_import_manual_text_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-input")
-            .performTextInput("내일까지 민준에게 견적서를 보내기")
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-save").performClick()
+        composeTestRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("evidence-import-sheet-back")
+            .performSemanticsAction(SemanticsActions.OnClick)
 
         composeTestRule.runOnIdle {
-            assertEquals("내일까지 민준에게 견적서를 보내기", submittedText)
+            assertEquals(1, dismissed)
         }
     }
 
     @Test
-    fun e2e_036_blank_manual_text_is_rejected_before_submit() {
-        var submitCount = 0
+    fun e2e_039_evidence_import_host_routes_each_path_to_the_matching_action() {
+        var screenshotImports = 0
+        var audioImports = 0
 
         composeTestRule.setContent {
             BecalmTheme {
-                ManualTextEvidenceDialog(
-                    onDismiss = {},
-                    onSubmit = { submitCount += 1 },
+                val controller = rememberEvidenceImportSheetController()
+                EvidenceImportFloatingActionButton(onClick = controller::openSheet)
+                EvidenceImportSheetHost(
+                    controller = controller,
+                    onMessageScreenshotImport = { screenshotImports += 1 },
+                    onMeetingAudioImport = { audioImports += 1 },
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-save").assertIsNotEnabled()
+        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeTestRule.onNodeWithTag("evidence-import-message-screenshot")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeTestRule.onNodeWithTag("evidence-import-meeting-audio")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
+        composeTestRule.onAllNodesWithTag("evidence-import-meeting-transcript").assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("evidence-import-manual-text").assertCountEquals(0)
 
         composeTestRule.runOnIdle {
-            assertEquals(0, submitCount)
+            assertEquals(1, screenshotImports)
+            assertEquals(1, audioImports)
         }
     }
 
     private fun renderSheet(
+        onDismiss: () -> Unit = {},
         onMessageScreenshotImport: () -> Unit = {},
         onMeetingAudioImport: () -> Unit = {},
-        onMeetingTranscriptImport: () -> Unit = {},
-        onManualTextImport: () -> Unit = {},
     ) {
         composeTestRule.setContent {
             BecalmTheme {
                 EvidenceImportSheet(
-                    onDismiss = {},
+                    onDismiss = onDismiss,
                     onMessageScreenshotImport = onMessageScreenshotImport,
                     onMeetingAudioImport = onMeetingAudioImport,
-                    onMeetingTranscriptImport = onMeetingTranscriptImport,
-                    onManualTextImport = onManualTextImport,
                 )
             }
         }

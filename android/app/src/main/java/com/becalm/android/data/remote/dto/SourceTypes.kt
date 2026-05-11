@@ -18,14 +18,11 @@ public object SourceType {
     /** Call recording captured on Samsung One UI (`Recordings/Call/`). Matches data-model.yml:28-32 enum. */
     public const val CALL_RECORDING: String = "call_recording"
 
-    /** User-imported meeting audio or transcript saved under `Recordings/BeCalm Meetings/`. */
+    /** User-imported meeting audio saved under `Recordings/BeCalm Meetings/Audio/`. */
     public const val MEETING: String = "meeting"
 
     /** User-imported messenger screenshot saved in app-private source import storage. */
     public const val MESSAGE_SCREENSHOT: String = "message_screenshot"
-
-    /** User-authored text evidence saved in app-private source import storage. */
-    public const val MANUAL_TEXT: String = "manual_text"
 
     /** Gmail message via Google Gmail API. */
     public const val GMAIL: String = "gmail"
@@ -77,7 +74,6 @@ public object SourceType {
         CALL_RECORDING,
         MEETING,
         MESSAGE_SCREENSHOT,
-        MANUAL_TEXT,
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,
@@ -99,7 +95,6 @@ public object SourceType {
         VOICE,
         MEETING,
         MESSAGE_SCREENSHOT,
-        MANUAL_TEXT,
         GMAIL,
         OUTLOOK_MAIL,
         NAVER_IMAP,

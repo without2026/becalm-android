@@ -131,7 +131,6 @@ class VoiceUploadWorkerNotificationSpecTest {
                 any(),
                 any(),
                 any(),
-                any(),
             )
         } returns Response.error(
             502,
@@ -175,7 +174,6 @@ class VoiceUploadWorkerNotificationSpecTest {
         coEvery { rawIngestionEventDao.update(capture(updatedSlot)) } returns 1
         coEvery {
             sourceExtractionApi.commitmentExtract(
-                any(),
                 any(),
                 any(),
                 any(),

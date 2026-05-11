@@ -72,9 +72,7 @@ public data class SourceDetailUiState(
     val showDisconnectButton: Boolean = false,
     val showManualSyncButton: Boolean = false,
     val showMeetingAudioAddButton: Boolean = false,
-    val showMeetingTranscriptAddButton: Boolean = false,
     val meetingAudioPickerInitialUri: String? = null,
-    val meetingTranscriptPickerInitialUri: String? = null,
     val showDisconnectConfirmDialog: Boolean = false,
     val disconnectOutcome: SourceDisconnectOutcome? = null,
     val actionError: UiMessage? = null,
@@ -189,17 +187,6 @@ public class SourceDetailViewModel @Inject constructor(
             when (val result = meetingImportRepository.importAudio(uri)) {
                 is BecalmResult.Success -> _actionError.value = null
                 is BecalmResult.Failure -> _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed)
-            }
-        }
-    }
-
-    /** Imports a user-selected transcript into Recordings/BeCalm Meetings/Transcripts. */
-    public fun onMeetingTranscriptSelected(uri: Uri?) {
-        if (uri == null || sourceType != SourceType.MEETING) return
-        viewModelScope.launch {
-            when (val result = meetingImportRepository.importTranscript(uri)) {
-                is BecalmResult.Success -> _actionError.value = null
-                is BecalmResult.Failure -> _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_transcript_import_failed)
             }
         }
     }
@@ -341,7 +328,6 @@ public class SourceDetailViewModel @Inject constructor(
         } else {
             base.copy(
                 meetingAudioPickerInitialUri = pickerFolders.audioUri,
-                meetingTranscriptPickerInitialUri = pickerFolders.transcriptUri,
             )
         }
     }
@@ -349,12 +335,9 @@ public class SourceDetailViewModel @Inject constructor(
     private fun prepareMeetingImportFolders() {
         viewModelScope.launch {
             val audio = meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio)
-            val transcript = meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Transcript)
             val audioUri = (audio as? BecalmResult.Success)?.value
-            val transcriptUri = (transcript as? BecalmResult.Success)?.value
-            _meetingPickerFolders.value = MeetingPickerFolders(audioUri, transcriptUri)
-            val firstFailure = listOf(audio, transcript).filterIsInstance<BecalmResult.Failure>().firstOrNull()
-            if (firstFailure != null) {
+            _meetingPickerFolders.value = MeetingPickerFolders(audioUri)
+            if (audio is BecalmResult.Failure) {
                 _actionError.value = UiMessage.resource(R.string.source_detail_error_folder_probe_failed)
             }
         }
@@ -362,6 +345,5 @@ public class SourceDetailViewModel @Inject constructor(
 
     private data class MeetingPickerFolders(
         val audioUri: String? = null,
-        val transcriptUri: String? = null,
     )
 }

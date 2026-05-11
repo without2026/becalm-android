@@ -60,18 +60,6 @@ internal class WorkSchedulerOneShotEnqueuer(
         )
     }
 
-    fun enqueueMeetingTranscriptUpload(rawEventId: String) {
-        planRunner.run(
-            UniqueOneTimeWorkPlan(
-                uniqueKey = UniqueWorkKeys.meetingTranscriptUpload(rawEventId),
-                policy = ExistingWorkPolicy.REPLACE,
-                request = WorkSchedulerRequests.meetingTranscriptUploadRequest(rawEventId),
-                logMessage = "enqueueMeetingTranscriptUpload rawEventId_hash=${redact(rawEventId)} " +
-                    "key=${UniqueWorkKeys.meetingTranscriptUpload(rawEventId)}",
-            ),
-        )
-    }
-
     fun enqueueMessageScreenshotUpload(rawEventId: String) {
         planRunner.run(
             UniqueOneTimeWorkPlan(
@@ -84,15 +72,4 @@ internal class WorkSchedulerOneShotEnqueuer(
         )
     }
 
-    fun enqueueManualTextUpload(rawEventId: String) {
-        planRunner.run(
-            UniqueOneTimeWorkPlan(
-                uniqueKey = UniqueWorkKeys.manualTextUpload(rawEventId),
-                policy = ExistingWorkPolicy.REPLACE,
-                request = WorkSchedulerRequests.manualTextUploadRequest(rawEventId),
-                logMessage = "enqueueManualTextUpload rawEventId_hash=${redact(rawEventId)} " +
-                    "key=${UniqueWorkKeys.manualTextUpload(rawEventId)}",
-            ),
-        )
-    }
 }

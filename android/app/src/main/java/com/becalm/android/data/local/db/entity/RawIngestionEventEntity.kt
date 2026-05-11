@@ -85,7 +85,7 @@ public data class RawIngestionEventEntity(
 
     /**
      * Source of this event.
-     * Valid values: voice | call_recording | meeting | message_screenshot | manual_text |
+     * Valid values: voice | call_recording | meeting | message_screenshot |
      * gmail | outlook_mail | naver_imap | daum_imap | google_calendar | outlook_calendar.
      */
     @ColumnInfo(name = "source_type")
@@ -108,7 +108,7 @@ public data class RawIngestionEventEntity(
     val counterpartyRef: String? = null,
 
     /**
-     * Voice/meeting/message_screenshot/manual_text: file display name or note title;
+     * Voice/meeting/message_screenshot: file display name;
      * email: subject; calendar: event title.
      * Populated at ingestion time. Null if the source does not produce a title.
      */

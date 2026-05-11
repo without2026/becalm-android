@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 
 public object AppDeepLinks {
+    public const val PERSONS_URI: String = "becalm://persons"
     public const val PERSONS_UNASSIGNED_URI: String = "becalm://persons/unassigned"
 
     public fun routeFrom(intent: Intent): String? {
@@ -17,10 +18,10 @@ public object AppDeepLinks {
             "commitments" -> uri.pathSegments
                 ?.lastOrNull { it.isNotBlank() }
                 ?.let { BecalmRoute.CommitmentDetail(it).path }
-            "persons" -> if (uri.pathSegments == listOf("unassigned")) {
-                BecalmRoute.PersonsUnassigned.path
-            } else {
-                null
+            "persons" -> when (uri.pathSegments) {
+                emptyList<String>() -> BecalmRoute.Persons.path
+                listOf("unassigned") -> BecalmRoute.PersonsUnassigned.path
+                else -> null
             }
             else -> null
         }

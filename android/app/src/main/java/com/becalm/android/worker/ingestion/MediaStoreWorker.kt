@@ -203,7 +203,6 @@ public class MediaStoreWorker @AssistedInject constructor(
         audioMissing: Boolean,
     ): LocalFileScanResult {
         val voiceProbe = createProbe()
-        val meetingProbe by lazy { createMeetingDocumentTreeProbe() }
         val tasks = listOf(
             LocalFileScanTask(
                 sourceType = SourceType.VOICE,
@@ -228,17 +227,6 @@ public class MediaStoreWorker @AssistedInject constructor(
                 scanMessage = "Queued meeting import",
                 onScan = {
                     when (val outcome = voiceProbe.ingestMeetingAudio(now, lookbackDays)) {
-                        is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
-                        MeetingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("Meeting scan failed")
-                    }
-                },
-            ),
-            LocalFileScanTask(
-                sourceType = SourceType.MEETING,
-                enabled = meetingEnabled,
-                scanMessage = "Queued meeting import",
-                onScan = {
-                    when (val outcome = meetingProbe.ingestMeetingTranscripts(now, lookbackDays)) {
                         is MeetingIngestOutcome.Success -> LocalFileScanOutcome.Success(outcome.insertedCount)
                         MeetingIngestOutcome.ScanFailed -> LocalFileScanOutcome.Failed("Meeting scan failed")
                     }
@@ -304,18 +292,6 @@ public class MediaStoreWorker @AssistedInject constructor(
             logger = logger,
         )
 
-    private fun createMeetingDocumentTreeProbe(): MeetingDocumentTreeProbe =
-        MeetingDocumentTreeProbe(
-            appContext = appContext,
-            syncCursorStore = syncCursorStoreProvider.get(),
-            sourceStatusRepository = sourceStatusRepositoryProvider.get(),
-            rawIngestionEventDao = rawIngestionEventDaoProvider.get(),
-            sourceArtifactRepository = sourceArtifactRepositoryProvider.get(),
-            userPrefsStore = userPrefsStore,
-            workScheduler = workSchedulerProvider.get(),
-            logger = logger,
-        )
-
     public companion object {
         private const val TAG = "MediaStoreWorker"
 
@@ -338,8 +314,6 @@ public class MediaStoreWorker @AssistedInject constructor(
         /** [SyncCursorStore] MediaStore kind key for meeting audio under `Recordings/BeCalm Meetings/Audio/`. */
         public const val KIND_MEETING: String = "meeting"
 
-        /** [SyncCursorStore] cursor key for meeting transcripts under `Recordings/BeCalm Meetings/Transcripts/`. */
-        public const val KIND_MEETING_TRANSCRIPT: String = "meeting_transcript"
         private const val NO_LOOKBACK: Int = -1
 
         /**

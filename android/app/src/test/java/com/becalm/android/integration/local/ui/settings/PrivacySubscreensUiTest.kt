@@ -56,11 +56,11 @@ class PrivacySubscreensUiTest {
             }
         }
 
-        composeRule.onNodeWithText("Voice auto processing").assertIsDisplayed()
-        composeRule.onNodeWithText("Gmail").assertIsDisplayed()
-        composeRule.onNodeWithText("Outlook Mail").assertIsDisplayed()
-        composeRule.onNodeWithText("Naver Email").assertIsDisplayed()
-        composeRule.onNodeWithText("Daum Email").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_withdraw_voice_label)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_withdraw_gmail_label)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_withdraw_outlook_mail_label)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_withdraw_naver_label)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_withdraw_daum_label)).assertIsDisplayed()
         composeRule.onNodeWithTag("privacy-withdraw-gmail").performClick()
 
         composeRule.runOnIdle {
@@ -162,7 +162,7 @@ class PrivacySubscreensUiTest {
 
         composeRule.runOnIdle { showLogs = true }
 
-        composeRule.onNodeWithText("data_export").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.privacy_activity_action_data_export)).assertIsDisplayed()
         composeRule.onNodeWithText("2026-04-24T01:00:00Z").assertIsDisplayed()
     }
 

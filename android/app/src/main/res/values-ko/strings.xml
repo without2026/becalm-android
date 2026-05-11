@@ -19,8 +19,8 @@
     <string name="person_matching_required_channel_desc">동기화된 상호작용에 사람 매칭이 필요할 때 알립니다.</string>
     <string name="person_matching_required_notification_title">인물 매칭이 필요합니다</string>
     <plurals name="person_matching_required_notification_body">
-        <item quantity="one">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. People에서 지정해 주세요.</item>
-        <item quantity="other">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. People에서 지정해 주세요.</item>
+        <item quantity="one">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. 사람 탭에서 지정해 주세요.</item>
+        <item quantity="other">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. 사람 탭에서 지정해 주세요.</item>
     </plurals>
 
     <!-- Error / empty states -->
@@ -86,7 +86,7 @@
     <string name="onb_recording_folder_call_status_fmt">통화 녹음 폴더: %1$s</string>
     <string name="onb_recording_folder_status_detected">감지됨</string>
     <string name="onb_recording_folder_status_missing">미감지</string>
-    <string name="onb_recording_folder_manual_picker_fallback">자동 탐색에 실패했습니다. picker에서 상위 Recordings 폴더를 선택해 주세요.</string>
+    <string name="onb_recording_folder_manual_picker_fallback">자동 탐색에 실패했습니다. 선택기에서 상위 녹음 폴더를 선택해 주세요.</string>
 
     <!-- Onboarding: contacts -->
     <string name="onb_contacts_title">연락처 접근</string>
@@ -320,7 +320,7 @@
     <string name="raw_event_commitments_extracted">약속 추출 %1$d건</string>
     <string name="raw_event_body_expand">전체 보기</string>
     <string name="raw_event_body_collapse">접기</string>
-    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이며 로컬 저장소에 plain text 본문이 없습니다.</string>
+    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이며 로컬 저장소에 일반 텍스트 본문이 없습니다.</string>
     <string name="raw_event_original_deleted_notice">원문이 이 기기에서 삭제되었습니다.</string>
     <string name="raw_event_original_truncated_notice">원문이 길어 이 화면에는 미리보기만 표시합니다.</string>
 
@@ -335,7 +335,6 @@
     <string name="raw_event_source_badge_call_recording">통화 녹음</string>
     <string name="raw_event_source_badge_meeting">미팅</string>
     <string name="raw_event_source_badge_message_screenshot">메신저 캡처</string>
-    <string name="raw_event_source_badge_manual_text">직접 입력</string>
     <string name="raw_event_source_badge_unknown">기타</string>
 
     <!-- Today 타임라인 (S5-A / S5-B) -->
@@ -435,16 +434,13 @@
     <string name="source_detail_recent_events_section">최근 이벤트</string>
     <string name="source_detail_meeting_import_section">미팅 파일</string>
     <string name="source_detail_meeting_audio_add">미팅 오디오 추가</string>
-    <string name="source_detail_meeting_transcript_add">전사본 추가</string>
     <string name="source_detail_meeting_audio_formats">M4A, MP4, AAC, MP3, WAV만 가능</string>
-    <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX만 가능</string>
     <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
     <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
     <string name="source_detail_error_missing_source_message">소스 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
     <string name="source_detail_error_invalid_source">지원하지 않는 소스입니다.</string>
     <string name="source_detail_error_manual_sync_failed">동기화를 시작하지 못했습니다. 다시 시도해 주세요.</string>
     <string name="source_detail_error_meeting_audio_import_failed">미팅 오디오를 추가하지 못했습니다.</string>
-    <string name="source_detail_error_meeting_transcript_import_failed">미팅 전사본을 추가하지 못했습니다.</string>
     <string name="source_detail_error_disconnect_failed">소스 연결을 해제하지 못했습니다.</string>
     <string name="source_detail_error_folder_probe_failed">저장된 미팅 폴더를 확인하지 못했습니다.</string>
     <string name="source_detail_danger_zone_title">위험 영역</string>
@@ -635,17 +631,8 @@
     <string name="evidence_import_message_screenshot_subtitle">카카오톡, Slack, 문자 캡처를 분석합니다</string>
     <string name="evidence_import_meeting_audio">회의 녹음</string>
     <string name="evidence_import_meeting_audio_subtitle">M4A, MP4, AAC, MP3, WAV</string>
-    <string name="evidence_import_meeting_transcript">회의 전사본</string>
-    <string name="evidence_import_meeting_transcript_subtitle">TXT, MD, PDF, DOCX</string>
-    <string name="evidence_import_manual_text">직접 입력</string>
-    <string name="evidence_import_manual_text_subtitle">메일·메신저 밖 업무 맥락을 텍스트로 추가합니다</string>
-    <string name="evidence_import_manual_text_title">직접 입력</string>
-    <string name="evidence_import_manual_text_placeholder">예: 김철수에게 내일까지 견적서를 보내야 함</string>
-    <string name="evidence_import_manual_text_save">추가</string>
-    <string name="evidence_import_manual_text_cancel">취소</string>
     <string name="evidence_import_success">증거를 추가했습니다.</string>
     <string name="evidence_import_error_message_screenshot">메신저 스크린샷을 추가하지 못했습니다.</string>
-    <string name="evidence_import_error_manual_text">텍스트 증거를 추가하지 못했습니다.</string>
     <string name="commitment_save_error_supersede_source_not_found">원문 약속을 찾지 못했습니다.</string>
     <string name="commitment_save_error_login_required">로그인이 필요합니다.</string>
     <string name="commitment_save_error_deleted">삭제된 약속입니다.</string>
@@ -716,11 +703,11 @@
     <string name="settings_pipa_disable_dialog_warning">향후 녹음 파일은 자동 업로드되지 않습니다. 이미 업로드된 데이터는 영향받지 않습니다.</string>
     <string name="settings_call_log_matching_toggle_label">통화기록 기반 인물 매칭</string>
     <string name="settings_call_log_matching_enable_dialog_title">통화기록 기반 인물 매칭 동의</string>
-    <string name="settings_call_log_matching_enable_dialog_message">통화 녹음 파일을 인물별로 정리하기 위해 기기 내 통화기록의 번호, 통화 시각, 통화 길이만 로컬에서 대조합니다. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다.</string>
+    <string name="settings_call_log_matching_enable_dialog_message">통화 녹음 파일을 인물별로 정리하기 위해 기기 내 통화기록의 번호, 통화 시각, 통화 길이만 로컬에서 대조합니다. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 인물 참조값으로 저장됩니다.</string>
     <string name="onb_call_log_matching_title">통화기록 기반 인물 매칭</string>
     <string name="onb_call_log_matching_headline">통화 녹음을 사람별로 자동 정리</string>
     <string name="onb_call_log_matching_body">통화 녹음 파일명에 전화번호가 없을 수 있어, BeCalm은 기기 내 통화기록과 녹음 파일의 시각·길이를 로컬에서 대조해 상대방을 추정할 수 있습니다.</string>
-    <string name="onb_call_log_matching_scope">사용 항목: 전화번호, 통화 시각, 통화 길이. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다. 동의하지 않아도 파일명 기반 매칭과 다른 기능은 계속 사용할 수 있습니다.</string>
+    <string name="onb_call_log_matching_scope">사용 항목: 전화번호, 통화 시각, 통화 길이. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 인물 참조값으로 저장됩니다. 동의하지 않아도 파일명 기반 매칭과 다른 기능은 계속 사용할 수 있습니다.</string>
     <string name="onb_call_log_matching_agree">동의하고 권한 허용</string>
     <string name="privacy_export_title">내 데이터 다운로드 (열람권, 제35조)</string>
     <string name="privacy_withdraw_title">동의 철회 (동의철회권, 제39조)</string>
@@ -730,6 +717,6 @@
     <string name="privacy_correction_guidance">정정은 각 상세 편집 화면에서 처리됩니다. 약속 수정은 편집 화면, 연락처 보강은 원본 이벤트 또는 연락처 경로를 이용하세요.</string>
     <string name="privacy_export_confirm_body">데이터를 ZIP 파일로 저장하시겠습니까?</string>
     <string name="privacy_pause_confirm_body">처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다.</string>
-    <string name="privacy_delete_keyword_label">Type “삭제” to confirm</string>
+    <string name="privacy_delete_keyword_label">확인을 위해 “삭제”를 입력하세요</string>
     <string name="processing_paused_banner">처리 일시중단 중</string>
 </resources>

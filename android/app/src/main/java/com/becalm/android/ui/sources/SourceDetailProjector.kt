@@ -34,7 +34,6 @@ internal object SourceDetailProjector {
             showDisconnectButton = connectionButtons.showDisconnectButton,
             showManualSyncButton = connectionButtons.showManualSyncButton,
             showMeetingAudioAddButton = sourceType == SourceType.MEETING,
-            showMeetingTranscriptAddButton = sourceType == SourceType.MEETING,
             showDisconnectConfirmDialog = showDisconnectConfirmDialog,
             disconnectOutcome = disconnectOutcome,
             actionError = actionError,

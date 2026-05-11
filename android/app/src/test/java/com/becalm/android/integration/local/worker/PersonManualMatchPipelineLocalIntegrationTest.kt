@@ -200,9 +200,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
-        override fun enqueueMeetingTranscriptUpload(rawEventId: String) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
-        override fun enqueueManualTextUpload(rawEventId: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -215,9 +213,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun enqueueColdSyncStage2() = Unit
         override fun cancelColdSyncStage2() = Unit
         override fun cancelVoiceUpload(rawEventId: String) = Unit
-        override fun cancelMeetingTranscriptUpload(rawEventId: String) = Unit
         override fun cancelMessageScreenshotUpload(rawEventId: String) = Unit
-        override fun cancelManualTextUpload(rawEventId: String) = Unit
         override fun cancelAll() = Unit
         override fun cleanupLegacyWorkNames() = Unit
     }

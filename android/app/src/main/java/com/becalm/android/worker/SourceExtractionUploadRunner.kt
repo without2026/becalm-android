@@ -23,7 +23,6 @@ internal data class SourceExtractionUploadRequest(
     val audioPart: MultipartBody.Part? = null,
     val imagePart: MultipartBody.Part? = null,
     val durationSecondsFallback: RequestBody? = null,
-    val bodyText: String? = null,
     val nonRetryableErrorMessage: String,
     val onMarkFailed: suspend (reasonCode: String?) -> Unit,
     val onRateLimited: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
@@ -44,7 +43,6 @@ internal class SourceExtractionUploadRunner(
         val parts = sourceExtractionInputAdapter.toRequestParts(
             event = request.entity,
             rawEventId = request.rawEventId,
-            bodyTextOverride = request.bodyText,
         )
         val response = try {
             sourceExtractionApi.commitmentExtract(
@@ -61,7 +59,6 @@ internal class SourceExtractionUploadRunner(
                 folder = parts.folder,
                 conversationRef = null,
                 previousThreadContext = null,
-                bodyText = parts.bodyText,
             )
         } catch (e: IOException) {
             logger.w(tag, "network error id=${redact(request.rawEventId)} attempt=$runAttemptCount: ${e.message}")

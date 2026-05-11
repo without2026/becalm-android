@@ -111,7 +111,6 @@ public class DefaultSourceAdministrationPort @Inject constructor(
             }
             SourceType.MEETING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, null)
-                syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING_TRANSCRIPT, null)
                 true
             }
             else -> false

@@ -72,18 +72,9 @@ public fun SourceDetailScreen(
     ) { uri ->
         viewModel.onMeetingAudioSelected(uri)
     }
-    val transcriptPicker = rememberLauncherForActivityResult(
-        MeetingOpenDocumentContract(),
-    ) { uri ->
-        viewModel.onMeetingTranscriptSelected(uri)
-    }
     val audioMimeTypes = remember { MeetingImportFilePolicy.AUDIO_MIME_TYPES }
-    val transcriptMimeTypes = remember { MeetingImportFilePolicy.TRANSCRIPT_MIME_TYPES }
     val meetingAudioInitialUri = remember(state.meetingAudioPickerInitialUri) {
         state.meetingAudioPickerInitialUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
-    }
-    val meetingTranscriptInitialUri = remember(state.meetingTranscriptPickerInitialUri) {
-        state.meetingTranscriptPickerInitialUri?.takeIf { it.isNotBlank() }?.let(Uri::parse)
     }
 
     CollectFlowEffect(viewModel.effects) { effect ->
@@ -140,14 +131,6 @@ public fun SourceDetailScreen(
                             ),
                         )
                     },
-                    onMeetingTranscriptAdd = {
-                        transcriptPicker.launch(
-                            MeetingOpenDocumentRequest(
-                                mimeTypes = transcriptMimeTypes,
-                                initialUri = meetingTranscriptInitialUri,
-                            ),
-                        )
-                    },
                 )
             }
         }
@@ -164,7 +147,6 @@ public fun SourceDetailScreenContent(
     onDisconnectDismiss: () -> Unit,
     onDisconnectConfirm: () -> Unit,
     onMeetingAudioAdd: () -> Unit,
-    onMeetingTranscriptAdd: () -> Unit,
 ) {
     val statusLabel = stringResource(sourceStatusLabelRes(state.status))
 
@@ -182,7 +164,6 @@ public fun SourceDetailScreenContent(
                 onReconnect = onReconnect,
                 onManualSync = onManualSync,
                 onMeetingAudioAdd = onMeetingAudioAdd,
-                onMeetingTranscriptAdd = onMeetingTranscriptAdd,
             )
         }
 
@@ -277,7 +258,6 @@ private fun PreviewSourceDetailScreenWithEvents() {
                 onDisconnectDismiss = {},
                 onDisconnectConfirm = {},
                 onMeetingAudioAdd = {},
-                onMeetingTranscriptAdd = {},
             )
         }
     }

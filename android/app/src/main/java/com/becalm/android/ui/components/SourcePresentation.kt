@@ -80,12 +80,6 @@ internal fun sourcePresentationFor(sourceType: String): SourcePresentation = whe
         accentColor = Color(0xFF8B7158),
     )
 
-    SourceType.MANUAL_TEXT -> SourcePresentation(
-        labelRes = R.string.raw_event_source_badge_manual_text,
-        icon = Icons.AutoMirrored.Outlined.Notes,
-        accentColor = Color(0xFF6F7F68),
-    )
-
     else -> SourcePresentation(
         labelRes = R.string.raw_event_source_badge_unknown,
         icon = Icons.Outlined.Email,

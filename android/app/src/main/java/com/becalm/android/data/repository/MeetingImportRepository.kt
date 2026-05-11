@@ -37,15 +37,11 @@ public class MeetingImportRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionRepository: RawIngestionRepository,
-    private val sourceArtifactRepository: SourceArtifactRepository,
     private val workScheduler: WorkScheduler,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     public suspend fun importAudio(uri: Uri): BecalmResult<MeetingImportResult> =
         import(kind = ImportKind.Audio, uri = uri)
-
-    public suspend fun importTranscript(uri: Uri): BecalmResult<MeetingImportResult> =
-        import(kind = ImportKind.Transcript, uri = uri)
 
     public suspend fun ensureTargetFolder(kind: MeetingImportFolderKind): BecalmResult<String> =
         withContext(ioDispatcher) {
@@ -73,18 +69,10 @@ public class MeetingImportRepository @Inject constructor(
                 val resolver = context.contentResolver
                 val meta = resolver.readOpenableMeta(uri)
                 val mimeType = resolver.getType(uri)
-                val valid = when (kind) {
-                    ImportKind.Audio -> MeetingImportFilePolicy.isAllowedAudio(mimeType, meta.displayName)
-                    ImportKind.Transcript -> MeetingImportFilePolicy.isAllowedTranscript(mimeType, meta.displayName)
-                }
+                val valid = MeetingImportFilePolicy.isAllowedAudio(mimeType, meta.displayName)
                 if (!valid) {
                     return@withContext BecalmResult.Failure(
                         BecalmError.Validation("file", "unsupported meeting file format"),
-                    )
-                }
-                if (kind == ImportKind.Transcript && meta.byteSize != null && meta.byteSize > MAX_TRANSCRIPT_BYTES) {
-                    return@withContext BecalmResult.Failure(
-                        BecalmError.Validation("file", "transcript exceeds 10 MiB"),
                     )
                 }
 
@@ -116,32 +104,12 @@ public class MeetingImportRepository @Inject constructor(
                     } else {
                         "awaiting_consent"
                     },
-                    snippet = if (
-                        kind == ImportKind.Transcript &&
-                        MeetingImportFilePolicy.isTextTranscript(mimeType, meta.displayName)
-                    ) {
-                        resolver.readUtf8Preview(uri, MAX_TRANSCRIPT_BYTES)?.take(SNIPPET_CHARS)
-                    } else {
-                        null
-                    },
+                    snippet = null,
                 )
                 val inserted = rawIngestionRepository.insertLocal(rawEvent)
                 if (inserted is BecalmResult.Failure) return@withContext inserted
 
-                if (
-                    kind == ImportKind.Transcript &&
-                    MeetingImportFilePolicy.isTextTranscript(mimeType, meta.displayName)
-                ) {
-                    meetingTranscriptFinalizer().archiveAndEnqueue(
-                        userId = userId,
-                        rawEventId = rawEvent.id,
-                        sourceRef = savedFile.uri.toString(),
-                        occurredAt = occurredAt,
-                        title = meta.displayName,
-                        text = resolver.readUtf8Preview(uri, MAX_TRANSCRIPT_BYTES),
-                        syncStatus = rawEvent.syncStatus,
-                    )
-                } else if (rawEvent.syncStatus == "pending") {
+                if (rawEvent.syncStatus == "pending") {
                     workScheduler.enqueueVoiceUpload(rawEvent.id, savedFile.uri.toString())
                 }
 
@@ -152,12 +120,6 @@ public class MeetingImportRepository @Inject constructor(
                 BecalmResult.Failure(BecalmError.Unknown(t))
             }
         }
-
-    private fun meetingTranscriptFinalizer(): MeetingTranscriptIngestionFinalizer =
-        MeetingTranscriptIngestionFinalizer(
-            sourceArtifactRepository = sourceArtifactRepository,
-            workScheduler = workScheduler,
-        )
 
     private fun buildRawEvent(
         userId: String,
@@ -288,25 +250,20 @@ public class MeetingImportRepository @Inject constructor(
             .take(MAX_FILE_NAME_CHARS)
 
     private fun fallbackMimeType(kind: ImportKind): String =
-        if (kind == ImportKind.Audio) "audio/m4a" else "text/plain"
+        "audio/m4a"
 
     private fun deterministicClientEventId(kind: ImportKind, savedDisplayName: String): String {
-        val sourceKey = when (kind) {
-            ImportKind.Audio -> "meeting:audio:$savedDisplayName"
-            ImportKind.Transcript -> "meeting:transcript:$savedDisplayName"
-        }
+        val sourceKey = "meeting:audio:$savedDisplayName"
         return UUID.nameUUIDFromBytes(sourceKey.toByteArray(StandardCharsets.UTF_8)).toString()
     }
 
     private enum class ImportKind {
         Audio,
-        Transcript,
         ;
 
         val folderKind: MeetingImportFolderKind
             get() = when (this) {
                 Audio -> MeetingImportFolderKind.Audio
-                Transcript -> MeetingImportFolderKind.Transcript
             }
     }
 
