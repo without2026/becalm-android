@@ -367,8 +367,6 @@ class CommitmentsTodayCheckpoint5E2eTest {
                     onFilterChange = onFilterChange,
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
-                    onMeetingTranscriptImport = {},
-                    onManualTextImport = {},
                     onOpenDetail = {},
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},

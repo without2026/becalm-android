@@ -28,11 +28,9 @@ internal class SourceExtractionInputAdapter(
     suspend fun toRequestParts(
         event: RawIngestionEventEntity,
         rawEventId: String,
-        bodyTextOverride: String? = null,
     ): SourceExtractionRequestParts {
         return toNormalizedEvent(event).toRequestParts(
             rawEventId = rawEventId,
-            bodyTextOverride = bodyTextOverride,
         )
     }
 
@@ -55,7 +53,6 @@ internal data class SourceExtractionRequestParts(
     val counterpartyRef: RequestBody?,
     val eventTitle: RequestBody?,
     val folder: RequestBody?,
-    val bodyText: RequestBody?,
 )
 
 internal fun String.toPlainRequestBody(): RequestBody =
@@ -63,7 +60,6 @@ internal fun String.toPlainRequestBody(): RequestBody =
 
 internal fun NormalizedSourceEvent.toRequestParts(
     rawEventId: String,
-    bodyTextOverride: String? = null,
 ): SourceExtractionRequestParts {
     val dto = toDto()
     return SourceExtractionRequestParts(
@@ -75,7 +71,6 @@ internal fun NormalizedSourceEvent.toRequestParts(
         counterpartyRef = dto.counterpartyRef?.toPlainRequestBody(),
         eventTitle = dto.eventTitle?.toPlainRequestBody(),
         folder = dto.folder?.toPlainRequestBody(),
-        bodyText = (bodyTextOverride ?: dto.emailBodyPlain)?.toPlainRequestBody(),
     )
 }
 

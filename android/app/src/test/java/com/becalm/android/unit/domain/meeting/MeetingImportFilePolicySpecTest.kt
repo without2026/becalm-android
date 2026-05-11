@@ -23,30 +23,13 @@ class MeetingImportFilePolicySpecTest {
     }
 
     @Test
-    fun `MTG-001 transcript import accepts only contracted transcript formats`() {
-        assertTrue(MeetingImportFilePolicy.isAllowedTranscript("text/plain", "meeting.txt"))
-        assertTrue(MeetingImportFilePolicy.isAllowedTranscript("text/markdown", "meeting.md"))
-        assertTrue(MeetingImportFilePolicy.isAllowedTranscript("application/pdf", "meeting.pdf"))
-        assertTrue(
-            MeetingImportFilePolicy.isAllowedTranscript(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "meeting.docx",
-            ),
-        )
-
-        assertFalse(MeetingImportFilePolicy.isAllowedTranscript("text/html", "meeting.html"))
-        assertFalse(MeetingImportFilePolicy.isAllowedTranscript("application/rtf", "meeting.rtf"))
-        assertFalse(MeetingImportFilePolicy.isAllowedTranscript("audio/m4a", "meeting.m4a"))
-    }
-
-    @Test
-    fun `MTG-001 classify returns rejected when MIME and extension do not match contract`() {
+    fun `MTG-001 classify rejects transcript and mismatched files`() {
         assertEquals(
             MeetingImportFileKind.Audio,
             MeetingImportFilePolicy.classify("audio/m4a", "customer-sync.m4a"),
         )
         assertEquals(
-            MeetingImportFileKind.Transcript,
+            MeetingImportFileKind.Rejected,
             MeetingImportFilePolicy.classify("text/plain", "customer-sync.txt"),
         )
         assertEquals(

@@ -28,7 +28,7 @@ private val TAB_ROUTES = setOf(
  * handles the onboarding-completed / auth-state routing decision.
  *
  * @param pendingDeepLinkRoute Pre-resolved nav route from app-owned deep links such as
- *   `becalm://commitments/{id}` or `becalm://persons/unassigned`.
+ *   `becalm://commitments/{id}`, `becalm://persons`, or `becalm://persons/unassigned`.
  * @param onDeepLinkConsumed Callback invoked once the deep-link navigation has been
  *   dispatched. No-op when no pending route is present.
  */

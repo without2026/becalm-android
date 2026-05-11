@@ -31,10 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,9 +62,9 @@ import com.becalm.android.ui.components.TimestampText
 import com.becalm.android.ui.components.commitmentActionLabelRes
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.evidence.EvidenceImportFloatingActionButton
-import com.becalm.android.ui.evidence.EvidenceImportSheet
+import com.becalm.android.ui.evidence.EvidenceImportSheetHost
 import com.becalm.android.ui.evidence.EvidenceImportViewModel
-import com.becalm.android.ui.evidence.ManualTextEvidenceDialog
+import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.evidence.rememberEvidenceImportActions
 import com.becalm.android.ui.main.MainTabHeaderState
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -129,8 +126,6 @@ public fun TodayTimelineScreen(
         },
         onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
-        onMeetingTranscriptImport = evidenceImportActions.openMeetingTranscriptPicker,
-        onManualTextImport = evidenceImportActions.submitManualText,
     )
 }
 
@@ -151,12 +146,9 @@ public fun TodayTimelineContent(
     onAddDueTime: (String) -> Unit = {},
     onMessageScreenshotImport: () -> Unit = {},
     onMeetingAudioImport: () -> Unit = {},
-    onMeetingTranscriptImport: () -> Unit = {},
-    onManualTextImport: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var showImportSheet by rememberSaveable { mutableStateOf(false) }
-    var showManualTextDialog by rememberSaveable { mutableStateOf(false) }
+    val evidenceImportController = rememberEvidenceImportSheetController()
     val pullState = rememberPullRefreshState(
         refreshing = state.refreshing,
         onRefresh = onPullRefresh,
@@ -177,7 +169,7 @@ public fun TodayTimelineContent(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            EvidenceImportFloatingActionButton(onClick = { showImportSheet = true })
+            EvidenceImportFloatingActionButton(onClick = evidenceImportController::openSheet)
         },
     ) { padding ->
         // Single-column calm on every viewport: cap content at the timeline
@@ -250,36 +242,11 @@ public fun TodayTimelineContent(
         }
     }
 
-    if (showImportSheet) {
-        EvidenceImportSheet(
-            onDismiss = { showImportSheet = false },
-            onMessageScreenshotImport = {
-                showImportSheet = false
-                onMessageScreenshotImport()
-            },
-            onMeetingAudioImport = {
-                showImportSheet = false
-                onMeetingAudioImport()
-            },
-            onMeetingTranscriptImport = {
-                showImportSheet = false
-                onMeetingTranscriptImport()
-            },
-            onManualTextImport = {
-                showImportSheet = false
-                showManualTextDialog = true
-            },
-        )
-    }
-    if (showManualTextDialog) {
-        ManualTextEvidenceDialog(
-            onDismiss = { showManualTextDialog = false },
-            onSubmit = {
-                showManualTextDialog = false
-                onManualTextImport(it)
-            },
-        )
-    }
+    EvidenceImportSheetHost(
+        controller = evidenceImportController,
+        onMessageScreenshotImport = onMessageScreenshotImport,
+        onMeetingAudioImport = onMeetingAudioImport,
+    )
 }
 
 /** Reading-width cap for the Today timeline. Below this, content fills the

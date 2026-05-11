@@ -6,8 +6,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -166,9 +168,8 @@ class HappyPathFullJourneyE2eTest {
     }
 
     @Test
-    fun today_empty_state_manual_text_import_adds_new_work_card() {
-        var timeline by mutableStateOf<List<TimelineItem>>(emptyList())
-        var submittedText: String? = null
+    fun today_empty_state_blocks_manual_text_bypass_from_evidence_sheet() {
+        val timeline = emptyList<TimelineItem>()
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -179,32 +180,14 @@ class HappyPathFullJourneyE2eTest {
                     ),
                     onOpenSettings = {},
                     onPullRefresh = {},
-                    onManualTextImport = { text ->
-                        submittedText = text
-                        timeline = listOf(
-                            todayCommitment(
-                                id = "manual-commitment",
-                                title = "민준에게 견적서 보내기",
-                                counterparty = "민준",
-                            ),
-                        )
-                    },
                 )
             }
         }
 
         composeTestRule.onNodeWithText(string(R.string.today_empty_title)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
-        composeTestRule.onNodeWithTag("evidence-import-manual-text")
-            .performSemanticsAction(SemanticsActions.OnClick)
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-input")
-            .performTextInput("내일까지 민준에게 견적서를 보내기")
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-save").performClick()
-
-        composeTestRule.onNodeWithText("민준에게 견적서 보내기").assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals("내일까지 민준에게 견적서를 보내기", submittedText)
-        }
+        composeTestRule.onAllNodesWithTag("evidence-import-manual-text").assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("evidence-import-meeting-transcript").assertCountEquals(0)
     }
 
     @Test

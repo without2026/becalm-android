@@ -82,10 +82,10 @@ class TodayTimelineUiTest {
         composeRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
-        composeRule.onNodeWithText("Voice").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_source_badge_voice)).assertIsDisplayed()
         composeRule.onNodeWithText("Gmail").assertExists()
-        composeRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
-        composeRule.onAllNodesWithText("Naver Email").assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_outlook_mail)).assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_naver_imap)).assertCountEquals(0)
         composeRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeRule.runOnIdle {
@@ -181,9 +181,9 @@ class TodayTimelineUiTest {
             }
         }
 
-        composeRule.onNodeWithText("Voice").assertExists()
+        composeRule.onNodeWithText(string(R.string.raw_event_source_badge_voice)).assertExists()
         composeRule.onNodeWithText("Gmail").assertExists()
-        composeRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_outlook_mail)).assertCountEquals(0)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

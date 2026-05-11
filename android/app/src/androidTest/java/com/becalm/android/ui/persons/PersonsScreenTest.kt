@@ -1,6 +1,9 @@
 package com.becalm.android.ui.persons
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -11,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -103,12 +107,13 @@ class PersonsScreenTest {
     fun persons_search_input_routes_typed_query() {
         var typedQuery: String? = null
         var screenshotImports = 0
-        var manualText: String? = null
+        var query by mutableStateOf("")
 
         composeTestRule.setContent {
             BecalmTheme {
                 PersonsScreenContent(
                     state = PersonsUiState(
+                        query = query,
                         people = listOf(
                             PersonRow(
                                 personId = "kim@example.com",
@@ -120,32 +125,26 @@ class PersonsScreenTest {
                         loading = false,
                     ),
                     snackbarHostState = SnackbarHostState(),
-                    onQueryChange = { typedQuery = it },
+                    onQueryChange = {
+                        typedQuery = it
+                        query = it
+                    },
                     onPersonClick = {},
                     onMessageScreenshotImport = { screenshotImports += 1 },
-                    onManualTextImport = { manualText = it },
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("persons-search-input").performTextInput("김")
+        composeTestRule.onNodeWithTag("persons-search-input").performTextReplacement("김")
         composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
         composeTestRule.onNodeWithText(appString(R.string.evidence_import_sheet_title)).assertIsDisplayed()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("evidence-import-message-screenshot")
             .performSemanticsAction(SemanticsActions.OnClick)
-        composeTestRule.onNodeWithTag("evidence-import-fab").performClick()
-        composeTestRule.onNodeWithText(appString(R.string.evidence_import_sheet_title)).assertIsDisplayed()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("evidence-import-manual-text")
-            .performSemanticsAction(SemanticsActions.OnClick)
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-input").performTextInput("견적서를 내일까지 보낸다")
-        composeTestRule.onNodeWithTag("evidence-import-manual-text-save").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("김", typedQuery)
             assertEquals(1, screenshotImports)
-            assertEquals("견적서를 내일까지 보낸다", manualText)
         }
     }
 

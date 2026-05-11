@@ -90,7 +90,6 @@ class SourcesCheckpoint2E2eTest {
                     onDisconnectDismiss = {},
                     onDisconnectConfirm = { disconnectConfirmations += 1 },
                     onMeetingAudioAdd = {},
-                    onMeetingTranscriptAdd = {},
                 )
             }
         }

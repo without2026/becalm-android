@@ -43,8 +43,6 @@ class CommitmentManagementScreenTest {
                     onFilterChange = {},
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
-                    onMeetingTranscriptImport = {},
-                    onManualTextImport = {},
                     onOpenDetail = {},
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -91,8 +89,6 @@ class CommitmentManagementScreenTest {
                     onFilterChange = { selectedFilter = it },
                     onMessageScreenshotImport = {},
                     onMeetingAudioImport = {},
-                    onMeetingTranscriptImport = {},
-                    onManualTextImport = {},
                     onOpenDetail = { openedDetailId = it },
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -120,7 +116,6 @@ class CommitmentManagementScreenTest {
     fun commitment_management_fab_opens_evidence_import_sheet() {
         var screenshotImports = 0
         var meetingAudioImports = 0
-        var meetingTranscriptImports = 0
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -135,8 +130,6 @@ class CommitmentManagementScreenTest {
                     onFilterChange = {},
                     onMessageScreenshotImport = { screenshotImports += 1 },
                     onMeetingAudioImport = { meetingAudioImports += 1 },
-                    onMeetingTranscriptImport = { meetingTranscriptImports += 1 },
-                    onManualTextImport = {},
                     onOpenDetail = {},
                     onToggleCompletedSection = {},
                     onToggleCancelledSection = {},
@@ -151,7 +144,6 @@ class CommitmentManagementScreenTest {
         composeTestRule.runOnIdle {
             assertEquals(1, screenshotImports)
             assertEquals(0, meetingAudioImports)
-            assertEquals(0, meetingTranscriptImports)
         }
     }
 

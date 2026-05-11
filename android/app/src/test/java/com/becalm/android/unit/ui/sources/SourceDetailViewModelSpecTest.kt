@@ -60,8 +60,6 @@ class SourceDetailViewModelSpecTest {
         Dispatchers.setMain(testDispatcher)
         coEvery { meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Audio) } returns
             BecalmResult.Success("content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio")
-        coEvery { meetingImportRepository.ensureTargetFolder(MeetingImportFolderKind.Transcript) } returns
-            BecalmResult.Success("content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FTranscripts")
     }
 
     @After
@@ -352,7 +350,7 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
-    fun `SMG-006 meeting source exposes add-audio and add-transcript actions`() = runTest {
+    fun `SMG-006 meeting source exposes audio import only`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.MEETING) } returns
             flowOf(status(sourceType = SourceType.MEETING, status = SourceConnectionStatus.CONNECTED))
         every { rawIngestionRepository.observeForSourceType("user-1", SourceType.MEETING, 50) } returns
@@ -368,14 +366,9 @@ class SourceDetailViewModelSpecTest {
 
             assertEquals(SourceType.MEETING, state.sourceType)
             assertTrue(state.showMeetingAudioAddButton)
-            assertTrue(state.showMeetingTranscriptAddButton)
             assertEquals(
                 "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio",
                 state.meetingAudioPickerInitialUri,
-            )
-            assertEquals(
-                "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FTranscripts",
-                state.meetingTranscriptPickerInitialUri,
             )
             cancelAndIgnoreRemainingEvents()
         }

@@ -45,7 +45,6 @@ class SourceResilienceCheckpoint6E2eTest {
                     onDisconnectDismiss = {},
                     onDisconnectConfirm = {},
                     onMeetingAudioAdd = {},
-                    onMeetingTranscriptAdd = {},
                 )
             }
         }

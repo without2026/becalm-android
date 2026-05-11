@@ -45,25 +45,6 @@ public class EvidenceImportViewModel @Inject constructor(
         }
     }
 
-    public fun onMeetingTranscriptSelected(uri: Uri?) {
-        if (uri == null) return
-        viewModelScope.launch {
-            _state.value = when (sourceImportRepository.importMeetingTranscript(uri)) {
-                is BecalmResult.Success -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_success))
-                is BecalmResult.Failure -> EvidenceImportUiState(UiMessage.resource(R.string.source_detail_error_meeting_transcript_import_failed))
-            }
-        }
-    }
-
-    public fun onManualTextSubmitted(text: String) {
-        viewModelScope.launch {
-            _state.value = when (sourceImportRepository.importManualText(text)) {
-                is BecalmResult.Success -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_success))
-                is BecalmResult.Failure -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_error_manual_text))
-            }
-        }
-    }
-
     public fun onMessageShown() {
         _state.value = EvidenceImportUiState()
     }

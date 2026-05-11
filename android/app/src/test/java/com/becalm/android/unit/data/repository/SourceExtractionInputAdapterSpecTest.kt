@@ -105,7 +105,6 @@ class SourceExtractionInputAdapterSpecTest {
         val parts = adapter.toRequestParts(
             event = raw,
             rawEventId = raw.id,
-            bodyTextOverride = "회의록 본문",
         )
 
         assertEquals(dto.sourceType, parts.sourceType.readUtf8())
@@ -115,7 +114,6 @@ class SourceExtractionInputAdapterSpecTest {
         assertEquals(dto.timestamp.toString(), parts.timestamp.readUtf8())
         assertEquals(dto.counterpartyRef, parts.counterpartyRef?.readUtf8())
         assertEquals(dto.eventTitle, parts.eventTitle?.readUtf8())
-        assertEquals("회의록 본문", parts.bodyText?.readUtf8())
     }
 
     private fun rawEvent(

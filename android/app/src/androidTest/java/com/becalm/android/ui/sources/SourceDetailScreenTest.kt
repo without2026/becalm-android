@@ -130,7 +130,6 @@ class SourceDetailScreenTest {
                     onDisconnectDismiss = onDisconnectDismiss,
                     onDisconnectConfirm = onDisconnectConfirm,
                     onMeetingAudioAdd = {},
-                    onMeetingTranscriptAdd = {},
                 )
             }
         }

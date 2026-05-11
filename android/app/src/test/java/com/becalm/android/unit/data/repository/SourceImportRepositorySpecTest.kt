@@ -154,40 +154,6 @@ class SourceImportRepositorySpecTest {
         verify(exactly = 0) { workScheduler.enqueueMessageScreenshotUpload(any()) }
     }
 
-    @Test
-    fun `TXT-001 import manual text stores private text raw event and enqueues extraction`() = runTest {
-        val eventSlot = slot<RawIngestionEventEntity>()
-        every { context.filesDir } returns temp.root
-        every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
-        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
-        coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
-            BecalmResult.Success(eventSlot.captured.id)
-        }
-
-        val result = repository().importManualText("  김철수에게 내일까지 견적서를 보내야 함  ")
-
-        assertTrue(result is BecalmResult.Success)
-        val event = eventSlot.captured
-        assertEquals(USER_ID, event.userId)
-        assertEquals(SourceType.MANUAL_TEXT, event.sourceType)
-        assertEquals("직접 입력", event.eventTitle)
-        assertEquals("김철수에게 내일까지 견적서를 보내야 함", event.eventSnippet)
-        assertEquals("pending", event.syncStatus)
-        val saved = java.io.File(requireNotNull(Uri.parse(event.sourceRef).path))
-        assertEquals("김철수에게 내일까지 견적서를 보내야 함", saved.readText())
-        verify(exactly = 1) { workScheduler.enqueueManualTextUpload(event.id) }
-    }
-
-    @Test
-    fun `TXT-002 import manual text rejects blank input`() = runTest {
-        val result = repository().importManualText("   ")
-
-        assertTrue(result is BecalmResult.Failure)
-        assertEquals(BecalmError.Validation("text", "manual text is blank"), (result as BecalmResult.Failure).error)
-        coVerify(exactly = 0) { rawIngestionRepository.insertLocal(any()) }
-        verify(exactly = 0) { workScheduler.enqueueManualTextUpload(any()) }
-    }
-
     private fun repository(): SourceImportRepository =
         SourceImportRepository(
             context = context,

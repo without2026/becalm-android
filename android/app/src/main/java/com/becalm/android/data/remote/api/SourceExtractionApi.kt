@@ -33,9 +33,9 @@ import retrofit2.http.Part
 public interface SourceExtractionApi {
 
     /**
-     * Uploads normalized source content to Railway for server-side business-item extraction via
-     * Vertex AI Gemini 2.5 Flash. Audio sources pass [audio], image sources pass [image],
-     * and text sources pass [bodyText].
+     * Uploads normalized source content to Railway for server-side business-item extraction.
+     * Audio sources pass [audio], image sources pass [image]. Transcript/manual text inputs are
+     * intentionally unsupported by this public endpoint.
      *
      * The audio bytes are streamed from a [ContentResolver] input stream directly into this
      * multipart part — no temp-file copy on device (VOI-007).
@@ -54,7 +54,7 @@ public interface SourceExtractionApi {
      *                       Content type should be "audio/m4a" or "audio/&#42;".
      * @param image          Optional image file as a multipart binary part (name="image").
      *                       Content type should be image/png, image/jpeg, or image/webp.
-     * @param inputModality  One of audio, image, transcript, email, text.
+     * @param inputModality  One of audio or image.
      * @param sourceType     Source type of the raw event.
      * @param clientEventId  UUID idempotency key matching the raw_ingestion_event row.
      * @param rawEventId     Server-assigned UUID of the raw_ingestion_event to update.
@@ -62,7 +62,6 @@ public interface SourceExtractionApi {
      * @param timestamp      ISO-8601 timestamp of when the recording occurred.
      * @param counterpartyRef      Optional canonicalized counterparty identifier.
      * @param eventTitle     Optional MediaStore TITLE of the recording.
-     * @param bodyText       Optional normalized text body for transcript/email/text sources.
      *
      * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
      */
@@ -82,6 +81,5 @@ public interface SourceExtractionApi {
         @Part("folder") folder: RequestBody?,
         @Part("conversation_ref") conversationRef: RequestBody?,
         @Part("previous_thread_context") previousThreadContext: RequestBody?,
-        @Part("body_text") bodyText: RequestBody?,
     ): Response<SourceExtractionResponse>
 }

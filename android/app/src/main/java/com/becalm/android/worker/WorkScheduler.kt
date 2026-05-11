@@ -100,11 +100,7 @@ public interface WorkScheduler {
      */
     public fun enqueueVoiceUpload(rawEventId: String, audioUri: String)
 
-    public fun enqueueMeetingTranscriptUpload(rawEventId: String)
-
     public fun enqueueMessageScreenshotUpload(rawEventId: String)
-
-    public fun enqueueManualTextUpload(rawEventId: String)
 
     /**
      * Enqueues a one-shot [VoiceUploadWorker] that waits at least [initialDelaySec] seconds
@@ -182,11 +178,7 @@ public interface WorkScheduler {
      */
     public fun cancelVoiceUpload(rawEventId: String)
 
-    public fun cancelMeetingTranscriptUpload(rawEventId: String)
-
     public fun cancelMessageScreenshotUpload(rawEventId: String)
-
-    public fun cancelManualTextUpload(rawEventId: String)
 
     /**
      * Cancels all uniquely-named work managed by this scheduler.

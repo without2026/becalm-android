@@ -5,18 +5,15 @@ import android.provider.DocumentsContract
 
 public enum class MeetingImportFolderKind {
     Audio,
-    Transcript,
 }
 
 public object MeetingImportFolders {
     public const val MEETINGS_DIR: String = "BeCalm Meetings"
     public const val AUDIO_DIR: String = "Audio"
-    public const val TRANSCRIPTS_DIR: String = "Transcripts"
 
     public fun targetDirectoryName(kind: MeetingImportFolderKind): String =
         when (kind) {
             MeetingImportFolderKind.Audio -> AUDIO_DIR
-            MeetingImportFolderKind.Transcript -> TRANSCRIPTS_DIR
         }
 
     public fun targetDirectoryDocumentUri(treeUri: Uri, kind: MeetingImportFolderKind): Uri {

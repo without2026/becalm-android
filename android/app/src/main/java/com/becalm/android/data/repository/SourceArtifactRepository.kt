@@ -32,21 +32,11 @@ public data class ArchivedOriginal(
 
 public interface SourceArtifactRepository {
     public suspend fun archiveEmailOriginal(input: EmailOriginalArchiveInput): SourceArtifactEntity?
-    public suspend fun archiveMeetingTranscript(input: MeetingTranscriptArchiveInput): SourceArtifactEntity?
     public suspend fun findMarkdownOriginal(userId: String, rawEventId: String): ArchivedOriginal?
     public suspend fun summary(userId: String): SourceArchiveSummary
     public suspend fun deleteBefore(userId: String, cutoff: Instant): SourceArchiveDeleteResult
     public suspend fun deleteAllForUser(userId: String)
 }
-
-public data class MeetingTranscriptArchiveInput(
-    val userId: String,
-    val rawEventId: String,
-    val sourceRef: String?,
-    val occurredAt: Instant,
-    val title: String?,
-    val text: String,
-)
 
 public data class EmailOriginalArchiveInput(
     val userId: String,
@@ -89,46 +79,6 @@ public class SourceArtifactRepositoryImpl @Inject constructor(
                 userId = input.userId,
                 rawEventId = input.rawEventId,
                 sourceType = input.sourceType,
-                sourceRef = input.sourceRef,
-                artifactType = SOURCE_ARTIFACT_TYPE_MARKDOWN_ORIGINAL,
-                localPath = write.relativePath,
-                sha256 = write.sha256,
-                byteSize = write.byteSize,
-                occurredAt = input.occurredAt,
-                createdAt = now,
-                updatedAt = now,
-            )
-            try {
-                dao.upsert(entity)
-                entity
-            } catch (t: Throwable) {
-                store.delete(write.relativePath)
-                throw t
-            }
-        }
-
-    override suspend fun archiveMeetingTranscript(input: MeetingTranscriptArchiveInput): SourceArtifactEntity? =
-        withContext(ioDispatcher) {
-            val body = input.text.takeIf { it.isNotBlank() } ?: return@withContext null
-            val markdown = buildMeetingTranscriptMarkdown(input, body)
-            val write = store.writeMarkdown(
-                userId = input.userId,
-                sourceType = com.becalm.android.data.remote.dto.SourceType.MEETING,
-                rawEventId = input.rawEventId,
-                occurredAt = input.occurredAt,
-                markdown = markdown,
-            )
-            val now = Clock.System.now()
-            val entity = SourceArtifactEntity(
-                id = stableId(
-                    input.userId,
-                    com.becalm.android.data.remote.dto.SourceType.MEETING,
-                    input.sourceRef,
-                    input.rawEventId,
-                ),
-                userId = input.userId,
-                rawEventId = input.rawEventId,
-                sourceType = com.becalm.android.data.remote.dto.SourceType.MEETING,
                 sourceRef = input.sourceRef,
                 artifactType = SOURCE_ARTIFACT_TYPE_MARKDOWN_ORIGINAL,
                 localPath = write.relativePath,
@@ -200,21 +150,6 @@ public class SourceArtifactRepositoryImpl @Inject constructor(
             appendLine("to:")
             input.toAddresses.forEach { appendLine("  - ${frontMatter(it)}") }
             appendLine("attachments_count: ${input.attachmentsCount}")
-            appendLine("---")
-            appendLine()
-            appendLine("# ${heading(input.title)}")
-            appendLine()
-            appendLine(body.trim())
-        }
-
-    private fun buildMeetingTranscriptMarkdown(input: MeetingTranscriptArchiveInput, body: String): String =
-        buildString {
-            appendLine("---")
-            appendLine("raw_event_id: ${frontMatter(input.rawEventId)}")
-            appendLine("source_type: meeting")
-            appendLine("source_ref: ${frontMatter(input.sourceRef ?: "null")}")
-            appendLine("occurred_at: ${frontMatter(input.occurredAt.toString())}")
-            appendLine("title: ${frontMatter(input.title ?: "(untitled meeting transcript)")}")
             appendLine("---")
             appendLine()
             appendLine("# ${heading(input.title)}")

@@ -29,9 +29,7 @@ internal object WorkSchedulerRequests {
     const val BACKOFF_DELAY_SECONDS: Long = 30L
     const val UPLOAD_DEBOUNCE_SECONDS: Long = 10L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
-    const val TAG_MEETING_TRANSCRIPT_UPLOAD: String = "meeting_transcript_upload"
     const val TAG_MESSAGE_SCREENSHOT_UPLOAD: String = "message_screenshot_upload"
-    const val TAG_MANUAL_TEXT_UPLOAD: String = "manual_text_upload"
     const val TAG_PROFILE_MEMORY: String = "profile_memory"
     const val LEGACY_TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
 
@@ -129,34 +127,6 @@ internal object WorkSchedulerRequests {
         }
         return builder.build()
     }
-
-    fun meetingTranscriptUploadRequest(rawEventId: String): OneTimeWorkRequest =
-        OneTimeWorkRequest.Builder(MeetingTranscriptUploadWorker::class.java)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
-            .setInputData(
-                workDataOf(MeetingTranscriptUploadWorker.KEY_RAW_EVENT_ID to rawEventId),
-            )
-            .addTag(TAG_MEETING_TRANSCRIPT_UPLOAD)
-            .build()
-
-    fun manualTextUploadRequest(rawEventId: String): OneTimeWorkRequest =
-        OneTimeWorkRequest.Builder(MeetingTranscriptUploadWorker::class.java)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
-            .setInputData(
-                workDataOf(MeetingTranscriptUploadWorker.KEY_RAW_EVENT_ID to rawEventId),
-            )
-            .addTag(TAG_MANUAL_TEXT_UPLOAD)
-            .build()
 
     fun messageScreenshotUploadRequest(rawEventId: String): OneTimeWorkRequest =
         OneTimeWorkRequest.Builder(MessageScreenshotUploadWorker::class.java)

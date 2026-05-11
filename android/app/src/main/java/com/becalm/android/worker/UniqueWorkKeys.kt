@@ -68,9 +68,7 @@ public object UniqueWorkKeys {
      * Spec refs: VOI-001.
      */
     public const val VOICE_UPLOAD_PREFIX: String = "voice.upload"
-    public const val MEETING_TRANSCRIPT_UPLOAD_PREFIX: String = "meeting.transcript.upload"
     public const val MESSAGE_SCREENSHOT_UPLOAD_PREFIX: String = "message.screenshot.upload"
-    public const val MANUAL_TEXT_UPLOAD_PREFIX: String = "manual.text.upload"
 
     /**
      * Returns the unique work name for a [com.becalm.android.worker.VoiceUploadWorker]
@@ -83,11 +81,7 @@ public object UniqueWorkKeys {
      */
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
 
-    public fun meetingTranscriptUpload(rawEventId: String): String = "$MEETING_TRANSCRIPT_UPLOAD_PREFIX.$rawEventId"
-
     public fun messageScreenshotUpload(rawEventId: String): String = "$MESSAGE_SCREENSHOT_UPLOAD_PREFIX.$rawEventId"
-
-    public fun manualTextUpload(rawEventId: String): String = "$MANUAL_TEXT_UPLOAD_PREFIX.$rawEventId"
 
     public fun profileMemory(personId: String): String = "$PROFILE_MEMORY_PREFIX.$personId"
 

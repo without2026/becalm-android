@@ -4,103 +4,94 @@
     <string name="app_name">BeCalm</string>
 
     <!-- Common -->
-    <string name="action_skip">Skip</string>
-    <string name="action_back">Back</string>
-    <string name="action_connect">Connect</string>
-    <string name="action_grant">Grant Permission</string>
-    <string name="action_confirm">Confirm</string>
-    <string name="action_cancel">Cancel</string>
-    <string name="action_sign_out">Sign Out</string>
-    <string name="action_wipe_data">Wipe Local Data</string>
-    <string name="action_delete_account">Delete Account</string>
-    <string name="action_reconnect">Reconnect</string>
-    <string name="action_sync_now">Sync Now</string>
-    <string name="action_disconnect">Disconnect</string>
-    <string name="action_revoke_permission">Revoke Permission</string>
-    <string name="label_settings">Settings</string>
-    <string name="voice_failure_channel_name">Voice Processing Issues</string>
-    <string name="voice_failure_channel_desc">Alerts when BeCalm cannot process a voice recording.</string>
-    <string name="voice_failure_notification_title">Voice processing failed</string>
-    <string name="voice_failure_notification_body_generic">%1$s could not be processed. Open BeCalm to review or retry.</string>
-    <string name="voice_failure_notification_body_output_truncated">%1$s was too long to process. Try a shorter recording.</string>
-    <string name="person_matching_required_channel_name">Person Matching Required</string>
-    <string name="person_matching_required_channel_desc">Alerts when synced interactions need a person match.</string>
-    <string name="person_matching_required_notification_title">Person matching needed</string>
+    <string name="action_skip">건너뛰기</string>
+    <string name="action_back">뒤로</string>
+    <string name="action_connect">연결</string>
+    <string name="action_grant">권한 허용</string>
+    <string name="action_confirm">확인</string>
+    <string name="action_cancel">취소</string>
+    <string name="action_sign_out">로그아웃</string>
+    <string name="action_wipe_data">데이터 삭제</string>
+    <string name="action_reconnect">다시 연결</string>
+    <string name="action_disconnect">연결 해제</string>
+    <string name="label_settings">설정</string>
+    <string name="person_matching_required_channel_name">인물 매칭 필요</string>
+    <string name="person_matching_required_channel_desc">동기화된 상호작용에 사람 매칭이 필요할 때 알립니다.</string>
+    <string name="person_matching_required_notification_title">인물 매칭이 필요합니다</string>
     <plurals name="person_matching_required_notification_body">
-        <item quantity="one">%1$d synced interaction needs a person match. Open People to assign it.</item>
-        <item quantity="other">%1$d synced interactions need person matches. Open People to assign them.</item>
+        <item quantity="one">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. 사람 탭에서 지정해 주세요.</item>
+        <item quantity="other">동기화된 상호작용 %1$d건에 사람 매칭이 필요합니다. 사람 탭에서 지정해 주세요.</item>
     </plurals>
 
     <!-- Error / empty states -->
-    <string name="error_generic_title">Something went wrong</string>
-    <string name="error_state_retry">Retry</string>
-    <string name="commitment_mark_done_action">Mark done</string>
-    <string name="today_source_strip_a11y_label">Data source status</string>
-    <string name="action_close">Close</string>
+    <string name="error_generic_title">오류가 발생했습니다</string>
+    <string name="error_state_retry">다시 시도</string>
+    <string name="commitment_mark_done_action">완료 처리</string>
+    <string name="today_source_strip_a11y_label">데이터 소스 상태 표시</string>
+    <string name="action_close">닫기</string>
 
     <!-- Splash -->
     <string name="splash_title">BeCalm</string>
-    <string name="splash_tagline">Your commitment companion</string>
-    <string name="splash_loading">Starting BeCalm...</string>
+    <string name="splash_tagline">약속을 관리하는 AI 비서</string>
 
     <!-- Terms -->
-    <string name="terms_title">Terms &amp; Privacy</string>
-    <string name="terms_subtitle">Please read and accept before continuing.</string>
-    <string name="terms_pipa_notice">BeCalm collects and processes personal information (contacts, calendar events, emails) on-device under your consent as required by the Personal Information Protection Act (PIPA). Your data is stored locally first and only shared with our servers with your explicit consent.</string>
-    <string name="terms_required_label">Required</string>
-    <string name="terms_check_terms_privacy">I agree to the Terms and Privacy notice.</string>
-    <string name="terms_check_local_first">Raw content and relationship data are managed locally first; only consented processing leaves the device.</string>
-    <string name="terms_accept_checkbox">I have read and agree to the Terms</string>
-    <string name="terms_cta">Continue</string>
-    <string name="terms_decline_cta">Decline &amp; exit</string>
+    <string name="terms_title">이용약관 및 개인정보처리방침</string>
+    <string name="terms_subtitle">계속하기 전에 아래 내용을 읽고 동의해 주세요.</string>
+    <string name="terms_pipa_notice">BeCalm은 개인정보 보호법(PIPA)에 따라 귀하의 동의 하에 연락처, 캘린더 일정, 이메일 등 개인정보를 기기 내에서 수집·처리합니다. 귀하의 데이터는 우선 기기에 로컬 저장되며, 귀하의 명시적 동의 항목만 서버로 전송됩니다.</string>
+    <string name="terms_required_label">필수</string>
+    <string name="terms_check_terms_privacy">이용약관과 개인정보 처리 안내에 동의합니다.</string>
+    <string name="terms_check_local_first">원문과 관계 데이터는 우선 기기 안에서 관리되며, 동의한 처리만 외부로 전송됩니다.</string>
+    <string name="terms_accept_checkbox">약관을 읽고 동의합니다</string>
+    <string name="terms_cta">계속</string>
+    <string name="terms_decline_cta">동의 안 함 · 앱 종료</string>
 
     <!-- Login -->
-    <string name="login_title">Sign In</string>
-    <string name="login_email_label">Email</string>
+    <string name="login_title">로그인</string>
+    <string name="login_email_label">이메일</string>
     <string name="login_email_placeholder">name@example.com</string>
-    <string name="login_password_label">Password</string>
-    <string name="login_password_placeholder">Your password</string>
-    <string name="login_cta">Sign In</string>
-    <string name="login_signup_cta">Create account</string>
-    <string name="login_google_cta">Continue with Google</string>
-    <string name="login_email_section_label">Or sign in with email</string>
-    <string name="login_framing">Quietly organize conversations and commitments by person.</string>
-    <string name="login_google_error_no_credentials">No Google account found on this device. Add one from Settings → Accounts and try again.</string>
-    <string name="login_google_error_unknown">Google sign-in failed. Please try again or use email.</string>
-    <string name="login_error_empty_fields">Please enter your email and password.</string>
-    <string name="login_signup_check_email">Check your email to confirm your account, then sign in.</string>
-    <string name="login_signup_failed">Couldn\'t create that account. Try signing in or use a different email.</string>
-    <string name="auth_error_invalid_credentials">Invalid email or password.</string>
-    <string name="auth_error_email_confirmation_required">Check your email to confirm your account, then sign in.</string>
-    <string name="auth_error_sign_up_failed">Could not create account.</string>
-    <string name="auth_error_network">Network connection failed. Please try again.</string>
-    <string name="auth_error_rate_limited">Too many attempts. Please wait and try again.</string>
-    <string name="auth_error_server">Server error. Please try again later.</string>
-    <string name="auth_error_validation">Please check the entered information.</string>
-    <string name="auth_error_local_io">Local storage error. Please try again.</string>
-    <string name="auth_error_permission">Required permission was not granted.</string>
-    <string name="auth_error_not_found">Requested account data was not found.</string>
-    <string name="auth_error_cancelled">Request was cancelled.</string>
-    <string name="auth_error_unknown">Something went wrong. Please try again.</string>
-    <string name="auth_error_sign_out_failed">Sign out failed. Please try again.</string>
-    <string name="auth_error_terms_acceptance_failed">Terms acceptance could not be saved.</string>
-    <string name="auth_error_session_restore_failed">Session could not be restored. Please sign in again.</string>
+    <string name="login_password_label">비밀번호</string>
+    <string name="login_password_placeholder">비밀번호를 입력하세요</string>
+    <string name="login_cta">로그인</string>
+    <string name="login_signup_cta">계정 만들기</string>
+    <string name="login_google_cta">Google로 계속하기</string>
+    <string name="login_email_section_label">또는 이메일로 로그인</string>
+    <string name="login_framing">사람별 대화와 약속을 조용히 정리합니다.</string>
+    <string name="login_google_error_no_credentials">이 기기에 Google 계정이 없습니다. 설정 → 계정에서 계정을 추가한 뒤 다시 시도해 주세요.</string>
+    <string name="login_google_error_unknown">Google 로그인에 실패했습니다. 다시 시도하거나 이메일 로그인을 이용해 주세요.</string>
+    <string name="login_error_empty_fields">이메일과 비밀번호를 입력해 주세요.</string>
+    <string name="login_signup_check_email">이메일을 확인해 계정을 인증한 뒤 로그인해 주세요.</string>
+    <string name="login_signup_failed">계정을 만들 수 없습니다. 로그인하거나 다른 이메일을 사용해 주세요.</string>
+    <string name="auth_error_invalid_credentials">이메일 또는 비밀번호가 올바르지 않습니다.</string>
+    <string name="auth_error_email_confirmation_required">이메일을 확인해 계정을 인증한 뒤 로그인해 주세요.</string>
+    <string name="auth_error_sign_up_failed">계정을 만들 수 없습니다.</string>
+    <string name="auth_error_network">네트워크 연결에 실패했습니다. 다시 시도해 주세요.</string>
+    <string name="auth_error_rate_limited">시도 횟수가 너무 많습니다. 잠시 후 다시 시도해 주세요.</string>
+    <string name="auth_error_server">서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</string>
+    <string name="auth_error_validation">입력한 정보를 다시 확인해 주세요.</string>
+    <string name="auth_error_local_io">기기 저장소 오류가 발생했습니다. 다시 시도해 주세요.</string>
+    <string name="auth_error_permission">필요한 권한이 허용되지 않았습니다.</string>
+    <string name="auth_error_not_found">요청한 계정 데이터를 찾을 수 없습니다.</string>
+    <string name="auth_error_cancelled">요청이 취소되었습니다.</string>
+    <string name="auth_error_unknown">문제가 발생했습니다. 다시 시도해 주세요.</string>
+    <string name="auth_error_sign_out_failed">로그아웃하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="auth_error_terms_acceptance_failed">약관 동의 상태를 저장하지 못했습니다.</string>
+    <string name="auth_error_session_restore_failed">세션을 복원하지 못했습니다. 다시 로그인해 주세요.</string>
 
     <!-- Onboarding: recording folder -->
-    <string name="onb_recording_folder_title">Recording Folder</string>
-    <string name="onb_recording_folder_headline">Allow access to recordings</string>
-    <string name="onb_recording_folder_body">BeCalm reads your voice recording files to extract commitments. Files are processed locally; only extracted commitment text is ever sent to our servers.</string>
-    <string name="onb_recording_folder_detected_path_fmt">Detected path: %1$s</string>
-    <string name="onb_recording_folder_voice_status_fmt">Voice Recorder folder: %1$s</string>
-    <string name="onb_recording_folder_call_status_fmt">Call folder: %1$s</string>
-    <string name="onb_recording_folder_status_detected">detected</string>
-    <string name="onb_recording_folder_status_missing">not detected</string>
-    <string name="onb_recording_folder_manual_picker_fallback">Automatic detection failed. Choose the top-level Recordings folder in the picker.</string>
+    <string name="onb_recording_folder_title">녹음 폴더</string>
+    <string name="onb_recording_folder_headline">녹음 파일 접근 허용</string>
+    <string name="onb_recording_folder_body">BeCalm은 약속 추출을 위해 음성 녹음 파일을 읽습니다. 파일은 기기에서만 처리되며, 추출된 약속 텍스트만 서버로 전송됩니다.</string>
+    <string name="onb_recording_folder_detected_path_fmt">감지된 경로: %1$s</string>
+    <string name="onb_recording_folder_voice_status_fmt">음성 메모 폴더: %1$s</string>
+    <string name="onb_recording_folder_call_status_fmt">통화 녹음 폴더: %1$s</string>
+    <string name="onb_recording_folder_status_detected">감지됨</string>
+    <string name="onb_recording_folder_status_missing">미감지</string>
+    <string name="onb_recording_folder_manual_picker_fallback">자동 탐색에 실패했습니다. 선택기에서 상위 녹음 폴더를 선택해 주세요.</string>
 
     <!-- Onboarding: contacts -->
-    <string name="onb_contacts_title">Contacts Access</string>
-    <string name="onb_contacts_headline">Connect your contacts</string>
-    <string name="onb_contacts_body">BeCalm reads your contact names to display people you interact with. Contact data never leaves your device. This permission can be revoked at any time.</string>
+    <string name="onb_contacts_title">연락처 접근</string>
+    <string name="onb_contacts_headline">연락처 연결</string>
+    <string name="onb_contacts_body">BeCalm은 상호작용 상대방의 이름 표시를 위해 연락처를 읽습니다. 연락처 데이터는 기기 밖으로 전송되지 않습니다. 언제든지 권한을 취소할 수 있습니다.</string>
     <string name="onb_contacts_pipa">수집 목적: 상호작용 상대방 이름 표시. 보유 기간: 앱 사용 기간. 파기: 앱 삭제 또는 데이터 초기화 시.</string>
 
     <!-- Onboarding: compact setup -->
@@ -120,179 +111,460 @@
     <string name="onb_setup_notifications_title">알림</string>
     <string name="onb_setup_notifications_body">오늘 처리해야 할 약속을 제때 알려드립니다.</string>
     <string name="onb_setup_start">BeCalm 시작하기</string>
-    <string name="onb_error_complete_steps">Complete the remaining setup items before finishing.</string>
-    <string name="onb_error_completion_failed">Setup could not be completed. Please try again.</string>
-    <string name="onb_error_consent_write_failed">Consent could not be saved. Please try again.</string>
+    <string name="onb_error_complete_steps">남은 설정 항목을 완료한 뒤 시작해 주세요.</string>
+    <string name="onb_error_completion_failed">시작 설정을 완료하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_error_consent_write_failed">동의 내용을 저장하지 못했습니다. 다시 시도해 주세요.</string>
 
-    <!-- Onboarding: source connections -->
-    <string name="onb_sources_title">Sources</string>
-    <string name="onb_sources_headline">Connect the places work happens</string>
-    <string name="onb_sources_body">Choose the accounts BeCalm can use to build relationship history. You can skip any source and connect it later from Settings.</string>
-    <string name="onb_sources_mail_section">Mail</string>
-    <string name="onb_sources_calendar_section">Calendar</string>
-    <string name="onb_sources_status_ready">Ready</string>
-    <string name="onb_sources_status_consent">Consent needed</string>
-    <string name="onb_sources_status_connecting">Connecting</string>
-    <string name="onb_sources_status_waiting">Waiting for browser</string>
-    <string name="onb_sources_status_connected">Connected</string>
-    <string name="onb_sources_status_skipped">Skipped</string>
-    <string name="onb_sources_status_failed">Needs retry</string>
-    <string name="onb_sources_continue">Continue</string>
-    <string name="onb_sources_skip_remaining">Skip remaining and continue</string>
-    <string name="onb_sources_connect_with_consent">Agree and connect</string>
-    <string name="onb_sources_retry">Retry</string>
-    <string name="onb_sources_activity_missing">Connection could not start from this screen. Try again.</string>
-    <string name="onb_sources_consent_write_failed">Couldn\'t save consent. Please try again.</string>
-    <string name="onb_sources_mail_consent_body">BeCalm uses read-only access to extract relationship commitments. Mail content is used only for source processing and can be disconnected later.</string>
-    <string name="settings_source_connections_title">Connect sources</string>
-    <string name="settings_source_connections_headline">Reconnect relationship sources</string>
-    <string name="settings_source_connections_body">Choose a mail or calendar account to reconnect. BeCalm uses these sources to keep relationship history current.</string>
-    <string name="settings_source_connections_done">Done</string>
-    <string name="settings_source_connections_not_now">Not now</string>
+    <!-- Source connection hub -->
+    <string name="onb_sources_title">소스 연결</string>
+    <string name="onb_sources_headline">일이 오가는 곳을 연결하세요</string>
+    <string name="onb_sources_body">BeCalm이 관계 히스토리를 만들 때 사용할 계정을 선택하세요. 건너뛴 소스는 설정에서 나중에 연결할 수 있습니다.</string>
+    <string name="onb_sources_mail_section">메일</string>
+    <string name="onb_sources_calendar_section">캘린더</string>
+    <string name="onb_sources_status_ready">준비됨</string>
+    <string name="onb_sources_status_consent">동의 필요</string>
+    <string name="onb_sources_status_connecting">연결 중</string>
+    <string name="onb_sources_status_waiting">브라우저 대기 중</string>
+    <string name="onb_sources_status_connected">연결됨</string>
+    <string name="onb_sources_status_skipped">건너뜀</string>
+    <string name="onb_sources_status_failed">재시도 필요</string>
+    <string name="onb_sources_continue">계속</string>
+    <string name="onb_sources_skip_remaining">남은 항목 건너뛰고 계속</string>
+    <string name="onb_sources_connect_with_consent">동의하고 연결</string>
+    <string name="onb_sources_retry">다시 시도</string>
+    <string name="onb_sources_activity_missing">이 화면에서 연결을 시작할 수 없습니다. 다시 시도해 주세요.</string>
+    <string name="onb_sources_consent_write_failed">동의 저장에 실패했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_sources_mail_consent_body">BeCalm은 관계 약속 추출을 위해 읽기 전용 접근을 사용합니다. 메일 내용은 소스 처리에만 사용되며 나중에 연결을 해제할 수 있습니다.</string>
+    <string name="settings_source_connections_title">소스 연결</string>
+    <string name="settings_source_connections_headline">관계 소스 다시 연결</string>
+    <string name="settings_source_connections_body">다시 연결할 메일 또는 캘린더 계정을 선택하세요. BeCalm은 이 소스로 관계 히스토리를 최신 상태로 유지합니다.</string>
+    <string name="settings_source_connections_done">완료</string>
+    <string name="settings_source_connections_not_now">나중에</string>
 
     <!-- Onboarding: Gmail OAuth -->
     <string name="onb_gmail_title">Gmail</string>
-    <string name="onb_gmail_headline">Connect Gmail</string>
-    <string name="onb_gmail_body">BeCalm accesses your Gmail to detect commitments in email threads. We request read-only access. Only commitment-relevant metadata is synced; full email bodies are never uploaded.</string>
+    <string name="onb_gmail_headline">Gmail 연결</string>
+    <string name="onb_gmail_body">BeCalm은 이메일 스레드에서 약속을 감지하기 위해 Gmail에 접근합니다. 읽기 전용 권한을 요청합니다. 약속 관련 메타데이터만 동기화되며 이메일 본문은 업로드되지 않습니다.</string>
 
     <!-- Onboarding: Outlook Mail OAuth -->
-    <string name="onb_outlook_mail_title">Outlook Mail</string>
-    <string name="onb_outlook_mail_headline">Connect Outlook Mail</string>
-    <string name="onb_outlook_mail_body">BeCalm accesses your Outlook inbox to detect commitments in email threads. We request read-only access. Full email bodies are never uploaded.</string>
+    <string name="onb_outlook_mail_title">Outlook 메일</string>
+    <string name="onb_outlook_mail_headline">Outlook 메일 연결</string>
+    <string name="onb_outlook_mail_body">BeCalm은 이메일 스레드에서 약속을 감지하기 위해 Outlook 받은편지함에 접근합니다. 읽기 전용 권한을 요청합니다. 이메일 본문은 업로드되지 않습니다.</string>
 
     <!-- Onboarding: IMAP -->
-    <string name="onb_imap_title">IMAP / App Password</string>
-    <string name="onb_imap_headline">Connect via IMAP</string>
-    <string name="onb_imap_body">Enter your IMAP server details to sync email commitments. Use an app-specific password, not your main account password. Your credentials are stored encrypted on this device.</string>
-    <string name="onb_imap_host_label">IMAP Server</string>
+    <string name="onb_imap_title">IMAP / 앱 비밀번호</string>
+    <string name="onb_imap_headline">IMAP으로 연결</string>
+    <string name="onb_imap_body">IMAP 서버 정보를 입력해 이메일 약속을 동기화하세요. 주 계정 비밀번호가 아닌 앱 전용 비밀번호를 사용하세요. 자격 증명은 이 기기에 암호화 저장됩니다.</string>
+    <string name="onb_imap_host_label">IMAP 서버</string>
     <string name="onb_imap_host_placeholder">imap.example.com</string>
-    <string name="onb_imap_email_label">Email address</string>
+    <string name="onb_imap_email_label">이메일 주소</string>
     <string name="onb_imap_email_placeholder">name@example.com</string>
-    <string name="onb_imap_password_label">App password</string>
-    <string name="onb_imap_password_placeholder">App-specific password</string>
-    <string name="onb_imap_cta">Save</string>
+    <string name="onb_imap_password_label">앱 비밀번호</string>
+    <string name="onb_imap_password_placeholder">앱 전용 비밀번호</string>
+    <string name="onb_imap_cta">저장</string>
 
     <!-- Onboarding: Google Calendar -->
-    <string name="onb_gcal_title">Google Calendar</string>
-    <string name="onb_gcal_headline">Connect Google Calendar</string>
-    <string name="onb_gcal_body">BeCalm reads your Google Calendar to surface upcoming meetings and related commitments. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
+    <string name="onb_gcal_title">Google 캘린더</string>
+    <string name="onb_gcal_headline">Google 캘린더 연결</string>
+    <string name="onb_gcal_body">BeCalm은 예정 회의 및 관련 약속을 표시하기 위해 Google 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
     <!-- Onboarding: Outlook Calendar -->
-    <string name="onb_outlook_cal_title">Outlook Calendar</string>
-    <string name="onb_outlook_cal_headline">Connect Outlook Calendar</string>
-    <string name="onb_outlook_cal_body">BeCalm reads your Outlook Calendar to surface upcoming meetings. Read-only access. Event titles and attendees are synced; descriptions are not.</string>
+    <string name="onb_outlook_cal_title">Outlook 캘린더</string>
+    <string name="onb_outlook_cal_headline">Outlook 캘린더 연결</string>
+    <string name="onb_outlook_cal_body">BeCalm은 예정 회의를 표시하기 위해 Outlook 캘린더를 읽습니다. 읽기 전용 접근. 일정 제목과 참석자가 동기화되며 설명은 동기화되지 않습니다.</string>
 
     <!-- Onboarding: IMAP provider selector + errors (S6-H) -->
-    <string name="onb_imap_provider_naver">Naver</string>
-    <string name="onb_imap_provider_daum">Daum</string>
-    <string name="onb_imap_username_hint_naver">naver.com ID</string>
-    <string name="onb_imap_username_hint_daum">daum.net / hanmail.net ID</string>
-    <string name="onb_imap_error_save_failed">Couldn\'t save credentials. Please try again.</string>
-    <string name="onb_imap_error_network">Network error. Check your connection and try again.</string>
+    <string name="onb_imap_provider_naver">네이버</string>
+    <string name="onb_imap_provider_daum">다음</string>
+    <string name="onb_imap_username_hint_naver">naver.com 아이디</string>
+    <string name="onb_imap_username_hint_daum">daum.net / hanmail.net 아이디</string>
+    <string name="onb_imap_error_save_failed">자격 증명 저장에 실패했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_imap_error_network">네트워크 오류입니다. 연결을 확인한 뒤 다시 시도해 주세요.</string>
 
     <!-- Onboarding: Gmail OAuth errors (S6-F) -->
-    <string name="onb_gmail_error_network">Couldn\'t reach Google. Please check your connection and try again.</string>
-    <string name="onb_gmail_error_permission_denied">BeCalm needs Gmail read access. Please grant the scope to continue.</string>
-    <string name="onb_gmail_error_unknown">Gmail connection failed. Please try again or skip for now.</string>
+    <string name="onb_gmail_error_network">구글 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="onb_gmail_error_permission_denied">BeCalm에는 Gmail 읽기 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_gmail_error_unknown">Gmail 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
 
     <!-- Onboarding: Outlook OAuth errors (S6-G) -->
-    <string name="onb_outlook_error_network">Couldn\'t reach Microsoft. Please check your connection and try again.</string>
-    <string name="onb_outlook_error_permission_denied">BeCalm needs Mail.Read access. Please grant the scope to continue.</string>
-    <string name="onb_outlook_error_unknown">Outlook connection failed. Please try again or skip for now.</string>
-    <string name="onb_gcal_error_unavailable">Google Calendar connection could not start. Check backend OAuth configuration or skip for now.</string>
-    <string name="onb_gcal_error_unknown">Google Calendar connection failed. Please try again or skip for now.</string>
-    <string name="onb_outlook_cal_error_unavailable">Outlook Calendar connection could not start. Check backend OAuth configuration or skip for now.</string>
-    <string name="onb_outlook_cal_error_unknown">Outlook Calendar connection failed. Please try again or skip for now.</string>
+    <string name="onb_outlook_error_network">Microsoft 서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="onb_outlook_error_permission_denied">BeCalm에는 Mail.Read 권한이 필요합니다. 권한을 허용해 주세요.</string>
+    <string name="onb_outlook_error_unknown">Outlook 연결에 실패했습니다. 다시 시도하거나 건너뛴 뒤 설정에서 연결해 주세요.</string>
 
     <!-- Onboarding: Email PIPA 제3자 제공 consent (S6-D) -->
-    <string name="onb_pipa_email_title_gmail">Gmail data use</string>
-    <string name="onb_pipa_email_title_outlook">Outlook Mail data use</string>
-    <string name="onb_pipa_email_title_imap">IMAP mail data use</string>
-    <string name="onb_pipa_email_headline_gmail">Grant BeCalm permission to read your Gmail</string>
-    <string name="onb_pipa_email_headline_outlook">Grant BeCalm permission to read your Outlook Mail</string>
-    <string name="onb_pipa_email_headline_imap">Grant BeCalm permission to read your IMAP inbox</string>
-    <string name="onb_pipa_email_recipient">Third party</string>
-    <string name="onb_pipa_email_recipient_gmail">Google LLC (United States)</string>
-    <string name="onb_pipa_email_recipient_outlook">Microsoft Corporation (United States)</string>
-    <string name="onb_pipa_email_recipient_imap">Naver Corp / Kakao Corp (Korea)</string>
-    <string name="onb_pipa_email_purpose">Purpose</string>
-    <string name="onb_pipa_email_purpose_body">Extract upcoming commitments from mail metadata and body text. Processing stays on your device; messages are never uploaded.</string>
-    <string name="onb_pipa_email_items">Items collected</string>
-    <string name="onb_pipa_email_items_body">Subject, sender / recipient, timestamps, body text. Attachment bytes are never downloaded.</string>
-    <string name="onb_pipa_email_retention">Retention</string>
-    <string name="onb_pipa_email_retention_body">Stored on-device only for up to 30 days, then automatically deleted.</string>
-    <string name="onb_pipa_email_opt_out">Opt-out</string>
-    <string name="onb_pipa_email_opt_out_body">Declining simply skips this email provider. You can grant consent later from Settings.</string>
-    <string name="onb_pipa_email_cta_agree">Agree</string>
-    <string name="onb_pipa_email_cta_agree_connect">Agree and connect</string>
-    <string name="onb_pipa_email_cta_deny">Decline</string>
-    <string name="onb_pipa_email_error_write_failed">Couldn\'t save your consent decision. Please try again.</string>
+    <string name="onb_pipa_email_title_gmail">Gmail 정보 이용 안내</string>
+    <string name="onb_pipa_email_title_outlook">Outlook 메일 정보 이용 안내</string>
+    <string name="onb_pipa_email_title_imap">IMAP 메일 정보 이용 안내</string>
+    <string name="onb_pipa_email_headline_gmail">BeCalm에 Gmail 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_outlook">BeCalm에 Outlook 메일 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_headline_imap">BeCalm에 IMAP 메일함 읽기 권한을 허용해 주세요</string>
+    <string name="onb_pipa_email_recipient">제공받는 자</string>
+    <string name="onb_pipa_email_recipient_gmail">Google LLC (미국)</string>
+    <string name="onb_pipa_email_recipient_outlook">Microsoft Corporation (미국)</string>
+    <string name="onb_pipa_email_recipient_imap">Naver Corp / Kakao Corp (대한민국)</string>
+    <string name="onb_pipa_email_purpose">이용 목적</string>
+    <string name="onb_pipa_email_purpose_body">메일 본문과 메타데이터에서 약속 정보를 추출해 기기 내에서 표시합니다. 본문은 서버로 전송되지 않습니다.</string>
+    <string name="onb_pipa_email_items">수집 항목</string>
+    <string name="onb_pipa_email_items_body">제목, 발신자/수신자, 시각, 본문 텍스트. 첨부 파일 바이트는 다운로드하지 않습니다.</string>
+    <string name="onb_pipa_email_retention">보유 기간</string>
+    <string name="onb_pipa_email_retention_body">최대 30일 동안 기기에만 저장되며 이후 자동 삭제됩니다.</string>
+    <string name="onb_pipa_email_opt_out">동의 거부 시</string>
+    <string name="onb_pipa_email_opt_out_body">거부해도 해당 이메일 제공자 연결만 건너뛰며, 나머지 기능은 정상 이용 가능합니다. 언제든 설정에서 다시 동의할 수 있습니다.</string>
+    <string name="onb_pipa_email_cta_agree">동의</string>
+    <string name="onb_pipa_email_cta_deny">동의 안 함</string>
+    <string name="onb_pipa_email_error_write_failed">동의 기록 저장에 실패했습니다. 다시 시도해 주세요.</string>
 
     <!-- Onboarding: Notification permission (S6-E) -->
-    <string name="onb_notifications_title">Notifications</string>
-    <string name="onb_notifications_headline">Get reminded before a commitment is due</string>
-    <string name="onb_notifications_body">BeCalm posts a heads-up notification 30 minutes before each commitment so you never miss a follow-through. Notifications stay on-device and never leave your phone.</string>
-    <string name="onb_notifications_rationale">You can change this any time from Android Settings → Apps → BeCalm → Notifications.</string>
+    <string name="onb_notifications_title">알림</string>
+    <string name="onb_notifications_headline">약속 30분 전 미리 알려드려요</string>
+    <string name="onb_notifications_body">BeCalm은 각 약속 만기 30분 전에 기기에서 알림을 띄워 드립니다. 알림은 전부 기기 내에서만 처리되며 서버로 전송되지 않습니다.</string>
+    <string name="onb_notifications_rationale">언제든 안드로이드 설정 → 앱 → BeCalm → 알림에서 변경할 수 있습니다.</string>
 
     <!-- Onboarding: Battery optimization -->
-    <string name="onb_battery_title">Background Activity</string>
-    <string name="onb_battery_headline">Keep BeCalm active</string>
-    <string name="onb_battery_body">To capture commitments reliably, BeCalm needs to run in the background. Please disable battery optimization for BeCalm. On Samsung devices, also remove it from the Sleeping Apps list.</string>
-    <string name="onb_battery_cta">Disable Battery Optimization</string>
-    <string name="onb_battery_samsung_guide">Samsung: Settings → Device Care → Battery → Background usage limits → Sleeping apps → remove BeCalm</string>
+    <string name="onb_battery_title">백그라운드 실행</string>
+    <string name="onb_battery_headline">BeCalm 백그라운드 유지</string>
+    <string name="onb_battery_body">약속을 안정적으로 캡처하려면 BeCalm이 백그라운드에서 실행되어야 합니다. BeCalm의 배터리 최적화를 비활성화해 주세요. 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
+    <string name="onb_battery_cta">배터리 최적화 비활성화</string>
+    <string name="onb_battery_samsung_guide">삼성: 설정 → 디바이스 케어 → 배터리 → 백그라운드 사용 제한 → 절전 앱 → BeCalm 제거</string>
 
     <!-- Onboarding: Cold sync -->
-    <string name="onb_cold_sync_title">Initial Sync</string>
-    <string name="onb_cold_sync_headline">Preparing your first data</string>
-    <string name="onb_cold_sync_body">You can enter the app first. Longer sync work will continue in the background.</string>
-    <string name="onb_cold_sync_done">Initial sync is complete</string>
-    <string name="onb_cold_sync_cta">Go to Today</string>
-    <string name="onb_cold_sync_skip_cta">Skip for now</string>
-    <string name="onb_cold_sync_skip_disabled">Please wait while BeCalm checks the minimum setup. You can skip shortly.</string>
-    <string name="onb_cold_sync_transition_error">Could not finish this step. Please try again.</string>
-    <string name="onb_cold_sync_profile">My profile</string>
-    <string name="onb_cold_sync_source_done">Done</string>
-    <string name="onb_cold_sync_source_syncing">Syncing</string>
+    <string name="onb_cold_sync_title">초기 동기화</string>
+    <string name="onb_cold_sync_headline">처음 데이터를 준비하고 있어요</string>
+    <string name="onb_cold_sync_body">앱으로 먼저 들어갈 수 있고, 오래 걸리는 동기화는 뒤에서 계속 이어집니다.</string>
+    <string name="onb_cold_sync_done">동기화가 완료되었습니다</string>
+    <string name="onb_cold_sync_cta">오늘로 이동</string>
+    <string name="onb_cold_sync_skip_disabled">잠시만 기다려 주세요. 최소 설정을 확인한 뒤 건너뛸 수 있습니다.</string>
+    <string name="onb_cold_sync_transition_error">화면 전환을 완료하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="onb_cold_sync_profile">내 프로필</string>
+    <string name="onb_cold_sync_source_done">완료</string>
+    <string name="onb_cold_sync_source_syncing">동기화 중</string>
 
     <!-- Today Timeline -->
-    <string name="today_title">Today</string>
-    <string name="today_empty_title">Clear day ahead</string>
-    <string name="today_empty_message">No commitments or meetings scheduled for today.</string>
-    <string name="today_error_sign_in_required">Please sign in again to see today.</string>
-    <string name="today_error_load_failed">Today could not be loaded.</string>
-    <string name="today_section_commitments">Commitments</string>
-    <string name="today_section_meetings">Meetings</string>
-    <string name="today_section_events">Events</string>
-    <string name="today_person_focus_title">People to follow up</string>
-    <string name="today_person_focus_subtitle_fmt">%1$d people need attention across %2$d commitments</string>
-    <string name="today_person_focus_commitments_fmt">Commitments %1$d</string>
-    <string name="today_syncing_fmt">Syncing %1$d/%2$d</string>
-    <string name="today_synced_time_fmt">Synced %1$s</string>
-    <string name="today_synced_date_time_fmt">Synced %1$s %2$s</string>
-    <string name="today_partial_failure">Some sources failed - check Settings</string>
-    <string name="today_source_attention_disconnected_fmt">%1$d sources are not connected - connect in Settings</string>
-    <string name="today_source_attention_failed_fmt">%1$d sources failed - check Settings</string>
-    <string name="today_source_attention_mixed_fmt">%1$d sources are not connected, %2$d failed - check Settings</string>
+    <string name="today_title">오늘</string>
+    <string name="today_empty_title">오늘 일정 없음</string>
+    <string name="today_empty_message">오늘 예정된 약속이나 회의가 없습니다.</string>
+    <string name="today_error_sign_in_required">오늘 할 일을 보려면 다시 로그인해 주세요.</string>
+    <string name="today_error_load_failed">오늘 할 일을 불러오지 못했습니다.</string>
+    <string name="today_section_commitments">약속</string>
+    <string name="today_section_meetings">회의</string>
+    <string name="today_section_events">이벤트</string>
+    <string name="today_person_focus_title">오늘 챙길 사람</string>
+    <string name="today_person_focus_subtitle_fmt">%1$d명에게 걸린 약속 %2$d건을 먼저 정리했어요</string>
+    <string name="today_person_focus_commitments_fmt">약속 %1$d건</string>
+    <string name="today_syncing_fmt">동기화 중 %1$d/%2$d</string>
+    <string name="today_synced_time_fmt">동기화됨 %1$s</string>
+    <string name="today_synced_date_time_fmt">동기화됨 %1$s %2$s</string>
+    <string name="today_partial_failure">일부 소스 실패, 설정에서 확인</string>
+    <string name="today_source_attention_disconnected_fmt">%1$d개 소스가 연결되지 않았습니다. 설정에서 연결하세요</string>
+    <string name="today_source_attention_failed_fmt">%1$d개 소스 연결에 실패했습니다. 설정에서 확인하세요</string>
+    <string name="today_source_attention_mixed_fmt">%1$d개 소스 미연결, %2$d개 소스 실패. 설정에서 확인하세요</string>
 
     <!-- Persons -->
-    <string name="persons_title">People</string>
-    <string name="persons_search_placeholder">Search people…</string>
-    <string name="persons_empty_title">No people yet</string>
-    <string name="persons_empty_message">People will appear here once BeCalm detects interactions.</string>
-    <string name="persons_unidentified">Unidentified contact</string>
-    <string name="persons_unassigned_title">Interactions waiting for a person</string>
-    <string name="persons_unassigned_empty_title">No unassigned events</string>
-    <string name="persons_unassigned_empty_message">Every interaction is already organized around a person.</string>
-    <string name="person_matching_required_banner_title">Person matching required</string>
-    <string name="person_matching_required_banner_body">%1$d synced interactions are not attached to a person yet. Match them so People, Today, and Commitments stay accurate.</string>
-    <string name="person_matching_required_banner_action">Review</string>
-    <string name="persons_manual_match_anchor_hint">Person email, phone, or name</string>
-    <string name="persons_manual_match_nickname_hint">Nickname to remember next time</string>
-    <string name="persons_manual_add_person_action">Add new person</string>
-    <string name="persons_manual_match_action">Match person</string>
-    <string name="persons_error_sign_in_required">Please sign in again to match people.</string>
-    <string name="persons_error_manual_match_failed">Person match could not be saved.</string>
-    <string name="persons_error_load_failed">People could not be loaded.</string>
+    <string name="persons_title">사람</string>
+    <string name="persons_search_placeholder">사람 검색…</string>
+    <string name="persons_empty_title">아직 사람이 없습니다</string>
+    <string name="persons_empty_message">상호작용이 감지되면 여기에 사람이 표시됩니다.</string>
+    <string name="persons_unidentified">미식별 연락처</string>
+    <string name="persons_unassigned_title">사람을 찾는 중인 상호작용</string>
+    <string name="persons_unassigned_empty_title">미할당 이벤트 없음</string>
+    <string name="persons_unassigned_empty_message">모든 상호작용이 사람별로 정리되었습니다.</string>
+    <string name="person_matching_required_banner_title">인물 매칭이 필요합니다</string>
+    <string name="person_matching_required_banner_body">동기화된 상호작용 %1$d건이 아직 사람에 연결되지 않았습니다. 매칭하면 사람, 오늘, 약속 화면이 더 정확해집니다.</string>
+    <string name="person_matching_required_banner_action">확인</string>
+    <string name="persons_interactions_count">%d회 상호작용</string>
+    <string name="persons_pending_commitments_fmt">미이행 %1$d건</string>
+    <string name="persons_section_pending_commitments">미이행 약속</string>
+    <string name="persons_section_recent_contacts">최근 연락</string>
+    <string name="persons_offline_badge_fmt">오프라인 - 마지막 동기화 %1$s</string>
+    <string name="persons_offline_badge_no_sync">오프라인</string>
+    <string name="persons_error_sign_in_required">사람 매칭을 저장하려면 다시 로그인해 주세요.</string>
+    <string name="persons_error_manual_match_failed">사람 매칭을 저장하지 못했습니다.</string>
+    <string name="persons_error_load_failed">사람 목록을 불러오지 못했습니다.</string>
+    <string name="sources_contacts_title">연락처</string>
+    <string name="sources_contacts_enriched_fmt">%1$d명 보강됨</string>
+    <string name="sources_last_error_generic">연결 실패</string>
+
+    <!-- Person detail -->
+    <string name="person_detail_commitments_section">약속</string>
+    <string name="person_detail_timeline_section_fmt">타임라인 (%1$d)</string>
+    <string name="person_detail_timeline_filter_empty">이 출처의 항목이 없습니다.</string>
+    <string name="person_detail_filter_all">전체</string>
+    <string name="person_detail_filter_email">이메일</string>
+    <string name="person_detail_filter_call">통화</string>
+    <string name="person_detail_filter_meeting">미팅</string>
+    <string name="person_detail_filter_commitment">약속</string>
+    <string name="person_detail_empty_interactions">아직 기록된 상호작용이 없습니다.</string>
+    <string name="person_detail_stat_email">이메일</string>
+    <string name="person_detail_stat_call">통화</string>
+    <string name="person_detail_stat_meeting">미팅</string>
+    <string name="person_detail_stat_commitment">약속</string>
+    <string name="person_detail_bucket_my_actions">내가 해야 할 일</string>
+    <string name="person_detail_bucket_their_actions">상대가 해야 할 일</string>
+    <string name="person_detail_next_action_title">추천 다음 행동</string>
+    <string name="person_detail_next_action_call">전화</string>
+    <string name="person_detail_next_action_email_reply">이메일 답신</string>
+    <string name="person_detail_next_action_schedule">일정</string>
+    <string name="person_detail_error_missing_id">사람 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+    <string name="person_detail_error_load_failed">사람 타임라인을 불러오지 못했습니다.</string>
+
+    <!-- Raw event detail -->
+    <string name="raw_event_detail_title">이벤트 상세</string>
+    <string name="raw_event_detail_source">출처</string>
+    <string name="raw_event_detail_timestamp">기록 시각</string>
+    <string name="raw_event_detail_not_found">이벤트를 찾을 수 없습니다.</string>
+    <string name="raw_event_detail_no_title">(제목 없음)</string>
+    <string name="raw_event_detail_error_missing_id">이벤트 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+
+    <!-- Raw event detail — 이메일 분기 (S5-D ui-raw-event-email-rendering) -->
+    <string name="raw_event_attachments_count">📎 첨부 %1$d건</string>
+    <string name="raw_event_commitments_extracted">약속 추출 %1$d건</string>
+    <string name="raw_event_body_expand">전체 보기</string>
+    <string name="raw_event_body_collapse">접기</string>
+    <string name="raw_event_body_html_only_notice">HTML 전용 이메일이며 로컬 저장소에 일반 텍스트 본문이 없습니다.</string>
+    <string name="raw_event_original_deleted_notice">원문이 이 기기에서 삭제되었습니다.</string>
+    <string name="raw_event_original_truncated_notice">원문이 길어 이 화면에는 미리보기만 표시합니다.</string>
+
+    <!-- Raw event detail — 출처 배지 -->
+    <string name="raw_event_source_badge_gmail">Gmail</string>
+    <string name="raw_event_source_badge_outlook_mail">Outlook</string>
+    <string name="raw_event_source_badge_naver_imap">네이버 메일</string>
+    <string name="raw_event_source_badge_daum_imap">다음 메일</string>
+    <string name="raw_event_source_badge_google_calendar">구글 캘린더</string>
+    <string name="raw_event_source_badge_outlook_calendar">아웃룩 캘린더</string>
+    <string name="raw_event_source_badge_voice">음성</string>
+    <string name="raw_event_source_badge_call_recording">통화 녹음</string>
+    <string name="raw_event_source_badge_meeting">미팅</string>
+    <string name="raw_event_source_badge_message_screenshot">메신저 캡처</string>
+    <string name="raw_event_source_badge_unknown">기타</string>
+
+    <!-- Today 타임라인 (S5-A / S5-B) -->
+    <string name="today_counterparty_unknown">미매칭</string>
+    <string name="today_timed_section">시간순 일정</string>
+    <string name="today_untimed_section">시간 미정</string>
+    <string name="today_no_due_time">시간 없음</string>
+    <string name="today_add_due_time">시간 추가</string>
+    <string name="today_type_schedule">일정</string>
+    <string name="today_type_meeting">회의</string>
+    <string name="today_type_event">이벤트</string>
+    <string name="today_since_just_now">방금 전</string>
+    <string name="today_since_minutes">%1$d분 전</string>
+    <string name="today_since_hours">%1$d시간 전</string>
+    <string name="today_since_today_at">오늘 %1$s</string>
+
+    <!-- Person 상세 헤더 (S5-C) -->
+    <string name="person_header_job_subtitle">%1$s · %2$s</string>
+    <string name="person_header_company_only">%1$s</string>
+    <string name="person_header_job_only">%1$s</string>
+    <string name="person_header_nickname_fmt">(%1$s)</string>
+    <string name="person_header_event_count_fmt">이벤트 %1$d건</string>
+    <string name="person_header_pending_count_fmt">미이행 약속 %1$d건</string>
+    <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
+
+    <!-- Person 상세 섹션 (SRC-008) -->
+
+    <!-- Commitments -->
+    <string name="commitments_title">약속 관리</string>
+    <string name="commitments_filter_all">전체</string>
+    <string name="commitments_filter_give">내가 할 일</string>
+    <string name="commitments_filter_take">기다리는 일</string>
+    <string name="commitments_filter_schedule">일정</string>
+    <string name="commitments_filter_closed">완료/보류</string>
+    <string name="commitment_item_type_action">할 일</string>
+    <string name="commitment_item_type_schedule">일정</string>
+    <string name="commitment_item_type_decision">결정</string>
+    <string name="commitment_action_label_give">내가 할 일</string>
+    <string name="commitment_action_label_take">기다리는 일</string>
+    <string name="commitment_action_label_unknown">할 일</string>
+    <string name="commitment_subtype_schedule_confirmed">확정</string>
+    <string name="commitment_subtype_schedule_changed">변경</string>
+    <string name="commitment_subtype_schedule_postponed">연기</string>
+    <string name="commitment_subtype_schedule_cancelled">취소</string>
+    <string name="commitment_subtype_schedule_follow_up">후속 조율</string>
+    <string name="commitment_subtype_decision_approved">승인</string>
+    <string name="commitment_subtype_decision_rejected">반려</string>
+    <string name="commitment_subtype_decision_chosen">채택</string>
+    <string name="commitment_subtype_decision_deferred">보류</string>
+    <string name="commitment_subtype_decision_ongoing">논의중</string>
+    <string name="commitment_counterparty_unknown">미지정 상대</string>
+    <string name="commitment_source_context_fmt">%1$s · %2$s</string>
+    <string name="commitment_source_manual">사용자 직접 추가</string>
+    <string name="commitments_empty_title">약속 없음</string>
+    <string name="commitments_empty_message">메일, 통화, 미팅에서 약속이 발견되면 사람별로 정리됩니다.</string>
+    <string name="commitments_error_load_failed">약속을 불러오지 못했습니다.</string>
+    <string name="commitments_error_refresh_failed">약속을 새로고침하지 못했습니다.</string>
+    <string name="commitments_error_action_failed">약속 상태를 변경하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="commitments_error_undo_failed">복구하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="commitments_person_group_count_fmt">약속 %1$d건</string>
+
+    <!-- Settings -->
+    <string name="settings_title">설정</string>
+    <string name="settings_account_section">계정</string>
+    <string name="settings_preferences_section">환경설정</string>
+    <string name="settings_data_section">데이터</string>
+    <string name="settings_danger_section">위험 작업</string>
+    <string name="settings_notifications_label">알림</string>
+    <string name="settings_sources_label">데이터 소스</string>
+    <string name="settings_sign_out_confirm_title">로그아웃하시겠습니까?</string>
+    <string name="settings_sign_out_confirm_message">BeCalm에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
+    <string name="settings_wipe_confirm_title">모든 데이터를 삭제하시겠습니까?</string>
+    <string name="settings_wipe_confirm_message">로컬에 저장된 모든 개인정보가 영구적으로 삭제되고 로그아웃됩니다. 이 작업은 취소할 수 없습니다.</string>
+
+    <!-- Sources list -->
+    <string name="sources_title">데이터 소스</string>
+    <string name="sources_empty_title">연결된 소스 없음</string>
+    <string name="sources_empty_message">데이터 소스를 연결하면 약속 캡처가 시작됩니다.</string>
+    <string name="sources_status_connected">동기화됨</string>
+    <string name="sources_status_syncing">동기화 중</string>
+    <string name="sources_status_stale">오래됨</string>
+    <string name="sources_status_error">오류</string>
+    <string name="sources_status_disconnected">연결 안 됨</string>
+    <string name="sources_status_unknown">상태 확인 중</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_today">오늘</string>
+    <string name="nav_persons">사람</string>
+    <string name="nav_commitments">약속</string>
+
+    <!-- Source detail -->
+    <string name="source_detail_title">소스 상세</string>
+    <string name="source_detail_status_section">상태</string>
+    <string name="source_detail_last_sync_fmt">마지막 동기화 %1$s</string>
+    <string name="source_detail_events_synced_fmt">최근 항목 %1$d개 표시</string>
+    <string name="source_detail_last_error_generic">마지막 오류: 연결 실패. 설정을 확인해 주세요.</string>
+    <string name="source_detail_recent_events_section">최근 이벤트</string>
+    <string name="source_detail_meeting_import_section">미팅 파일</string>
+    <string name="source_detail_meeting_audio_add">미팅 오디오 추가</string>
+    <string name="source_detail_meeting_audio_formats">M4A, MP4, AAC, MP3, WAV만 가능</string>
+    <string name="source_detail_empty_events">아직 이 소스에서 기록된 이벤트가 없습니다.</string>
+    <string name="source_detail_error_missing_source">소스 유형이 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+    <string name="source_detail_error_missing_source_message">소스 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+    <string name="source_detail_error_invalid_source">지원하지 않는 소스입니다.</string>
+    <string name="source_detail_error_manual_sync_failed">동기화를 시작하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="source_detail_error_meeting_audio_import_failed">미팅 오디오를 추가하지 못했습니다.</string>
+    <string name="source_detail_error_disconnect_failed">소스 연결을 해제하지 못했습니다.</string>
+    <string name="source_detail_error_folder_probe_failed">저장된 미팅 폴더를 확인하지 못했습니다.</string>
+    <string name="source_detail_danger_zone_title">위험 영역</string>
+    <string name="source_detail_disconnect_body">이 소스의 연결만 해제합니다. 이미 가져온 로컬 데이터는 삭제되지 않습니다.</string>
+
+    <!-- ─── Korean overrides for English defaults (i18n cleanup) ─── -->
+
+    <!-- Common actions -->
+    <string name="action_delete_account">계정 삭제</string>
+    <string name="action_sync_now">지금 동기화</string>
+    <string name="action_revoke_permission">권한 회수</string>
+
+    <!-- Voice processing notification channel + alerts -->
+    <string name="voice_failure_channel_name">음성 처리 알림</string>
+    <string name="voice_failure_channel_desc">BeCalm이 음성 녹음을 처리하지 못할 때 알립니다.</string>
+    <string name="voice_failure_notification_title">음성 처리 실패</string>
+    <string name="voice_failure_notification_body_generic">%1$s을(를) 처리하지 못했습니다. BeCalm에서 확인하거나 다시 시도해 주세요.</string>
+    <string name="voice_failure_notification_body_output_truncated">%1$s이(가) 너무 길어 처리하지 못했습니다. 더 짧은 녹음으로 다시 시도해 주세요.</string>
+
+    <!-- Splash -->
+    <string name="splash_loading">BeCalm을 시작하는 중…</string>
+
+    <!-- Onboarding: Calendar OAuth errors -->
+    <string name="onb_gcal_error_unavailable">Google 캘린더 연결을 시작할 수 없습니다. 백엔드 OAuth 설정을 확인하거나 일단 건너뛰세요.</string>
+    <string name="onb_gcal_error_unknown">Google 캘린더 연결에 실패했습니다. 다시 시도하거나 일단 건너뛰세요.</string>
+    <string name="onb_outlook_cal_error_unavailable">Outlook 캘린더 연결을 시작할 수 없습니다. 백엔드 OAuth 설정을 확인하거나 일단 건너뛰세요.</string>
+    <string name="onb_outlook_cal_error_unknown">Outlook 캘린더 연결에 실패했습니다. 다시 시도하거나 일단 건너뛰세요.</string>
+
+    <!-- Onboarding: PIPA + cold sync -->
+    <string name="onb_pipa_email_cta_agree_connect">동의하고 연결</string>
+    <string name="onb_cold_sync_skip_cta">일단 건너뛰기</string>
+    <!-- onb_pipa_bullet_1_value stays "Google LLC" — proper noun -->
+
+    <!-- Persons: manual match + add -->
+    <string name="persons_manual_match_anchor_hint">이메일, 전화번호, 또는 이름</string>
+    <string name="persons_manual_match_nickname_hint">다음에 기억할 별명</string>
+    <string name="persons_manual_add_person_action">새 사람 추가</string>
+    <string name="persons_manual_match_action">사람 매칭</string>
+
+    <!-- Sources: contacts + detail -->
+    <string name="contacts_source_connection_state_fmt">상태: %1$s</string>
+    <string name="contacts_source_enriched_count_fmt">보강된 연락처: %1$d개</string>
+    <string name="source_detail_disconnect_confirm_title">소스 연결을 해제하시겠습니까?</string>
+    <string name="source_detail_disconnect_confirm_body">현재 소스 연결을 제거합니다. 가져온 데이터는 기기에 그대로 남습니다.</string>
+    <!-- Settings + Privacy -->
+    <string name="settings_processing_status_label">처리 현황</string>
+    <string name="settings_privacy_label">개인정보 관리</string>
+    <string name="settings_sign_out_pipa_note">로그아웃해도 로컬 데이터는 삭제되지 않습니다. 영구 삭제는 개인정보 관리 → 계정 삭제를 이용하세요.</string>
+    <string name="settings_error_load_failed">설정을 불러오지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="settings_error_language_change_failed">언어 설정을 저장하지 못했습니다.</string>
+    <string name="settings_error_notifications_toggle_failed">알림 설정을 저장하지 못했습니다.</string>
+    <string name="settings_error_calllog_matching_toggle_failed">통화기록 기반 인물 매칭 설정을 저장하지 못했습니다.</string>
+    <string name="settings_error_calllog_permission_required">인물 매칭을 사용하려면 통화기록 권한이 필요합니다.</string>
+    <string name="settings_error_consent_toggle_failed">동의 설정을 저장하지 못했습니다.</string>
+    <string name="settings_error_voice_release_failed">대기 중인 음성 항목 처리를 재개하지 못했습니다.</string>
+    <string name="settings_error_voice_park_failed">대기 중인 음성 항목 처리를 중단하지 못했습니다.</string>
+    <string name="settings_error_sign_out_failed">로그아웃하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="settings_error_wipe_failed">로컬 데이터를 삭제하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="processing_status_title">처리 현황</string>
+    <string name="processing_phase_idle">최근 처리 없음</string>
+    <string name="processing_phase_scanning">새 항목 확인 중</string>
+    <string name="processing_phase_new_items">새 항목 발견</string>
+    <string name="processing_phase_gemini">Gemini 추출 중</string>
+    <string name="processing_phase_uploading">업로드 및 추출 중</string>
+    <string name="processing_phase_no_new_items">새 항목 없음</string>
+    <string name="processing_phase_synced">처리 완료</string>
+    <string name="processing_phase_blocked">처리 중단됨</string>
+    <string name="processing_phase_error">처리 오류</string>
+    <string name="processing_status_item_count_fmt">항목 %1$d개</string>
+
+    <!-- Privacy management screen -->
+    <string name="privacy_management_title">개인정보 관리</string>
+    <string name="privacy_data_control_section">내 데이터 관리</string>
+    <string name="privacy_processing_section">처리 제어</string>
+    <string name="privacy_danger_section">위험 작업</string>
+    <string name="privacy_export_subtitle">기기에 저장된 BeCalm 데이터를 ZIP 파일로 저장합니다.</string>
+    <string name="privacy_withdraw_subtitle">소스별로 동의를 철회하고 향후 자동 처리를 중단합니다.</string>
+    <string name="privacy_pause_subtitle">백그라운드 처리를 일시 중단하고, 나중에 다시 동기화하여 재개합니다.</string>
+    <string name="privacy_delete_subtitle_fmt">로컬 계정 데이터를 삭제합니다. 현재 로컬 요약: 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개.</string>
+    <string name="privacy_activity_log_subtitle">로컬에 저장된 PIPA 권리 활동 이력을 확인합니다.</string>
+    <string name="privacy_activity_log_local_only_notice">이 기록은 이 기기에만 저장됩니다.</string>
+    <string name="privacy_activity_action_data_export">개인정보 내보내기</string>
+    <string name="privacy_activity_action_source_archive_delete_before">원문 아카이브 삭제</string>
+    <string name="privacy_activity_action_processing_pause">처리 일시정지</string>
+    <string name="privacy_activity_action_processing_resume">처리 다시 시작</string>
+    <string name="privacy_activity_action_consent_withdraw">동의 철회</string>
+    <string name="privacy_activity_action_account_delete_initiated">계정 삭제 요청</string>
+    <string name="privacy_activity_detail_cutoff_date">기준일</string>
+    <string name="privacy_activity_detail_deleted_count">삭제 건수</string>
+    <string name="privacy_activity_detail_failed_count">실패 건수</string>
+    <string name="privacy_activity_detail_source">소스</string>
+    <string name="privacy_activity_detail_consent_type">동의 항목</string>
+    <string name="privacy_activity_detail_status">상태</string>
+    <string name="privacy_source_archive_title">원문 아카이브</string>
+    <string name="privacy_source_archive_subtitle_fmt">이 기기에 원문 %1$d건, %2$s가 보관되어 있습니다. 선택한 날짜 이전 원문만 삭제할 수 있습니다.</string>
+    <string name="privacy_source_archive_empty">이 기기에 보관된 원문이 없습니다.</string>
+    <string name="privacy_source_archive_cutoff_label">이 날짜 이전 원문 삭제</string>
+    <string name="privacy_source_archive_delete_confirm">원문 아카이브 삭제</string>
+    <string name="privacy_source_archive_deleted_fmt">원문 %1$d건을 삭제했습니다.</string>
+    <string name="privacy_source_archive_delete_failed">원문 아카이브를 삭제하지 못했습니다.</string>
+    <string name="privacy_export_cancelled">내보내기가 취소되었습니다.</string>
+    <string name="privacy_export_failed">내보내기 ZIP 파일을 만들지 못했습니다.</string>
+    <string name="privacy_error_sign_in_required">계속하려면 다시 로그인해 주세요.</string>
+    <string name="privacy_error_date_format">날짜를 YYYY-MM-DD 형식으로 입력해 주세요.</string>
+    <string name="privacy_error_email_mismatch">입력한 이메일이 현재 계정과 일치하지 않습니다.</string>
+    <string name="privacy_error_confirmation_mismatch">삭제를 진행하려면 삭제라고 입력해 주세요.</string>
+    <string name="privacy_error_account_deletion_failed">계정 삭제를 완료하지 못했습니다. 다시 시도해 주세요.</string>
+    <string name="privacy_error_voice_withdraw_failed">음성 처리 동의를 철회하지 못했습니다.</string>
+    <string name="privacy_pause_description">처리를 일시 중단하면 로컬 데이터는 유지되지만, 재개 전까지 모든 백그라운드 수집·업로드 작업이 건너뛰어집니다.</string>
+    <string name="privacy_pause_switch_label">모든 처리 일시 중단</string>
+    <string name="privacy_pause_started_fmt">일시 중단 시작: %1$s</string>
+    <string name="privacy_delete_warning_fmt">이 작업은 되돌릴 수 없습니다. 약속 %1$d개, 연락처 보강 %2$d개, 이메일 %3$d개가 이 기기에서 삭제됩니다.</string>
+    <string name="privacy_delete_email_label">계정 이메일을 다시 입력하세요</string>
+    <string name="privacy_delete_confirm">로컬 계정 삭제</string>
+    <string name="privacy_activity_log_empty">아직 기록된 PIPA 권리 활동이 없습니다.</string>
+    <string name="privacy_withdraw_voice_label">음성 자동 처리</string>
+    <string name="privacy_withdraw_gmail_label">Gmail</string>
+    <string name="privacy_withdraw_outlook_mail_label">Outlook Mail</string>
+    <string name="privacy_withdraw_naver_label">Naver Email</string>
+    <string name="privacy_withdraw_daum_label">Daum Email</string>
+    <string name="privacy_withdraw_google_calendar_label">Google Calendar</string>
+    <string name="privacy_withdraw_outlook_calendar_label">Outlook Calendar</string>
+
+    <!-- Lint parity: strings present in default resources must also exist in ko. -->
     <string name="person_match_review_heading">사람 확인</string>
     <string name="person_match_review_summary">%1$d개 항목이 확인을 기다립니다.</string>
     <string name="person_match_filter_recommended">추천 있음 %1$d</string>
@@ -308,168 +580,31 @@
     <string name="person_match_confirm_action">확인</string>
     <string name="person_match_other_person_action">다른 사람</string>
     <string name="person_match_later_action">나중에</string>
-    <string name="persons_interactions_count">%d interactions</string>
-    <string name="persons_pending_commitments_fmt">Pending %1$d</string>
-    <string name="persons_section_pending_commitments">Pending commitments</string>
-    <string name="persons_section_recent_contacts">Recent contacts</string>
-    <string name="persons_offline_badge_fmt">Offline - last sync %1$s</string>
-    <string name="persons_offline_badge_no_sync">Offline</string>
-    <string name="contacts_source_connection_state_fmt">Status: %1$s</string>
-    <string name="contacts_source_enriched_count_fmt">Enriched contacts: %1$d</string>
-    <string name="sources_contacts_title">Contacts</string>
-    <string name="sources_contacts_enriched_fmt">%1$d contacts enriched</string>
-    <string name="sources_last_error_generic">Connection failed</string>
-
-    <!-- Person detail -->
-    <string name="person_detail_commitments_section">Commitments</string>
-    <string name="person_detail_timeline_section_fmt">Timeline (%1$d)</string>
-    <string name="person_detail_timeline_filter_empty">No items for this source.</string>
-    <string name="person_detail_filter_all">All</string>
-    <string name="person_detail_filter_email">Email</string>
-    <string name="person_detail_filter_call">Call</string>
-    <string name="person_detail_filter_meeting">Meeting</string>
-    <string name="person_detail_filter_commitment">Commitment</string>
-    <string name="person_detail_empty_interactions">No interactions recorded yet.</string>
-    <string name="person_detail_stat_email">Email</string>
-    <string name="person_detail_stat_call">Call</string>
-    <string name="person_detail_stat_meeting">Meeting</string>
-    <string name="person_detail_stat_commitment">Commitment</string>
-    <string name="person_detail_bucket_my_actions">What I need to do</string>
-    <string name="person_detail_bucket_their_actions">What they need to do</string>
-    <string name="person_detail_next_action_title">Recommended next action</string>
-    <string name="person_detail_next_action_call">Call</string>
-    <string name="person_detail_next_action_email_reply">Email reply</string>
-    <string name="person_detail_next_action_schedule">Schedule</string>
-    <string name="person_detail_error_missing_id">Person information is missing. Please go back and try again.</string>
-    <string name="person_detail_error_load_failed">Person timeline could not be loaded.</string>
-    <string name="source_detail_last_sync_fmt">Last sync: %1$s</string>
-    <string name="source_detail_events_synced_fmt">%1$d recent items shown</string>
-    <string name="source_detail_last_error_generic">Last error: connection failed. Check Settings.</string>
-    <string name="source_detail_disconnect_confirm_title">Disconnect source?</string>
-    <string name="source_detail_disconnect_confirm_body">This removes the current source connection. Existing imported data stays on device.</string>
-
-    <!-- Raw event detail -->
-    <string name="raw_event_detail_title">Event Detail</string>
-    <string name="raw_event_detail_source">Source</string>
-    <string name="raw_event_detail_timestamp">Recorded</string>
-    <string name="raw_event_detail_not_found">Event not found.</string>
-    <string name="raw_event_detail_no_title">(No title)</string>
-    <string name="raw_event_detail_error_missing_id">Event information is missing. Please go back and try again.</string>
-
-    <!-- Raw event detail — email branch (S5-D ui-raw-event-email-rendering) -->
-    <string name="raw_event_attachments_count">📎 %1$d attachments</string>
-    <string name="raw_event_commitments_extracted">Commitments extracted: %1$d</string>
-    <string name="raw_event_body_expand">Show full message</string>
-    <string name="raw_event_body_collapse">Collapse</string>
-    <string name="raw_event_body_html_only_notice">This message arrived as HTML only. Plain text is not available in local storage.</string>
-    <string name="raw_event_original_deleted_notice">The original was deleted from this device.</string>
-    <string name="raw_event_original_truncated_notice">This original is long, so only a preview is shown here.</string>
-
-    <!-- Raw event detail — source badges -->
-    <string name="raw_event_source_badge_gmail">Gmail</string>
-    <string name="raw_event_source_badge_outlook_mail">Outlook</string>
-    <string name="raw_event_source_badge_naver_imap">Naver Mail</string>
-    <string name="raw_event_source_badge_daum_imap">Daum Mail</string>
-    <string name="raw_event_source_badge_google_calendar">Google Calendar</string>
-    <string name="raw_event_source_badge_outlook_calendar">Outlook Calendar</string>
-    <string name="raw_event_source_badge_voice">Voice</string>
-    <string name="raw_event_source_badge_call_recording">Call Recording</string>
-    <string name="raw_event_source_badge_meeting">Meeting</string>
-    <string name="raw_event_source_badge_message_screenshot">Messenger Capture</string>
-    <string name="raw_event_source_badge_manual_text">Manual Note</string>
-    <string name="raw_event_source_badge_unknown">Other</string>
-
-    <!-- Today timeline (S5-A / S5-B) -->
-    <string name="today_counterparty_unknown">Unknown</string>
-    <string name="today_timed_section">Timeline</string>
-    <string name="today_untimed_section">Needs time</string>
-    <string name="today_no_due_time">No time</string>
-    <string name="today_add_due_time">Add time</string>
-    <string name="today_type_schedule">Schedule</string>
-    <string name="today_type_meeting">Meeting</string>
-    <string name="today_type_event">Event</string>
-    <string name="today_since_just_now">Just now</string>
-    <string name="today_since_minutes">%1$d min ago</string>
-    <string name="today_since_hours">%1$d hr ago</string>
-    <string name="today_since_today_at">Today %1$s</string>
-
-    <!-- Person detail header (S5-C) -->
-    <string name="person_header_job_subtitle">%1$s @ %2$s</string>
-    <string name="person_header_company_only">%1$s</string>
-    <string name="person_header_job_only">%1$s</string>
-    <string name="person_header_nickname_fmt">(%1$s)</string>
-    <string name="person_header_event_count_fmt">%1$d events</string>
-    <string name="person_header_pending_count_fmt">%1$d pending commitments</string>
-    <string name="person_interaction_snippet_placeholder">(No preview)</string>
-
-    <!-- Person detail sections (SRC-008) -->
-
-    <!-- Commitments -->
-    <string name="commitments_title">Commitments</string>
-    <string name="commitments_filter_all">All</string>
-    <string name="commitments_filter_give">My tasks</string>
-    <string name="commitments_filter_take">Waiting</string>
-    <string name="commitments_filter_schedule">Schedule</string>
-    <string name="commitments_filter_closed">Closed</string>
-    <string name="commitment_item_type_action">Task</string>
-    <string name="commitment_item_type_schedule">Schedule</string>
-    <string name="commitment_item_type_decision">Decision</string>
-    <string name="commitment_action_label_give">My task</string>
-    <string name="commitment_action_label_take">Waiting on them</string>
-    <string name="commitment_action_label_unknown">Task</string>
-    <string name="commitment_subtype_schedule_confirmed">Confirmed</string>
-    <string name="commitment_subtype_schedule_changed">Changed</string>
-    <string name="commitment_subtype_schedule_postponed">Postponed</string>
-    <string name="commitment_subtype_schedule_cancelled">Cancelled</string>
-    <string name="commitment_subtype_schedule_follow_up">Follow-up</string>
-    <string name="commitment_subtype_decision_approved">Approved</string>
-    <string name="commitment_subtype_decision_rejected">Rejected</string>
-    <string name="commitment_subtype_decision_chosen">Chosen</string>
-    <string name="commitment_subtype_decision_deferred">Deferred</string>
-    <string name="commitment_subtype_decision_ongoing">Ongoing</string>
-    <string name="commitment_counterparty_unknown">Unassigned counterparty</string>
-    <string name="commitment_source_context_fmt">%1$s · %2$s</string>
-    <string name="commitment_source_manual">Manual entry</string>
-    <string name="commitments_empty_title">No commitments found yet</string>
-    <string name="commitments_empty_message">Sync is working, but no actionable promises, schedules, or decisions have been detected yet. New items from email, calls, and calendar events will appear here by person.</string>
-    <string name="commitments_error_load_failed">Commitments could not be loaded.</string>
-    <string name="commitments_error_refresh_failed">Commitments could not be refreshed.</string>
-    <string name="commitments_error_action_failed">Commitment update failed. Please try again.</string>
-    <string name="commitments_error_undo_failed">Undo failed. Please try again.</string>
-    <string name="commitments_person_group_count_fmt">%1$d commitments</string>
-
-    <!-- Commitment action_state labels (CMT-005..012) -->
     <string name="commitment_state_pending">미확인</string>
     <string name="commitment_state_reminded">리마인드됨</string>
     <string name="commitment_state_followed_up">팔로업됨</string>
     <string name="commitment_state_completed">완료</string>
     <string name="commitment_state_overdue">놓침</string>
     <string name="commitment_state_cancelled">취소됨</string>
-
-    <!-- Commitment detail sheet (CMT-003 + EDIT-008 + MAN-004) -->
     <string name="commitment_detail_title">약속 상세</string>
     <string name="commitment_detail_quote_label">원문</string>
     <string name="commitment_detail_counterparty_label">상대방</string>
     <string name="commitment_detail_due_label">마감</string>
     <string name="commitment_detail_last_edited_fmt">마지막 수정: %1$s (본인)</string>
     <string name="commitment_detail_disputed_badge_fmt">⚠ 원문 이의 제기됨 (%1$s)</string>
-    <string name="commitment_detail_disputed_label_fmt">Source disputed, %1$s</string>
+    <string name="commitment_detail_disputed_label_fmt">이의 제기됨, %1$s</string>
     <string name="commitment_detail_superseded_link">이전 약속 보기</string>
     <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
     <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
-    <string name="commitment_detail_llm_source_original_fmt">Original · %1$s KST</string>
+    <string name="commitment_detail_llm_source_original_fmt">원문 · %1$s KST</string>
     <string name="commitment_detail_empty_error">삭제된 약속</string>
-    <string name="commitment_detail_error_missing_id">Commitment information is missing. Please go back and try again.</string>
-    <string name="commitment_detail_error_load_failed">Commitment detail could not be loaded.</string>
-
-    <!-- Commitment action buttons (CMT-005..012 + EDIT-001) -->
+    <string name="commitment_detail_error_missing_id">약속 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+    <string name="commitment_detail_error_load_failed">약속 상세를 불러오지 못했습니다.</string>
     <string name="commitment_action_remind">리마인드</string>
     <string name="commitment_action_follow_up">팔로업</string>
     <string name="commitment_action_complete">완료</string>
     <string name="commitment_action_cancel">취소</string>
     <string name="commitment_action_edit">편집</string>
-
-    <!-- Manual/supersede compatibility sheet (EDIT-007) -->
     <string name="commitment_manual_badge">📝 수동 추가</string>
     <string name="commitment_manual_sheet_title_supersede">다른 약속으로 교체</string>
     <string name="commitment_manual_quote_hint">상대의 약속 내용을 메모하세요 (1~500자)</string>
@@ -490,30 +625,19 @@
     <string name="commitment_manual_field_due_hint">원문 표현 (예: 월말)</string>
     <string name="commitment_manual_field_due_approximate">대략적</string>
     <string name="commitment_manual_save_failure">저장에 실패했습니다. 다시 시도해 주세요</string>
-    <string name="evidence_import_fab_content_desc">Add evidence</string>
+    <string name="evidence_import_fab_content_desc">증거 추가</string>
     <string name="evidence_import_sheet_title">증거 추가</string>
     <string name="evidence_import_message_screenshot">메신저 스크린샷</string>
     <string name="evidence_import_message_screenshot_subtitle">카카오톡, Slack, 문자 캡처를 분석합니다</string>
     <string name="evidence_import_meeting_audio">회의 녹음</string>
     <string name="evidence_import_meeting_audio_subtitle">M4A, MP4, AAC, MP3, WAV</string>
-    <string name="evidence_import_meeting_transcript">회의 전사본</string>
-    <string name="evidence_import_meeting_transcript_subtitle">TXT, MD, PDF, DOCX</string>
-    <string name="evidence_import_manual_text">직접 입력</string>
-    <string name="evidence_import_manual_text_subtitle">메일·메신저 밖 업무 맥락을 텍스트로 추가합니다</string>
-    <string name="evidence_import_manual_text_title">직접 입력</string>
-    <string name="evidence_import_manual_text_placeholder">예: 김철수에게 내일까지 견적서를 보내야 함</string>
-    <string name="evidence_import_manual_text_save">추가</string>
-    <string name="evidence_import_manual_text_cancel">취소</string>
     <string name="evidence_import_success">증거를 추가했습니다.</string>
     <string name="evidence_import_error_message_screenshot">메신저 스크린샷을 추가하지 못했습니다.</string>
-    <string name="evidence_import_error_manual_text">텍스트 증거를 추가하지 못했습니다.</string>
-    <string name="commitment_save_error_supersede_source_not_found">Source commitment could not be found.</string>
-    <string name="commitment_save_error_login_required">Please sign in.</string>
-    <string name="commitment_save_error_deleted">This commitment was deleted.</string>
-    <string name="commitment_save_error_validation">Check the commitment details and try again.</string>
-    <string name="commitment_save_error_generic">Could not save. Try again.</string>
-
-    <!-- Commitment edit sheet (EDIT-001..008) -->
+    <string name="commitment_save_error_supersede_source_not_found">원문 약속을 찾지 못했습니다.</string>
+    <string name="commitment_save_error_login_required">로그인이 필요합니다.</string>
+    <string name="commitment_save_error_deleted">삭제된 약속입니다.</string>
+    <string name="commitment_save_error_validation">약속 내용을 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="commitment_save_error_generic">저장에 실패했습니다. 다시 시도해 주세요.</string>
     <string name="commitment_edit_title">약속 편집</string>
     <string name="commitment_edit_field_title">제목</string>
     <string name="commitment_edit_field_due">마감</string>
@@ -545,200 +669,54 @@
     <string name="commitment_edit_error_direction_required">방향을 선택해주세요</string>
     <string name="commitment_edit_saving">저장 중…</string>
     <string name="commitment_edit_save_failed">저장 실패. 다시 시도해주세요.</string>
-
-    <!-- Commitment management screen sections (CMT-009) -->
     <string name="commitment_section_active_fmt">진행 중 (%1$d)</string>
     <string name="commitment_section_completed_fmt">이행 완료 (%1$d)</string>
     <string name="commitment_section_cancelled_fmt">취소된 약속 (%1$d)</string>
     <string name="commitment_section_expand_desc">섹션 펼치기/접기</string>
-
-    <!-- Commitment undo snackbar (CMT-013) -->
     <string name="commitment_undo_completed">완료 처리됨</string>
     <string name="commitment_undo_cancelled">취소 처리됨</string>
     <string name="commitment_undo_action">복구</string>
-
-    <!-- Commitment reminder alarm (CMT-005 + CMT-008) -->
     <string name="commitment_alarm_title">곧 마감되는 약속 (1시간 뒤)</string>
     <string name="commitment_alarm_body_give_fmt">내가 한 약속: %1$s</string>
     <string name="commitment_alarm_body_take_fmt">상대가 한 약속: %1$s</string>
     <string name="commitment_channel_due_soon_name">곧 마감 리마인더</string>
     <string name="commitment_channel_due_soon_desc">약속 마감 1시간 전 알림</string>
-
-    <!-- Settings -->
-    <string name="settings_title">Settings</string>
-    <string name="settings_account_section">Account</string>
-    <string name="settings_preferences_section">Preferences</string>
-    <string name="settings_data_section">Data</string>
-    <string name="settings_danger_section">Danger Zone</string>
-    <string name="settings_notifications_label">Notifications</string>
-    <string name="settings_sources_label">Data Sources</string>
-    <string name="settings_processing_status_label">Processing Status</string>
-    <string name="settings_privacy_label">Privacy Management</string>
-    <string name="settings_sign_out_confirm_title">Sign out?</string>
-    <string name="settings_sign_out_confirm_message">You will be signed out of BeCalm. Local data remains until you wipe it.</string>
-    <string name="settings_wipe_confirm_title">Wipe all data?</string>
-    <string name="settings_wipe_confirm_message">This will permanently delete all locally stored personal data and sign you out. This action cannot be undone.</string>
-    <string name="settings_sign_out_pipa_note">Sign out does not delete local data. For permanent deletion, use Privacy Management → Delete Account.</string>
-    <string name="settings_error_load_failed">Settings could not be loaded. Please try again.</string>
-    <string name="settings_error_language_change_failed">Language setting could not be saved.</string>
-    <string name="settings_error_notifications_toggle_failed">Notification setting could not be saved.</string>
-    <string name="settings_error_calllog_matching_toggle_failed">Call log matching setting could not be saved.</string>
-    <string name="settings_error_calllog_permission_required">Call log permission is required for person matching.</string>
-    <string name="settings_error_consent_toggle_failed">Consent setting could not be saved.</string>
-    <string name="settings_error_voice_release_failed">Pending voice items could not be resumed.</string>
-    <string name="settings_error_voice_park_failed">Pending voice items could not be paused.</string>
-    <string name="settings_error_sign_out_failed">Sign out failed. Please try again.</string>
-    <string name="settings_error_wipe_failed">Local data could not be deleted. Please try again.</string>
-
-    <!-- Sources list -->
-    <string name="sources_title">Data Sources</string>
-    <string name="sources_empty_title">No sources connected</string>
-    <string name="sources_empty_message">Connect a data source to start capturing commitments.</string>
-    <string name="sources_status_connected">Synced</string>
-    <string name="sources_status_syncing">Syncing</string>
-    <string name="sources_status_stale">Stale</string>
-    <string name="sources_status_error">Error</string>
-    <string name="sources_status_disconnected">Not connected</string>
-    <string name="sources_status_unknown">Checking</string>
-
-    <!-- Bottom navigation -->
-    <string name="nav_today">Today</string>
-    <string name="nav_persons">People</string>
-    <string name="nav_commitments">Commitments</string>
-
-    <!-- Onboarding: PIPA 제3자 제공 + 국외 이전 동의 (ONB-PIPA) -->
     <string name="onb_pipa_title">개인정보 제3자 제공 동의</string>
     <string name="onb_pipa_headline">음성 자동 처리를 위한 정보 제공 동의</string>
     <string name="onb_pipa_body">BeCalm은 음성 녹음 파일을 자동으로 분석하여 약속과 할 일을 추출합니다. 이를 위해 아래 내용에 따라 귀하의 녹음 파일을 Google LLC에 제공합니다. 동의를 거부하셔도 이메일·캘린더·수동 입력 기능은 정상 사용하실 수 있습니다.</string>
-    <!-- Bullet 1: 제공받는 자 -->
     <string name="onb_pipa_bullet_1_label">제공받는 자</string>
     <string name="onb_pipa_bullet_1_value">Google LLC</string>
-    <!-- Bullet 2: 제공 항목 -->
     <string name="onb_pipa_bullet_2_label">제공 항목</string>
     <string name="onb_pipa_bullet_2_value">녹음 파일 전체 오디오 바이트</string>
-    <!-- Bullet 3: 제공 목적 -->
     <string name="onb_pipa_bullet_3_label">제공 목적</string>
     <string name="onb_pipa_bullet_3_value">약속/할 일 자동 추출 (Gemini 2.5 Flash audio multimodal)</string>
-    <!-- Bullet 4: 데이터 처리 리전 -->
     <string name="onb_pipa_bullet_4_label">데이터 처리 리전</string>
     <string name="onb_pipa_bullet_4_value">us-central1 (미국 중부)</string>
-    <!-- Bullet 5: 보유 및 이용 기간 -->
     <string name="onb_pipa_bullet_5_label">보유 및 이용 기간</string>
     <string name="onb_pipa_bullet_5_value">요청 처리 후 즉시 삭제 (ZDR, Zero Data Retention)</string>
-    <!-- Bullet 6: 거부 권리 및 불이익 -->
     <string name="onb_pipa_bullet_6_label">거부 권리 및 불이익</string>
     <string name="onb_pipa_bullet_6_value">동의 거부 시 음성 자동 처리 기능만 비활성화되며, 나머지 앱 기능(이메일·캘린더 연동, 수동 입력)은 정상 사용 가능합니다. 설정에서 언제든지 변경하실 수 있습니다.</string>
-    <!-- Buttons -->
     <string name="onb_pipa_button_agree">동의</string>
     <string name="onb_pipa_button_decline">동의 안 함</string>
-
-    <!-- Settings: PIPA 제3자 제공 동의 toggle -->
     <string name="settings_pipa_toggle_label">음성 자동 업로드 (PIPA 제3자 제공 동의)</string>
     <string name="settings_pipa_enable_dialog_title">개인정보 제3자 제공 동의</string>
     <string name="settings_pipa_disable_dialog_warning">향후 녹음 파일은 자동 업로드되지 않습니다. 이미 업로드된 데이터는 영향받지 않습니다.</string>
     <string name="settings_call_log_matching_toggle_label">통화기록 기반 인물 매칭</string>
     <string name="settings_call_log_matching_enable_dialog_title">통화기록 기반 인물 매칭 동의</string>
-    <string name="settings_call_log_matching_enable_dialog_message">통화 녹음 파일을 인물별로 정리하기 위해 기기 내 통화기록의 번호, 통화 시각, 통화 길이만 로컬에서 대조합니다. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다.</string>
-
-    <!-- Onboarding: CallLog matching consent -->
+    <string name="settings_call_log_matching_enable_dialog_message">통화 녹음 파일을 인물별로 정리하기 위해 기기 내 통화기록의 번호, 통화 시각, 통화 길이만 로컬에서 대조합니다. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 인물 참조값으로 저장됩니다.</string>
     <string name="onb_call_log_matching_title">통화기록 기반 인물 매칭</string>
     <string name="onb_call_log_matching_headline">통화 녹음을 사람별로 자동 정리</string>
     <string name="onb_call_log_matching_body">통화 녹음 파일명에 전화번호가 없을 수 있어, BeCalm은 기기 내 통화기록과 녹음 파일의 시각·길이를 로컬에서 대조해 상대방을 추정할 수 있습니다.</string>
-    <string name="onb_call_log_matching_scope">사용 항목: 전화번호, 통화 시각, 통화 길이. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 person_ref로 저장됩니다. 동의하지 않아도 파일명 기반 매칭과 다른 기능은 계속 사용할 수 있습니다.</string>
+    <string name="onb_call_log_matching_scope">사용 항목: 전화번호, 통화 시각, 통화 길이. 통화기록 원문은 서버로 전송하지 않으며, 매칭된 상대 번호만 녹음 이벤트의 인물 참조값으로 저장됩니다. 동의하지 않아도 파일명 기반 매칭과 다른 기능은 계속 사용할 수 있습니다.</string>
     <string name="onb_call_log_matching_agree">동의하고 권한 허용</string>
-
-    <!-- Source detail -->
-    <string name="source_detail_title">Source Detail</string>
-    <string name="source_detail_status_section">Status</string>
-    <string name="source_detail_recent_events_section">Recent Events</string>
-    <string name="source_detail_meeting_import_section">Meeting files</string>
-    <string name="source_detail_meeting_audio_add">Add meeting audio</string>
-    <string name="source_detail_meeting_transcript_add">Add transcript</string>
-    <string name="source_detail_meeting_audio_formats">M4A, MP4, AAC, MP3, WAV only</string>
-    <string name="source_detail_meeting_transcript_formats">TXT, MD, PDF, DOCX only</string>
-    <string name="source_detail_empty_events">No events recorded from this source yet.</string>
-    <string name="source_detail_error_missing_source">Source type is missing. Please go back and try again.</string>
-    <string name="source_detail_error_missing_source_message">Source information is missing. Please go back and try again.</string>
-    <string name="source_detail_error_invalid_source">This source is not supported.</string>
-    <string name="source_detail_error_manual_sync_failed">Sync could not be started. Please try again.</string>
-    <string name="source_detail_error_meeting_audio_import_failed">Meeting audio could not be added.</string>
-    <string name="source_detail_error_meeting_transcript_import_failed">Meeting transcript could not be added.</string>
-    <string name="source_detail_error_disconnect_failed">Source could not be disconnected.</string>
-    <string name="source_detail_error_folder_probe_failed">Saved meeting folders could not be checked.</string>
-    <string name="source_detail_danger_zone_title">Danger zone</string>
-    <string name="source_detail_disconnect_body">Disconnect only this source. Existing local data stays on this device.</string>
-
-    <!-- Privacy management -->
-    <string name="privacy_management_title">Privacy Management</string>
-    <string name="privacy_data_control_section">Data Control</string>
-    <string name="privacy_processing_section">Processing</string>
-    <string name="privacy_danger_section">Danger Zone</string>
     <string name="privacy_export_title">내 데이터 다운로드 (열람권, 제35조)</string>
-    <string name="privacy_export_subtitle">Save the current on-device BeCalm data as a ZIP file.</string>
     <string name="privacy_withdraw_title">동의 철회 (동의철회권, 제39조)</string>
-    <string name="privacy_withdraw_subtitle">Withdraw consent source-by-source and stop future automatic processing.</string>
     <string name="privacy_pause_title">데이터 처리 일시중단 (처리정지권, 제37조)</string>
-    <string name="privacy_pause_subtitle">Temporarily pause background processing and resume with a catch-up sync later.</string>
     <string name="privacy_delete_title">계정 삭제 (삭제권, 제36조)</string>
-    <string name="privacy_delete_subtitle_fmt">Deletes local account data. Current local summary: commitments %1$d, contact enrichment %2$d, email rows %3$d.</string>
     <string name="privacy_activity_log_title">활동 내역</string>
-    <string name="privacy_activity_log_subtitle">Review local-only PIPA rights activity history.</string>
-    <string name="privacy_activity_log_local_only_notice">이 기록은 이 기기에만 저장됩니다.</string>
-    <string name="privacy_activity_action_data_export">개인정보 내보내기</string>
-    <string name="privacy_activity_action_source_archive_delete_before">원문 아카이브 삭제</string>
-    <string name="privacy_activity_action_processing_pause">처리 일시정지</string>
-    <string name="privacy_activity_action_processing_resume">처리 다시 시작</string>
-    <string name="privacy_activity_action_consent_withdraw">동의 철회</string>
-    <string name="privacy_activity_action_account_delete_initiated">계정 삭제 요청</string>
-    <string name="privacy_activity_detail_cutoff_date">기준일</string>
-    <string name="privacy_activity_detail_deleted_count">삭제 건수</string>
-    <string name="privacy_activity_detail_failed_count">실패 건수</string>
-    <string name="privacy_activity_detail_source">소스</string>
-    <string name="privacy_activity_detail_consent_type">동의 항목</string>
-    <string name="privacy_activity_detail_status">상태</string>
-    <string name="privacy_source_archive_title">Source originals</string>
-    <string name="privacy_source_archive_subtitle_fmt">%1$d local originals, %2$s. Delete archived originals before a selected date.</string>
-    <string name="privacy_source_archive_empty">No local source originals are archived on this device.</string>
-    <string name="privacy_source_archive_cutoff_label">Delete originals before date</string>
-    <string name="privacy_source_archive_delete_confirm">Delete archived originals</string>
-    <string name="privacy_source_archive_deleted_fmt">Deleted %1$d archived originals.</string>
-    <string name="privacy_source_archive_delete_failed">Could not delete archived originals.</string>
     <string name="privacy_correction_guidance">정정은 각 상세 편집 화면에서 처리됩니다. 약속 수정은 편집 화면, 연락처 보강은 원본 이벤트 또는 연락처 경로를 이용하세요.</string>
-    <string name="privacy_export_cancelled">Export was cancelled.</string>
-    <string name="privacy_export_failed">Could not write the export ZIP.</string>
-    <string name="privacy_error_sign_in_required">Please sign in again to continue.</string>
-    <string name="privacy_error_date_format">Enter the date as YYYY-MM-DD.</string>
-    <string name="privacy_error_email_mismatch">The email address does not match this account.</string>
-    <string name="privacy_error_confirmation_mismatch">Type 삭제 to confirm deletion.</string>
-    <string name="privacy_error_account_deletion_failed">Account deletion failed. Please try again.</string>
-    <string name="privacy_error_voice_withdraw_failed">Voice processing consent could not be withdrawn.</string>
     <string name="privacy_export_confirm_body">데이터를 ZIP 파일로 저장하시겠습니까?</string>
-    <string name="privacy_pause_description">When processing is paused, BeCalm keeps your local data but skips all background ingestion and upload work until you resume it.</string>
-    <string name="privacy_pause_switch_label">Pause all processing</string>
-    <string name="privacy_pause_started_fmt">Pause started at: %1$s</string>
     <string name="privacy_pause_confirm_body">처리를 일시중단하면 새 녹음·이메일·캘린더 이벤트가 자동으로 수집되지 않습니다. 기존 데이터는 유지됩니다.</string>
-    <string name="privacy_delete_warning_fmt">This action cannot be undone. Commitments %1$d, contact enrichment %2$d, and email rows %3$d will be removed from this device.</string>
-    <string name="privacy_delete_email_label">Re-enter your account email</string>
-    <string name="privacy_delete_keyword_label">Type “삭제” to confirm</string>
-    <string name="privacy_delete_confirm">Delete account locally</string>
-    <string name="privacy_activity_log_empty">No PIPA activity has been recorded yet.</string>
-    <string name="privacy_withdraw_voice_label">Voice auto processing</string>
-    <string name="privacy_withdraw_gmail_label">Gmail</string>
-    <string name="privacy_withdraw_outlook_mail_label">Outlook Mail</string>
-    <string name="privacy_withdraw_naver_label">Naver Email</string>
-    <string name="privacy_withdraw_daum_label">Daum Email</string>
-    <string name="privacy_withdraw_google_calendar_label">Google Calendar</string>
-    <string name="privacy_withdraw_outlook_calendar_label">Outlook Calendar</string>
+    <string name="privacy_delete_keyword_label">확인을 위해 “삭제”를 입력하세요</string>
     <string name="processing_paused_banner">처리 일시중단 중</string>
-    <string name="processing_status_title">Processing Status</string>
-    <string name="processing_phase_idle">No recent activity</string>
-    <string name="processing_phase_scanning">Scanning for new items</string>
-    <string name="processing_phase_new_items">New items found</string>
-    <string name="processing_phase_gemini">Gemini extraction in progress</string>
-    <string name="processing_phase_uploading">Uploading and extracting</string>
-    <string name="processing_phase_no_new_items">No new items</string>
-    <string name="processing_phase_synced">Processing complete</string>
-    <string name="processing_phase_blocked">Blocked</string>
-    <string name="processing_phase_error">Error</string>
-    <string name="processing_status_item_count_fmt">%1$d item(s)</string>
 </resources>

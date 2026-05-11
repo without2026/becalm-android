@@ -212,7 +212,7 @@ public interface SyncCursorStore {
      * Emits the `DATE_MODIFIED` / `DATE_ADDED` epoch-millisecond watermark for a
      * MediaStore-backed source, or `null` on first run.
      *
-     * [kind] must be "sms", "voice", "call_recording", "meeting", or "meeting_transcript".
+     * [kind] must be "sms", "voice", "call_recording", or "meeting".
      * The sync engine queries MediaStore/SAF with
      * `WHERE date_modified > lastSeenTimestampMs` to avoid re-ingesting already-processed
      * rows.

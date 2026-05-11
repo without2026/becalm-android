@@ -33,7 +33,6 @@ internal fun SourceStatusSummarySection(
     onReconnect: () -> Unit,
     onManualSync: () -> Unit,
     onMeetingAudioAdd: () -> Unit,
-    onMeetingTranscriptAdd: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -71,7 +70,6 @@ internal fun SourceStatusSummarySection(
             MeetingImportActions(
                 state = state,
                 onMeetingAudioAdd = onMeetingAudioAdd,
-                onMeetingTranscriptAdd = onMeetingTranscriptAdd,
             )
         }
     }
@@ -153,9 +151,8 @@ private fun SourceRecoveryActions(
 private fun MeetingImportActions(
     state: SourceDetailUiState,
     onMeetingAudioAdd: () -> Unit,
-    onMeetingTranscriptAdd: () -> Unit,
 ) {
-    if (!state.showMeetingAudioAddButton && !state.showMeetingTranscriptAddButton) return
+    if (!state.showMeetingAudioAddButton) return
     Spacer(modifier = Modifier.height(16.dp))
     Text(
         text = stringResource(R.string.source_detail_meeting_import_section),
@@ -175,23 +172,6 @@ private fun MeetingImportActions(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.source_detail_meeting_audio_formats),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    if (state.showMeetingTranscriptAddButton) {
-        Spacer(modifier = Modifier.height(8.dp))
-        BecalmButton(
-            text = stringResource(R.string.source_detail_meeting_transcript_add),
-            onClick = onMeetingTranscriptAdd,
-            variant = BecalmButtonVariant.Secondary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("source-detail-meeting-transcript-add"),
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.source_detail_meeting_transcript_formats),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
