@@ -12,13 +12,16 @@ import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 public data class EvidenceImportUiState(
     val message: UiMessage? = null,
     val loadingMessage: UiMessage? = null,
+    val statusMessage: UiMessage? = null,
     val meetingReview: MeetingSpeakerReviewUiState? = null,
 )
 
@@ -29,19 +32,42 @@ public data class MeetingSpeakerReviewUiState(
     val selectedSelfSpeakerId: String? = speakers.firstOrNull()?.speakerId,
 )
 
+private data class EvidenceImportTransientState(
+    val message: UiMessage? = null,
+    val loadingMessage: UiMessage? = null,
+    val meetingReview: MeetingSpeakerReviewUiState? = null,
+)
+
 @HiltViewModel
 public class EvidenceImportViewModel @Inject constructor(
     private val sourceImportRepository: SourceImportRepository,
+    statusProjectionPort: EvidenceImportStatusProjectionPort,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(EvidenceImportUiState())
-    public val state: StateFlow<EvidenceImportUiState> = _state.asStateFlow()
+    private val transientState = MutableStateFlow(EvidenceImportTransientState())
+    public val state: StateFlow<EvidenceImportUiState> =
+        combine(transientState, statusProjectionPort.observeStatus()) { transient, persistentStatus ->
+            EvidenceImportUiState(
+                message = transient.message,
+                loadingMessage = transient.loadingMessage,
+                statusMessage = persistentStatus.toUiMessage(),
+                meetingReview = transient.meetingReview,
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = EvidenceImportUiState(),
+        )
 
     public fun onMessageScreenshotSelected(uri: Uri?) {
         if (uri == null) return
         viewModelScope.launch {
-            _state.value = when (sourceImportRepository.importMessageScreenshot(uri)) {
-                is BecalmResult.Success -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_success))
-                is BecalmResult.Failure -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_error_message_screenshot))
+            transientState.value = when (sourceImportRepository.importMessageScreenshot(uri)) {
+                is BecalmResult.Success -> EvidenceImportUiState(
+                    message = UiMessage.resource(R.string.evidence_import_success),
+                ).toTransient()
+                is BecalmResult.Failure -> EvidenceImportTransientState(
+                    message = UiMessage.resource(R.string.evidence_import_error_message_screenshot),
+                )
             }
         }
     }
@@ -49,55 +75,77 @@ public class EvidenceImportViewModel @Inject constructor(
     public fun onMeetingAudioSelected(uri: Uri?) {
         if (uri == null) return
         viewModelScope.launch {
-            _state.value = EvidenceImportUiState(loadingMessage = UiMessage.resource(R.string.evidence_import_meeting_preview_loading))
-            _state.value = when (val preview = sourceImportRepository.previewMeetingAudioSpeakers(uri)) {
-                is BecalmResult.Success -> EvidenceImportUiState(
+            transientState.value = EvidenceImportTransientState(
+                loadingMessage = UiMessage.resource(R.string.evidence_import_meeting_preview_loading),
+            )
+            transientState.value = when (val preview = sourceImportRepository.previewMeetingAudioSpeakers(uri)) {
+                is BecalmResult.Success -> EvidenceImportTransientState(
                     meetingReview = MeetingSpeakerReviewUiState(
                         audioUri = uri,
                         speakerPreviewId = preview.value.speakerPreviewId,
                         speakers = preview.value.speakers,
                     ),
                 )
-                is BecalmResult.Failure -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_meeting_preview_failed))
+                is BecalmResult.Failure -> EvidenceImportTransientState(
+                    message = UiMessage.resource(R.string.evidence_import_meeting_preview_failed),
+                )
             }
         }
     }
 
     public fun onMeetingSelfSpeakerSelected(speakerId: String) {
-        val review = _state.value.meetingReview ?: return
-        _state.value = _state.value.copy(
+        val review = transientState.value.meetingReview ?: return
+        transientState.value = transientState.value.copy(
             meetingReview = review.copy(selectedSelfSpeakerId = speakerId),
         )
     }
 
     public fun onMeetingSpeakerReviewCancelled() {
-        _state.value = EvidenceImportUiState()
+        transientState.value = EvidenceImportTransientState()
     }
 
     public fun onMeetingSpeakerReviewConfirmed() {
-        val review = _state.value.meetingReview ?: return
+        val review = transientState.value.meetingReview ?: return
         val selfSpeakerId = review.selectedSelfSpeakerId ?: return
         viewModelScope.launch {
-            _state.value = EvidenceImportUiState(loadingMessage = UiMessage.resource(R.string.evidence_import_meeting_preview_loading))
+            transientState.value = EvidenceImportTransientState(
+                loadingMessage = UiMessage.resource(R.string.evidence_import_meeting_preview_loading),
+            )
             val context = MeetingSpeakerReviewContext(
                 selfSpeakerId = selfSpeakerId,
                 speakerMappingsJson = speakerMappingsJson(review.speakers, selfSpeakerId),
                 speakerPreviewId = review.speakerPreviewId,
             )
-            _state.value = when (sourceImportRepository.importMeetingAudio(review.audioUri, context)) {
-                is BecalmResult.Success -> EvidenceImportUiState(UiMessage.resource(R.string.evidence_import_success))
-                is BecalmResult.Failure -> EvidenceImportUiState(UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed))
+            transientState.value = when (sourceImportRepository.importMeetingAudio(review.audioUri, context)) {
+                is BecalmResult.Success -> EvidenceImportTransientState(
+                    message = UiMessage.resource(R.string.evidence_import_success),
+                )
+                is BecalmResult.Failure -> EvidenceImportTransientState(
+                    message = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed),
+                )
             }
         }
     }
 
     public fun onMessageShown() {
-        if (_state.value.meetingReview == null) {
-            _state.value = EvidenceImportUiState()
-        } else {
-            _state.value = _state.value.copy(message = null, loadingMessage = null)
-        }
+        transientState.value = transientState.value.copy(message = null, loadingMessage = null)
     }
+
+    private fun EvidenceImportPersistentStatus.toUiMessage(): UiMessage? =
+        when (this) {
+            EvidenceImportPersistentStatus.NONE -> null
+            EvidenceImportPersistentStatus.PROCESSING ->
+                UiMessage.resource(R.string.evidence_import_status_processing)
+            EvidenceImportPersistentStatus.REVIEW_REQUIRED ->
+                UiMessage.resource(R.string.evidence_import_status_review_required)
+        }
+
+    private fun EvidenceImportUiState.toTransient(): EvidenceImportTransientState =
+        EvidenceImportTransientState(
+            message = message,
+            loadingMessage = loadingMessage,
+            meetingReview = meetingReview,
+        )
 
     private fun speakerMappingsJson(speakers: List<MeetingSpeakerPreviewDto>, selfSpeakerId: String): String =
         speakers.joinToString(prefix = "[", postfix = "]") { speaker ->

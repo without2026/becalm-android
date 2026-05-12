@@ -19,6 +19,13 @@ class SourceTypeCategorySpecTest {
 
         assertTrue(SourceType.GOOGLE_CALENDAR.isCalendarSource())
         assertTrue(SourceType.OUTLOOK_CALENDAR.isCalendarSource())
+        assertFalse(SourceType.MEETING.isCalendarSource())
         assertFalse(SourceType.NAVER_IMAP.isCalendarSource())
+
+        assertTrue(SourceType.MEETING.isMeetingSource())
+        assertTrue(SourceType.GOOGLE_CALENDAR.isMeetingTimelineSource())
+        assertTrue(SourceType.OUTLOOK_CALENDAR.isMeetingTimelineSource())
+        assertTrue(SourceType.MEETING.isMeetingTimelineSource())
+        assertFalse(SourceType.GMAIL.isMeetingTimelineSource())
     }
 }

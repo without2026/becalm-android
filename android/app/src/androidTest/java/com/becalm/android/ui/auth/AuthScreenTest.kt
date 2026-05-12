@@ -184,7 +184,35 @@ class AuthScreenTest {
         composeTestRule.onNodeWithText(string(R.string.login_error_empty_fields)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("google-sign-in-button").assertIsNotEnabled()
         composeTestRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
+        composeTestRule.onNodeWithText(string(R.string.login_google_setup_required)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
+    }
+
+    @Test
+    fun login_form_blocks_invalid_email_and_short_password() {
+        var submitted = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    onSignIn = { _, _ -> submitted += 1 },
+                    onSignUp = { _, _ -> submitted += 1 },
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("login-email").performTextInput("not-an-email")
+        composeTestRule.onNodeWithTag("login-password").performTextInput("short")
+        composeTestRule.onNodeWithText(string(R.string.login_cta)).performClick()
+
+        composeTestRule.onNodeWithText(string(R.string.login_error_invalid_email)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.login_error_short_password)).assertIsDisplayed()
+        composeTestRule.runOnIdle {
+            assertEquals(0, submitted)
+        }
     }
 
     @Test
@@ -208,12 +236,12 @@ class AuthScreenTest {
         }
 
         composeTestRule.onNodeWithTag("login-email").performTextInput("user@example.com")
-        composeTestRule.onNodeWithTag("login-password").performTextInput("secret")
+        composeTestRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
         composeTestRule.onNodeWithText(string(R.string.login_cta)).performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("user@example.com", submittedEmail)
-            assertEquals("secret", submittedPassword)
+            assertEquals("ValidPass1!", submittedPassword)
         }
     }
 

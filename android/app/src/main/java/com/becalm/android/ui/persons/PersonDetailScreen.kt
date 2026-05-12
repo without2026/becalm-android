@@ -43,9 +43,9 @@ import com.becalm.android.ui.components.ErrorState
 import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.HandleSnackbarMessage
 import com.becalm.android.ui.components.RecommendationPanel
-import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
+import com.becalm.android.ui.components.isMeetingTimelineSource
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
@@ -314,7 +314,7 @@ private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boole
     PersonTimelineFilter.ALL -> true
     PersonTimelineFilter.EMAIL -> card.sourceType.isEmailSource()
     PersonTimelineFilter.CALL -> card.sourceType.isCallSource()
-    PersonTimelineFilter.MEETING -> card.sourceType.isCalendarSource()
+    PersonTimelineFilter.MEETING -> card.sourceType.isMeetingTimelineSource()
     PersonTimelineFilter.COMMITMENT ->
         card.myActions.isNotEmpty() || card.theirActions.isNotEmpty() || card.schedules.isNotEmpty()
 }

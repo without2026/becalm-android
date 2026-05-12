@@ -62,6 +62,7 @@ markdown_format:
     - "## Work Context"
     - "## Recent Interactions"
     - "## Matching Notes"
+    - "## Local Voice Evidence"
     - "## Evidence References"
   section_rules:
     Identity:
@@ -83,6 +84,12 @@ markdown_format:
     Matching_Notes:
       - "May include user-confirmed semantic patterns, rejected matches, and ambiguity warnings."
       - "Semantic notes are reinforcement context, not deterministic identity anchors."
+    Local_Voice_Evidence:
+      - "Confirmed audio speaker rows may be listed as local-only voice evidence."
+      - "Only source_event_participants with source_type in voice|call_recording|meeting, role='speaker', resolved person_id, and source-local SPEAKER_* label may appear here."
+      - "Links must use voice://chunk/{filename}; raw filesystem paths, content:// URIs, signed URLs, and cloud object paths are forbidden."
+      - "Chunk filenames are deterministic from user_id, person_id, source_event_id, and speaker label, and must not include person names, emails, or phone numbers."
+      - "MVP A records voice evidence references only. Actual audio chunk materialization requires persisted segment offsets and is out of scope."
     Evidence_References:
       - "List source_ref, source_type, occurred_at, and short evidence label for every factual bullet above."
 
@@ -110,7 +117,12 @@ generation_rules:
 
   - id: PMEM-006
     description: "Semantic matching may consult person memory only as optional context."
-    expected: "Deterministic email/phone/confirmed identity matching remains first. If no deterministic match exists, semantic matcher may compare participant evidence against the latest local memory.md. Absence or staleness of memory.md falls back to structured DB context or user review."
+    expected: "Deterministic email/phone/confirmed identity matching remains first. If no deterministic match exists, semantic matcher may compare participant evidence against a bounded local semantic index generated from the same structured input as memory.md. Runtime matching must not parse memory.md. Absence or staleness of the index falls back to structured DB context or user review."
+
+  - id: PMEM-007
+    description: "Confirmed local audio speakers are preserved as voice evidence references."
+    trigger: "User resolves an audio source_event_participant speaker label to a real person and PersonInteractionIndexWorker enqueues ProfileMemoryWorker for that person."
+    expected: "PersonMemoryInputCollector derives a PersonMemoryVoiceEvidence row from the resolved speaker participant. PersonMemoryMarkdownBuilder writes it under Local Voice Evidence as a voice://chunk link. The link is local-only and does not imply backend, Supabase, or cloud audio storage."
 
 reinforcement_matching_rules:
   - "Email and phone identities are automatic deterministic anchors."
@@ -148,6 +160,7 @@ prompt_contract:
         relation_to_user: string
         display_name?: string
         organization?: string
+        title?: string
         evidence?: string
         occurred_at: datetime
     interactions:
@@ -165,6 +178,13 @@ prompt_contract:
         status?: string # action_state for action, schedule_status for schedule, decision_status for decision
         quote: string
         occurred_at: datetime
+    voice_evidence:
+      - source_ref: string
+        source_type: "voice|call_recording|meeting"
+        speaker_label: "SPEAKER_*"
+        chunk_file_name: string
+        evidence?: string
+        occurred_at: datetime
     matching_feedback:
       - kind: "confirmed_semantic_match|rejected_semantic_match|ambiguity_warning"
         pattern: string
@@ -179,7 +199,33 @@ validation_rules:
   - "No single evidence quote/snippet may exceed 240 characters."
   - "Forbidden original-body markers or transcript-size text blocks cause validation failure."
   - "Every Profile, Work Context, and Matching Notes factual bullet must contain a source ref token such as raw:<id>, commitment:<id>, or participant:<id>."
+  - "Local Voice Evidence rows must use voice://chunk links and must never include raw filesystem paths, content:// URIs, cloud object paths, or full transcript text."
   - "Validator failure prevents upload and keeps the local worker retryable or quarantined according to error type."
+
+semantic_index_contract:
+  storage:
+    table: person_memory_semantic_index
+    owner: Android Room only
+    source: PersonMemoryInput structured graph
+    forbidden_source: memory.md runtime parsing
+  fields:
+    - display_name_terms_json
+    - aliases_json
+    - organizations_json
+    - titles_json
+    - work_terms_json
+    - decision_terms_json
+    - open_commitment_terms_json
+    - confirmed_patterns_json
+    - rejected_patterns_json
+    - recent_source_types_json
+    - content_hash
+    - updated_at
+  rules:
+    - "Index rows contain bounded normalized terms and short phrases only, never full email bodies, transcripts, audio text, or source original blobs."
+    - "ProfileMemoryWorker updates the index before/with local memory generation, but failed remote upload must not remove or block the local index."
+    - "Unresolved/name-only/speaker-label matching may use index terms to rank candidates and show recommendation reasons."
+    - "Semantic index matches never auto-merge people; user confirmation is required unless deterministic email/phone/contact/verified alias anchors match."
 
 privacy_and_retention:
   - "The artifact is user-scoped and person-scoped. Account deletion deletes local files and Supabase Storage objects under {user_id}/."

@@ -7,9 +7,9 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
-import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
+import com.becalm.android.ui.components.isMeetingTimelineSource
 import com.becalm.android.ui.components.isTakeDirection
 
 internal object PersonDetailProjector {
@@ -39,7 +39,9 @@ internal object PersonDetailProjector {
             eventCount = interactions.count { it.interactionKind != "commitment" },
             emailInteractionCount = interactions.count { it.interactionKind == "email" },
             callInteractionCount = interactions.count { it.interactionKind == "call" },
-            meetingCount = interactions.count { it.interactionKind == "calendar" },
+            meetingCount = interactions.count {
+                it.interactionKind == "calendar" || it.interactionKind == "meeting"
+            },
             pendingCommitmentCount = interactions.count { it.isOpenCommitmentLoop() },
             channelSources = interactions.map { it.sourceType }.toSet(),
             sourceEventCards = sourceEventCards,
@@ -182,7 +184,7 @@ internal object PersonDetailProjector {
                     text.contains("email") ||
                     text.contains("reply")
                 ) -> R.string.person_detail_next_action_email_reply
-            next.sourceType.isCalendarSource() && (
+            next.sourceType.isMeetingTimelineSource() && (
                 text.contains("미팅") ||
                     text.contains("회의") ||
                     text.contains("일정") ||

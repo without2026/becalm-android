@@ -112,6 +112,62 @@ class EvidenceImportUiTest {
         }
     }
 
+    @Test
+    fun `import host renders persistent processing or review entry after upload`() {
+        var reviewClicks = 0
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
+                            R.string.evidence_import_status_review_required,
+                        ),
+                    ),
+                    onReviewRequiredClick = { reviewClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("evidence-import-status").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_status_review_required)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-review-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.runOnIdle {
+            assertEquals(1, reviewClicks)
+        }
+    }
+
+    @Test
+    fun `review required banner CTA is visible and clickable from persistent state`() {
+        var navigatedToReview = false
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
+                            R.string.evidence_import_status_review_required,
+                        ),
+                    ),
+                    onReviewRequiredClick = { navigatedToReview = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.evidence_import_review_action)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-review-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(true, navigatedToReview)
+        }
+    }
+
     private fun renderSheet(
         onDismiss: () -> Unit = {},
         onMessageScreenshotImport: () -> Unit = {},

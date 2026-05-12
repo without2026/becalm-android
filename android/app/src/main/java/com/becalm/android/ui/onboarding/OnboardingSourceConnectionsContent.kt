@@ -97,20 +97,26 @@ internal fun SourceConnectionsContent(
                 )
             }
         }
-        sourceSection(
-            title = mailSection,
-            items = items.filter { it.category == SourceConnectionCategory.Mail },
-            onConnect = onConnect,
-            onSkip = onSkip,
-            skipLabel = skipLabel,
-        )
-        sourceSection(
-            title = calendarSection,
-            items = items.filter { it.category == SourceConnectionCategory.Calendar },
-            onConnect = onConnect,
-            onSkip = onSkip,
-            skipLabel = skipLabel,
-        )
+        val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
+        if (mailItems.isNotEmpty()) {
+            sourceSection(
+                title = mailSection,
+                items = mailItems,
+                onConnect = onConnect,
+                onSkip = onSkip,
+                skipLabel = skipLabel,
+            )
+        }
+        val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
+        if (calendarItems.isNotEmpty()) {
+            sourceSection(
+                title = calendarSection,
+                items = calendarItems,
+                onConnect = onConnect,
+                onSkip = onSkip,
+                skipLabel = skipLabel,
+            )
+        }
         item {
             Spacer(modifier = Modifier.height(8.dp))
             BecalmButton(

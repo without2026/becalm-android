@@ -5,6 +5,7 @@ import com.becalm.android.domain.person.PersonMatchDecision
 import com.becalm.android.domain.person.PersonMatchIdentity
 import com.becalm.android.domain.person.PersonMatchParticipant
 import com.becalm.android.domain.person.PersonMatchingEngine
+import com.becalm.android.domain.person.PersonSemanticContext
 import com.becalm.android.domain.person.StaticPersonSemanticContextProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,6 +36,44 @@ class Checkpoint4PersonMatchingSpecTest {
 
         assertAutoMatch(emailDecision, "person-jane")
         assertAutoMatch(phoneDecision, "person-jane")
+    }
+
+    @Test
+    fun `name-only participant can be recommended from memory semantic index terms`() {
+        val candidate = PersonMatchCandidate(
+            personId = "person-jane",
+            displayName = "Jane Kim",
+            identities = emptyList(),
+        )
+        val engine = PersonMatchingEngine(
+            StaticPersonSemanticContextProvider(
+                mapOf(
+                    "person-jane" to PersonSemanticContext(
+                        organizations = setOf("acme"),
+                        titles = setOf("ceo"),
+                        openCommitmentTerms = setOf("revised", "terms"),
+                        decisionTerms = setOf("renewal", "discount"),
+                    ),
+                ),
+            ),
+        )
+
+        val decision = engine.decide(
+            participant = PersonMatchParticipant(
+                displayName = "Jane Kim",
+                organization = "Acme",
+                title = "CEO",
+                evidence = "Jane mentioned the renewal discount and revised terms.",
+                sourceType = "meeting",
+            ),
+            candidates = listOf(candidate),
+        )
+
+        assertTrue(decision is PersonMatchDecision.NeedsUserConfirmation)
+        val scored = (decision as PersonMatchDecision.NeedsUserConfirmation).candidates.single()
+        assertEquals("person-jane", scored.personId)
+        assertTrue(scored.reasons.contains("open_commitment"))
+        assertTrue(scored.reasons.contains("decision_context"))
     }
 
     private fun participant(

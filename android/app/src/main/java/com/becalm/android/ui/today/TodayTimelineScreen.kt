@@ -131,6 +131,9 @@ public fun TodayTimelineScreen(
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onReviewRequiredClick = {
+            navController.navigate(BecalmRoute.PersonsUnassigned.path)
+        },
     )
 }
 
@@ -155,6 +158,7 @@ public fun TodayTimelineContent(
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onReviewRequiredClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
@@ -259,6 +263,7 @@ public fun TodayTimelineContent(
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onReviewRequiredClick = onReviewRequiredClick,
     )
 }
 

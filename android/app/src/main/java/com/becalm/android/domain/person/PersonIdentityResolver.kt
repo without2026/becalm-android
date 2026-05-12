@@ -16,6 +16,13 @@ public data class PersonIdentityResolution(
     val verified: Boolean,
 )
 
+public object PersonIdentityTypes {
+    public const val SPEAKER_LABEL: String = "speaker_label"
+
+    public fun isSourceLocal(identityType: String): Boolean =
+        identityType == SPEAKER_LABEL
+}
+
 public object PersonIdentityResolver {
     private val PERSON_NAMESPACE: UUID = UUID.fromString("b69fa098-8289-46d4-857a-5e9a9c113c79")
     private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)

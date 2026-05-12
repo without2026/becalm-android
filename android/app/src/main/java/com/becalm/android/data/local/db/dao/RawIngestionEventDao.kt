@@ -220,6 +220,21 @@ public interface RawIngestionEventDao {
     ): Flow<Int>
 
     /**
+     * Emits the number of user-imported evidence rows still blocked or queued for extraction.
+     * This drives the persistent import status banner so process death does not erase a
+     * long-running import state.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND sync_status IN ('pending', 'awaiting_consent')
+        """,
+    )
+    public fun observeEvidenceImportProcessingCount(userId: String): Flow<Int>
+
+    /**
      * Hard-deletes all events owned by [userId]. Called on logout to clear local data
      * per the local-first privacy model — data that has not yet been synced is discarded
      * without upload.

@@ -109,7 +109,7 @@ public object ApiFactory {
      *
      * The [Retrofit] instance must be built with an [OkHttpClient] that uses
      * [HttpTimeouts.SourceExtraction] (connect=30s, read=180s, write=180s) to accommodate
-     * audio file uploads up to 60 MiB, transcript extraction, and Vertex AI inference latency (VOI-006).
+     * audio/image uploads, CLOVA preview/extraction, and Vertex AI inference latency (VOI-006).
      *
      * @param retrofit [Retrofit] instance from [createRetrofit], configured with extraction timeouts.
      */

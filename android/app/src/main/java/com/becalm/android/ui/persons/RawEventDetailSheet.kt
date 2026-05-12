@@ -133,7 +133,7 @@ internal fun RawEventDetailContent(
 /**
  * Minimal layout for voice / calendar / call_recording events — the common header
  * (source badge + title + timestamp) only. Per-source extended fields
- * (`duration_seconds`, `transcript`, `location`, `attendees_raw`) are intentionally
+ * (`duration_seconds`, `location`, `attendees_raw`) are intentionally
  * out of scope for this plan; future plans (`ui-raw-event-voice-rendering`,
  * `ui-raw-event-calendar-rendering`) will specialize each branch the same way
  * [EmailEventDetailSection] does for email.

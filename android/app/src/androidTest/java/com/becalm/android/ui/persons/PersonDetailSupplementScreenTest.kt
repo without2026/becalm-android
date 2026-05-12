@@ -145,12 +145,77 @@ class PersonDetailSupplementScreenTest {
             .performTextInput("noreply@navercorp.com")
         composeTestRule.onNodeWithTag("unassigned-match-nickname-event-1")
             .performTextInput("네이버 예약팀")
-        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action))
+            .performScrollTo()
+            .performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("event-1", matchedEventId)
             assertEquals("noreply@navercorp.com", matchedAnchor)
             assertEquals("네이버 예약팀", matchedNickname)
+        }
+    }
+
+    @Test
+    fun unassigned_events_other_person_renders_existing_people_and_matches_selected_row() {
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    matchChoices = listOf(
+                        PersonMatchChoiceRow(
+                            anchor = "minji@corp.com",
+                            displayName = "김민지",
+                            detail = "minji@corp.com",
+                            hasInteractions = true,
+                        ),
+                        PersonMatchChoiceRow(
+                            anchor = "+82109998888",
+                            displayName = "박서연",
+                            detail = "+82109998888",
+                            hasInteractions = false,
+                        ),
+                    ),
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-other",
+                            sourceType = SourceType.VOICE,
+                            title = "회의 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "SPEAKER_02",
+                                    displayName = "SPEAKER_02",
+                                    detail = null,
+                                    role = "speaker",
+                                    evidence = "자료 공유 약속",
+                                    confidence = 0.42,
+                                ),
+                            ),
+                        ),
+                    ),
+                    onManualMatch = { _, anchor, nickname ->
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.person_match_other_person_action)).performClick()
+        composeTestRule.onNodeWithText("김민지").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("박서연").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("김민지").performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_match_action))
+            .performScrollTo()
+            .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("minji@corp.com", matchedAnchor)
+            assertEquals("김민지", matchedNickname)
         }
     }
 
@@ -181,7 +246,9 @@ class PersonDetailSupplementScreenTest {
 
         composeTestRule.onNodeWithTag("unassigned-match-anchor-event-2")
             .performTextInput("+821012345678")
-        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
+            .performScrollTo()
+            .performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("+821012345678", matchedAnchor)

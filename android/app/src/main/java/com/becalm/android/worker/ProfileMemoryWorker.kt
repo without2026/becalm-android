@@ -11,6 +11,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.PersonMemoryInputCollector
 import com.becalm.android.data.repository.PersonMemoryRemoteRepository
+import com.becalm.android.data.repository.PersonMemorySemanticIndexStore
 import com.becalm.android.data.repository.PersonMemoryStore
 import com.becalm.android.domain.person.PersonMemoryMarkdownBuilder
 import com.becalm.android.domain.person.PersonMemoryMarkdownValidator
@@ -29,6 +30,7 @@ public class ProfileMemoryWorker @AssistedInject constructor(
     private val userPrefsStoreProvider: Provider<UserPrefsStore>,
     private val inputCollectorProvider: Provider<PersonMemoryInputCollector>,
     private val memoryStoreProvider: Provider<PersonMemoryStore>,
+    private val semanticIndexStoreProvider: Provider<PersonMemorySemanticIndexStore>,
     private val remoteRepositoryProvider: Provider<PersonMemoryRemoteRepository>,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -40,6 +42,7 @@ public class ProfileMemoryWorker @AssistedInject constructor(
         userPrefsStore: UserPrefsStore,
         inputCollector: PersonMemoryInputCollector,
         memoryStore: PersonMemoryStore,
+        semanticIndexStore: PersonMemorySemanticIndexStore,
         remoteRepository: PersonMemoryRemoteRepository,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
@@ -49,6 +52,7 @@ public class ProfileMemoryWorker @AssistedInject constructor(
         userPrefsStoreProvider = Provider { userPrefsStore },
         inputCollectorProvider = Provider { inputCollector },
         memoryStoreProvider = Provider { memoryStore },
+        semanticIndexStoreProvider = Provider { semanticIndexStore },
         remoteRepositoryProvider = Provider { remoteRepository },
         logger = logger,
         ioDispatcher = ioDispatcher,
@@ -98,6 +102,7 @@ public class ProfileMemoryWorker @AssistedInject constructor(
             )
         }
 
+        semanticIndexStoreProvider.get().upsert(input)
         val write = memoryStoreProvider.get().write(
             userId = userId,
             personId = personId,

@@ -17,6 +17,7 @@ import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.repository.PersonMemoryInputCollector
 import com.becalm.android.data.repository.PersonMemoryRemoteMirror
 import com.becalm.android.data.repository.PersonMemoryRemoteRepository
+import com.becalm.android.data.repository.PersonMemorySemanticIndexStore
 import com.becalm.android.data.repository.PersonMemoryStore
 import com.becalm.android.domain.person.PersonMemoryHash
 import com.becalm.android.domain.person.PersonMemoryMarkdownValidator
@@ -73,6 +74,10 @@ class ProfileMemoryWorkerLocalIntegrationTest {
         val markdown = memoryFile(USER_ID, PERSON_ID).readText(Charsets.UTF_8)
         assertTrue(markdown.contains("Works with Acme as CEO."))
         assertTrue(markdown.contains("Send revised terms"))
+        val semanticIndex = db.personIndexDao().findSemanticIndexForPerson(USER_ID, PERSON_ID)
+        assertEquals(PERSON_ID, semanticIndex?.personId)
+        assertTrue(requireNotNull(semanticIndex).organizationsJson.contains("acme"))
+        assertTrue(semanticIndex.openCommitmentTermsJson.contains("revised"))
         assertEquals(PersonMemoryHash.sha256(markdown), result.outputData.getString(ProfileMemoryWorker.KEY_CONTENT_HASH))
         assertEquals(
             emptyList<PersonMemoryValidationError>(),
@@ -162,6 +167,10 @@ class ProfileMemoryWorkerLocalIntegrationTest {
                 ioDispatcher = dispatcher,
             ),
             memoryStore = PersonMemoryStore(LocalIntegrationSupport.appContext()),
+            semanticIndexStore = PersonMemorySemanticIndexStore(
+                personIndexDao = db.personIndexDao(),
+                ioDispatcher = dispatcher,
+            ),
             remoteRepository = FakePersonMemoryRemoteRepository(remoteResult),
             logger = logger,
             ioDispatcher = dispatcher,

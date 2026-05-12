@@ -65,6 +65,20 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
                     organization = "Acme",
                 ),
                 sourceParticipant(
+                    id = "participant-speaker",
+                    sourceEventId = "meeting-1",
+                    personId = PERSON_ID,
+                    displayName = "SPEAKER_02",
+                    organization = "",
+                    sourceType = "meeting",
+                    role = "speaker",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    email = null,
+                    title = null,
+                    evidence = "금요일까지 자료를 공유하겠습니다.",
+                ),
+                sourceParticipant(
                     id = "participant-other",
                     sourceEventId = "raw-other",
                     personId = OTHER_PERSON_ID,
@@ -129,9 +143,12 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
 
         assertEquals("Jane Kim", input.displayName)
         assertEquals(listOf("email", "name"), input.identities.map { it.identityType })
-        assertEquals(listOf("raw:raw-1"), input.participants.map { it.sourceRef })
-        assertEquals(listOf("Acme"), input.participants.map { it.organization })
-        assertEquals(listOf("CEO"), input.participants.map { it.title })
+        assertEquals(setOf("raw:raw-1", "raw:meeting-1"), input.participants.map { it.sourceRef }.toSet())
+        assertTrue(input.participants.any { it.organization == "Acme" })
+        assertTrue(input.participants.any { it.title == "CEO" })
+        assertEquals(listOf("SPEAKER_02"), input.voiceEvidence.map { it.speakerLabel })
+        assertTrue(input.voiceEvidence.single().chunkFileName.startsWith("voice_chunk_"))
+        assertTrue(input.voiceEvidence.single().chunkFileName.endsWith(".m4a"))
         assertEquals(
             setOf("raw:raw-1", "commitment:commitment-1", "commitment:commitment-decision"),
             input.interactions.map { it.sourceRef }.toSet(),
@@ -242,24 +259,31 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
         personId: String,
         displayName: String,
         organization: String,
+        sourceType: String = "gmail",
+        role: String = "sender",
+        identityType: String? = "email",
+        normalizedValue: String? = "jane@acme.com",
+        email: String? = "jane@acme.com",
+        title: String? = "CEO",
+        evidence: String = "$displayName, $organization",
     ): SourceEventParticipantEntity =
         SourceEventParticipantEntity(
             id = id,
             userId = USER_ID,
             sourceEventId = sourceEventId,
-            sourceType = "gmail",
-            sourceRef = "gmail-message-$sourceEventId",
+            sourceType = sourceType,
+            sourceRef = "$sourceType-$sourceEventId",
             personId = personId,
-            role = "sender",
+            role = role,
             relationToUser = "counterparty",
-            identityType = "email",
-            normalizedValue = "jane@acme.com",
+            identityType = identityType,
+            normalizedValue = normalizedValue,
             displayNameRaw = displayName,
-            emailRaw = "jane@acme.com",
+            emailRaw = email,
             phoneRaw = null,
             organizationRaw = organization,
-            titleRaw = "CEO",
-            evidence = "$displayName, $organization",
+            titleRaw = title,
+            evidence = evidence,
             confidence = 0.9,
             resolutionStatus = "resolved",
             createdAt = GENERATED_AT,

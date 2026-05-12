@@ -98,6 +98,7 @@ public fun CommitmentManagementScreen(
     headerViewModel: MainTabHeaderViewModel = hiltViewModel(),
     onOpenDetail: (id: String) -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenUnassigned: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val evidenceImportState by evidenceImportViewModel.state.collectAsStateWithLifecycle()
@@ -165,6 +166,7 @@ public fun CommitmentManagementScreen(
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onReviewRequiredClick = onOpenUnassigned,
         onOpenSettings = onOpenSettings,
         onOpenDetail = viewModel::onCommitmentSelected,
         onToggleCompletedSection = viewModel::onToggleCompletedSection,
@@ -186,6 +188,7 @@ public fun CommitmentManagementScreenContent(
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onReviewRequiredClick: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenDetail: (String) -> Unit,
     onToggleCompletedSection: () -> Unit,
@@ -339,6 +342,7 @@ public fun CommitmentManagementScreenContent(
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onReviewRequiredClick = onReviewRequiredClick,
     )
 }
 

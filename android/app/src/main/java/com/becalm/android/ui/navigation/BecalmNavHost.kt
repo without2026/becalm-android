@@ -361,6 +361,9 @@ public fun BecalmNavHost(
                     onOpenSettings = {
                         navController.navigate(BecalmRoute.Settings.path)
                     },
+                    onOpenUnassigned = {
+                        navController.navigate(BecalmRoute.PersonsUnassigned.path)
+                    },
                 )
             }
         }

@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
+import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
@@ -47,6 +48,9 @@ public interface PersonIndexDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertDirtySources(rows: List<PersonIndexDirtySourceEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertSemanticIndexes(rows: List<PersonMemorySemanticIndexEntity>)
 
     @Query("DELETE FROM person_interactions WHERE user_id = :userId")
     public suspend fun deleteInteractionsForUser(userId: String): Int
@@ -293,6 +297,23 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT COUNT(*) FROM unmatched_person_interactions
+        WHERE user_id = :userId
+        """,
+    )
+    public fun observeUnmatchedInteractionCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM source_event_participants
+        WHERE user_id = :userId
+          AND resolution_status = 'unresolved'
+        """,
+    )
+    public fun observeUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>
+
+    @Query(
+        """
         SELECT * FROM unmatched_person_interactions
         WHERE user_id = :userId
         ORDER BY occurred_at DESC
@@ -365,6 +386,33 @@ public interface PersonIndexDao {
         """,
     )
     public fun observeIdentitiesForPerson(userId: String, personId: String): Flow<List<PersonIdentityEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_identities
+        WHERE user_id = :userId
+        ORDER BY verified DESC, confidence DESC, identity_type ASC
+        """,
+    )
+    public fun observeIdentitiesForUser(userId: String): Flow<List<PersonIdentityEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_memory_semantic_index
+        WHERE user_id = :userId
+        ORDER BY updated_at DESC
+        """,
+    )
+    public fun observeSemanticIndexesForUser(userId: String): Flow<List<PersonMemorySemanticIndexEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_memory_semantic_index
+        WHERE user_id = :userId
+          AND person_id = :personId
+        """,
+    )
+    public suspend fun findSemanticIndexForPerson(userId: String, personId: String): PersonMemorySemanticIndexEntity?
 
     @Query(
         """

@@ -12,6 +12,7 @@ public data class PersonMemoryInput(
     val participants: List<PersonMemoryParticipant> = emptyList(),
     val interactions: List<PersonMemoryInteraction> = emptyList(),
     val commitments: List<PersonMemoryCommitment> = emptyList(),
+    val voiceEvidence: List<PersonMemoryVoiceEvidence> = emptyList(),
     val matchingNotes: List<String> = emptyList(),
 )
 
@@ -53,6 +54,15 @@ public data class PersonMemoryCommitment(
     val occurredAt: Instant,
 )
 
+public data class PersonMemoryVoiceEvidence(
+    val sourceRef: String,
+    val sourceType: String,
+    val speakerLabel: String,
+    val chunkFileName: String,
+    val evidence: String?,
+    val occurredAt: Instant,
+)
+
 public object PersonMemoryMarkdownBuilder {
     public fun build(input: PersonMemoryInput): String {
         val body = buildBody(input, contentHash = HASH_PLACEHOLDER)
@@ -78,6 +88,7 @@ public object PersonMemoryMarkdownBuilder {
             appendWorkContext(input)
             appendRecentInteractions(input)
             appendMatchingNotes(input)
+            appendLocalVoiceEvidence(input)
             appendEvidenceReferences(input)
         }
 
@@ -183,6 +194,26 @@ public object PersonMemoryMarkdownBuilder {
         appendLine()
     }
 
+    private fun StringBuilder.appendLocalVoiceEvidence(input: PersonMemoryInput) {
+        appendLine("## Local Voice Evidence")
+        val evidenceRows = input.voiceEvidence
+            .sortedWith(compareByDescending<PersonMemoryVoiceEvidence> { it.occurredAt }.thenBy { it.speakerLabel })
+            .take(12)
+        if (evidenceRows.isEmpty()) {
+            appendLine("- No confirmed local voice evidence.")
+        } else {
+            evidenceRows.forEach { evidence ->
+                appendLine(
+                    "- ${evidence.occurredAt.datePart()} ${evidence.sourceType} speaker `${evidence.speakerLabel.safeInline(48)}`: " +
+                        "[voice chunk](voice://chunk/${evidence.chunkFileName.sanitizePathSegment()})." +
+                        evidence.evidence?.takeIf { it.isNotBlank() }?.let { " Evidence: ${it.safeInline(120)}." }.orEmpty() +
+                        " [${evidence.sourceRef}]",
+                )
+            }
+        }
+        appendLine()
+    }
+
     private fun StringBuilder.appendEvidenceReferences(input: PersonMemoryInput) {
         appendLine("## Evidence References")
         val refs = linkedMapOf<String, String>()
@@ -243,6 +274,9 @@ public object PersonMemoryMarkdownValidator {
         if (FORBIDDEN_ORIGINAL_MARKERS.any { marker -> markdown.contains(marker, ignoreCase = true) }) {
             errors += PersonMemoryValidationError.ForbiddenOriginalLeak
         }
+        if (hasForbiddenLocalVoiceReference(markdown)) {
+            errors += PersonMemoryValidationError.ForbiddenLocalVoiceReference
+        }
         return PersonMemoryValidationResult(errors.distinct())
     }
 
@@ -281,6 +315,15 @@ public object PersonMemoryMarkdownValidator {
             .filter { it.isNotBlank() }
     }
 
+    private fun hasForbiddenLocalVoiceReference(markdown: String): Boolean =
+        markdown.sectionLines("## Local Voice Evidence")
+            .filter { it.startsWith("- ") }
+            .filterNot { it == "- No confirmed local voice evidence." }
+            .any { line ->
+                LOCAL_VOICE_FORBIDDEN_REFERENCES.any { token -> line.contains(token, ignoreCase = true) } ||
+                    !line.contains("voice://chunk/")
+            }
+
     private val REQUIRED_SECTIONS = listOf(
         "# Person Memory",
         "## Identity",
@@ -288,6 +331,7 @@ public object PersonMemoryMarkdownValidator {
         "## Work Context",
         "## Recent Interactions",
         "## Matching Notes",
+        "## Local Voice Evidence",
         "## Evidence References",
     )
     private val REQUIRED_FRONTMATTER_KEYS = setOf(
@@ -304,6 +348,7 @@ public object PersonMemoryMarkdownValidator {
         "- No evidence-backed profile facts yet.",
         "- No open work context recorded.",
         "- No user-confirmed semantic matching notes.",
+        "- No confirmed local voice evidence.",
     )
     private val FORBIDDEN_ORIGINAL_MARKERS = setOf(
         "full transcript",
@@ -311,6 +356,14 @@ public object PersonMemoryMarkdownValidator {
         "transcript transcript transcript",
         "original email body",
         "raw_model_text",
+    )
+    private val LOCAL_VOICE_FORBIDDEN_REFERENCES = setOf(
+        "content://",
+        "file://",
+        "/data/",
+        "/storage/",
+        "http://",
+        "https://",
     )
     private const val MAX_MARKDOWN_BYTES = 65_536
     private const val MAX_EVIDENCE_LINE_CHARS = 240
@@ -329,6 +382,7 @@ public enum class PersonMemoryValidationError {
     MissingSourceRef,
     EvidenceTooLong,
     ForbiddenOriginalLeak,
+    ForbiddenLocalVoiceReference,
     TooLarge,
 }
 
@@ -349,6 +403,22 @@ public object PersonMemoryPathResolver {
     public fun localRelativePath(userId: String, personId: String): String =
         "person_memory/${PersonMemoryHash.sha256Bytes(userId.toByteArray(Charsets.UTF_8)).take(16)}/" +
             "${personId.sanitizePathSegment()}/memory.md"
+}
+
+public object PersonVoiceChunkReference {
+    public fun fileName(
+        userId: String,
+        personId: String,
+        sourceEventId: String,
+        speakerLabel: String,
+    ): String {
+        val digest = PersonMemoryHash.sha256Bytes(
+            listOf(userId, personId, sourceEventId, speakerLabel)
+                .joinToString(separator = "|")
+                .toByteArray(Charsets.UTF_8),
+        ).take(24)
+        return "voice_chunk_$digest.m4a"
+    }
 }
 
 private fun String.safeInline(maxChars: Int): String =

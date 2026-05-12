@@ -1,0 +1,72 @@
+# Release UX hardening batch for closed beta readiness.
+# Coding rules for this batch:
+# - 변경 순서는 spec/contract → test → implementation → refactor/cleanup 이다.
+# - 구현은 최소 설계 변경으로 유지하고, person 중심 relational intelligence를 우선한다.
+# - 한국의 30대~50대 비즈니스 리더가 빠르게 맥락을 회복하는 흐름을 기준으로 한다.
+# - 사용자에게 보이는 신규 문구는 한국어 기본 문구를 가진다.
+module: release-ux-hardening
+platform: android
+version: 1
+
+behaviors:
+  - id: RUX-001
+    type: ui_contract
+    description: "모든 primary action은 disabled/loading/error 상태 중 현재 상태를 명확히 보여준다"
+    expected: "로그인, 소스 연결, 증거 import, 회의 화자 확인 같은 주요 action은 비활성 이유, 진행 중 문구, 실패 후 재시도/복구 경로 중 하나를 제공한다"
+    source: release-ux-hardening
+    tests: [AuthScreenTest, OnboardingSourceConnectionProjectorSpecTest, EvidenceImportUiTest]
+
+  - id: RUX-002
+    type: ui_contract
+    description: "long-running upload/extraction은 snackbar 단독 성공/실패로 끝나지 않고 처리 중 또는 검토 필요 상태를 남긴다"
+    expected: "screenshot/audio import 후 UI state는 processing 또는 reviewRequired entry point를 노출한다. 실패 시 재시도 가능한 한국어 문구를 제공한다"
+    source: release-ux-hardening
+    tests: [EvidenceImportUiTest]
+
+  - id: RUX-003
+    type: source_category
+    description: "meeting은 calendar가 아니라 meeting source category에 포함된다. Person detail의 '미팅' 필터는 google_calendar, outlook_calendar, meeting을 모두 포함한다"
+    expected: "meetingCount는 interactionKind가 calendar 또는 meeting인 row를 모두 센다. meeting audio card는 '미팅' 필터에서 유지된다"
+    source: release-ux-hardening
+    tests: [SourceTypeCategorySpecTest, PersonDetailViewModelSpecTest, PersonDetailScreenTest]
+
+  - id: RUX-004
+    type: auth_ux
+    description: "Auth 입력 검증은 blank뿐 아니라 invalid email과 short password를 사용자에게 즉시 설명한다"
+    expected: "이메일 형식이 아니면 '올바른 이메일 주소를 입력해 주세요.'를 표시하고, 비밀번호가 8자 미만이면 '비밀번호는 8자 이상이어야 합니다.'를 표시한다"
+    source: release-ux-hardening
+    tests: [AuthScreenTest]
+
+  - id: RUX-005
+    type: auth_ux
+    description: "Google sign-in SDK 설정이 없으면 조용히 비활성화하지 않고 설정 필요 안내를 표시한다"
+    expected: "Google 버튼은 disabled 상태이고 'Google 로그인 설정이 필요합니다. 이메일로 로그인해 주세요.' 안내가 보인다"
+    source: release-ux-hardening
+    tests: [AuthScreenTest]
+
+  - id: RUX-006
+    type: onboarding_ux
+    description: "Calendar OAuth provider SDK/backend 설정이 production 연결 가능 상태가 아니면 first-run onboarding 핵심 CTA로 노출하지 않는다"
+    expected: "first-run Setup/Onboarding entry point에서는 calendar 항목이 숨김 또는 disabled-with-reason 상태다. Settings에서는 준비 중/연결 불가 상태로 표시하고 fake success를 금지한다"
+    source: release-ux-hardening
+    tests: [OnboardingSourceConnectionProjectorSpecTest]
+
+  - id: RUX-007
+    type: person_matching
+    description: "email/phone/verified alias는 deterministic auto-match하고, name-only/speaker-label/organization-only는 자동 확정하지 않는다"
+    expected: "semantic/contextual match는 ranked suggestion과 근거로만 보여주며 사용자 확인 전 canonical identity로 승격하지 않는다"
+    source: release-ux-hardening
+    tests: [PersonMatchingEngineSpecTest]
+
+  - id: RUX-008
+    type: evidence_import
+    description: "증거 import 후 처리 중 / 매칭 확인 필요 상태는 ViewModel 메모리가 아니라 Room/DataStore projection에서 복구된다"
+    expected: "app restart 또는 process death 이후에도 pending/awaiting_consent meeting·message_screenshot row는 처리 중 배너를 만들고, unmatched_person_interactions 또는 unresolved source_event_participants row는 매칭 확인 배너를 만든다. reviewRequired는 processing보다 우선한다"
+    source: release-ux-hardening
+    tests: [EvidenceImportStatusProjectionPortTest, EvidenceImportViewModelTest, EvidenceImportUiTest, PersonManualMatchPipelineLocalIntegrationTest]
+
+invariants:
+  - "People list는 연락처 정보만 보이고 work context는 person detail에서만 보인다"
+  - "source status는 main tab에서 compact summary만 보이고 상세 복구는 source detail/settings에서 수행한다"
+  - "decision은 일반 feed/open-loop로 렌더링하지 않고 memory.md 업무 맥락으로만 소비한다"
+  - "raw transcript 원문은 memory.md에 쓰지 않는다"

@@ -41,6 +41,26 @@ behaviors:
     source: phase2-acceptance
     tests: []
 
+  - id: AUTH-003A
+    type: ui_interaction
+    description: "Google OAuth SDK 설정이 없거나 client id가 누락된 빌드에서는 Google 로그인 CTA가 fake success처럼 보이지 않는다"
+    screen: "LoginScreen"
+    interaction: "화면 진입"
+    precondition: "GoogleSignInLauncher.isConfigured=false"
+    expected: "Google 버튼은 비활성화되고 'Google 로그인 설정이 필요합니다. 이메일로 로그인해 주세요.' 안내가 표시된다. 이메일 로그인/회원가입이 primary path로 남는다"
+    source: release-ux-hardening
+    tests: [AuthScreenTest]
+
+  - id: AUTH-012
+    type: ui_interaction
+    description: "이메일 로그인/회원가입 제출 전 blank, invalid email, short password를 구분해 한국어 validation copy를 표시한다"
+    screen: "LoginScreen"
+    interaction: "[로그인] 또는 [계정 만들기] 탭"
+    precondition: "이메일 또는 비밀번호가 비어 있거나, 이메일 형식이 아니거나, 비밀번호가 8자 미만"
+    expected: "blank: '이메일과 비밀번호를 입력해 주세요.' invalid email: '올바른 이메일 주소를 입력해 주세요.' short password: '비밀번호는 8자 이상이어야 합니다.' 표시. validation 실패 시 AuthRepository 호출 없음"
+    source: release-ux-hardening
+    tests: [AuthScreenTest]
+
   - id: AUTH-004
     type: api
     description: "access_token 만료 시 refresh_token으로 자동 갱신하고 재시도한다"

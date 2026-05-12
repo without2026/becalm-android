@@ -59,6 +59,9 @@
     <string name="login_google_error_no_credentials">이 기기에 Google 계정이 없습니다. 설정 → 계정에서 계정을 추가한 뒤 다시 시도해 주세요.</string>
     <string name="login_google_error_unknown">Google 로그인에 실패했습니다. 다시 시도하거나 이메일 로그인을 이용해 주세요.</string>
     <string name="login_error_empty_fields">이메일과 비밀번호를 입력해 주세요.</string>
+    <string name="login_error_invalid_email">올바른 이메일 주소를 입력해 주세요.</string>
+    <string name="login_error_short_password">비밀번호는 8자 이상이어야 합니다.</string>
+    <string name="login_google_setup_required">Google 로그인 설정이 필요합니다. 이메일로 로그인해 주세요.</string>
     <string name="login_signup_check_email">이메일을 확인해 계정을 인증한 뒤 로그인해 주세요.</string>
     <string name="login_signup_failed">계정을 만들 수 없습니다. 로그인하거나 다른 이메일을 사용해 주세요.</string>
     <string name="auth_error_invalid_credentials">이메일 또는 비밀번호가 올바르지 않습니다.</string>
@@ -475,7 +478,7 @@
     <!-- onb_pipa_bullet_1_value stays "Google LLC" — proper noun -->
 
     <!-- Persons: manual match + add -->
-    <string name="persons_manual_match_anchor_hint">이메일, 전화번호, 또는 이름</string>
+    <string name="persons_manual_match_search_hint">이름, 이메일, 전화번호 검색</string>
     <string name="persons_manual_match_nickname_hint">다음에 기억할 별명</string>
     <string name="persons_manual_add_person_action">새 사람 추가</string>
     <string name="persons_manual_match_action">사람 매칭</string>
@@ -575,8 +578,15 @@
     <string name="person_match_empty_later">나중에 볼 항목은 없습니다.</string>
     <string name="person_match_recommendation_label">이 사람으로 보입니다</string>
     <string name="person_match_candidate_with_confidence">%1$s · %2$d%%</string>
+    <string name="person_match_reasons">추천 근거: %1$s</string>
     <string name="person_match_evidence">근거: %1$s</string>
     <string name="person_match_manual_label">다른 사람 찾기</string>
+    <string name="person_match_existing_people_label">기존 사람과 연락처</string>
+    <string name="person_match_candidate_label">추천 후보</string>
+    <string name="person_match_existing_person_label">등록된 사람</string>
+    <string name="person_match_contact_label">연락처</string>
+    <string name="person_match_selected_label">선택됨</string>
+    <string name="person_match_no_existing_people">일치하는 기존 사람이나 연락처가 없습니다. 새 사람으로 추가할 수 있습니다.</string>
     <string name="person_match_confirm_action">확인</string>
     <string name="person_match_other_person_action">다른 사람</string>
     <string name="person_match_later_action">나중에</string>
@@ -632,6 +642,9 @@
     <string name="evidence_import_meeting_audio">회의 녹음</string>
     <string name="evidence_import_meeting_audio_subtitle">M4A, MP4, AAC, MP3, WAV</string>
     <string name="evidence_import_success">증거를 추가했습니다.</string>
+    <string name="evidence_import_status_processing">증거를 처리 중입니다. 완료되면 검토할 항목에 표시됩니다.</string>
+    <string name="evidence_import_status_review_required">회의 정리가 시작되었습니다. 곧 매칭 검토가 필요합니다.</string>
+    <string name="evidence_import_review_action">매칭 확인</string>
     <string name="evidence_import_error_message_screenshot">메신저 스크린샷을 추가하지 못했습니다.</string>
     <string name="evidence_import_meeting_preview_loading">회의 화자를 확인하는 중입니다.</string>
     <string name="evidence_import_meeting_review_title">내 목소리 선택</string>

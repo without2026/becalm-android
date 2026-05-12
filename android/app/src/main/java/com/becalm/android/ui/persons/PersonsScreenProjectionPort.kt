@@ -49,6 +49,8 @@ public data class PersonMatchCandidateSummary(
     val role: String,
     val evidence: String?,
     val confidence: Double,
+    val recommended: Boolean = false,
+    val reasons: List<String> = emptyList(),
 )
 
 /** Unassigned bucket item surfaced on the persons screen. */
@@ -169,13 +171,29 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
 
     override fun observeUnassigned(userId: String, limit: Int): Flow<List<UnassignedEventSummary>> =
         combine(
+            personEnrichmentRepository.observeAll(),
+            personIndexDao.observeAggregates(userId, MATCH_CANDIDATE_LIMIT),
+            personIndexDao.observeIdentitiesForUser(userId),
+            personIndexDao.observeSemanticIndexesForUser(userId),
+            userPrefsStore.observeBlockedPersonRefs(),
+        ) { enrichmentRows, aggregateRows, identityRows, semanticIndexRows, blockedPersonRefs ->
+            buildMatchingContext(
+                userId = userId,
+                enrichmentRows = enrichmentRows,
+                aggregateRows = aggregateRows,
+                identityRows = identityRows,
+                semanticIndexRows = semanticIndexRows,
+                blockedPersonRefs = blockedPersonRefs,
+            )
+        }.let { matchingContextFlow ->
+        combine(
             personIndexDao.observeUnmatchedInteractions(userId, limit),
             personIndexDao.observeSourceEventParticipantsForUser(userId),
-            userPrefsStore.observeBlockedPersonRefs(),
-        ) { events, participants, blockedPersonRefs ->
+            matchingContextFlow,
+        ) { events, participants, matchingContext ->
             events
                 .filterNot { event ->
-                    PersonIdentityResolver.isBlocked(event.suggestedLabel, blockedPersonRefs) ||
+                    PersonIdentityResolver.isBlocked(event.suggestedLabel, matchingContext.blockedPersonRefs) ||
                         PersonIdentityResolver.isLikelyAutomated(event.suggestedLabel)
                 }
                 .map { event ->
@@ -187,12 +205,17 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                                         participant.sourceRef == ref ||
                                             "raw:${participant.sourceEventId}" == ref ||
                                             participant.sourceEventId == ref.removePrefix("raw:")
-                                        )
+                                )
                             }
                         }
-                        .mapNotNull { it.toMatchCandidateSummary(blockedPersonRefs) }
+                        .flatMap { participant ->
+                            participant.toRecommendedCandidateSummaries(
+                                event = event,
+                                matchingContext = matchingContext,
+                            ) + listOfNotNull(participant.toMatchCandidateSummary(matchingContext.blockedPersonRefs))
+                        }
                         .distinctBy { it.anchor }
-                        .sortedByDescending { it.confidence }
+                        .sortedWith(compareByDescending<PersonMatchCandidateSummary> { it.recommended }.thenByDescending { it.confidence })
                     UnassignedEventSummary(
                         id = event.id,
                         sourceType = event.sourceType,
@@ -205,6 +228,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                         timestamp = event.occurredAt,
                     )
                 }
+        }
         }
             .distinctUntilChanged()
             .flowOn(ioDispatcher)
@@ -309,6 +333,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
 
     private companion object {
         const val PAGE_SIZE: Int = 20
+        const val MATCH_CANDIDATE_LIMIT: Int = 200
     }
 }
 

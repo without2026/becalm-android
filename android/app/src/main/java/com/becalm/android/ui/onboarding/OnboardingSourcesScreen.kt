@@ -221,6 +221,7 @@ internal fun SourceConnectionsScreen(
         stepStates = state.stepStates,
         transientStates = transientStates,
         respectStepStates = entryPoint == SourceConnectionsEntryPoint.Onboarding,
+        includeCalendarSources = entryPoint == SourceConnectionsEntryPoint.Settings,
         stringFor = resources::getString,
     )
     val hasIncomplete = entryPoint == SourceConnectionsEntryPoint.Onboarding &&

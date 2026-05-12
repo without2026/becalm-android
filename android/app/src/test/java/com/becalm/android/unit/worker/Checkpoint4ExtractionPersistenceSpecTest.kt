@@ -108,6 +108,33 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
+    fun `name-only extracted participants stay unresolved for user confirmation`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "speaker",
+            relationToUser = "participant",
+            identityType = "name",
+            normalizedValue = "김민홍",
+            displayName = "김민홍",
+            organization = "Acme",
+            title = "PM",
+            evidence = "김민홍 PM이 renewal 범위를 확인했습니다.",
+            confidence = 0.74,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.MEETING,
+            sourceRef = "meeting-audio",
+            index = 0,
+            now = NOW,
+        )
+
+        assertEquals(null, participant.personId)
+        assertEquals("unresolved", participant.resolutionStatus)
+        assertEquals("name", participant.identityType)
+        assertEquals("김민홍", participant.displayNameRaw)
+    }
+
+    @Test
     fun `E2E-051 decisions are retained as context items but excluded from primary UI feed loops`() {
         val decision = SourceExtractedItemDto(
             type = SourceExtractedItemType.DECISION,

@@ -1,8 +1,11 @@
 package com.becalm.android.ui.persons
 
 import android.view.WindowManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,9 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -35,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -49,6 +55,7 @@ import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.BecalmTextField
+import com.becalm.android.ui.components.ContactRow
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.EventSourceBadge
@@ -105,6 +112,7 @@ public fun UnassignedEventsScreen(
         UnassignedEventsContent(
             loading = state.loading,
             unassignedEvents = state.unassignedEvents,
+            matchChoices = state.matchChoices,
             onManualMatch = viewModel::onManualMatch,
             modifier = Modifier.padding(padding),
         )
@@ -115,6 +123,7 @@ public fun UnassignedEventsScreen(
 internal fun UnassignedEventsContent(
     loading: Boolean,
     unassignedEvents: List<UnassignedEventSummary>,
+    matchChoices: List<PersonMatchChoiceRow> = emptyList(),
     onManualMatch: (UnassignedEventSummary, String, String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
@@ -178,6 +187,7 @@ internal fun UnassignedEventsContent(
                 items(items = visibleEvents, key = { it.id }) { event ->
                     PersonMatchReviewCard(
                         event = event,
+                        matchChoices = matchChoices,
                         onConfirm = { anchor, nickname ->
                             onManualMatch(event, anchor, nickname)
                             completedIds = completedIds + event.id
@@ -285,6 +295,7 @@ private fun MatchReviewEmptyFilter(filter: MatchQueueFilter) {
 @Composable
 private fun PersonMatchReviewCard(
     event: UnassignedEventSummary,
+    matchChoices: List<PersonMatchChoiceRow>,
     onConfirm: (String, String) -> Unit,
     onLater: () -> Unit,
 ) {
@@ -365,6 +376,8 @@ private fun PersonMatchReviewCard(
                 eventId = event.id,
                 personAnchor = personAnchor,
                 nickname = nickname,
+                eventCandidates = event.candidates,
+                matchChoices = matchChoices,
                 onPersonAnchorChange = { personAnchor = it },
                 onNicknameChange = { nickname = it },
                 onLater = onLater,
@@ -416,6 +429,13 @@ private fun CandidateRecommendation(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (candidate.reasons.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.person_match_reasons, candidate.reasons.joinToString(", ")),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         if (!candidate.evidence.isNullOrBlank()) {
@@ -434,11 +454,33 @@ private fun ManualMatchPanel(
     eventId: String,
     personAnchor: String,
     nickname: String,
+    eventCandidates: List<PersonMatchCandidateSummary>,
+    matchChoices: List<PersonMatchChoiceRow>,
     onPersonAnchorChange: (String) -> Unit,
     onNicknameChange: (String) -> Unit,
     onLater: () -> Unit,
     onConfirm: () -> Unit,
 ) {
+    val normalizedQuery = personAnchor.trim()
+    val candidateChoices = eventCandidates.map { candidate ->
+        PersonMatchChoiceRow(
+            anchor = candidate.anchor,
+            displayName = candidate.displayName,
+            detail = candidate.detail ?: candidate.evidence,
+            hasInteractions = true,
+            kind = PersonMatchChoiceKind.CANDIDATE,
+        )
+    }
+    val visibleChoices = (candidateChoices + matchChoices)
+        .distinctBy(PersonMatchChoiceRow::anchor)
+        .filter { choice ->
+            normalizedQuery.isBlank() ||
+                choice.displayName.contains(normalizedQuery, ignoreCase = true) ||
+                choice.anchor.contains(normalizedQuery, ignoreCase = true) ||
+                choice.detail?.contains(normalizedQuery, ignoreCase = true) == true
+        }
+        .take(MAX_MANUAL_MATCH_CHOICES)
+
     Text(
         text = stringResource(R.string.person_match_manual_label),
         style = MaterialTheme.typography.labelMedium,
@@ -448,11 +490,57 @@ private fun ManualMatchPanel(
     BecalmTextField(
         value = personAnchor,
         onValueChange = onPersonAnchorChange,
-        placeholder = stringResource(R.string.persons_manual_match_anchor_hint),
+        placeholder = stringResource(R.string.persons_manual_match_search_hint),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("unassigned-match-anchor-$eventId"),
     )
+    if (visibleChoices.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = stringResource(R.string.person_match_existing_people_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            visibleChoices.forEach { choice ->
+                val selected = choice.anchor == personAnchor
+                ContactRow(
+                    headline = choice.displayName,
+                    metadata = choice.detail ?: choice.anchor
+                        .takeUnless { it == choice.displayName }
+                        ?.takeIf(::isDisplayableManualMatchAnchor),
+                    attentionLabel = when {
+                        selected -> stringResource(R.string.person_match_selected_label)
+                        choice.kind == PersonMatchChoiceKind.CANDIDATE ->
+                            stringResource(R.string.person_match_candidate_label)
+                        choice.hasInteractions || choice.kind == PersonMatchChoiceKind.EXISTING_PERSON ->
+                            stringResource(R.string.person_match_existing_person_label)
+                        else -> stringResource(R.string.person_match_contact_label)
+                    },
+                    onClick = {
+                        onPersonAnchorChange(choice.anchor)
+                        onNicknameChange(choice.displayName)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("unassigned-match-choice-$eventId-${choice.anchor}"),
+                ) {
+                    MatchChoiceAvatar(seed = choice.displayName)
+                }
+            }
+        }
+    } else if (normalizedQuery.isNotBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.person_match_no_existing_people),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+    }
     Spacer(modifier = Modifier.height(8.dp))
     BecalmTextField(
         value = nickname,
@@ -485,11 +573,34 @@ private fun ManualMatchPanel(
     }
 }
 
+@Composable
+private fun MatchChoiceAvatar(seed: String) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = seed.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
+}
+
 private enum class MatchQueueFilter {
     RECOMMENDED,
     MANUAL,
     LATER,
 }
+
+private const val MAX_MANUAL_MATCH_CHOICES = 24
+
+private fun isDisplayableManualMatchAnchor(anchor: String): Boolean =
+    anchor.contains("@") || anchor.startsWith("+")
 
 private fun UnassignedEventSummary.bestCandidate(): PersonMatchCandidateSummary? =
     candidates.firstOrNull()

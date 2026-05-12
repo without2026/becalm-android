@@ -32,7 +32,7 @@ The current catalog contains 72 independent scenarios:
 - `E2E-009..014` — onboarding, PIPA, contacts, notifications, source setup skip.
 - `E2E-015..023` — source connection, source settings parity, disconnect.
 - `E2E-024..029` — cold sync, foreground refresh, batch/single upload.
-- `E2E-030..038` — evidence import: meeting audio/transcript, screenshot, manual text, voice.
+- `E2E-030..038` — evidence import: meeting audio, screenshot, voice, and blocked transcript/manual-text bypasses.
 - `E2E-039..045` — source-normalized extraction pipeline.
 - `E2E-046..052` — person matching, people list, person detail, raw source detail.
 - `E2E-053..060` — commitments, edit/CRUD, Today.
@@ -48,7 +48,7 @@ When a device appears in `adb devices -l`, run the smoke scenarios in this order
 3. `E2E-009` compact onboarding setup shell.
 4. `E2E-014` skip-all-sources app entry.
 5. `E2E-022` source setup/settings parity.
-6. `E2E-030`, `E2E-031`, `E2E-033`, `E2E-035` evidence import entry points.
+6. `E2E-030`, `E2E-033` evidence import entry points, plus blocked-path checks for transcript/manual text.
 7. `E2E-049`, `E2E-050`, `E2E-053`, `E2E-058` main tab rendering.
 8. `E2E-008` wipe-local-data regression.
 

@@ -54,6 +54,20 @@ public data class PersonRow(
             ?: personId
 }
 
+public data class PersonMatchChoiceRow(
+    val anchor: String,
+    val displayName: String,
+    val detail: String?,
+    val hasInteractions: Boolean,
+    val kind: PersonMatchChoiceKind = PersonMatchChoiceKind.CONTACT,
+)
+
+public enum class PersonMatchChoiceKind {
+    CANDIDATE,
+    EXISTING_PERSON,
+    CONTACT,
+}
+
 public enum class PersonSectionKind {
     PENDING_COMMITMENTS,
     RECENT_CONTACTS,
@@ -98,6 +112,7 @@ public data class PersonsUiState(
     val query: String = "",
     val people: List<PersonRow> = emptyList(),
     val personSections: List<PersonSection> = buildPersonSections(people),
+    val matchChoices: List<PersonMatchChoiceRow> = emptyList(),
     val unassignedEvents: List<UnassignedEventSummary> = emptyList(),
     val showOfflineBadge: Boolean = false,
     val offlineLastSyncAt: Instant? = null,

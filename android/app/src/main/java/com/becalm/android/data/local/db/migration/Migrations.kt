@@ -1046,6 +1046,40 @@ private val MIGRATION_18_19 = object : Migration(18, 19) {
     }
 }
 
+// ─── Migration 19 → 20 (person memory semantic matching index) ──────────────
+//
+// Adds a Room-only bounded semantic term projection for unresolved participant
+// recommendation. Matching reads this table instead of parsing `memory.md` at runtime.
+private val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `person_memory_semantic_index` (
+                `person_id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `display_name_terms_json` TEXT NOT NULL,
+                `aliases_json` TEXT NOT NULL,
+                `organizations_json` TEXT NOT NULL,
+                `titles_json` TEXT NOT NULL,
+                `work_terms_json` TEXT NOT NULL,
+                `decision_terms_json` TEXT NOT NULL,
+                `open_commitment_terms_json` TEXT NOT NULL,
+                `confirmed_patterns_json` TEXT NOT NULL,
+                `rejected_patterns_json` TEXT NOT NULL,
+                `recent_source_types_json` TEXT NOT NULL,
+                `content_hash` TEXT NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`person_id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_person_memory_semantic_index_user_updated` " +
+                "ON `person_memory_semantic_index` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1078,4 +1112,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_16_17,
     MIGRATION_17_18,
     MIGRATION_18_19,
+    MIGRATION_19_20,
 )

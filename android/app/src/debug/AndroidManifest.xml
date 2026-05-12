@@ -8,6 +8,7 @@
             <intent-filter>
                 <action android:name="com.becalm.android.DEBUG_SEED_PERSON_RENDERING" />
                 <action android:name="com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E" />
+                <action android:name="com.becalm.android.DEBUG_SEED_MEETING_SPEAKER_JOURNEY" />
             </intent-filter>
         </receiver>
     </application>

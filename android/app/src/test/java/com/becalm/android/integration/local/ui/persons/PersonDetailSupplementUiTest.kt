@@ -17,6 +17,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.persons.EmailBodyUi
 import com.becalm.android.ui.persons.RawEventDetailContent
 import com.becalm.android.ui.persons.RawEventDetailUiState
+import com.becalm.android.ui.persons.PersonMatchChoiceRow
 import com.becalm.android.ui.persons.PersonMatchCandidateSummary
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.persons.UnassignedEventsContent
@@ -150,12 +151,77 @@ class PersonDetailSupplementUiTest {
             .performTextInput("noreply@navercorp.com")
         composeRule.onNodeWithTag("unassigned-match-nickname-event-1")
             .performTextInput("네이버 예약팀")
-        composeRule.onNodeWithText(string(R.string.persons_manual_match_action)).performClick()
+        composeRule.onNodeWithText(string(R.string.persons_manual_match_action))
+            .performScrollTo()
+            .performClick()
 
         composeRule.runOnIdle {
             assertEquals("event-1", matchedEventId)
             assertEquals("noreply@navercorp.com", matchedAnchor)
             assertEquals("네이버 예약팀", matchedNickname)
+        }
+    }
+
+    @Test
+    fun `unassigned events other person renders existing people and matches selected row`() {
+        var matchedAnchor: String? = null
+        var matchedNickname: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    matchChoices = listOf(
+                        PersonMatchChoiceRow(
+                            anchor = "minji@corp.com",
+                            displayName = "김민지",
+                            detail = "minji@corp.com",
+                            hasInteractions = true,
+                        ),
+                        PersonMatchChoiceRow(
+                            anchor = "+82109998888",
+                            displayName = "박서연",
+                            detail = "+82109998888",
+                            hasInteractions = false,
+                        ),
+                    ),
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-other",
+                            sourceType = SourceType.VOICE,
+                            title = "회의 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "SPEAKER_02",
+                                    displayName = "SPEAKER_02",
+                                    detail = null,
+                                    role = "speaker",
+                                    evidence = "자료 공유 약속",
+                                    confidence = 0.42,
+                                ),
+                            ),
+                        ),
+                    ),
+                    onManualMatch = { _, anchor, nickname ->
+                        matchedAnchor = anchor
+                        matchedNickname = nickname
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.person_match_other_person_action)).performClick()
+        composeRule.onNodeWithText("김민지").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("박서연").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("김민지").performScrollTo().performClick()
+        composeRule.onNodeWithText(string(R.string.persons_manual_match_action))
+            .performScrollTo()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("minji@corp.com", matchedAnchor)
+            assertEquals("김민지", matchedNickname)
         }
     }
 
@@ -186,7 +252,9 @@ class PersonDetailSupplementUiTest {
 
         composeRule.onNodeWithTag("unassigned-match-anchor-event-2")
             .performTextInput("+821012345678")
-        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action)).performClick()
+        composeRule.onNodeWithText(string(R.string.persons_manual_add_person_action))
+            .performScrollTo()
+            .performClick()
 
         composeRule.runOnIdle {
             assertEquals("+821012345678", matchedAnchor)

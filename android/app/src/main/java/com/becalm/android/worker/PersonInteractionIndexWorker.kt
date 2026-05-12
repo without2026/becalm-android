@@ -24,6 +24,7 @@ import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.repository.toPersonEntityOrNull
 import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.domain.person.SourceInteractionKind
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -377,6 +378,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         ) {
             val personId = participant.personId ?: return
             val identityType = participant.identityType ?: return
+            if (PersonIdentityTypes.isSourceLocal(identityType)) return
             val normalized = participant.normalizedValue ?: return
             val identityKey = "$identityType:$normalized"
             val rawValue = when (identityType) {

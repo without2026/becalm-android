@@ -10,6 +10,7 @@ import com.becalm.android.domain.person.PersonMemoryMarkdownValidator
 import com.becalm.android.domain.person.PersonMemoryParticipant
 import com.becalm.android.domain.person.PersonMemoryPathResolver
 import com.becalm.android.domain.person.PersonMemoryValidationError
+import com.becalm.android.domain.person.PersonMemoryVoiceEvidence
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,6 +33,7 @@ class PersonMemoryMarkdownSpecTest {
         assertTrue(markdown.contains("- email: jane@acme.com"))
         assertTrue(markdown.contains("### Decisions"))
         assertTrue(markdown.contains("- Renewal discount approved (decision, approved). [commitment:commitment-decision, 2026-05-05]"))
+        assertTrue(markdown.contains("## Local Voice Evidence"))
         assertFalse(markdown.contains("Acme CEO\n-")) // role/title must not appear as identity alias.
 
         val result = PersonMemoryMarkdownValidator.validate(
@@ -40,6 +42,35 @@ class PersonMemoryMarkdownSpecTest {
             expectedPersonId = "person-1",
         )
         assertEquals(emptyList<PersonMemoryValidationError>(), result.errors)
+    }
+
+    @Test
+    fun `builder links confirmed speaker evidence to local-only voice chunk references`() {
+        val markdown = PersonMemoryMarkdownBuilder.build(
+            input().copy(
+                voiceEvidence = listOf(
+                    PersonMemoryVoiceEvidence(
+                        sourceRef = "raw:meeting-1",
+                        sourceType = "meeting",
+                        speakerLabel = "SPEAKER_02",
+                        chunkFileName = "voice_chunk_abc123.m4a",
+                        evidence = "금요일까지 자료를 공유하겠습니다.",
+                        occurredAt = Instant.parse("2026-05-12T00:00:00Z"),
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(markdown.contains("## Local Voice Evidence"))
+        assertTrue(markdown.contains("SPEAKER_02"))
+        assertTrue(markdown.contains("voice://chunk/voice_chunk_abc123.m4a"))
+        assertTrue(markdown.contains("raw:meeting-1"))
+        assertFalse(markdown.contains("/data/"))
+        assertFalse(markdown.contains("content://"))
+        assertEquals(
+            emptyList<PersonMemoryValidationError>(),
+            PersonMemoryMarkdownValidator.validate(markdown, "user-1", "person-1").errors,
+        )
     }
 
     @Test
@@ -108,6 +139,35 @@ class PersonMemoryMarkdownSpecTest {
     }
 
     @Test
+    fun `validator rejects non local voice evidence references`() {
+        val markdown = PersonMemoryMarkdownBuilder.build(
+            input().copy(
+                voiceEvidence = listOf(
+                    PersonMemoryVoiceEvidence(
+                        sourceRef = "raw:meeting-1",
+                        sourceType = "meeting",
+                        speakerLabel = "SPEAKER_02",
+                        chunkFileName = "voice_chunk_abc123.m4a",
+                        evidence = "자료 공유",
+                        occurredAt = Instant.parse("2026-05-12T00:00:00Z"),
+                    ),
+                ),
+            ),
+        ).replace(
+            "voice://chunk/voice_chunk_abc123.m4a",
+            "content://media/external/audio/1",
+        )
+
+        val result = PersonMemoryMarkdownValidator.validate(
+            markdown = markdown,
+            expectedUserId = "user-1",
+            expectedPersonId = "person-1",
+        )
+
+        assertTrue(result.errors.contains(PersonMemoryValidationError.ForbiddenLocalVoiceReference))
+    }
+
+    @Test
     fun `validator rejects markdown over size limit`() {
         val markdown = PersonMemoryMarkdownBuilder.build(input()).replace(
             "## Evidence References\n",
@@ -142,6 +202,7 @@ class PersonMemoryMarkdownSpecTest {
             "## Work Context",
             "## Recent Interactions",
             "## Matching Notes",
+            "## Local Voice Evidence",
             "## Evidence References",
         ).forEach { section ->
             assertTrue("missing $section", markdown.contains(section))

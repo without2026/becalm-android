@@ -206,6 +206,7 @@ public fun PersonsScreenContent(
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onReviewRequiredClick = onOpenUnassigned,
     )
 }
 

@@ -26,6 +26,10 @@ internal val CALENDAR_SOURCE_TYPES: Set<String> = setOf(
     SourceType.OUTLOOK_CALENDAR,
 )
 
+internal val MEETING_SOURCE_TYPES: Set<String> = setOf(
+    SourceType.MEETING,
+)
+
 internal fun String.isEmailSource(): Boolean =
     this in EMAIL_SOURCE_TYPES ||
         contains("email", ignoreCase = true) ||
@@ -39,3 +43,9 @@ internal fun String.isCallSource(): Boolean =
 internal fun String.isCalendarSource(): Boolean =
     this in CALENDAR_SOURCE_TYPES ||
         contains("calendar", ignoreCase = true)
+
+internal fun String.isMeetingSource(): Boolean =
+    this in MEETING_SOURCE_TYPES
+
+internal fun String.isMeetingTimelineSource(): Boolean =
+    isCalendarSource() || isMeetingSource()
