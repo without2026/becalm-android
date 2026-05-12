@@ -3,13 +3,16 @@ package com.becalm.android.integration.local.ui.persons
 import app.cash.turbine.test
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
+import com.becalm.android.data.local.db.PersonMemorySemanticIndexJson
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
+import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
@@ -333,6 +336,114 @@ class PersonsScreenStateSourceLocalIntegrationTest {
                 state = awaitItem()
             }
             assertEquals(2, state.people.single().pendingCommitmentCount)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `unassigned name-only participant is ranked against existing people with semantic reasons`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "minhong@acme.kr")).personId
+
+        db.personEnrichmentDao().upsert(
+            PersonEnrichmentEntity(
+                personRef = "minhong@acme.kr",
+                displayName = "김민홍",
+                nickname = "민홍",
+                company = null,
+                title = null,
+                lastSyncedAt = occurredAt,
+            ),
+        )
+        upsertIdentityAndInteraction(
+            anchor = "minhong@acme.kr",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-known-minhong",
+            kind = "email",
+            role = "counterparty",
+            occurredAt = occurredAt,
+            title = "Renewal follow-up",
+            snippet = "지난 이메일을 확인했습니다.",
+        )
+        db.personIndexDao().upsertSemanticIndexes(
+            listOf(
+                PersonMemorySemanticIndexEntity(
+                    personId = personId,
+                    userId = USER_ID,
+                    displayNameTermsJson = PersonMemorySemanticIndexJson.encode(setOf("김민홍")),
+                    aliasesJson = PersonMemorySemanticIndexJson.encode(emptySet()),
+                    organizationsJson = PersonMemorySemanticIndexJson.encode(setOf("acme")),
+                    titlesJson = PersonMemorySemanticIndexJson.encode(setOf("pm")),
+                    workTermsJson = PersonMemorySemanticIndexJson.encode(setOf("renewal", "견적")),
+                    decisionTermsJson = PersonMemorySemanticIndexJson.encode(setOf("discount")),
+                    openCommitmentTermsJson = PersonMemorySemanticIndexJson.encode(setOf("견적", "범위")),
+                    confirmedPatternsJson = PersonMemorySemanticIndexJson.encode(emptySet()),
+                    rejectedPatternsJson = PersonMemorySemanticIndexJson.encode(emptySet()),
+                    recentSourceTypesJson = PersonMemorySemanticIndexJson.encode(setOf(SourceType.GMAIL)),
+                    contentHash = "hash",
+                    updatedAt = occurredAt,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-raw-meeting",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:raw-meeting",
+                    interactionKind = "meeting",
+                    title = "Renewal 회의",
+                    snippet = "김민홍 PM이 renewal 견적 범위를 확인했습니다.",
+                    suggestedLabel = "김민홍",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-minhong",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-audio",
+                    personId = null,
+                    role = "speaker",
+                    relationToUser = "participant",
+                    identityType = "name",
+                    normalizedValue = "김민홍",
+                    displayNameRaw = "김민홍",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = "Acme",
+                    titleRaw = "PM",
+                    evidence = "김민홍 PM이 renewal 견적 범위를 확인했습니다.",
+                    confidence = 0.74,
+                    resolutionStatus = "unresolved",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.unassignedEvents.firstOrNull()?.candidates?.firstOrNull()?.recommended != true) {
+                state = awaitItem()
+            }
+
+            val candidate = state.unassignedEvents.single().candidates.first()
+            assertEquals(personId, candidate.anchor)
+            assertEquals("김민홍", candidate.displayName)
+            assertTrue(candidate.recommended)
+            assertTrue(candidate.reasons.any { it.contains("이름") })
+            assertTrue(candidate.reasons.any { it.contains("회사") || it.contains("업무") })
             cancelAndIgnoreRemainingEvents()
         }
     }

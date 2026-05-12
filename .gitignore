@@ -18,6 +18,7 @@ android/.idea/
 android/*.iml
 android/captures/
 android/.cxx/
+qa/emulator/tmp/
 *.apk
 *.aab
 *.ap_

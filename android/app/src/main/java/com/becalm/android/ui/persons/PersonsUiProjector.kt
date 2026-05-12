@@ -40,10 +40,14 @@ internal object PersonsUiProjector {
                     projection.personId.contains(query, ignoreCase = true)
             }
             .map(PersonsUiProjector::toPersonRow)
+        val matchChoices = (peoplePage.rows + searchableContacts)
+            .distinctBy(PersonListProjection::personId)
+            .map(PersonsUiProjector::toPersonMatchChoiceRow)
         return PersonsUiState(
             query = query,
             people = rows,
             personSections = buildPersonSections(rows),
+            matchChoices = matchChoices,
             unassignedEvents = unassigned,
             showOfflineBadge = offlineStatus.isOffline && offlineStatus.lastSyncAt != null,
             offlineLastSyncAt = offlineStatus.lastSyncAt,
@@ -67,4 +71,44 @@ internal object PersonsUiProjector {
         channelSources = projection.channelSources,
         lastInteractionSnippet = null,
     )
+
+    private fun toPersonMatchChoiceRow(projection: PersonListProjection): PersonMatchChoiceRow {
+        val displayName = projection.displayName
+            ?: projection.nickname
+            ?: projection.personId
+        val detail = listOfNotNull(
+            projection.nickname
+                ?.takeUnless { it == displayName },
+            projection.jobTitle,
+            projection.companyName,
+            projection.personId
+                .takeUnless { it == displayName }
+                ?.takeIf(::isDisplayablePersonAnchor),
+        )
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .filterNot(::isInternalPersonAnchor)
+            .firstOrNull()
+        return PersonMatchChoiceRow(
+            anchor = projection.personId,
+            displayName = displayName,
+            detail = detail,
+            hasInteractions = projection.eventCount > 0,
+            kind = if (projection.eventCount > 0) {
+                PersonMatchChoiceKind.EXISTING_PERSON
+            } else {
+                PersonMatchChoiceKind.CONTACT
+            },
+        )
+    }
+
+    private fun isDisplayablePersonAnchor(anchor: String): Boolean =
+        anchor.contains("@") ||
+            anchor.startsWith("+") ||
+            anchor.any(Char::isDigit) &&
+            anchor.none { it == '-' }
+
+    private fun isInternalPersonAnchor(value: String): Boolean =
+        value.startsWith("qa-person-") ||
+            value.matches(Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
 }

@@ -4,6 +4,7 @@ import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonIdentityTypes
 
 internal fun SourceEventParticipantEntity.toPersonEntityOrNull(): PersonEntity? {
     val id = personId ?: return null
@@ -24,6 +25,7 @@ internal fun SourceEventParticipantEntity.toPersonEntityOrNull(): PersonEntity? 
 internal fun SourceEventParticipantEntity.toPersonIdentityEntityOrNull(): PersonIdentityEntity? {
     val ownerPersonId = personId ?: return null
     val type = identityType ?: return null
+    if (PersonIdentityTypes.isSourceLocal(type)) return null
     val normalized = normalizedValue ?: return null
     val raw = when (type) {
         "email" -> emailRaw ?: normalized

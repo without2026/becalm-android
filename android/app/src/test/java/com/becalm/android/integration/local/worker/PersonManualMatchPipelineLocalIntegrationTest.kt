@@ -4,6 +4,8 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.PersonEntity
+import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
@@ -124,6 +126,81 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals(1, scheduler.personIndexEnqueueCount)
     }
 
+    @Test
+    fun `manual match can resolve directly to existing person id choice`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.personIndexDao().upsertPersons(
+            listOf(
+                person(
+                    id = personId,
+                    displayName = "Customer",
+                    primaryEmail = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertIdentities(
+            listOf(
+                identity(
+                    id = "identity-customer-email",
+                    personId = personId,
+                    rawValue = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-speaker-1", snippet = "금요일까지 자료 공유"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-speaker-1",
+                    sourceEventId = "raw-speaker-1",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-file-1",
+                    displayName = "SPEAKER_02",
+                ).copy(
+                    role = "speaker",
+                    relationToUser = "participant",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    confidence = 0.0,
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.MEETING,
+            sourceRef = "raw:raw-speaker-1",
+            interactionKind = "meeting",
+            personAnchor = personId,
+            nickname = "Customer",
+        )
+        assertTrue(result is BecalmResult.Success)
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertEquals(listOf("raw:raw-speaker-1"), interactions.map { it.sourceRef })
+        val participants = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-speaker-1"),
+        )
+        assertEquals(personId, participants.single().personId)
+        val identities = db.personIndexDao().findIdentitiesForMemory(USER_ID, personId)
+        assertTrue(identities.none { it.identityType == "speaker_label" })
+        assertEquals(1, scheduler.personIndexEnqueueCount)
+    }
+
     private fun newWorker(): PersonInteractionIndexWorker =
         PersonInteractionIndexWorker(
             appContext = LocalIntegrationSupport.appContext(),
@@ -151,6 +228,42 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             folder = "INBOX",
             timestamp = Instant.parse("2026-04-29T00:00:00Z"),
             syncStatus = "synced",
+        )
+
+    private fun person(id: String, displayName: String, primaryEmail: String?): PersonEntity =
+        PersonEntity(
+            id = id,
+            userId = USER_ID,
+            displayName = displayName,
+            kind = "person",
+            primaryEmail = primaryEmail,
+            primaryPhone = null,
+            confidence = 0.95,
+            createdAt = Instant.parse("2026-04-29T00:00:00Z"),
+            updatedAt = Instant.parse("2026-04-29T00:00:00Z"),
+            archivedAt = null,
+        )
+
+    private fun identity(id: String, personId: String, rawValue: String): PersonIdentityEntity =
+        PersonIdentityEntity(
+            id = id,
+            userId = USER_ID,
+            personId = personId,
+            identityKey = "email:${rawValue.lowercase()}",
+            identityType = "email",
+            rawValue = rawValue,
+            displayNameHint = "Customer",
+            identityValue = rawValue,
+            normalizedValue = rawValue.lowercase(),
+            displayName = "Customer",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-relation-1",
+            confidence = 0.95,
+            isPrimary = true,
+            verified = true,
+            lastSeenAt = Instant.parse("2026-04-29T00:00:00Z"),
+            createdAt = Instant.parse("2026-04-29T00:00:00Z"),
+            updatedAt = Instant.parse("2026-04-29T00:00:00Z"),
         )
 
     private fun sourceParticipant(
@@ -199,13 +312,16 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun enqueueEnrichment() = Unit
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit
-        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String) = Unit
+        override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
             initialDelaySec: Long,
             rateLimitedAttempt: Int,
+            selfSpeakerId: String?,
+            speakerMappingsJson: String?,
+            speakerPreviewId: String?,
         ) = Unit
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit

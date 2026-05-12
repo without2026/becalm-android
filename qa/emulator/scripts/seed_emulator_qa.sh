@@ -12,6 +12,11 @@ else
   FIXTURE_DIR="$DEFAULT_FIXTURE_DIR"
 fi
 REMOTE_DIR="/sdcard/Pictures/BeCalmQa/message_screenshots"
+MEETING_FIXTURE="$ROOT_DIR/backend/data/fixture/meeting_001.wav"
+if [[ ! -f "$MEETING_FIXTURE" ]]; then
+  MEETING_FIXTURE="$ROOT_DIR/qa/emulator/tmp/clova_meeting_001_60s.wav"
+fi
+REMOTE_MEETING_DIR="/sdcard/Music/BeCalmQa/meetings"
 
 if [[ ! -x "$ADB_BIN" ]]; then
   echo "adb not found or not executable: $ADB_BIN" >&2
@@ -29,6 +34,15 @@ fi
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.apps.photos >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell mkdir -p "$REMOTE_DIR"
 "$ADB_BIN" -s "$DEVICE" push "$FIXTURE_DIR/." "$REMOTE_DIR/"
+if [[ -f "$MEETING_FIXTURE" ]]; then
+  "$ADB_BIN" -s "$DEVICE" shell mkdir -p "$REMOTE_MEETING_DIR"
+  "$ADB_BIN" -s "$DEVICE" push "$MEETING_FIXTURE" "$REMOTE_MEETING_DIR/meeting_001.wav" >/dev/null
+  if ! "$ADB_BIN" -s "$DEVICE" shell cmd media scan-file "$REMOTE_MEETING_DIR/meeting_001.wav" >/dev/null 2>&1; then
+    "$ADB_BIN" -s "$DEVICE" shell am broadcast \
+      -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
+      -d "file://$REMOTE_MEETING_DIR/meeting_001.wav" >/dev/null || true
+  fi
+fi
 
 while IFS= read -r image; do
   remote="$REMOTE_DIR/$(basename "$image")"
@@ -56,6 +70,9 @@ Seeded BeCalm QA data on $DEVICE.
 
 Images:
   $REMOTE_DIR
+
+Meeting audio:
+  $REMOTE_MEETING_DIR/meeting_001.wav
 
 Debug account:
   debug.person.rendering@becalm.local

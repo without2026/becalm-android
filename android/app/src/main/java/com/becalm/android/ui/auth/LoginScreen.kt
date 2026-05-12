@@ -230,7 +230,7 @@ internal fun LoginForm(
     // Local UI state only — no PII stored in remembered state
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var showEmptyError by remember { mutableStateOf(false) }
+    var validationErrors by remember { mutableStateOf(emptySet<LoginValidationError>()) }
 
     // Box centres the form on tablets / foldables; the inner Column caps at
     // 480dp so email + password fields stay at a comfortable reading width
@@ -256,24 +256,24 @@ internal fun LoginForm(
             LoginEmailFields(
                 email = email,
                 password = password,
-                showEmptyError = showEmptyError,
-                onEmailChange = { email = it; showEmptyError = false },
-                onPasswordChange = { password = it; showEmptyError = false },
+                validationErrors = validationErrors,
+                onEmailChange = { email = it; validationErrors = emptySet() },
+                onPasswordChange = { password = it; validationErrors = emptySet() },
             )
             Spacer(modifier = Modifier.height(24.dp))
             LoginActionButtons(
                 isLoading = isLoading,
                 onSignIn = {
-                    if (email.isBlank() || password.isBlank()) {
-                        showEmptyError = true
-                    } else {
+                    val nextErrors = validateLoginInput(email, password)
+                    validationErrors = nextErrors
+                    if (nextErrors.isEmpty()) {
                         onSignIn(email, password)
                     }
                 },
                 onSignUp = {
-                    if (email.isBlank() || password.isBlank()) {
-                        showEmptyError = true
-                    } else {
+                    val nextErrors = validateLoginInput(email, password)
+                    validationErrors = nextErrors
+                    if (nextErrors.isEmpty()) {
                         onSignUp(email, password)
                     }
                 },
@@ -301,16 +301,27 @@ private fun LoginProviderSection(
         loading = false,
         modifier = Modifier.fillMaxWidth(),
     )
+    if (!googleSignInEnabled) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.login_google_setup_required),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
 private fun LoginEmailFields(
     email: String,
     password: String,
-    showEmptyError: Boolean,
+    validationErrors: Set<LoginValidationError>,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
 ) {
+    val emailError = validationErrors.any { it == LoginValidationError.EmptyFields || it == LoginValidationError.InvalidEmail }
+    val passwordError = validationErrors.any { it == LoginValidationError.EmptyFields || it == LoginValidationError.ShortPassword }
     BecalmTextField(
         value = email,
         onValueChange = onEmailChange,
@@ -318,6 +329,11 @@ private fun LoginEmailFields(
         placeholder = stringResource(R.string.login_email_placeholder),
         keyboardType = KeyboardType.Email,
         imeAction = ImeAction.Next,
+        isError = emailError,
+        supportingText = when {
+            LoginValidationError.InvalidEmail in validationErrors -> stringResource(R.string.login_error_invalid_email)
+            else -> null
+        },
         modifier = Modifier
             .fillMaxWidth()
             .testTag("login-email"),
@@ -331,11 +347,11 @@ private fun LoginEmailFields(
         keyboardType = KeyboardType.Password,
         imeAction = ImeAction.Done,
         visualTransformation = PasswordVisualTransformation(),
-        isError = showEmptyError && password.isBlank(),
-        supportingText = if (showEmptyError && password.isBlank()) {
-            stringResource(R.string.login_error_empty_fields)
-        } else {
-            null
+        isError = passwordError,
+        supportingText = when {
+            LoginValidationError.EmptyFields in validationErrors -> stringResource(R.string.login_error_empty_fields)
+            LoginValidationError.ShortPassword in validationErrors -> stringResource(R.string.login_error_short_password)
+            else -> null
         },
         modifier = Modifier
             .fillMaxWidth()
@@ -387,6 +403,22 @@ private fun LoginDivider(modifier: Modifier = Modifier) {
  *  spirit of the 600dp Today timeline cap and 480dp state-view cap; sized
  *  smaller because login fields are denser than reading content. */
 private val LoginFormMaxContentWidth: androidx.compose.ui.unit.Dp = 480.dp
+private const val LoginPasswordMinLength = 8
+private val LoginEmailPattern = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+
+private enum class LoginValidationError {
+    EmptyFields,
+    InvalidEmail,
+    ShortPassword,
+}
+
+private fun validateLoginInput(email: String, password: String): Set<LoginValidationError> {
+    if (email.isBlank() || password.isBlank()) return setOf(LoginValidationError.EmptyFields)
+    return buildSet {
+        if (!LoginEmailPattern.matches(email.trim())) add(LoginValidationError.InvalidEmail)
+        if (password.length < LoginPasswordMinLength) add(LoginValidationError.ShortPassword)
+    }
+}
 
 // ─── Previews ─────────────────────────────────────────────────────────────────
 

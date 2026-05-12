@@ -11,7 +11,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
 import com.becalm.android.ui.evidence.EvidenceImportSheet
+import com.becalm.android.ui.evidence.EvidenceImportSheetHost
+import com.becalm.android.ui.evidence.EvidenceImportUiState
+import com.becalm.android.ui.evidence.MeetingSpeakerReviewUiState
+import com.becalm.android.ui.evidence.rememberEvidenceImportSheetController
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -65,6 +70,101 @@ class EvidenceImportUiTest {
 
         composeRule.runOnIdle {
             assertEquals(1, dismissed)
+        }
+    }
+
+    @Test
+    fun `meeting review asks for self speaker before final import`() {
+        var selected: String? = null
+        var confirmed = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        meetingReview = MeetingSpeakerReviewUiState(
+                            audioUri = android.net.Uri.parse("content://meeting/audio"),
+                            speakerPreviewId = "preview-1",
+                            speakers = listOf(
+                                MeetingSpeakerPreviewDto("SPEAKER_01", listOf("제가 자료 보낼게요."), 0.0, 12.0),
+                                MeetingSpeakerPreviewDto("SPEAKER_02", listOf("금요일까지 부탁드립니다."), 12.5, 8.0),
+                            ),
+                        ),
+                    ),
+                    onMeetingSelfSpeakerSelected = { selected = it },
+                    onMeetingSpeakerReviewConfirmed = { confirmed += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("meeting-speaker-SPEAKER_02")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_confirm))
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals("SPEAKER_02", selected)
+            assertEquals(1, confirmed)
+        }
+    }
+
+    @Test
+    fun `import host renders persistent processing or review entry after upload`() {
+        var reviewClicks = 0
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
+                            R.string.evidence_import_status_review_required,
+                        ),
+                    ),
+                    onReviewRequiredClick = { reviewClicks += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("evidence-import-status").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_status_review_required)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-review-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.runOnIdle {
+            assertEquals(1, reviewClicks)
+        }
+    }
+
+    @Test
+    fun `review required banner CTA is visible and clickable from persistent state`() {
+        var navigatedToReview = false
+        composeRule.setContent {
+            BecalmTheme {
+                EvidenceImportSheetHost(
+                    controller = rememberEvidenceImportSheetController(),
+                    onMessageScreenshotImport = {},
+                    onMeetingAudioImport = {},
+                    state = EvidenceImportUiState(
+                        statusMessage = com.becalm.android.ui.components.UiMessage.resource(
+                            R.string.evidence_import_status_review_required,
+                        ),
+                    ),
+                    onReviewRequiredClick = { navigatedToReview = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.evidence_import_review_action)).assertIsDisplayed()
+        composeRule.onNodeWithTag("evidence-import-review-action")
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        composeRule.runOnIdle {
+            assertEquals(true, navigatedToReview)
         }
     }
 

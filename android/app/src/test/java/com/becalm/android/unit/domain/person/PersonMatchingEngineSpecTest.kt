@@ -59,7 +59,7 @@ class PersonMatchingEngineSpecTest {
     }
 
     @Test
-    fun `name organization and title unique semantic bundle auto matches`() {
+    fun `name organization and title unique semantic bundle requires confirmation`() {
         val decision = engine(
             "person-jane" to context(
                 organizations = setOf("Acme"),
@@ -76,7 +76,7 @@ class PersonMatchingEngineSpecTest {
             candidates = listOf(candidate(personId = "person-jane", displayName = "Jane Kim")),
         )
 
-        assertAuto(decision, "person-jane", "semantic_bundle")
+        assertConfirmation(decision, listOf("person-jane"))
     }
 
     @Test
@@ -120,7 +120,7 @@ class PersonMatchingEngineSpecTest {
     }
 
     @Test
-    fun `confirmed semantic pattern auto matches when unique`() {
+    fun `confirmed semantic pattern requires confirmation when unique`() {
         val decision = engine(
             "person-jane" to context(confirmedPatterns = setOf("jane kim acme renewal")),
         ).decide(
@@ -132,7 +132,23 @@ class PersonMatchingEngineSpecTest {
             candidates = listOf(candidate(personId = "person-jane", displayName = "Jane Kim")),
         )
 
-        assertAuto(decision, "person-jane", "semantic_bundle")
+        assertConfirmation(decision, listOf("person-jane"))
+    }
+
+    @Test
+    fun `speaker label never auto matches as canonical identity`() {
+        val decision = engine().decide(
+            participant = participant(displayName = "SPEAKER_01", evidence = "SPEAKER_01: 확인했습니다."),
+            candidates = listOf(
+                candidate(
+                    personId = "person-speaker",
+                    displayName = "SPEAKER_01",
+                    identities = listOf(identity("speaker_label", "SPEAKER_01", verified = true)),
+                ),
+            ),
+        )
+
+        assertTrue(decision is PersonMatchDecision.NoMatch)
     }
 
     @Test

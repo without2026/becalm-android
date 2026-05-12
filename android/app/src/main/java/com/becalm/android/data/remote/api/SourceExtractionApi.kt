@@ -1,6 +1,7 @@
 package com.becalm.android.data.remote.api
 
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
+import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -62,6 +63,13 @@ public interface SourceExtractionApi {
      * @param timestamp      ISO-8601 timestamp of when the recording occurred.
      * @param counterpartyRef      Optional canonicalized counterparty identifier.
      * @param eventTitle     Optional MediaStore TITLE of the recording.
+     * @param selfSpeakerId  Optional confirmed user speaker label for multi-party meeting
+     *                       audio, e.g. "SPEAKER_01". Null until the meeting review UI
+     *                       confirms speaker identity.
+     * @param speakerMappings Optional JSON array of confirmed speaker/person mappings for
+     *                        meeting audio review. Null until the review UI is wired.
+     * @param speakerPreviewId Optional server-side transient preview token. When present for
+     *                         meeting audio, Railway reuses the already billed CLOVA transcript.
      *
      * Spec refs: VOI-001, VOI-002, VOI-003, VOI-006, VOI-007.
      */
@@ -81,5 +89,16 @@ public interface SourceExtractionApi {
         @Part("folder") folder: RequestBody?,
         @Part("conversation_ref") conversationRef: RequestBody?,
         @Part("previous_thread_context") previousThreadContext: RequestBody?,
+        @Part("self_speaker_id") selfSpeakerId: RequestBody?,
+        @Part("speaker_mappings") speakerMappings: RequestBody?,
+        @Part("speaker_preview_id") speakerPreviewId: RequestBody?,
     ): Response<SourceExtractionResponse>
+
+    @Multipart
+    @POST("v1/extractions/meeting_speaker_preview")
+    public suspend fun meetingSpeakerPreview(
+        @Part audio: MultipartBody.Part,
+        @Part("raw_event_id") rawEventId: RequestBody,
+        @Part("duration_seconds") durationSeconds: RequestBody,
+    ): Response<MeetingSpeakerPreviewResponse>
 }

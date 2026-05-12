@@ -42,6 +42,9 @@ internal class WorkSchedulerOneShotEnqueuer(
         audioUri: String,
         initialDelaySec: Long,
         rateLimitedAttempt: Int,
+        selfSpeakerId: String? = null,
+        speakerMappingsJson: String? = null,
+        speakerPreviewId: String? = null,
     ) {
         planRunner.run(
             UniqueOneTimeWorkPlan(
@@ -52,6 +55,9 @@ internal class WorkSchedulerOneShotEnqueuer(
                     audioUri = audioUri,
                     initialDelaySec = initialDelaySec,
                     rateLimitedAttempt = rateLimitedAttempt,
+                    selfSpeakerId = selfSpeakerId,
+                    speakerMappingsJson = speakerMappingsJson,
+                    speakerPreviewId = speakerPreviewId,
                 ),
                 logMessage = "enqueueVoiceUpload rawEventId_hash=${redact(rawEventId)} " +
                     "key=${UniqueWorkKeys.voiceUpload(rawEventId)} delaySec=$initialDelaySec " +

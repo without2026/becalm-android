@@ -77,6 +77,23 @@ public data class SourceExtractionResponse(
 )
 
 @JsonClass(generateAdapter = true)
+public data class MeetingSpeakerPreviewResponse(
+    @field:Json(name = "raw_event_id") val rawEventId: String,
+    @field:Json(name = "speaker_preview_id") val speakerPreviewId: String,
+    @field:Json(name = "speakers") val speakers: List<MeetingSpeakerPreviewDto>,
+    @field:Json(name = "model") val model: String,
+    @field:Json(name = "billable_seconds") val billableSeconds: Int,
+)
+
+@JsonClass(generateAdapter = true)
+public data class MeetingSpeakerPreviewDto(
+    @field:Json(name = "speaker_id") val speakerId: String,
+    @field:Json(name = "sample_texts") val sampleTexts: List<String> = emptyList(),
+    @field:Json(name = "first_start") val firstStart: Double = 0.0,
+    @field:Json(name = "total_seconds") val totalSeconds: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
 public data class SourceExtractedParticipantDto(
     @field:Json(name = "role") val role: String,
     @field:Json(name = "relation_to_user") val relationToUser: String = "unknown",

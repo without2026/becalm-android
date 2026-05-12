@@ -21,7 +21,7 @@ behaviors:
     screen: "OnboardingSetupScreen"
     interaction: "[선택한 항목 연결] 또는 각 항목 [연결] / [건너뛰기]"
     precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore onboarding_completed=false"
-    expected: "OnboardingSetupScreen이 표시됨. 필수 섹션은 이미 완료된 약관/로그인 및 개인정보 핵심 안내를 표시한다. 추천 섹션은 연락처, 알림, 녹음 폴더를 표시한다. 선택 섹션은 Gmail, Outlook Mail, Google Calendar, Outlook Calendar를 표시한다. 사용자가 모든 선택 항목을 건너뛰어도 onboarding_completed=true 저장 후 main 화면으로 진입 가능하다. 기존 개별 onboarding route는 설정/복구/호환 경로로만 남는다"
+    expected: "OnboardingSetupScreen이 표시됨. 필수 섹션은 이미 완료된 약관/로그인 및 개인정보 핵심 안내를 표시한다. 추천 섹션은 연락처, 알림, 녹음 폴더를 표시한다. 선택 섹션은 Gmail, Outlook Mail을 표시한다. Calendar OAuth가 production 연결 가능 상태가 되기 전까지 Google Calendar, Outlook Calendar는 first-run 핵심 CTA에서 숨기거나 disabled-with-reason으로 표시한다. 사용자가 모든 선택 항목을 건너뛰어도 onboarding_completed=true 저장 후 main 화면으로 진입 가능하다. 기존 개별 onboarding route는 설정/복구/호환 경로로만 남는다"
     source: product-onboarding-refactor
     tests: []
 
@@ -129,3 +129,4 @@ invariants:
   - "CONTACTS 권한 거부는 온보딩을 중단시키지 않는다 — graceful skip"
   - "PIPA 제3자 제공 + 국외 이전 동의 거부는 온보딩을 중단시키지 않는다 — 음성 기능만 비활성화되고 Settings에서 추후 변경 가능"
   - "온보딩은 고정 12-step 선형 플로우가 아니라 조건부 setup graph다: 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 소스) → Today"
+  - "Calendar OAuth가 실제 provider SDK/backend 설정과 함께 production 연결 가능 상태가 되기 전까지 first-run onboarding에서 연결 가능 CTA로 노출하지 않는다. Settings/Sources에서는 준비 중 또는 연결 불가 상태로만 표시한다"

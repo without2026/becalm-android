@@ -64,11 +64,11 @@ behaviors:
 
   - id: SMG-006
     type: ui_interaction
-    description: "Meetings 소스 상세 화면은 미팅 자료를 앱 내 Recordings 내부 폴더로 저장하는 두 개의 명시적 추가 버튼을 표시한다"
+    description: "Meetings 소스 상세 화면은 미팅 오디오를 앱 내 Recordings 내부 폴더로 저장하는 명시적 추가 버튼을 표시한다"
     screen: "SourceDetailScreen"
     interaction: "source_id='meeting' 화면 진입"
     precondition: "인증 완료, Recordings SAF tree URI grant 보유"
-    expected: "[미팅 오디오 추가]와 [전사본 추가] 버튼 표시. [미팅 오디오 추가]는 Recordings/BeCalm Meetings/Audio/를 picker 초기 위치로 열고 audio/m4a, audio/mp4, audio/aac, audio/mpeg, audio/wav 및 .m4a/.mp4/.aac/.mp3/.wav만 허용. [전사본 추가]는 Recordings/BeCalm Meetings/Transcripts/를 picker 초기 위치로 열고 text/plain, text/markdown, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document 및 .txt/.md/.pdf/.docx만 허용. 저장 결과는 MTG-002/003에 따른다"
+    expected: "[미팅 오디오 추가] 버튼 표시. picker는 audio/m4a, audio/mp4, audio/aac, audio/mpeg, audio/wav 및 .m4a/.mp4/.aac/.mp3/.wav만 허용한다. 전사본/text/manual_text 추가 버튼은 표시하지 않는다"
     source: user-request
     tests: []
 
@@ -79,3 +79,5 @@ invariants:
   - "소스 연결 해제 시 기존 Room 데이터(raw_ingestion_events, EmailBody, commitments/quotes)는 삭제하지 않는다"
   - "소스 연결 해제 시 해당 소스의 Keystore credentials와 DataStore cursor만 삭제된다"
   - "[지금 동기화]는 소스 상세 화면에서만 접근 가능하다 — 대시보드에서 소스별 개별 동기화 불가"
+  - "source category contract: `meeting`은 calendar category가 아니라 meeting category다. 다만 Person detail의 '미팅' 필터는 `google_calendar`, `outlook_calendar`, `meeting`을 함께 포함한다"
+  - "main tab source status는 compact summary만 표시한다. source별 상세 오류, 재시도, 재연결은 SourceDetailScreen 또는 Settings/Sources에서 수행한다"

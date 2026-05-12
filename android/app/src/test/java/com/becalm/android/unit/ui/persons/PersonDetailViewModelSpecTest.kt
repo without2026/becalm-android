@@ -218,6 +218,33 @@ class PersonDetailViewModelSpecTest {
     }
 
     @Test
+    fun `meeting interactions count as meetings and remain visible in person detail`() = runTest {
+        val personId = "person-1"
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
+            flowOf(
+                listOf(
+                    interaction(
+                        id = "meeting-audio",
+                        personId = personId,
+                        sourceType = SourceType.MEETING,
+                        sourceRef = "raw:raw-meeting-audio-1",
+                        interactionKind = "meeting",
+                        title = "고객 미팅 녹음",
+                        snippet = "다음 주 제안서를 다시 보내기로 했습니다.",
+                        occurredAt = Instant.fromEpochMilliseconds(3_000),
+                    ),
+                ),
+            )
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.meetingCount)
+        assertEquals(SourceType.MEETING, state.sourceEventCards.single().sourceType)
+    }
+
+    @Test
     fun `source artifact filename is not used as person detail primary event title`() = runTest {
         val personId = "person-1"
         every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns

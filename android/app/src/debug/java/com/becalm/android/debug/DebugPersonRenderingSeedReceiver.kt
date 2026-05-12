@@ -3,6 +3,7 @@ package com.becalm.android.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.BeCalmDatabase
@@ -17,17 +18,21 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.remote.supabase.SupabaseSessionStore
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import timber.log.Timber
@@ -41,18 +46,99 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
     @Inject lateinit var workScheduler: WorkScheduler
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION) return
+        if (intent.action !in setOf(ACTION, ACTION_ENQUEUE_CLOVA_AUDIO_E2E, ACTION_SEED_MEETING_SPEAKER_JOURNEY)) return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {
-                seedDemoData()
+                when (intent.action) {
+                    ACTION -> seedDemoData()
+                    ACTION_ENQUEUE_CLOVA_AUDIO_E2E -> enqueueClovaAudioE2e(intent)
+                    ACTION_SEED_MEETING_SPEAKER_JOURNEY -> seedMeetingSpeakerJourney()
+                }
             }.onSuccess {
-                Timber.i("Debug person rendering seed completed")
+                Timber.i("Debug action completed action=${intent.action}")
             }.onFailure { error ->
-                Timber.e(error, "Debug person rendering seed failed")
+                Timber.e(error, "Debug action failed action=${intent.action}")
             }
             pending.finish()
         }
+    }
+
+    private suspend fun enqueueClovaAudioE2e(intent: Intent) {
+        val userId = ensureE2eSession(intent)
+        val audioPath = intent.getStringExtra(EXTRA_AUDIO_PATH)?.takeIf { it.isNotBlank() }
+            ?: error("Missing $EXTRA_AUDIO_PATH")
+        val audioFile = File(audioPath)
+        require(audioFile.exists()) { "Audio file does not exist: $audioPath" }
+        val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0)
+        require(durationSeconds > 0) { "$EXTRA_DURATION_SECONDS must be positive" }
+        val sourceType = intent.getStringExtra(EXTRA_SOURCE_TYPE)?.takeIf { it.isNotBlank() }
+            ?: SourceType.MEETING
+        require(sourceType in setOf(SourceType.MEETING, SourceType.VOICE, SourceType.CALL_RECORDING)) {
+            "Unsupported audio source_type for Clova E2E: $sourceType"
+        }
+
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val title = intent.getStringExtra(EXTRA_EVENT_TITLE)?.takeIf { it.isNotBlank() }
+            ?: audioFile.name
+        val sourceRef = Uri.fromFile(audioFile).toString()
+        val rawEventId = UUID.randomUUID().toString()
+
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        userPrefsStore.setThirdPartyProvisionConsent(true)
+        userPrefsStore.setSourceEnabled(sourceType, true)
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(userId))
+        val db = databaseProvider.current()
+
+        val entity = RawIngestionEventEntity(
+            id = rawEventId,
+            userId = userId,
+            clientEventId = UUID.nameUUIDFromBytes(
+                "debug-clova-e2e:$sourceType:$sourceRef:${now.toEpochMilliseconds()}".toByteArray(),
+            ).toString(),
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            counterpartyRef = intent.getStringExtra(EXTRA_COUNTERPARTY_REF)?.takeIf { it.isNotBlank() },
+            eventTitle = title,
+            eventSnippet = null,
+            durationSeconds = durationSeconds,
+            timestamp = now,
+            syncStatus = "pending",
+        )
+        val inserted = db.rawIngestionEventDao().insert(entity)
+        require(inserted != -1L) { "Raw event insert ignored for clientEventId=${entity.clientEventId}" }
+        workScheduler.enqueueVoiceUpload(rawEventId = rawEventId, audioUri = sourceRef)
+        Timber.i(
+            "Debug Clova audio E2E enqueued rawEventId=$rawEventId " +
+                "sourceType=$sourceType durationSeconds=$durationSeconds sourceRef=$sourceRef",
+        )
+    }
+
+    private suspend fun ensureE2eSession(intent: Intent): String {
+        val existingUserId = userPrefsStore.observeCurrentUserId().first()?.takeIf { it.isNotBlank() }
+        val providedUserId = intent.getStringExtra(EXTRA_USER_ID)?.takeIf { it.isNotBlank() }
+        val accessToken = intent.getStringExtra(EXTRA_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }
+        if (accessToken != null && providedUserId != null) {
+            val expiresAtMillis = intent.getLongExtra(
+                EXTRA_EXPIRES_AT_EPOCH_MS,
+                System.currentTimeMillis() + 60L * 60L * 1000L,
+            )
+            userPrefsStore.setCurrentUserId(providedUserId)
+            sessionStore.save(
+                SupabaseSession(
+                    accessToken = accessToken,
+                    refreshToken = intent.getStringExtra(EXTRA_REFRESH_TOKEN).orEmpty(),
+                    userId = providedUserId,
+                    email = intent.getStringExtra(EXTRA_EMAIL)?.takeIf { it.isNotBlank() }
+                        ?: "adb-clova-e2e@becalm.local",
+                    expiresAt = Instant.fromEpochMilliseconds(expiresAtMillis),
+                ),
+            )
+            return providedUserId
+        }
+        return existingUserId
+            ?: error("No active userId. Sign in or provide $EXTRA_USER_ID + $EXTRA_ACCESS_TOKEN before running Clova audio E2E.")
     }
 
     private suspend fun seedDemoData() {
@@ -295,6 +381,209 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         }
     }
 
+    private suspend fun seedMeetingSpeakerJourney() {
+        val now = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+        val expiresAt = Instant.fromEpochMilliseconds(System.currentTimeMillis() + 365L * 24L * 60L * 60L * 1000L)
+        val customerEmail = "customer@example.com"
+        val customerPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, customerEmail)).personId
+        val rawEventId = "qa-meeting-speaker-raw"
+        val sourceRef = "qa-meeting-speaker:meeting_001.wav"
+
+        userPrefsStore.setTermsAccepted(true)
+        userPrefsStore.setCurrentUserId(USER_ID)
+        userPrefsStore.setOnboardingCompleted(true)
+        userPrefsStore.setProcessingPaused(false)
+        userPrefsStore.setThirdPartyProvisionConsent(true)
+        sessionStore.save(
+            SupabaseSession(
+                accessToken = "debug-access-token",
+                refreshToken = "debug-refresh-token",
+                userId = USER_ID,
+                email = "debug.meeting.speaker@becalm.local",
+                expiresAt = expiresAt,
+            ),
+        )
+
+        databaseProvider.ensureOpenFor(BeCalmDatabase.deriveUserIdHash(USER_ID))
+        val db = databaseProvider.current()
+        clearDemoRows(db)
+        seedConnectedSources(now)
+
+        db.rawIngestionEventDao().upsertSyncedFromServer(
+            listOf(
+                RawIngestionEventEntity(
+                    id = rawEventId,
+                    userId = USER_ID,
+                    clientEventId = "debug-client-$rawEventId",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = sourceRef,
+                    counterpartyRef = null,
+                    eventTitle = "meeting_001.wav",
+                    eventSnippet = "SPEAKER_02가 금요일까지 제안서를 공유하겠다고 말한 회의입니다.",
+                    durationSeconds = 60,
+                    commitmentsExtractedCount = 2,
+                    timestamp = now.minusHours(1),
+                    syncStatus = "synced",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertPersons(
+            listOf(person(customerPersonId, "Customer Lee", customerEmail, null, now)),
+        )
+        db.personIndexDao().upsertIdentities(
+            listOf(identity(customerPersonId, "email", customerEmail, "Customer Lee", SourceType.MEETING, now, true)),
+        )
+        db.personEnrichmentDao().upsertAll(
+            listOf(enrichment(customerEmail, "Customer Lee", "PM", now)),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "qa-meeting-speaker-self",
+                    userId = USER_ID,
+                    sourceEventId = rawEventId,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = sourceRef,
+                    personId = null,
+                    role = "speaker",
+                    relationToUser = "self",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_01",
+                    displayNameRaw = "SPEAKER_01",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "제가 일정 확인해서 공유하겠습니다.",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = now.minusHours(1),
+                ),
+                SourceEventParticipantEntity(
+                    id = "qa-meeting-speaker-counterparty",
+                    userId = USER_ID,
+                    sourceEventId = rawEventId,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = sourceRef,
+                    personId = null,
+                    role = "speaker",
+                    relationToUser = "participant",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    displayNameRaw = "SPEAKER_02",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "금요일까지 제안서 보내겠습니다.",
+                    confidence = 0.0,
+                    resolutionStatus = "unresolved",
+                    createdAt = now.minusHours(1),
+                ),
+            ),
+        )
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "qa-unmatched-meeting-speaker",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:$rawEventId",
+                    interactionKind = "meeting",
+                    title = "회의 녹음 - meeting_001.wav",
+                    snippet = "SPEAKER_02: 금요일까지 제안서 보내겠습니다.",
+                    suggestedLabel = "SPEAKER_02",
+                    occurredAt = now.minusHours(1),
+                    createdAt = now,
+                ),
+            ),
+        )
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "qa-meeting-speaker-take",
+                    personId = customerPersonId,
+                    sourceEventId = rawEventId,
+                    itemType = CommitmentItemType.ACTION,
+                    direction = "take",
+                    scheduleStatus = null,
+                    decisionStatus = null,
+                    title = "Customer Lee가 금요일까지 제안서 공유",
+                    quote = "금요일까지 제안서 보내겠습니다.",
+                    occurredAt = now.minusHours(1),
+                    dueAt = null,
+                    dueHint = "금요일",
+                ).copy(
+                    counterpartyRaw = "Customer Lee",
+                    counterpartyRef = customerEmail,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:$rawEventId",
+                    sourceEventTitle = "meeting_001.wav",
+                ),
+                commitment(
+                    id = "qa-meeting-speaker-schedule",
+                    personId = customerPersonId,
+                    sourceEventId = rawEventId,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    decisionStatus = null,
+                    title = "다음 주 미팅 일정 확인",
+                    quote = "다음 주 미팅 일정은 다시 확인하겠습니다.",
+                    occurredAt = now.minusHours(1),
+                    dueAt = null,
+                    dueHint = "다음 주",
+                ).copy(
+                    counterpartyRaw = "Customer Lee",
+                    counterpartyRef = customerEmail,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:$rawEventId",
+                    sourceEventTitle = "meeting_001.wav",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                sourceInteraction(
+                    personId = customerPersonId,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:$rawEventId",
+                    sourceEventId = rawEventId,
+                    kind = "meeting",
+                    role = "participant",
+                    direction = null,
+                    status = null,
+                    occurredAt = now.minusHours(1),
+                    title = "회의 녹음 - meeting_001.wav",
+                    snippet = "금요일까지 제안서 공유와 다음 주 미팅 일정 확인이 논의되었습니다.",
+                ),
+                commitmentInteraction(
+                    personId = customerPersonId,
+                    sourceType = SourceType.MEETING,
+                    commitmentId = "qa-meeting-speaker-take",
+                    sourceEventId = rawEventId,
+                    itemType = CommitmentItemType.ACTION,
+                    direction = "take",
+                    status = "pending",
+                    occurredAt = now.minusHours(1),
+                    title = "Customer Lee가 금요일까지 제안서 공유",
+                ),
+                commitmentInteraction(
+                    personId = customerPersonId,
+                    sourceType = SourceType.MEETING,
+                    commitmentId = "qa-meeting-speaker-schedule",
+                    sourceEventId = rawEventId,
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    status = "confirmed",
+                    occurredAt = now.minusHours(1),
+                    title = "다음 주 미팅 일정 확인",
+                ),
+            ),
+        )
+        workScheduler.enqueueProfileMemory(customerPersonId, initialDelaySeconds = 0)
+    }
+
     private suspend fun seedConnectedSources(now: Instant) {
         userPrefsStore.setCallLogMatchingConsent(true)
         userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
@@ -323,6 +612,9 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
         sql.execSQL("DELETE FROM commitment_participants WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM source_event_participants WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM person_interactions WHERE user_id = ?", args)
+        runCatching { sql.execSQL("DELETE FROM unmatched_person_interactions WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_index_dirty_sources WHERE user_id = ?", args) }
+        runCatching { sql.execSQL("DELETE FROM person_memory_semantic_index WHERE user_id = ?", args) }
         sql.execSQL("DELETE FROM person_identities WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM persons WHERE user_id = ?", args)
         sql.execSQL("DELETE FROM raw_ingestion_events WHERE user_id = ?", args)
@@ -567,6 +859,18 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
 
     private companion object {
         const val ACTION = "com.becalm.android.DEBUG_SEED_PERSON_RENDERING"
+        const val ACTION_ENQUEUE_CLOVA_AUDIO_E2E = "com.becalm.android.DEBUG_ENQUEUE_CLOVA_AUDIO_E2E"
+        const val ACTION_SEED_MEETING_SPEAKER_JOURNEY = "com.becalm.android.DEBUG_SEED_MEETING_SPEAKER_JOURNEY"
+        const val EXTRA_AUDIO_PATH = "audio_path"
+        const val EXTRA_DURATION_SECONDS = "duration_seconds"
+        const val EXTRA_SOURCE_TYPE = "source_type"
+        const val EXTRA_EVENT_TITLE = "event_title"
+        const val EXTRA_COUNTERPARTY_REF = "counterparty_ref"
+        const val EXTRA_USER_ID = "user_id"
+        const val EXTRA_ACCESS_TOKEN = "access_token"
+        const val EXTRA_REFRESH_TOKEN = "refresh_token"
+        const val EXTRA_EMAIL = "email"
+        const val EXTRA_EXPIRES_AT_EPOCH_MS = "expires_at_epoch_ms"
         const val USER_ID = "00000000-0000-4000-8000-000000000001"
         const val PERSON_KIM_HYUNSOO = "qa-person-kim-hyunsoo"
         const val PERSON_KIM_YOUNGKYUNG = "qa-person-kim-youngkyung"

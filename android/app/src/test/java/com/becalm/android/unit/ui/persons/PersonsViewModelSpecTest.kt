@@ -170,6 +170,10 @@ class PersonsViewModelSpecTest {
         val viewModel = buildViewModel()
         advanceUntilIdle()
         assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
+        assertEquals(
+            listOf("lee@corp.com", "+82109998888"),
+            viewModel.uiState.value.matchChoices.map { it.anchor },
+        )
 
         viewModel.onQueryChange("Kim")
         advanceTimeBy(300)

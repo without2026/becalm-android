@@ -106,21 +106,38 @@ internal object WorkSchedulerRequests {
         audioUri: String,
         initialDelaySec: Long,
         rateLimitedAttempt: Int,
+        selfSpeakerId: String? = null,
+        speakerMappingsJson: String? = null,
+        speakerPreviewId: String? = null,
     ): OneTimeWorkRequest {
+        val input = workDataOf(
+            VoiceUploadWorker.KEY_RAW_EVENT_ID to rawEventId,
+            VoiceUploadWorker.KEY_AUDIO_URI to audioUri,
+            VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT to rateLimitedAttempt,
+        ).let { data ->
+            androidx.work.Data.Builder()
+                .putAll(data)
+                .apply {
+                    if (!selfSpeakerId.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SELF_SPEAKER_ID, selfSpeakerId)
+                    if (!speakerMappingsJson.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SPEAKER_MAPPINGS_JSON, speakerMappingsJson)
+                    if (!speakerPreviewId.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SPEAKER_PREVIEW_ID, speakerPreviewId)
+                }
+                .build()
+        }
         val builder = OneTimeWorkRequest.Builder(VoiceUploadWorker::class.java)
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.UNMETERED)
+                    .setRequiredNetworkType(
+                        if (speakerPreviewId.isNullOrBlank()) {
+                            NetworkType.UNMETERED
+                        } else {
+                            NetworkType.CONNECTED
+                        },
+                    )
                     .build(),
             )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
-            .setInputData(
-                workDataOf(
-                    VoiceUploadWorker.KEY_RAW_EVENT_ID to rawEventId,
-                    VoiceUploadWorker.KEY_AUDIO_URI to audioUri,
-                    VoiceUploadWorker.KEY_RATE_LIMITED_ATTEMPT to rateLimitedAttempt,
-                ),
-            )
+            .setInputData(input)
             .addTag(TAG_VOICE_UPLOAD)
         if (initialDelaySec > 0L) {
             builder.setInitialDelay(initialDelaySec, TimeUnit.SECONDS)

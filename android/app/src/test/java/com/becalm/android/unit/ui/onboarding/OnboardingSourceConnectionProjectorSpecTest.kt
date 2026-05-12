@@ -69,6 +69,22 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
+    fun `first run onboarding omits calendar oauth until provider is launch ready`() {
+        val items = SourceConnectionProjector.sourceConnectionItems(
+            stepStates = emptyMap(),
+            transientStates = emptyMap(),
+            respectStepStates = true,
+            includeCalendarSources = false,
+            stringFor = { resId -> "res:$resId" },
+        )
+
+        assertEquals(
+            listOf(OnboardingSourceProvider.GMAIL, OnboardingSourceProvider.OUTLOOK_MAIL),
+            items.map { it.provider },
+        )
+    }
+
+    @Test
     fun `provider errors resolve to localized string resources without allocating copy maps`() {
         assertEquals(
             R.string.onb_gmail_error_network,

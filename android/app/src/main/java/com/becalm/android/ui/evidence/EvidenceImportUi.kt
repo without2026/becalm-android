@@ -18,14 +18,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.ui.components.uiMessageStringResource
 
 @Stable
 public class EvidenceImportSheetController internal constructor(
@@ -92,7 +98,30 @@ public fun EvidenceImportSheetHost(
     controller: EvidenceImportSheetController,
     onMessageScreenshotImport: () -> Unit,
     onMeetingAudioImport: () -> Unit,
+    state: EvidenceImportUiState = EvidenceImportUiState(),
+    onMeetingSelfSpeakerSelected: (String) -> Unit = {},
+    onMeetingSpeakerReviewConfirmed: () -> Unit = {},
+    onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onReviewRequiredClick: (() -> Unit)? = null,
 ) {
+    state.statusMessage?.let { message ->
+        EvidenceImportStatusBanner(
+            message = uiMessageStringResource(message),
+            onReviewRequiredClick = onReviewRequiredClick
+                ?.takeIf { message.resId == R.string.evidence_import_status_review_required },
+        )
+    }
+    state.meetingReview?.let { review ->
+        MeetingSpeakerReviewSheet(
+            review = review,
+            onSelect = onMeetingSelfSpeakerSelected,
+            onConfirm = onMeetingSpeakerReviewConfirmed,
+            onDismiss = onMeetingSpeakerReviewCancelled,
+        )
+    }
+    if (state.loadingMessage != null) {
+        EvidenceImportLoadingSheet(message = stringResource(R.string.evidence_import_meeting_preview_loading))
+    }
     if (controller.isSheetVisible) {
         EvidenceImportSheet(
             onDismiss = controller::dismissSheet,
@@ -105,6 +134,154 @@ public fun EvidenceImportSheetHost(
                 onMeetingAudioImport()
             },
         )
+    }
+}
+
+@Composable
+private fun EvidenceImportStatusBanner(
+    message: String,
+    onReviewRequiredClick: (() -> Unit)?,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("evidence-import-status"),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            if (onReviewRequiredClick != null) {
+                TextButton(
+                    onClick = onReviewRequiredClick,
+                    modifier = Modifier.testTag("evidence-import-review-action"),
+                ) {
+                    Text(text = stringResource(R.string.evidence_import_review_action))
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EvidenceImportLoadingSheet(message: String) {
+    ModalBottomSheet(onDismissRequest = {}) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(14.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MeetingSpeakerReviewSheet(
+    review: MeetingSpeakerReviewUiState,
+    onSelect: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.evidence_import_meeting_review_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.evidence_import_meeting_review_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            review.speakers.forEach { speaker ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .clip(MaterialTheme.shapes.medium),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(speaker.speakerId) }
+                            .testTag("meeting-speaker-${speaker.speakerId}")
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = review.selectedSelfSpeakerId == speaker.speakerId,
+                            onClick = { onSelect(speaker.speakerId) },
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(
+                                    R.string.evidence_import_meeting_review_speaker_label,
+                                    speaker.speakerId,
+                                    speaker.totalSeconds.toInt(),
+                                ),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            speaker.sampleTexts.take(2).forEach { sample ->
+                                Text(
+                                    text = sample,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.evidence_import_meeting_review_cancel))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Button(
+                    onClick = onConfirm,
+                    enabled = review.selectedSelfSpeakerId != null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.evidence_import_meeting_review_confirm))
+                }
+            }
+        }
     }
 }
 

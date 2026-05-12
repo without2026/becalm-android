@@ -125,7 +125,35 @@ class AuthUiTest {
         composeRule.onNodeWithText(string(R.string.login_error_empty_fields)).assertIsDisplayed()
         composeRule.onNodeWithTag("google-sign-in-button").assertIsNotEnabled()
         composeRule.onNodeWithText(string(R.string.login_google_cta)).assertIsNotEnabled()
+        composeRule.onNodeWithText(string(R.string.login_google_setup_required)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.login_email_section_label)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `login form blocks invalid email and short password before submit`() {
+        var submitted = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = false,
+                    googleSignInEnabled = true,
+                    onSignIn = { _, _ -> submitted += 1 },
+                    onSignUp = { _, _ -> submitted += 1 },
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("login-email").performTextInput("not-an-email")
+        composeRule.onNodeWithTag("login-password").performTextInput("short")
+        composeRule.onNodeWithText(string(R.string.login_cta)).performClick()
+
+        composeRule.onNodeWithText(string(R.string.login_error_invalid_email)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.login_error_short_password)).assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(0, submitted)
+        }
     }
 
     @Test
@@ -149,12 +177,12 @@ class AuthUiTest {
         }
 
         composeRule.onNodeWithTag("login-email").performTextInput("user@example.com")
-        composeRule.onNodeWithTag("login-password").performTextInput("secret")
+        composeRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
         composeRule.onNodeWithText(string(R.string.login_cta)).performClick()
 
         composeRule.runOnIdle {
             assertEquals("user@example.com", submittedEmail)
-            assertEquals("secret", submittedPassword)
+            assertEquals("ValidPass1!", submittedPassword)
         }
     }
 

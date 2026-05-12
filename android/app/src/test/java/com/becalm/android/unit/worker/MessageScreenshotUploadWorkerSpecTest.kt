@@ -110,6 +110,9 @@ class MessageScreenshotUploadWorkerSpecTest {
                 folder = any(),
                 conversationRef = any(),
                 previousThreadContext = any(),
+                selfSpeakerId = any(),
+                speakerMappings = any(),
+                speakerPreviewId = any(),
             )
         } returns Response.success(
             SourceExtractionResponse(
@@ -126,7 +129,7 @@ class MessageScreenshotUploadWorkerSpecTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals("image/jpeg", imageSlot.captured.body.contentType().toString())
-        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any()) }
+        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 

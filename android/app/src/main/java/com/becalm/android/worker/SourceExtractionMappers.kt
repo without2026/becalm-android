@@ -62,11 +62,12 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     index: Int,
     now: Instant,
 ): SourceEventParticipantEntity {
-    val anchor = normalizedValue ?: email ?: phone ?: displayName ?: organization ?: rawValue
+    val anchor = email ?: phone
     val resolved = PersonIdentityResolver.resolve(userId, anchor)
     val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
+    val participantAnchor = anchor ?: normalizedValue ?: displayName ?: organization ?: rawValue
     val participantId = UUID.nameUUIDFromBytes(
-        "source-participant:$userId:$sourceEventId:$index:${role}:${anchor.orEmpty()}".toByteArray(Charsets.UTF_8),
+        "source-participant:$userId:$sourceEventId:$index:${role}:${participantAnchor.orEmpty()}".toByteArray(Charsets.UTF_8),
     ).toString()
     return SourceEventParticipantEntity(
         id = participantId,
@@ -78,7 +79,7 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         role = role,
         relationToUser = relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role),
         identityType = identityType ?: resolved?.identityType,
-        normalizedValue = normalized,
+        normalizedValue = normalized ?: displayName ?: organization ?: rawValue,
         displayNameRaw = displayName,
         emailRaw = email,
         phoneRaw = phone,

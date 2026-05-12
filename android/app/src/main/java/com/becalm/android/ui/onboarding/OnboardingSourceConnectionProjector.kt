@@ -9,24 +9,27 @@ internal object SourceConnectionProjector {
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean = true,
+        includeCalendarSources: Boolean = true,
         stringFor: (Int) -> String,
     ): List<SourceConnectionItemUi> =
-        sourceSpecs.map { spec ->
-            SourceConnectionItemUi(
-                provider = spec.provider,
-                category = spec.category,
-                title = stringFor(spec.titleRes),
-                description = stringFor(spec.descriptionRes),
-                consentCopy = spec.consentRes?.let(stringFor),
-                state = sourceStateFor(
+        sourceSpecs
+            .filter { spec -> includeCalendarSources || spec.category != SourceConnectionCategory.Calendar }
+            .map { spec ->
+                SourceConnectionItemUi(
                     provider = spec.provider,
-                    stepStates = stepStates,
-                    transientStates = transientStates,
-                    respectStepStates = respectStepStates,
-                    defaultState = spec.defaultState,
-                ),
-            )
-        }
+                    category = spec.category,
+                    title = stringFor(spec.titleRes),
+                    description = stringFor(spec.descriptionRes),
+                    consentCopy = spec.consentRes?.let(stringFor),
+                    state = sourceStateFor(
+                        provider = spec.provider,
+                        stepStates = stepStates,
+                        transientStates = transientStates,
+                        respectStepStates = respectStepStates,
+                        defaultState = spec.defaultState,
+                    ),
+                )
+            }
 
     fun sourceStateFor(
         provider: OnboardingSourceProvider,

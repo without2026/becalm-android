@@ -369,3 +369,51 @@ public data class PersonIndexDirtySourceEntity(
     @ColumnInfo(name = "updated_at")
     val updatedAt: Instant,
 )
+
+/**
+ * Room-only semantic projection generated from the same structured input as person memory.
+ *
+ * This table is the matching-time index. Runtime person matching must not parse `memory.md`;
+ * the markdown remains a human-readable artifact while this row keeps bounded terms for fast
+ * unresolved participant recommendation.
+ */
+@Entity(
+    tableName = "person_memory_semantic_index",
+    indices = [
+        Index(
+            name = "idx_person_memory_semantic_index_user_updated",
+            value = ["user_id", "updated_at"],
+        ),
+    ],
+)
+public data class PersonMemorySemanticIndexEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "person_id")
+    val personId: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "display_name_terms_json")
+    val displayNameTermsJson: String,
+    @ColumnInfo(name = "aliases_json")
+    val aliasesJson: String,
+    @ColumnInfo(name = "organizations_json")
+    val organizationsJson: String,
+    @ColumnInfo(name = "titles_json")
+    val titlesJson: String,
+    @ColumnInfo(name = "work_terms_json")
+    val workTermsJson: String,
+    @ColumnInfo(name = "decision_terms_json")
+    val decisionTermsJson: String,
+    @ColumnInfo(name = "open_commitment_terms_json")
+    val openCommitmentTermsJson: String,
+    @ColumnInfo(name = "confirmed_patterns_json")
+    val confirmedPatternsJson: String,
+    @ColumnInfo(name = "rejected_patterns_json")
+    val rejectedPatternsJson: String,
+    @ColumnInfo(name = "recent_source_types_json")
+    val recentSourceTypesJson: String,
+    @ColumnInfo(name = "content_hash")
+    val contentHash: String,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Instant,
+)

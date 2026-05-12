@@ -11,6 +11,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -45,6 +46,7 @@ class SourceImportRepositorySpecTest {
     private val userPrefsStore: UserPrefsStore = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val meetingImportRepository: MeetingImportRepository = mockk()
+    private val sourceExtractionApi: SourceExtractionApi = mockk()
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
 
     @Test
@@ -160,6 +162,7 @@ class SourceImportRepositorySpecTest {
             userPrefsStore = userPrefsStore,
             rawIngestionRepository = rawIngestionRepository,
             meetingImportRepository = meetingImportRepository,
+            sourceExtractionApi = sourceExtractionApi,
             workScheduler = workScheduler,
             ioDispatcher = Dispatchers.IO,
         )

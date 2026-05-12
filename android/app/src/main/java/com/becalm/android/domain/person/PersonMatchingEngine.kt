@@ -28,6 +28,8 @@ public data class PersonSemanticContext(
     val organizations: Set<String> = emptySet(),
     val titles: Set<String> = emptySet(),
     val workContextTerms: Set<String> = emptySet(),
+    val decisionTerms: Set<String> = emptySet(),
+    val openCommitmentTerms: Set<String> = emptySet(),
     val confirmedPatterns: Set<String> = emptySet(),
     val rejectedPatterns: Set<String> = emptySet(),
 )
@@ -112,13 +114,6 @@ public class PersonMatchingEngine(
 
         val best = viable.first()
         val competitors = viable.filter { best.confidence - it.confidence < COMPETITION_MARGIN }
-        if (best.hasStrongBundle && best.confidence >= AUTO_SEMANTIC_THRESHOLD && competitors.size == 1) {
-            return PersonMatchDecision.AutoMatched(
-                personId = best.personId,
-                confidence = best.confidence,
-                reason = "semantic_bundle",
-            )
-        }
 
         return PersonMatchDecision.NeedsUserConfirmation(
             candidates = competitors.map { it.toPublicCandidate() },
@@ -229,6 +224,18 @@ public class PersonMatchingEngine(
                 reasons += "work_context"
             }
         }
+        val openCommitmentMatched = matchesEvidence(participant.evidence, context.openCommitmentTerms).also {
+            if (it) {
+                confidence += 0.12
+                reasons += "open_commitment"
+            }
+        }
+        val decisionMatched = matchesEvidence(participant.evidence, context.decisionTerms).also {
+            if (it) {
+                confidence += 0.10
+                reasons += "decision_context"
+            }
+        }
         val confirmedPatternMatched = matchesPattern(participant, context.confirmedPatterns).also {
             if (it) {
                 confidence = maxOf(confidence, 0.90)
@@ -236,7 +243,7 @@ public class PersonMatchingEngine(
             }
         }
 
-        if (!nameMatched && (organizationMatched || titleMatched || workContextMatched)) {
+        if (!nameMatched && (organizationMatched || titleMatched || workContextMatched || openCommitmentMatched || decisionMatched)) {
             confidence = minOf(confidence, 0.44)
         }
 
@@ -301,7 +308,6 @@ public class PersonMatchingEngine(
     }
 
     private companion object {
-        private const val AUTO_SEMANTIC_THRESHOLD = 0.84
         private const val CONFIRMATION_THRESHOLD = 0.60
         private const val COMPETITION_MARGIN = 0.15
         private val CONFIRMED_ALIAS_TYPES = setOf("alias", "name")

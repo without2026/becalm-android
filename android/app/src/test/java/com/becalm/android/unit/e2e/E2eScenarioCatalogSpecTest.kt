@@ -106,7 +106,7 @@ class E2eScenarioCatalogSpecTest {
     )
 
     private companion object {
-        private const val EXPECTED_SCENARIO_COUNT = 72
+        private const val EXPECTED_SCENARIO_COUNT = 73
         private const val MIN_HAPPY_PATH_COUNT = 50
         private const val MIN_ERROR_PATH_COUNT = 20
         private val REQUIRED_DOMAIN_TAGS = setOf(

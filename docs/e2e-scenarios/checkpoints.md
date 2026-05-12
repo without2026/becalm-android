@@ -39,14 +39,14 @@ Exit criteria:
 Scenarios: `E2E-024..038`
 
 Primary layers:
-- `androidTest`: global evidence import sheet and file/text entry points.
+- `androidTest`: global evidence import sheet and supported file entry points.
 - `testDebugUnitTest`: cold sync state machine, source import repository, upload worker state machine.
 - `manual adb`: MediaStore call recording fixture, screenshot picker fixture.
 
 Exit criteria:
 - Cold sync starts, can be skipped, and recovers from backend timeout.
 - Batch and single extraction paths use the same normalized source input contract.
-- Meeting audio/transcript, screenshot, manual text, and voice inputs enqueue the correct workers.
+- Meeting audio, screenshot, and voice inputs enqueue the correct workers. Transcript/manual-text bypasses remain unavailable.
 
 ## Checkpoint 4 — Extraction Pipeline And Person Graph
 

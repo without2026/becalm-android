@@ -242,7 +242,7 @@ Feature: BeCalm full user journey catalog
     When its source upload worker runs
     Then it should build a SourceExtractionRequest from NormalizedSourceEvent
     And StructuredExtractionPersister should save commitments and participants
-    # Automation: unit SourceExtractionInputAdapterSpecTest and MeetingTranscriptUploadWorkerSpecTest.
+    # Automation: unit SourceExtractionInputAdapterSpecTest and source upload worker specs.
 
   @happy @import @meeting @audio
   Scenario: E2E-030 User imports meeting audio from the global evidence sheet
@@ -252,16 +252,15 @@ Feature: BeCalm full user journey catalog
     And I select a supported audio file
     Then the file should be stored locally as a meeting artifact
     And meeting upload work should be enqueued
-    # Automation: androidTest evidence sheet; unit MeetingImportFilePolicySpecTest and MeetingTranscriptUploadWorkerSpecTest.
+    # Automation: androidTest evidence sheet; unit MeetingImportFilePolicySpecTest and upload worker specs.
 
-  @happy @import @meeting @transcript
-  Scenario: E2E-031 User imports meeting transcript from the global evidence sheet
+  @error @import @meeting @transcript
+  Scenario: E2E-031 Meeting transcript import is not exposed
     Given I am signed in
-    When I choose meeting transcript from evidence import
-    And I select a supported transcript file
-    Then the raw event should use source type meeting
-    And extraction should use text modality
-    # Automation: local SourceArtifactRepositoryLocalIntegrationTest and MeetingTranscriptUploadWorkerSpecTest.
+    When I open evidence import
+    Then meeting transcript should not be an available option
+    And no text extraction work should be enqueued
+    # Automation: androidTest evidence sheet; backend extraction boundary tests.
 
   @error @import @meeting
   Scenario: E2E-032 User selects unsupported meeting file type
@@ -288,20 +287,19 @@ Feature: BeCalm full user journey catalog
     And the user should see a recoverable import error
     # Automation: unit SourceImportRepositorySpecTest.
 
-  @happy @import @manual-text
-  Scenario: E2E-035 User imports manual text evidence
+  @error @import @manual-text
+  Scenario: E2E-035 Manual text evidence is not exposed
     Given I am signed in
-    When I choose direct text from evidence import
-    And I submit a nonblank work note
-    Then a manual_text raw event should be stored locally
-    And extraction should run through the shared meeting transcript upload path
-    # Automation: androidTest PersonsScreenTest; unit SourceImportRepositorySpecTest and MeetingTranscriptUploadWorkerSpecTest.
+    When I open evidence import
+    Then direct text should not be an available option
+    And no manual_text raw event should be created
+    # Automation: androidTest evidence sheet; unit SourceTypeContractTest.
 
   @error @import @manual-text
-  Scenario: E2E-036 Blank manual text is rejected
-    Given I am in the direct text evidence dialog
-    When I submit blank text
-    Then the submit action should stay disabled or reject validation
+  Scenario: E2E-036 Text extraction bypass is rejected at the backend boundary
+    Given an authenticated client
+    When it posts body_text to the extraction endpoint
+    Then the request should fail with 422
     And no raw event should be created
     # Automation: androidTest evidence dialog; unit SourceImportRepositorySpecTest.
 
@@ -596,3 +594,12 @@ Feature: BeCalm full user journey catalog
     Then WorkManager should preserve retryable work
     And launching the app should not duplicate source events
     # Automation: adb process-kill smoke pending; unit WorkSchedulerImplSpecTest and UploadWorkerSpecTest.
+
+  @happy @meeting @person-matching @memory
+  Scenario: E2E-073 Meeting audio speaker review matches an existing person
+    Given a meeting audio upload has a Clova speaker preview
+    And an unresolved speaker has a name, company, and work context similar to an existing person
+    When I choose my speaker and confirm the recommended existing person
+    Then the extraction should use the reviewed speaker mapping
+    And the person detail timeline should show the meeting interaction with local memory evidence
+    # Automation: unit PersonsScreenStateSourceLocalIntegrationTest, Checkpoint4ExtractionPersistenceSpecTest, PersonMemoryMarkdownSpecTest; androidTest meeting speaker review pending.

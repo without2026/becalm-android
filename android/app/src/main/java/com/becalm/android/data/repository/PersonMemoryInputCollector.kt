@@ -13,6 +13,8 @@ import com.becalm.android.domain.person.PersonMemoryIdentity
 import com.becalm.android.domain.person.PersonMemoryInput
 import com.becalm.android.domain.person.PersonMemoryInteraction
 import com.becalm.android.domain.person.PersonMemoryParticipant
+import com.becalm.android.domain.person.PersonMemoryVoiceEvidence
+import com.becalm.android.domain.person.PersonVoiceChunkReference
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -82,6 +84,7 @@ public class PersonMemoryInputCollector @Inject constructor(
             participants = participants.map { it.toMemoryParticipant() },
             interactions = interactions.map { it.toMemoryInteraction() },
             commitments = commitments.map { it.toMemoryCommitment() },
+            voiceEvidence = participants.mapNotNull { it.toMemoryVoiceEvidence(userId = userId, personId = personId) },
         )
     }
 
@@ -119,6 +122,31 @@ public class PersonMemoryInputCollector @Inject constructor(
             evidence = evidence,
             occurredAt = createdAt,
         )
+
+    private fun SourceEventParticipantEntity.toMemoryVoiceEvidence(
+        userId: String,
+        personId: String,
+    ): PersonMemoryVoiceEvidence? {
+        if (sourceType !in AUDIO_SOURCE_TYPES) return null
+        if (!role.equals("speaker", ignoreCase = true)) return null
+        val speakerLabel = displayNameRaw?.trim()
+            ?: normalizedValue?.trim()
+            ?: return null
+        if (!speakerLabel.startsWith("SPEAKER_", ignoreCase = true)) return null
+        return PersonMemoryVoiceEvidence(
+            sourceRef = memorySourceRef(),
+            sourceType = sourceType,
+            speakerLabel = speakerLabel,
+            chunkFileName = PersonVoiceChunkReference.fileName(
+                userId = userId,
+                personId = personId,
+                sourceEventId = sourceEventId,
+                speakerLabel = speakerLabel,
+            ),
+            evidence = evidence,
+            occurredAt = createdAt,
+        )
+    }
 
     private fun PersonInteractionEntity.toMemoryInteraction(): PersonMemoryInteraction =
         PersonMemoryInteraction(
@@ -158,5 +186,6 @@ public class PersonMemoryInputCollector @Inject constructor(
         private const val DEFAULT_INTERACTION_LIMIT = 50
         private const val DEFAULT_PARTICIPANT_LIMIT = 50
         private const val DEFAULT_COMMITMENT_LIMIT = 20
+        private val AUDIO_SOURCE_TYPES = setOf("voice", "call_recording", "meeting")
     }
 }
