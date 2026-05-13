@@ -201,6 +201,8 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                         .flatMap { ref ->
                             participants.filter { participant ->
                                 participant.sourceType == event.sourceType &&
+                                    participant.resolutionStatus != "resolved" &&
+                                    participant.relationToUser != "self" &&
                                     (
                                         participant.sourceRef == ref ||
                                             "raw:${participant.sourceEventId}" == ref ||

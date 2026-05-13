@@ -113,7 +113,7 @@ public class EvidenceImportViewModel @Inject constructor(
             )
             val context = MeetingSpeakerReviewContext(
                 selfSpeakerId = selfSpeakerId,
-                speakerMappingsJson = speakerMappingsJson(review.speakers, selfSpeakerId),
+                speakerMappingsJson = MeetingSpeakerMappingsJson.encode(review.speakers, selfSpeakerId),
                 speakerPreviewId = review.speakerPreviewId,
             )
             transientState.value = when (sourceImportRepository.importMeetingAudio(review.audioUri, context)) {
@@ -146,11 +146,4 @@ public class EvidenceImportViewModel @Inject constructor(
             loadingMessage = loadingMessage,
             meetingReview = meetingReview,
         )
-
-    private fun speakerMappingsJson(speakers: List<MeetingSpeakerPreviewDto>, selfSpeakerId: String): String =
-        speakers.joinToString(prefix = "[", postfix = "]") { speaker ->
-            val relation = if (speaker.speakerId == selfSpeakerId) "self" else "participant"
-            val confirmed = if (speaker.speakerId == selfSpeakerId) "true" else "false"
-            """{"speaker_id":"${speaker.speakerId}","display_name":"${speaker.speakerId}","relation_to_user":"$relation","confidence":0.0,"confirmed_by_user":$confirmed}"""
-        }
 }

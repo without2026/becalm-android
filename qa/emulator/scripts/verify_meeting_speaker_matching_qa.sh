@@ -79,7 +79,7 @@ open_deep_link() {
     -a android.intent.action.VIEW \
     -d "$link" \
     -n com.becalm.android/.MainActivity >/dev/null
-  sleep 2
+  sleep 4
   dump_ui
 }
 
@@ -108,6 +108,7 @@ wait_for_text() {
 sleep 2
 
 open_deep_link "becalm://persons"
+wait_for_text "Customer Lee" "persons-customer"
 require_text "사람"
 require_text "Customer Lee"
 require_text "매칭 확인"
@@ -118,21 +119,23 @@ sleep 1
 dump_ui
 require_text "사람 확인"
 require_text "SPEAKER_02"
-require_text "Customer Lee"
 screenshot "02-speaker-review-queue"
 
-if grep -Fq "Customer Lee" "$TMP_XML"; then
-  tap_text "Customer Lee" || true
-  sleep 1
-  dump_ui
-fi
-if grep -Fq "사람 매칭" "$TMP_XML"; then
-  tap_text "사람 매칭" || true
-  sleep 2
-elif grep -Fq "확인" "$TMP_XML"; then
-  tap_text "확인" || true
-  sleep 2
-fi
+tap_text "다른 사람"
+sleep 1
+dump_ui
+require_text "다른 사람 찾기"
+require_text "Customer Lee"
+screenshot "03-select-existing-person"
+
+tap_text "Customer Lee"
+sleep 1
+dump_ui
+require_text "선택됨"
+require_text "사람 매칭"
+
+tap_text "사람 매칭"
+sleep 2
 
 open_deep_link "becalm://persons"
 tap_text "Customer Lee"
@@ -143,7 +146,7 @@ require_text "타임라인"
 require_text "회의"
 require_text "상대가 해야 할 일"
 require_text "일정"
-screenshot "03-person-detail-meeting"
+screenshot "04-person-detail-meeting"
 
 MEMORY_ROOT="$("$ADB_BIN" -s "$DEVICE" shell run-as com.becalm.android find files/person_memory -maxdepth 1 -mindepth 1 -type d 2>/dev/null | tr -d '\r' | head -n 1)"
 if [[ -z "$MEMORY_ROOT" ]]; then
@@ -151,7 +154,10 @@ if [[ -z "$MEMORY_ROOT" ]]; then
   screenshot "missing-memory-root"
   exit 1
 fi
-CUSTOMER_MEMORY="$("$ADB_BIN" -s "$DEVICE" shell run-as com.becalm.android find "$MEMORY_ROOT" -path '*memory.md' -print -exec cat {} \\; 2>/dev/null | tr -d '\r')"
+CUSTOMER_MEMORY="$(
+  "$ADB_BIN" -s "$DEVICE" shell "run-as com.becalm.android sh -c 'for f in \$(find \"$MEMORY_ROOT\" -type f -name memory.md); do cat \"\$f\"; done'" 2>/dev/null |
+    tr -d '\r'
+)"
 if [[ "$CUSTOMER_MEMORY" != *"Customer Lee"* && "$CUSTOMER_MEMORY" != *"제안서"* ]]; then
   echo "Customer memory.md or semantic input was not generated for the meeting journey." >&2
   exit 1

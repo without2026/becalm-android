@@ -26,7 +26,7 @@ does not depend on previous scenario state, and declares its automation mapping.
 
 ## Scenario Groups
 
-The current catalog contains 72 independent scenarios:
+The current catalog contains 73 independent scenarios:
 
 - `E2E-001..008` — auth, first-run, sign-out, local data wipe.
 - `E2E-009..014` — onboarding, PIPA, contacts, notifications, source setup skip.
@@ -38,6 +38,7 @@ The current catalog contains 72 independent scenarios:
 - `E2E-053..060` — commitments, edit/CRUD, Today.
 - `E2E-061..064` — notifications and person memory.
 - `E2E-065..072` — privacy, settings, source management, deep links, process death.
+- `E2E-073` — meeting audio speaker review, person matching, and local memory smoke.
 
 ## Current Device Smoke Order
 
@@ -49,8 +50,10 @@ When a device appears in `adb devices -l`, run the smoke scenarios in this order
 4. `E2E-014` skip-all-sources app entry.
 5. `E2E-022` source setup/settings parity.
 6. `E2E-030`, `E2E-033` evidence import entry points, plus blocked-path checks for transcript/manual text.
-7. `E2E-049`, `E2E-050`, `E2E-053`, `E2E-058` main tab rendering.
-8. `E2E-008` wipe-local-data regression.
+7. `E2E-073` meeting speaker review and person memory smoke via
+   `qa/emulator/scripts/verify_meeting_speaker_matching_qa.sh`.
+8. `E2E-049`, `E2E-050`, `E2E-053`, `E2E-058` main tab rendering.
+9. `E2E-008` wipe-local-data regression.
 
 Use logcat filters:
 

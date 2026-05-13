@@ -7,6 +7,36 @@ import org.junit.Test
 class OnboardingProgressResolverSpecTest {
 
     @Test
+    fun `decode ignores unknown persisted step names and statuses`() {
+        val decoded = OnboardingProgressResolver.decodeStepStatuses(
+            mapOf(
+                "TERMS" to "GRANTED",
+                "NO_LONGER_EXISTS" to "COMPLETE",
+                "LOGIN" to "BROKEN",
+            ),
+        )
+
+        assertEquals(mapOf(OnboardingStep.TERMS to StepStatus.GRANTED), decoded)
+    }
+
+    @Test
+    fun `hydrate upgrades terms and login only when persisted value is not terminal`() {
+        val hydrated = OnboardingProgressResolver.hydrateStepStates(
+            persisted = mapOf(
+                "TERMS" to "IN_PROGRESS",
+                "LOGIN" to "NOT_STARTED",
+                "CONTACTS_PERM" to "DENIED",
+            ),
+            termsAccepted = true,
+            signedIn = true,
+        )
+
+        assertEquals(StepStatus.GRANTED, hydrated.getValue(OnboardingStep.TERMS))
+        assertEquals(StepStatus.GRANTED, hydrated.getValue(OnboardingStep.LOGIN))
+        assertEquals(StepStatus.DENIED, hydrated.getValue(OnboardingStep.CONTACTS_PERM))
+    }
+
+    @Test
     fun `post login incomplete progress resumes to unified setup`() {
         val states = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED } +
             mapOf(

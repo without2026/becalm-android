@@ -65,6 +65,27 @@ behaviors:
     source: release-ux-hardening
     tests: [EvidenceImportStatusProjectionPortTest, EvidenceImportViewModelTest, EvidenceImportUiTest, PersonManualMatchPipelineLocalIntegrationTest]
 
+  - id: RUX-009
+    type: meeting_speaker_review
+    description: "회의 화자 확인 payload는 수동 문자열 조립이 아니라 JSON writer/serializer로 생성한다"
+    expected: "speaker_id/display_name 값에 따옴표, 역슬래시, 한글이 포함되어도 유효한 JSON 배열로 escape되고, 사용자가 선택한 self speaker만 relation_to_user=self 및 confirmed_by_user=true가 된다"
+    source: release-ux-hardening
+    tests: [MeetingSpeakerMappingsJsonSpecTest, EvidenceImportViewModelTest, verify_meeting_speaker_matching_qa.sh]
+
+  - id: RUX-010
+    type: auth_validation
+    description: "로그인 입력 검증은 Compose state가 아니라 pure validator contract로 고정한다"
+    expected: "blank, invalid email, short password, trimmed valid email case가 JVM unit test에서 검증되고 LoginForm은 같은 validator만 호출한다"
+    source: release-ux-hardening
+    tests: [LoginInputValidatorSpecTest, AuthUiTest]
+
+  - id: RUX-011
+    type: onboarding_progress
+    description: "onboarding terminal status 정의는 route resolver와 reducer가 공유하는 단일 정책을 사용한다"
+    expected: "hydrate, first incomplete route, complete-gate 판정은 같은 terminal policy를 사용하고 corrupt persisted status는 무시된다"
+    source: release-ux-hardening
+    tests: [OnboardingProgressResolverSpecTest, OnboardingStateReducerSpecTest, OnboardingViewModelSpecTest]
+
 invariants:
   - "People list는 연락처 정보만 보이고 work context는 person detail에서만 보인다"
   - "source status는 main tab에서 compact summary만 보이고 상세 복구는 source detail/settings에서 수행한다"

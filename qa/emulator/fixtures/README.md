@@ -20,3 +20,11 @@ qa/emulator/scripts/verify_person_rendering_qa.sh
 ```
 
 That script re-seeds the emulator, checks the Korean People tab, verifies the `+` evidence import sheet, confirms that the message screenshot path opens Android Photo Picker, and opens a person detail timeline.
+
+For the meeting speaker review journey (`E2E-073`):
+
+```bash
+qa/emulator/scripts/verify_meeting_speaker_matching_qa.sh
+```
+
+That script re-seeds the emulator, pushes a meeting audio fixture, verifies the persistent matching banner, selects an existing person for a speaker-label review item, opens the matched person detail timeline, and checks that local `memory.md` output exists for the matched person.

@@ -76,6 +76,25 @@ wait_for_focused_package() {
   exit 1
 }
 
+wait_for_focused_package_any() {
+  local window_dump
+  window_dump="$(mktemp)"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    "$ADB_BIN" -s "$DEVICE" shell dumpsys window > "$window_dump"
+    for package_name in "$@"; do
+      if grep -Fq "$package_name" "$window_dump"; then
+        rm -f "$window_dump"
+        return
+      fi
+    done
+    sleep 1
+  done
+  echo "Expected focused package did not appear: $*" >&2
+  grep -E 'mCurrentFocus|mFocusedApp|mTopActivity' "$window_dump" >&2 || true
+  rm -f "$window_dump"
+  exit 1
+}
+
 open_people_tab() {
   for _ in 1 2 3 4 5; do
     "$ADB_BIN" -s "$DEVICE" shell am start \
@@ -110,10 +129,11 @@ require_text "증거 추가"
 require_text "메신저 스크린샷"
 require_text "회의 녹음"
 
-"$ADB_BIN" -s "$DEVICE" shell input tap 520 1800
-wait_for_focused_package "com.google.android.photopicker"
+tap_text "메신저 스크린샷"
+wait_for_focused_package_any "com.google.android.photopicker" "com.google.android.providers.media.module"
 
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.photopicker >/dev/null 2>&1 || true
+"$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.providers.media.module >/dev/null 2>&1 || true
 sleep 1
 open_people_tab
 tap_text "김영경"
