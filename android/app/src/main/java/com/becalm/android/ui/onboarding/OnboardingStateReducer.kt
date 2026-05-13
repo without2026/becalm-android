@@ -72,13 +72,7 @@ internal object OnboardingStateReducer {
     }
 
     fun isTerminalGatePassed(stepStates: Map<OnboardingStep, StepStatus>): Boolean {
-        val terminalStatuses = setOf(
-            StepStatus.GRANTED,
-            StepStatus.COMPLETE,
-            StepStatus.SKIPPED,
-            StepStatus.DENIED,
-        )
         return OnboardingStep.entries
-            .all { step -> (stepStates[step] ?: StepStatus.NOT_STARTED) in terminalStatuses }
+            .all { step -> OnboardingTerminalStatusPolicy.isTerminal(stepStates[step] ?: StepStatus.NOT_STARTED) }
     }
 }

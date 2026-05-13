@@ -3,13 +3,6 @@ package com.becalm.android.ui.onboarding
 import com.becalm.android.ui.navigation.BecalmRoute
 
 internal object OnboardingProgressResolver {
-    private val terminalStatuses = setOf(
-        StepStatus.GRANTED,
-        StepStatus.COMPLETE,
-        StepStatus.SKIPPED,
-        StepStatus.DENIED,
-    )
-
     fun decodeStepStatuses(raw: Map<String, String>): Map<OnboardingStep, StepStatus> =
         buildMap {
             raw.forEach { (stepName, statusName) ->
@@ -34,9 +27,9 @@ internal object OnboardingProgressResolver {
         return OnboardingStep.entries.associateWith { step ->
             when {
                 step == OnboardingStep.TERMS && termsAccepted ->
-                    decoded[step]?.takeIf { it in terminalStatuses } ?: StepStatus.GRANTED
+                    decoded[step]?.takeIf(OnboardingTerminalStatusPolicy::isTerminal) ?: StepStatus.GRANTED
                 step == OnboardingStep.LOGIN && signedIn ->
-                    decoded[step]?.takeIf { it in terminalStatuses } ?: StepStatus.GRANTED
+                    decoded[step]?.takeIf(OnboardingTerminalStatusPolicy::isTerminal) ?: StepStatus.GRANTED
                 else -> decoded[step] ?: StepStatus.NOT_STARTED
             }
         }
@@ -44,7 +37,7 @@ internal object OnboardingProgressResolver {
 
     fun firstIncompleteStep(stepStates: Map<OnboardingStep, StepStatus>): OnboardingStep =
         OnboardingStep.entries.firstOrNull { step ->
-            (stepStates[step] ?: StepStatus.NOT_STARTED) !in terminalStatuses
+            !OnboardingTerminalStatusPolicy.isTerminal(stepStates[step] ?: StepStatus.NOT_STARTED)
         } ?: OnboardingStep.COLD_SYNC
 
     fun resumeRoute(stepStates: Map<OnboardingStep, StepStatus>): String = when (firstIncompleteStep(stepStates)) {

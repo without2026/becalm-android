@@ -230,7 +230,7 @@ internal fun LoginForm(
     // Local UI state only — no PII stored in remembered state
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var validationErrors by remember { mutableStateOf(emptySet<LoginValidationError>()) }
+    var validationErrors by remember { mutableStateOf(emptySet<LoginInputValidationError>()) }
 
     // Box centres the form on tablets / foldables; the inner Column caps at
     // 480dp so email + password fields stay at a comfortable reading width
@@ -264,14 +264,14 @@ internal fun LoginForm(
             LoginActionButtons(
                 isLoading = isLoading,
                 onSignIn = {
-                    val nextErrors = validateLoginInput(email, password)
+                    val nextErrors = LoginInputValidator.validate(email, password)
                     validationErrors = nextErrors
                     if (nextErrors.isEmpty()) {
                         onSignIn(email, password)
                     }
                 },
                 onSignUp = {
-                    val nextErrors = validateLoginInput(email, password)
+                    val nextErrors = LoginInputValidator.validate(email, password)
                     validationErrors = nextErrors
                     if (nextErrors.isEmpty()) {
                         onSignUp(email, password)
@@ -316,12 +316,12 @@ private fun LoginProviderSection(
 private fun LoginEmailFields(
     email: String,
     password: String,
-    validationErrors: Set<LoginValidationError>,
+    validationErrors: Set<LoginInputValidationError>,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
 ) {
-    val emailError = validationErrors.any { it == LoginValidationError.EmptyFields || it == LoginValidationError.InvalidEmail }
-    val passwordError = validationErrors.any { it == LoginValidationError.EmptyFields || it == LoginValidationError.ShortPassword }
+    val emailError = validationErrors.any { it == LoginInputValidationError.EmptyFields || it == LoginInputValidationError.InvalidEmail }
+    val passwordError = validationErrors.any { it == LoginInputValidationError.EmptyFields || it == LoginInputValidationError.ShortPassword }
     BecalmTextField(
         value = email,
         onValueChange = onEmailChange,
@@ -331,7 +331,7 @@ private fun LoginEmailFields(
         imeAction = ImeAction.Next,
         isError = emailError,
         supportingText = when {
-            LoginValidationError.InvalidEmail in validationErrors -> stringResource(R.string.login_error_invalid_email)
+            LoginInputValidationError.InvalidEmail in validationErrors -> stringResource(R.string.login_error_invalid_email)
             else -> null
         },
         modifier = Modifier
@@ -349,8 +349,8 @@ private fun LoginEmailFields(
         visualTransformation = PasswordVisualTransformation(),
         isError = passwordError,
         supportingText = when {
-            LoginValidationError.EmptyFields in validationErrors -> stringResource(R.string.login_error_empty_fields)
-            LoginValidationError.ShortPassword in validationErrors -> stringResource(R.string.login_error_short_password)
+            LoginInputValidationError.EmptyFields in validationErrors -> stringResource(R.string.login_error_empty_fields)
+            LoginInputValidationError.ShortPassword in validationErrors -> stringResource(R.string.login_error_short_password)
             else -> null
         },
         modifier = Modifier
@@ -403,23 +403,6 @@ private fun LoginDivider(modifier: Modifier = Modifier) {
  *  spirit of the 600dp Today timeline cap and 480dp state-view cap; sized
  *  smaller because login fields are denser than reading content. */
 private val LoginFormMaxContentWidth: androidx.compose.ui.unit.Dp = 480.dp
-private const val LoginPasswordMinLength = 8
-private val LoginEmailPattern = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
-
-private enum class LoginValidationError {
-    EmptyFields,
-    InvalidEmail,
-    ShortPassword,
-}
-
-private fun validateLoginInput(email: String, password: String): Set<LoginValidationError> {
-    if (email.isBlank() || password.isBlank()) return setOf(LoginValidationError.EmptyFields)
-    return buildSet {
-        if (!LoginEmailPattern.matches(email.trim())) add(LoginValidationError.InvalidEmail)
-        if (password.length < LoginPasswordMinLength) add(LoginValidationError.ShortPassword)
-    }
-}
-
 // ─── Previews ─────────────────────────────────────────────────────────────────
 
 @PreviewLightDark

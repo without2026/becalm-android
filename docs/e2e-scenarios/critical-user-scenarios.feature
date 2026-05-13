@@ -602,4 +602,4 @@ Feature: BeCalm full user journey catalog
     When I choose my speaker and confirm the recommended existing person
     Then the extraction should use the reviewed speaker mapping
     And the person detail timeline should show the meeting interaction with local memory evidence
-    # Automation: unit PersonsScreenStateSourceLocalIntegrationTest, Checkpoint4ExtractionPersistenceSpecTest, PersonMemoryMarkdownSpecTest; androidTest meeting speaker review pending.
+    # Automation: unit PersonsScreenStateSourceLocalIntegrationTest, Checkpoint4ExtractionPersistenceSpecTest, PersonMemoryMarkdownSpecTest; adb qa/emulator/scripts/verify_meeting_speaker_matching_qa.sh.

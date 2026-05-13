@@ -448,6 +448,89 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `unassigned meeting candidates exclude resolved self speaker rows`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-meeting-speaker",
+                    userId = USER_ID,
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "raw:raw-meeting",
+                    interactionKind = "meeting",
+                    title = "회의 녹음",
+                    snippet = "SPEAKER_02: 금요일까지 제안서 보내겠습니다.",
+                    suggestedLabel = "SPEAKER_02",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-self",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-audio",
+                    personId = null,
+                    role = "speaker",
+                    relationToUser = "self",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_01",
+                    displayNameRaw = "SPEAKER_01",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "제가 일정 확인해서 공유하겠습니다.",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = occurredAt,
+                ),
+                SourceEventParticipantEntity(
+                    id = "participant-counterparty",
+                    userId = USER_ID,
+                    sourceEventId = "raw-meeting",
+                    sourceType = SourceType.MEETING,
+                    sourceRef = "meeting-audio",
+                    personId = null,
+                    role = "speaker",
+                    relationToUser = "participant",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    displayNameRaw = "SPEAKER_02",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "금요일까지 제안서 보내겠습니다.",
+                    confidence = 0.0,
+                    resolutionStatus = "unresolved",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.unassignedEvents.firstOrNull()?.candidates?.isEmpty() != false) {
+                state = awaitItem()
+            }
+
+            assertEquals(listOf("SPEAKER_02"), state.unassignedEvents.single().candidates.map { it.anchor })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun rawEvent(
         id: String,
         counterpartyRef: String?,

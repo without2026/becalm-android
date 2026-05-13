@@ -91,6 +91,8 @@ Exit condition:
 - [x] Settings and privacy snackbar errors are resource-backed through `UiMessage`; ViewModels do not pin raw copy for known failures
 - [x] Onboarding completion and consent-write errors are resource-backed through `UiMessage`; English fallback literals are not shown for known setup failures
 - [x] Auth errors are resource-backed through `UiMessage`; login snackbar resolves locale copy at the Compose boundary
+- [x] Auth login input validation is covered by pure JVM tests and UI tests; `LoginForm` calls the shared validator for blank / invalid email / short password cases
+- [x] Onboarding route resume and complete-gate logic share one terminal status policy; corrupt persisted step/status values are ignored by resolver tests
 - [x] Person, source detail, today, and commitment error states use `UiMessage`; screens resolve locale copy at the Compose boundary
 - [x] Runtime UI code does not call `UiMessage.literal`; known auth/privacy/commitment failures stay resource-backed and fail fast on invalid message construction
 - [x] Source detail differentiates healthy connected actions from recovery-only error actions
@@ -101,3 +103,4 @@ Exit condition:
 - [x] Screenshot smoke matrix: 360x800 Korean, 430x932 Korean, tablet, font scale 1.3, dark theme. Captured under `docs/ui-smoke-screenshots/20260507-1220-ko/`.
 - [x] Emulator smoke after surface/wire refactor: Today / People / Commitments render without crash on `emulator-5554`; commitments FAB uses compact icon-only form so it does not cover card text. Captured under `docs/ui-smoke-screenshots/20260507-refactor-check/`.
 - [x] Emulator smoke after live QA fixes: People matching banner, source list/detail error copy, and person detail timeline render in Korean without raw source error messages or artifact filenames. Captured under `docs/ui-smoke-screenshots/20260507-live-emulator-fixes/`.
+- [x] Emulator smoke for `E2E-073`: meeting speaker review banner, existing-person selection, person detail meeting timeline, and local memory output verified by `qa/emulator/scripts/verify_meeting_speaker_matching_qa.sh`. Captured under `qa/emulator/screenshots/meeting-speaker-full-journey/`.
