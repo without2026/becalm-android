@@ -663,7 +663,7 @@ Create/update:
 After this PR lands, the pipeline is **startup-production-grade for a team of 1~3**, but still missing (P1 backlog):
 
 1. Progressive rollout / canary (Play Console staged)
-2. Observability: Crashlytics/Sentry, OTEL, structured logs
+2. Observability: Firebase Crashlytics, Amplitude, OTEL, structured logs
 3. Mutation testing (Pitest)
 4. Coverage threshold enforcement (not delta-only)
 5. Flaky test quarantine
