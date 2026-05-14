@@ -604,6 +604,14 @@ private fun TimelineCard(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
         )
+        relatedSourceLabel(item)?.let { label ->
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = item.title,
@@ -662,6 +670,16 @@ private fun typeLabelFor(item: TimelineItem): String = when (item) {
     }
     is TimelineItem.CalendarEvent -> stringResource(R.string.today_type_event)
     is TimelineItem.Meeting -> stringResource(R.string.today_type_meeting)
+}
+
+private fun relatedSourceLabel(item: TimelineItem): String? {
+    val sourceTypes = when (item) {
+        is TimelineItem.CalendarEvent -> item.relatedSourceTypes
+        is TimelineItem.Meeting -> item.relatedSourceTypes
+        is TimelineItem.Commitment -> emptyList()
+    }
+    if (sourceTypes.isEmpty()) return null
+    return sourceTypes.distinct().joinToString(prefix = "관련 ", separator = ", ")
 }
 
 private fun formatKstTime(instant: Instant): String {

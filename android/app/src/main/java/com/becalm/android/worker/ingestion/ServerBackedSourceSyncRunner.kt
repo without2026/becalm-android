@@ -10,6 +10,7 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
@@ -51,6 +52,7 @@ internal class ServerBackedSourceSyncRunner(
     private val commitmentRepository: CommitmentRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository? = null,
     private val workScheduler: WorkScheduler,
@@ -103,6 +105,7 @@ internal class ServerBackedSourceSyncRunner(
                 commitmentRepository = commitmentRepository,
                 sourceEventParticipantRepository = sourceEventParticipantRepository,
                 commitmentParticipantRepository = commitmentParticipantRepository,
+                scheduleEventLinkRepository = scheduleEventLinkRepository,
                 workScheduler = workScheduler,
                 logger = logger,
             ).refresh(

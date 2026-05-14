@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -476,6 +477,7 @@ private fun CommitmentRowCard(
         sourceContextLabel = commitmentSourceContextLabel(row),
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (row.deEmphasized) 0.62f else 1f)
             .padding(vertical = 4.dp),
         // C4 wiring — card tap opens the CommitmentDetailSheet route
         // (see BecalmRoute.CommitmentDetail). Action buttons live inside the sheet;

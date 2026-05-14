@@ -64,6 +64,20 @@ internal fun SourceEventCardRow(
             CommitmentBucket(label = stringResource(R.string.person_detail_bucket_my_actions), items = card.myActions)
             CommitmentBucket(label = stringResource(R.string.person_detail_bucket_their_actions), items = card.theirActions)
             CommitmentBucket(label = stringResource(R.string.commitment_item_type_schedule), items = card.schedules)
+            if (card.linkedCalendarEventId != null) {
+                Text(
+                    text = "연결된 일정",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (card.relatedSourceTypes.isNotEmpty()) {
+                Text(
+                    text = "관련 ${card.relatedSourceTypes.distinct().joinToString()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (card.commitmentsExtractedCount > 0) {
                 CommitmentsExtractedBadge(count = card.commitmentsExtractedCount)
             }
