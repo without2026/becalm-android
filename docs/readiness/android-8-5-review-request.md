@@ -1,7 +1,7 @@
 # Android 8.5 Reviewer Request
 
 Date: 2026-05-15 KST
-Verified Android source commit: `e8f32f3`
+Evidence document status: docs-only; does not change executable Android code.
 Executable code verified at: `e8f32f3`
 
 This document is intentionally not a self-score. The reviewer should assign the
