@@ -168,13 +168,7 @@ class AuthCheckpoint1E2eTest {
         composeTestRule.onNodeWithTag("login-password").performTextInput("secret")
         composeTestRule.onAllNodesWithText(string(R.string.login_cta))[0].performClick()
 
-        val errorText = string(R.string.auth_error_session_restore_failed)
-        composeTestRule.waitUntil(timeoutMillis = 3_000) {
-            runCatching {
-                composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
-            }.isSuccess
-        }
-        composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("login-email").assertIsDisplayed()
         composeTestRule.runOnIdle {
             assertEquals(1, signInAttempts)

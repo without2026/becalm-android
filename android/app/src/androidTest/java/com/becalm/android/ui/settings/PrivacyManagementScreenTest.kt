@@ -49,11 +49,11 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("privacy-export-card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("privacy-withdraw-card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("privacy-pause-card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("privacy-delete-card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_export_title)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_withdraw_title)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_pause_title)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_delete_title)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_activity_log_title)).performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.privacy_delete_subtitle_fmt, 4, 2, 9))
             .performScrollTo()
             .assertIsDisplayed()
@@ -83,11 +83,11 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("privacy-export-card").performScrollTo().performClick()
-        composeTestRule.onNodeWithTag("privacy-withdraw-card").performScrollTo().performClick()
-        composeTestRule.onNodeWithTag("privacy-pause-card").performScrollTo().performClick()
-        composeTestRule.onNodeWithTag("privacy-delete-card").performScrollTo().performClick()
-        composeTestRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.privacy_export_title)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.privacy_withdraw_title)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.privacy_pause_title)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.privacy_delete_title)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.privacy_activity_log_title)).performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, exportClicks)

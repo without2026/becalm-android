@@ -20,7 +20,6 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -160,8 +159,8 @@ class OnboardingScreenTest {
         composeTestRule.onAllNodesWithText(
             "${string(R.string.onb_pipa_email_recipient)}: ${string(R.string.onb_pipa_email_recipient_gmail)}",
         ).assertCountEquals(1)
-        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
-        composeTestRule.onNodeWithTag("email-pipa-deny").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performClick()
+        composeTestRule.onNodeWithTag("email-pipa-deny").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, agreeClicks)
@@ -188,7 +187,7 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performClick()
 
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {
@@ -213,7 +212,7 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performClick()
 
         composeTestRule.waitForText(string(R.string.onb_pipa_email_error_write_failed))
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_error_write_failed)).assertIsDisplayed()

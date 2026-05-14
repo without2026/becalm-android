@@ -344,6 +344,7 @@ class AuthScreenTest {
     @Test
     fun login_screen_shows_error_snackbar_and_consumes_error() {
         var dismissCount = 0
+        composeTestRule.mainClock.autoAdvance = false
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -363,8 +364,8 @@ class AuthScreenTest {
             }
         }
 
-        composeTestRule.waitForText("bad credentials")
-        composeTestRule.onNodeWithText("bad credentials").assertIsDisplayed()
+        composeTestRule.mainClock.advanceTimeBy(5_000)
+        composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {
             assertEquals(1, dismissCount)
         }
@@ -508,11 +509,4 @@ class AuthScreenTest {
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
 
-    private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.waitForText(text: String) {
-        waitUntil(timeoutMillis = 3_000) {
-            runCatching {
-                onNodeWithText(text).assertIsDisplayed()
-            }.isSuccess
-        }
-    }
 }

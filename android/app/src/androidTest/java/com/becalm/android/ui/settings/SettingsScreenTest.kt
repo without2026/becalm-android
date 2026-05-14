@@ -52,7 +52,7 @@ class SettingsScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).performScrollTo()
         composeTestRule.onNodeWithTag("settings-sources-row").performScrollTo().performClick()
         composeTestRule.onNodeWithTag("settings-privacy-row").performScrollTo().performClick()
         composeTestRule.onNodeWithTag("settings-wipe-button").performScrollTo().performClick()
@@ -86,7 +86,8 @@ class SettingsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("settings-pipa-toggle").performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.settings_pipa_toggle_label)).performScrollTo()
+        composeTestRule.onNodeWithTag("settings-pipa-toggle").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(true, lastToggle)

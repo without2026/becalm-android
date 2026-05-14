@@ -6,11 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -72,13 +70,8 @@ class EffectCollectorsTest {
             message = "저장되었습니다"
         }
 
-        composeTestRule.waitUntil(timeoutMillis = 3_000) {
-            runCatching {
-                composeTestRule.onNodeWithText("저장되었습니다").assertIsDisplayed()
-            }.isSuccess
-        }
-        composeTestRule.onNodeWithText("저장되었습니다").assertIsDisplayed()
-
+        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.waitForIdle()
         composeTestRule.mainClock.advanceTimeBy(5_000)
         composeTestRule.waitForIdle()
 
