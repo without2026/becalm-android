@@ -10,6 +10,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.becalm.android.productanalytics.NoopProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
 import com.becalm.android.ui.components.BecalmBottomNavigation
 import com.becalm.android.ui.navigation.BecalmNavHost
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -36,6 +39,7 @@ private val TAB_ROUTES = setOf(
 public fun BecalmApp(
     pendingDeepLinkRoute: String? = null,
     onDeepLinkConsumed: () -> Unit = {},
+    productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient,
 ) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
@@ -48,6 +52,29 @@ public fun BecalmApp(
         navController.addOnDestinationChangedListener(listener)
         onDispose {
             navController.removeOnDestinationChangedListener(listener)
+        }
+    }
+
+    DisposableEffect(currentRoute) {
+        val screenName = analyticsScreenName(currentRoute)
+        val startedAt = System.currentTimeMillis()
+        if (screenName != null) {
+            productAnalytics.track(
+                ProductAnalyticsNames.SCREEN_VIEWED,
+                properties = mapOf("screen" to screenName),
+            )
+        }
+        onDispose {
+            if (screenName != null) {
+                productAnalytics.track(
+                    ProductAnalyticsNames.SCREEN_EXITED,
+                    properties = mapOf(
+                        "screen" to screenName,
+                        "duration_seconds" to ((System.currentTimeMillis() - startedAt).coerceAtLeast(0L) / 1_000L).toInt(),
+                        "is_core_screen" to true,
+                    ),
+                )
+            }
         }
     }
 
@@ -75,3 +102,14 @@ public fun BecalmApp(
         )
     }
 }
+
+private fun analyticsScreenName(route: String?): String? =
+    when (route) {
+        BecalmRoute.Today.path -> "today"
+        BecalmRoute.Persons.path -> "persons"
+        BecalmRoute.PersonDetail.PATH -> "person_detail"
+        BecalmRoute.RawEventDetail.PATH -> "raw_event_detail"
+        BecalmRoute.Commitments.path -> "commitments"
+        BecalmRoute.CommitmentDetail.PATH -> "commitment_detail"
+        else -> null
+    }

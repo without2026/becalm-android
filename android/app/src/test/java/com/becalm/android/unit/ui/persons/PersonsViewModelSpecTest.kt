@@ -3,6 +3,8 @@ package com.becalm.android.unit.ui.persons
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
 import com.becalm.android.ui.persons.PersonListProjection
 import com.becalm.android.ui.persons.PersonRow
 import com.becalm.android.ui.persons.PersonSectionKind
@@ -14,6 +16,8 @@ import com.becalm.android.ui.persons.PersonsSortOrder
 import com.becalm.android.ui.persons.PersonsScreenProjectionPort
 import com.becalm.android.ui.persons.PersonsViewModel
 import com.becalm.android.ui.persons.UnassignedEventSummary
+import com.becalm.android.ui.persons.personsSearchRankBucket
+import com.becalm.android.ui.persons.personsSearchResultCountBucket
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +48,7 @@ class PersonsViewModelSpecTest {
     private val projectionPort = FakePersonsScreenProjectionPort()
     private val refreshCoordinator = FakePersonsRefreshCoordinator()
     private val manualMatchRepository: PersonManualMatchRepository = mockk(relaxed = true)
+    private val productAnalytics = RecordingProductAnalyticsClient()
 
     @Before
     fun setUp() {
@@ -156,6 +161,86 @@ class PersonsViewModelSpecTest {
         advanceUntilIdle()
         assertEquals("", viewModel.uiState.value.query)
         assertEquals(2, viewModel.uiState.value.people.size)
+    }
+
+    @Test
+    fun `search analytics emits debounced performed event with only result count bucket`() = runTest {
+        projectionPort.people.value = pageOf(
+            person(ref = "lee@example.com", displayName = "Minji Lee"),
+            person(ref = "kim@example.com", displayName = "Kim Chulsoo"),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        assertEquals(emptyList<TrackedProductEvent>(), productAnalytics.events)
+
+        viewModel.onQueryChange("lee")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+        viewModel.onQueryChange("lee")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        val event = productAnalytics.events.single()
+        assertEquals(ProductAnalyticsNames.SEARCH_PERFORMED, event.eventName)
+        assertEquals("persons", event.properties["surface"])
+        assertEquals("1", event.properties["result_count_bucket"])
+        assertFalse(event.properties.containsKey("query"))
+        assertFalse(event.properties.containsKey("person_id"))
+    }
+
+    @Test
+    fun `search result bucket helper matches metric contract`() {
+        assertEquals("0", personsSearchResultCountBucket(0))
+        assertEquals("1", personsSearchResultCountBucket(1))
+        assertEquals("2_5", personsSearchResultCountBucket(2))
+        assertEquals("2_5", personsSearchResultCountBucket(5))
+        assertEquals("6_plus", personsSearchResultCountBucket(6))
+    }
+
+    @Test
+    fun `search to detail analytics emits rank bucket without person identifiers`() = runTest {
+        projectionPort.people.value = pageOf(
+            person(ref = "person-1", displayName = "Person One"),
+            person(ref = "person-2", displayName = "Person Two"),
+            person(ref = "person-3", displayName = "Person Three"),
+            person(ref = "person-4", displayName = "Person Four"),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onSearchResultPersonClick("person-1")
+        assertEquals(emptyList<TrackedProductEvent>(), productAnalytics.events)
+
+        viewModel.onQueryChange("Person")
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        viewModel.onSearchResultPersonClick("person-1")
+        viewModel.onSearchResultPersonClick("person-3")
+        viewModel.onSearchResultPersonClick("person-4")
+
+        val detailEvents = productAnalytics.events.filter { it.eventName == ProductAnalyticsNames.SEARCH_TO_DETAIL }
+        assertEquals(3, detailEvents.size)
+        assertEquals("top_1", detailEvents[0].properties["result_rank_bucket"])
+        assertEquals("top_3", detailEvents[1].properties["result_rank_bucket"])
+        assertEquals("below_3", detailEvents[2].properties["result_rank_bucket"])
+        detailEvents.forEach { event ->
+            assertEquals("persons", event.properties["surface"])
+            assertEquals("person", event.properties["target_type"])
+            assertFalse(event.properties.containsKey("query"))
+            assertFalse(event.properties.containsKey("person_id"))
+        }
+    }
+
+    @Test
+    fun `search rank bucket helper matches metric contract`() {
+        assertEquals("top_1", personsSearchRankBucket(0))
+        assertEquals("top_3", personsSearchRankBucket(1))
+        assertEquals("top_3", personsSearchRankBucket(2))
+        assertEquals("below_3", personsSearchRankBucket(3))
+        assertEquals("below_3", personsSearchRankBucket(-1))
     }
 
     @Test
@@ -286,6 +371,7 @@ class PersonsViewModelSpecTest {
         projectionPort = projectionPort,
         refreshCoordinator = refreshCoordinator,
         manualMatchRepository = manualMatchRepository,
+        productAnalytics = productAnalytics,
         ioDispatcher = testDispatcher,
     )
 
@@ -382,4 +468,28 @@ class PersonsViewModelSpecTest {
             return snapshot
         }
     }
+
+    private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
+        val events = mutableListOf<TrackedProductEvent>()
+
+        override fun track(
+            eventName: String,
+            properties: Map<String, Any?>,
+            sessionId: String?,
+        ) {
+            events += TrackedProductEvent(
+                eventName = eventName,
+                properties = properties,
+                sessionId = sessionId,
+            )
+        }
+
+        override fun flush() = Unit
+    }
+
+    private data class TrackedProductEvent(
+        val eventName: String,
+        val properties: Map<String, Any?>,
+        val sessionId: String?,
+    )
 }
