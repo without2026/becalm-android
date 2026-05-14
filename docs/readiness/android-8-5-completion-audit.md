@@ -1,7 +1,7 @@
 # Android 8.5 Completion Audit
 
 Date: 2026-05-15 KST
-Executable code verified at: `9c3119b`
+Executable code verified at: `a70d273`
 
 Scope: Android beta-readiness hardening excluding Firebase Crashlytics and
 Amplitude SDK/client instrumentation. Those observability SDK tasks are tracked
@@ -15,13 +15,13 @@ self-scoring; the final score is assigned by the reviewer.
 | Requirement | Evidence |
 |---|---|
 | Improve beta readiness using the agreed rubric, excluding analytics SDK work | Scope note in `docs/readiness/android-8-5-hardening-checklist.md`; `.pipeline/platform.yml` declares `firebase_crashlytics_planned` and `amplitude_planned` |
-| Keep Android deterministic gates green | `Android Deterministic Gates` run `25873237888`, conclusion `success` |
-| Keep Android tests green | `Android Tests` run `25873237914`, conclusion `success` |
-| Verify emulator instrumentation | `instrumented-tests` job in run `25873237914`, conclusion `success` |
-| Verify release smoke | `release-smoke` job in run `25873237914`, conclusion `success` |
-| Verify unit tests | `unit-tests` job in run `25873237914`, conclusion `success` |
-| Verify backend optional tests | `backend-tests` job in run `25873237914`, conclusion `success` |
-| Verify staging deploy does not block main | `Deploy Staging` run `25873234112`, conclusion `success` |
+| Keep Android deterministic gates green | `Android Deterministic Gates` run `25875177248`, conclusion `success` |
+| Keep Android tests green | `Android Tests` run `25875177207`, conclusion `success` |
+| Verify emulator instrumentation | `instrumented-tests` job in run `25875177207`, conclusion `success` |
+| Verify release smoke | `release-smoke` job in run `25875177207`, conclusion `success` |
+| Verify unit tests | `unit-tests` job in run `25875177207`, conclusion `success` |
+| Verify backend optional tests | `backend-tests` job in run `25875177207`, conclusion `success` |
+| Verify staging deploy does not block main | `Deploy Staging` run `25875168351`, conclusion `success` |
 | Preserve failure evidence for CI triage | Artifacts exist for `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` |
 | Enforce beta-readiness performance/logcat smoke criteria | `qa/emulator/scripts/measure_android_readiness.sh` fails by default on unavailable/over-threshold cold start, unavailable/over-threshold PSS, or app fatal/ANR/OOM logcat patterns |
 | Prevent long-running CI jobs from hanging indefinitely | `.github/workflows/android-tests.yml` and `.github/workflows/android-gates.yml` define job-level `timeout-minutes`; mirrored in `.pipeline/adapters/android/test.yml` and `.pipeline/adapters/android/gates.yml` |
@@ -33,9 +33,9 @@ self-scoring; the final score is assigned by the reviewer.
 
 | Workflow | Run | Commit | Result |
 |---|---:|---|---|
-| Android Deterministic Gates | `25873237888` | `9c3119b` | success |
-| Android Tests | `25873237914` | `9c3119b` | success |
-| Deploy Staging | `25873234112` | `9c3119b` | success |
+| Android Deterministic Gates | `25875177248` | `a70d273` | success |
+| Android Tests | `25875177207` | `a70d273` | success |
+| Deploy Staging | `25875168351` | `a70d273` | success |
 
 Android Tests job results:
 
@@ -51,15 +51,18 @@ Artifact evidence:
 
 | Artifact | Size |
 |---|---:|
-| android-gate-reports | 94,095 bytes |
-| android-unit-test-reports | 334,892 bytes |
-| android-instrumented-test-reports | 905,255 bytes |
-| android-release-smoke-reports | 68,769 bytes |
+| android-gate-reports | 94,243 bytes |
+| android-unit-test-reports | 340,153 bytes |
+| android-instrumented-test-reports | 898,708 bytes |
+| android-release-smoke-reports | 68,947 bytes |
 
 ## Local Verification
 
 | Command | Result |
 |---|---|
+| `./gradlew lint testDebugUnitTest assembleRelease lintRelease --no-daemon --console=plain` | pass |
+| `./gradlew assembleDebugAndroidTest --no-daemon --console=plain` | pass |
+| `./gradlew testDebugUnitTest --tests '*LoggerObservabilityClientSpecTest' --no-daemon --console=plain` | pass |
 | `./gradlew testDebugUnitTest --tests '*AndroidBuildWorkflowSpecTest' --no-daemon --console=plain` | pass |
 | `./gradlew testDebugUnitTest --tests '*ReadinessQaScriptSpecTest' --no-daemon --console=plain` | pass |
 | `GITHUB_ACTIONS=true GITHUB_SHA=$(git rev-parse HEAD) python3 .pipeline/core/spec-coverage.py` | pass |
