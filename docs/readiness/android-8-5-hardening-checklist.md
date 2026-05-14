@@ -2,7 +2,7 @@
 
 This checklist maps the current beta-readiness target to concrete evidence. It is intentionally product-facing: a passing unit test is not enough unless it covers a user-visible requirement.
 
-Last updated: 2026-05-15 KST.
+Last updated: 2026-05-15 KST, main `c76fbc1`.
 
 Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that analytics/observability SDK implementation.
 
@@ -100,7 +100,7 @@ Current main evidence:
 
 - Korean UI copy invariant tests exist and are part of `testDebugUnitTest`.
 - Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
-- Current environment has no attached emulator, so this document does not claim a fresh live UI smoke for `08f19af`.
+- Current environment has no attached local emulator, so this document relies on the CI emulator run for the latest connected Android test evidence.
 
 ## Release Engineering / CI
 
@@ -117,7 +117,14 @@ Required evidence:
 
 Current main evidence:
 
-- Latest `Deploy Staging` run succeeded on main `08f19af`: https://github.com/without2026/becalm-android/actions/runs/25860968053
+- Latest `Android Deterministic Gates` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870504542
+- Latest `Android Tests` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870504458
+- Latest `Deploy Staging` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870500655
+- Latest CI artifacts were uploaded and are not expired:
+  - `android-gate-reports`
+  - `android-unit-test-reports`
+  - `android-instrumented-test-reports`
+  - `android-release-smoke-reports`
 - `.github/workflows/deploy-staging.yml` now runs `android-staging-preflight` and skips Firebase App Distribution with a warning until required Firebase/runtime/signing secrets are present.
 - `.github/workflows/deploy-production.yml` builds Android AAB through `adapter-build.yml` and uploads to Play Console using `r0adkll/upload-google-play@v1`.
 - `adapter-build.yml` runs `verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured` before protected Android release builds.
