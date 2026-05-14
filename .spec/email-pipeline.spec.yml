@@ -66,10 +66,10 @@ behaviors:
 
   - id: EMAIL-007
     type: resilience
-    description: "HTML 파싱 실패(잘못된 HTML / charset mismatch / Jsoup timeout)는 raw event를 quarantine으로 넘기지 않고 event_snippet=subject로 graceful degrade한다. Sentry에만 parse_failure 이벤트 기록"
+    description: "HTML 파싱 실패(잘못된 HTML / charset mismatch / Jsoup timeout)는 raw event를 quarantine으로 넘기지 않고 event_snippet=subject로 graceful degrade한다. ObservabilityClient에만 parse_failure 이벤트 기록"
     trigger: "Jsoup.parse() 또는 charset decoding 실패"
     precondition: "body_html만 존재 + 파싱 예외 발생"
-    expected: "raw_ingestion_events 정상 INSERT(event_snippet=subject 앞 200자), EmailBody.body_plain=null + body_html=원본 보존 + parse_failed=true 플래그. Sentry에 {error:'email_html_parse_failed', message_id, provider} 이벤트. 사용자는 원문보기 UI에서 body_html을 WebView로 렌더링 가능(post-MVP)"
+    expected: "raw_ingestion_events 정상 INSERT(event_snippet=subject 앞 200자), EmailBody.body_plain=null + body_html=원본 보존 + parse_failed=true 플래그. ObservabilityClient에 {error:'email_html_parse_failed', message_id, provider} 이벤트. 사용자는 원문보기 UI에서 body_html을 WebView로 렌더링 가능(post-MVP)"
     source: phase2-acceptance
     tests: []
 

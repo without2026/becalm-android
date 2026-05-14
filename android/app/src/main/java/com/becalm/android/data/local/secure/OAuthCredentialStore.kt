@@ -287,7 +287,7 @@ public class OAuthCredentialStore {
      * `BecalmApplication.warmUp()` would then republish that token for the next user's
      * session (PIPA cross-account invariant breach, spec 153).
      *
-     * Logs when `commit()` returns false so operators / Sentry can correlate rare
+     * Logs when `commit()` returns false so operators can correlate rare
      * Keystore damage cases; the sign-out flow continues regardless because there is
      * no meaningful recovery path beyond a fresh reinstall.
      */

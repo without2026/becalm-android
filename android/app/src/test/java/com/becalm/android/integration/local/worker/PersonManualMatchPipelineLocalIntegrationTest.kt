@@ -127,6 +127,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
+    // spec: RUX-007
     fun `manual match can resolve directly to existing person id choice`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
@@ -191,6 +192,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
         val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
         assertEquals(listOf("raw:raw-speaker-1"), interactions.map { it.sourceRef })
+        assertEquals("Customer", db.personIndexDao().findPersonForMemory(USER_ID, personId)?.displayName)
         val participants = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
             userId = USER_ID,
             sourceEventIds = listOf("raw-speaker-1"),

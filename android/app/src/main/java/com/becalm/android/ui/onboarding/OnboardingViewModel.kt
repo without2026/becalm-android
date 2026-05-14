@@ -581,8 +581,8 @@ public class OnboardingViewModel @Inject constructor(
         setError = { message -> _uiState.update { it.copy(error = message) } },
     )
 
-    // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시 Sentry 에
-    // onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
+    // spec: ONB-007 — "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생 시
+    // onboarding_step_failed 관측 이벤트 전송됨 (step 이름, error 포함)"
     /**
      * Emits the `onboarding_step_failed` observability event used by downstream onboarding
      * screens (Gmail / Outlook / IMAP plans S6-F/G/H) when an OAuth launcher reports a

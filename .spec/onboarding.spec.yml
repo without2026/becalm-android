@@ -96,10 +96,10 @@ behaviors:
 
   - id: ONB-007
     type: lifecycle
-    description: "온보딩 실패 이벤트가 Sentry에 전송된다"
+    description: "온보딩 실패 이벤트가 ObservabilityClient에 전송된다"
     trigger: "온보딩 중 OAuth 인증 실패 또는 권한 거부 발생"
-    precondition: "Sentry DSN 설정됨, 온보딩 진행 중"
-    expected: "Sentry에 onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
+    precondition: "ObservabilityClient binding 활성화, 온보딩 진행 중"
+    expected: "ObservabilityClient에 onboarding_step_failed 이벤트 전송됨 (step 이름, error 포함)"
     source: phase2-acceptance
     tests: []
 

@@ -20,3 +20,11 @@ SUPABASE_ANON_KEY=eyJ...
 # Google Web OAuth 2.0 Client ID used by Credential Manager for Supabase sign-in.
 # Example: 1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com
 google.web.client.id=
+
+# Optional Android release upload signing. Local debug/release smoke builds can
+# omit these. Protected CI builds with require_signing=true fail unless all four
+# values are provided and the keystore file exists.
+# becalm.release.store.file=/absolute/path/to/upload-keystore.jks
+# becalm.release.store.password=
+# becalm.release.key.alias=
+# becalm.release.key.password=

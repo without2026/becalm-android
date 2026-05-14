@@ -24,7 +24,8 @@ import okhttp3.Dispatcher
  * ## OkHttp interceptor chain (outermost → innermost)
  *
  * 1. [HttpLoggingInterceptor] — logs request/response details. `BASIC` in debug builds,
- *    `NONE` in release builds.
+ *    `NONE` in release builds. Sensitive auth/cookie headers are redacted even in
+ *    debug QA logs.
  * 2. [IdempotencyInterceptor] — converts the `X-BeCalm-Idempotent: 1` sentinel header into
  *    a real `Idempotency-Key: <uuid>` once per logical OkHttp call. It sits outside retry
  *    and auth so 5xx/408/429 retries and 401 refresh retries reuse the same key.
@@ -57,6 +58,10 @@ public object ApiFactory {
     ): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
             level = if (isDebug) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
+            redactHeader("Authorization")
+            redactHeader("Proxy-Authorization")
+            redactHeader("Cookie")
+            redactHeader("Set-Cookie")
         }
 
         return OkHttpClient.Builder()

@@ -55,7 +55,7 @@ behaviors:
     screen: "QuarantineDetailSheet"
     interaction: "voice/call_recording + reason='output_truncated' quarantine 탭"
     precondition: "raw_ingestion_events(source_type IN ('voice','call_recording'), sync_status='quarantined', quarantine_reason='output_truncated')"
-    expected: "ERR-004의 바텀시트 상단에 빨간색 안내 카드 표시. [재시도] 버튼은 숨김(같은 결과 반복 — 유도하지 않음), [삭제] 버튼만 표시. Sentry 이벤트 'voice_output_truncated_shown' (raw_event_id, duration_seconds) 전송 — post-MVP overlap-chunk 설계 입력으로 활용"
+    expected: "ERR-004의 바텀시트 상단에 빨간색 안내 카드 표시. [재시도] 버튼은 숨김(같은 결과 반복 — 유도하지 않음), [삭제] 버튼만 표시. ObservabilityClient 이벤트 'voice_output_truncated_shown' (raw_event_id, duration_seconds) 전송 — post-MVP overlap-chunk 설계 입력으로 활용"
     source: phase2-acceptance
     tests: []
 
@@ -65,7 +65,7 @@ behaviors:
     screen: "any"
     interaction: "Railway API 호출이 HTTP 429 수신"
     precondition: "Retry-After 헤더 존재(초 단위)"
-    expected: "Snackbar 3초 표시. UploadWorker/CommitmentExtractionWorker는 OneTimeWorkRequest에 initialDelay = Retry-After seconds로 재enqueue. 429가 5회 연속 발생하면 Sentry 'rate_limit_sustained' 이벤트 전송 + 배너 전환 '서버 혼잡 — 자동 동기화가 일시 중단되었습니다. 잠시 후 재시도' (사용자에게 pull-to-refresh 유도)"
+    expected: "Snackbar 3초 표시. UploadWorker/CommitmentExtractionWorker는 OneTimeWorkRequest에 initialDelay = Retry-After seconds로 재enqueue. 429가 5회 연속 발생하면 ObservabilityClient 'rate_limit_sustained' 이벤트 전송 + 배너 전환 '서버 혼잡 — 자동 동기화가 일시 중단되었습니다. 잠시 후 재시도' (사용자에게 pull-to-refresh 유도)"
     source: phase2-acceptance
     tests: []
 
@@ -101,6 +101,6 @@ behaviors:
 
 invariants:
   - "모든 실패 상태는 사용자가 **복구 경로를 볼 수 있어야** 한다 — 조용한 실패 금지 (quarantine은 배지로, disconnect은 배너로, offline은 badge로 노출)"
-  - "복구 불가능한 실패(output_truncated, 영구 OAuth revoke)는 Sentry로 수집되어 post-MVP에 대응"
+  - "복구 불가능한 실패(output_truncated, 영구 OAuth revoke)는 ObservabilityClient 이벤트로 수집되어 post-MVP에 대응"
   - "로컬 Room 데이터는 모든 오류 상태에서 정상 렌더링되며 사용자는 읽기·체크 완료 등 read/action 경로를 계속 사용할 수 있다"
   - "권한 revoke은 앱 강제 종료/로그아웃이 아닌 feature-level graceful degrade로 처리한다"

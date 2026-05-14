@@ -52,7 +52,7 @@ behaviors:
     description: "READ_MEDIA_AUDIO 권한 미부여 시 ContentObserver가 등록되지 않고 VoiceUploadWorker도 enqueue되지 않는다"
     os_permission: "READ_MEDIA_AUDIO"
     precondition: "앱 설치 직후, READ_MEDIA_AUDIO 권한 미부여"
-    expected: "ContentObserver 등록 안 됨. raw_ingestion_events에 source_type='voice' 신규 행 없음. Sentry에 onboarding_permission_denied(source='voice') 이벤트 전송됨. VoiceUploadWorker는 unique work 이름으로 enqueue되지 않음."
+    expected: "ContentObserver 등록 안 됨. raw_ingestion_events에 source_type='voice' 신규 행 없음. ObservabilityClient에 onboarding_permission_denied(source='voice') 이벤트 전송됨. VoiceUploadWorker는 unique work 이름으로 enqueue되지 않음."
     source: phase2-acceptance
     tests: []
 
@@ -61,7 +61,7 @@ behaviors:
     description: "VoiceUploadWorker는 네트워크/서버 오류 시 지수 백오프로 최대 3회 재시도한 후 quarantine으로 전이한다"
     trigger: "Railway `/v1/extractions/commitments` 호출이 HTTP 500/502/503 또는 IOException으로 실패"
     precondition: "VoiceUploadWorker 실행 중, max_attempts=3, initial_backoff=30s, multiplier=2"
-    expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed', Sentry에 voice_upload_quarantined 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 즉시 failed(retry_count=0 유지). HTTP 413/422는 retryable=false로 즉시 quarantine."
+    expected: "1차 실패 → retry_count=1, 30s 백오프. 2차 실패 → retry_count=2, 60s 백오프. 3차 실패 → retry_count=3, sync_status='failed', ObservabilityClient에 voice_upload_quarantined 이벤트 전송됨. HTTP 401 수신 시: AuthInterceptor refresh 후 1회 재시도, 그래도 401이면 즉시 failed(retry_count=0 유지). HTTP 413/422는 retryable=false로 즉시 quarantine."
     source: phase2-acceptance
     tests: []
 

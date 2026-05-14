@@ -13,11 +13,11 @@ public typealias ObservabilityTags = Map<String, String>
 /**
  * Vendor-neutral façade for structured events, breadcrumbs, and exception reports.
  *
- * ## Why not call Sentry / Firebase directly?
+ * ## Why not call Firebase directly?
  * ONB-007 and the broader operational playbook require a single abstraction so that
  * (1) debug builds with no configured DSN stay crash-free via a no-op impl,
  * (2) tests can assert emitted events without reaching into a third-party SDK, and
- * (3) the production backend can be swapped (Sentry → Firebase Crashlytics → OTEL)
+ * (3) the production backend can be swapped (logger → Firebase Crashlytics → OTEL)
  * without touching every call site. PIPA also requires filtering PII out of payloads
  * in one place — concrete implementations scrub tokens / emails before forwarding.
  *

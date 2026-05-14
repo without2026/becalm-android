@@ -7,9 +7,35 @@ on:
         required: false
         default: "release"
         type: string
+      require_signing:
+        description: "Fail protected release builds when Android upload signing is missing"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
+  read-config:
+    runs-on: ubuntu-latest
+    outputs:
+      root: ${{ steps.config.outputs.root }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read project_root
+        id: config
+        run: |
+          pip install -q pyyaml 2>/dev/null || true
+          PROJECT_ROOT=$(python3 -c "
+          import yaml
+          with open('.pipeline/platform.yml') as f:
+              print(yaml.safe_load(f).get('project_root', '.'))
+          ")
+          echo "root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
+
   build-aab:
+    needs: read-config
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,30 +46,24 @@ jobs:
           distribution: temurin
 
       - name: Build app bundle
-        working-directory: BeCalmv3/android
+        working-directory: ${{ needs.read-config.outputs.root }}/android
         run: |
-          if [ "${{ inputs.build_type }}" = "release" ]; then
-            ./gradlew bundleRelease
-          else
-            ./gradlew bundleDebug
+          chmod +x ./gradlew 2>/dev/null || true
+          if [ "${{ inputs.require_signing }}" = "true" ]; then
+            ./gradlew verifyReleaseSigningConfigured --no-daemon --console=plain
           fi
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            ./gradlew bundleRelease --no-daemon --console=plain
+          else
+            ./gradlew bundleDebug --no-daemon --console=plain
+          fi
+
+      - name: Android artifact size check
+        working-directory: ${{ needs.read-config.outputs.root }}/android
+        run: bash ../.pipeline/adapters/android/perf-check.sh
 
       - uses: actions/upload-artifact@v4
         with:
           name: android-aab
-          path: BeCalmv3/android/app/build/outputs/bundle/**/*.aab
-
-  build-api:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Verify API builds
-        working-directory: BeCalmv3/api
-        run: |
-          pip install -r requirements.txt 2>/dev/null || true
-          python -c "from app.main import app; print('[PASS] API imports ok')"
+          path: ${{ needs.read-config.outputs.root }}/android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error

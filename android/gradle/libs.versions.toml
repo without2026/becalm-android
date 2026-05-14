@@ -47,6 +47,7 @@ androidx-espresso = "3.7.0"
 androidx-benchmark = "1.4.1"
 androidx-profileinstaller = "1.4.1"
 androidx-uiautomator = "2.3.0"
+owasp-dependency-check = "12.2.1"
 
 [libraries]
 # ─── Kotlin / KotlinX ───────────────────────────────────────────────────────
@@ -200,3 +201,4 @@ hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "androidx-benchmark" }
+owasp-dependencycheck = { id = "org.owasp.dependencycheck", version.ref = "owasp-dependency-check" }

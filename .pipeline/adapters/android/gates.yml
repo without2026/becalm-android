@@ -45,8 +45,18 @@ jobs:
             echo "[WARN] Baseline created"
           fi
 
+      - name: Cache OWASP Dependency-Check data
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/dependency-check-data
+          key: dependency-check-${{ runner.os }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+
       - name: Gradle dependency check
         working-directory: ${{ steps.config.outputs.root }}/android
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: ./gradlew dependencyCheckAnalyze
 
       - name: Android Lint (security + a11y)

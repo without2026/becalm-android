@@ -17,6 +17,7 @@ if [[ ! -f "$MEETING_FIXTURE" ]]; then
   MEETING_FIXTURE="$ROOT_DIR/qa/emulator/tmp/clova_meeting_001_60s.wav"
 fi
 REMOTE_MEETING_DIR="/sdcard/Music/BeCalmQa/meetings"
+RESET_APP_DATA="${BECALM_QA_RESET_APP_DATA:-1}"
 
 if [[ ! -x "$ADB_BIN" ]]; then
   echo "adb not found or not executable: $ADB_BIN" >&2
@@ -25,6 +26,10 @@ if [[ ! -x "$ADB_BIN" ]]; then
 fi
 
 "$ADB_BIN" -s "$DEVICE" wait-for-device
+"$ADB_BIN" -s "$DEVICE" shell am force-stop com.becalm.android >/dev/null 2>&1 || true
+if [[ "$RESET_APP_DATA" == "1" ]]; then
+  "$ADB_BIN" -s "$DEVICE" shell pm clear com.becalm.android >/dev/null
+fi
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.photopicker >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.apps.photos >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell mkdir -p "$REMOTE_DIR"
@@ -61,7 +66,6 @@ done < <(
   -n com.becalm.android/.debug.DebugPersonRenderingSeedReceiver >/dev/null
 
 sleep 1
-"$ADB_BIN" -s "$DEVICE" shell am force-stop com.becalm.android >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell am start -S \
   -a android.intent.action.VIEW \
   -d becalm://persons \

@@ -1,0 +1,37 @@
+module: release-engineering
+platform: android
+version: 1
+
+behaviors:
+  - id: REL-001
+    type: ci_contract
+    description: "Android adapter build workflow는 electron 전용 fallback이 아니라 Android release AAB artifact를 생성한다"
+    trigger: "workflow_call adapter=android"
+    precondition: ".pipeline/platform.yml project_root가 현재 Android repo root를 가리킴"
+    expected: "adapter-build.yml은 project_root/android에서 Gradle bundleRelease를 실행하고 android-aab artifact를 업로드한다. legacy BeCalmv3 경로를 참조하지 않는다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
+  - id: REL-002
+    type: ci_contract
+    description: "보호된 Android release build는 upload signing 설정이 없으면 AAB 생성을 차단한다"
+    trigger: "workflow_call adapter=android require_signing=true"
+    precondition: "Play Console internal track 또는 production deploy용 build"
+    expected: "adapter-build.yml은 bundleRelease 전에 Gradle verifyReleaseSigningConfigured를 실행한다. Gradle task는 upload keystore file/password/alias/key password가 모두 있고 keystore 파일이 존재할 때만 통과한다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
+  - id: REL-003
+    type: privacy_contract
+    description: "Production source는 raw android.util.Log 호출이나 민감 header 노출 가능한 HTTP logging을 허용하지 않는다"
+    trigger: "release/debug QA build"
+    precondition: "앱이 auth token, id-bearing route, cookie-bearing OAuth flow를 처리함"
+    expected: "production Kotlin source는 Timber-backed Logger abstraction 또는 no-op release logger만 사용한다. OkHttp HTTP logger는 Authorization, Cookie, Set-Cookie, Proxy-Authorization header를 redact한다"
+    source: beta-readiness-hardening
+    tests: [AndroidLoggingPrivacySpecTest]
+
+invariants:
+  - "Android release artifact 경로는 .pipeline/platform.yml의 project_root를 기준으로 계산한다"
+  - "adapter=android는 unsupported-adapter job으로 떨어지면 안 된다"
+  - "로컬 release smoke는 signing 없이도 가능하지만, require_signing=true 배포 경로는 unsigned artifact를 만들 수 없다"
+  - "route id, auth token, cookie, email, phone number는 logcat에 원문으로 기록하지 않는다"

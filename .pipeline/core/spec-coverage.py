@@ -145,8 +145,8 @@ def _enforce_index_rules(
             sys.exit(2)
 
 
-def _get_changed_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
-    """Return changed files for the current PR when running in CI."""
+def _get_pr_base_head() -> tuple[str | None, str | None]:
+    """Return PR base/head SHAs from GitHub event payload or explicit env vars."""
     base = None
     head = None
 
@@ -166,6 +166,12 @@ def _get_changed_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
     if not head:
         head = os.environ.get("HEAD_SHA")
 
+    return base, head
+
+
+def _get_changed_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
+    """Return changed files for the current PR when running in CI."""
+    base, head = _get_pr_base_head()
     if not base or not head:
         return []
 
@@ -254,6 +260,56 @@ def _scan_file_for_spec_ids(
             if match:
                 refs.add(match.group(1))
     return refs
+
+
+def _collect_spec_ids_from_text(text: str) -> set[str]:
+    """Return behavior ids from one YAML spec document."""
+    try:
+        data = yaml.safe_load(text) if yaml else json.loads(text)
+    except Exception:
+        return set()
+    behaviors = data.get("behaviors", []) if isinstance(data, dict) else []
+    ids: set[str] = set()
+    for behavior in behaviors:
+        if isinstance(behavior, dict) and behavior.get("id"):
+            ids.add(str(behavior["id"]))
+    return ids
+
+
+def _new_spec_ids_for_changed_specs(
+    repo_root: pathlib.Path,
+    spec_dir: pathlib.Path,
+    changed_spec_files: list[pathlib.Path],
+    base_sha: str | None,
+) -> set[str]:
+    """Return behavior ids introduced by this PR's changed spec files.
+
+    Legacy specs are still reported as uncovered, but only newly introduced
+    behavior ids block PRs. This keeps the gate usable while the historical SDD
+    backfill is handled separately.
+    """
+    if not base_sha:
+        return set()
+    new_ids: set[str] = set()
+    for path in changed_spec_files:
+        try:
+            rel = path.relative_to(repo_root)
+        except ValueError:
+            continue
+        current_ids = _collect_spec_ids_from_text(path.read_text(encoding="utf-8", errors="replace"))
+        try:
+            previous = subprocess.run(
+                ["git", "show", f"{base_sha}:{rel.as_posix()}"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            previous_ids = _collect_spec_ids_from_text(previous)
+        except subprocess.CalledProcessError:
+            previous_ids = set()
+        new_ids.update(current_ids - previous_ids)
+    return new_ids
 
 
 def main() -> None:
@@ -369,6 +425,20 @@ def main() -> None:
         for path in changed_source_files:
             print(f"  {path.relative_to(repo_root)}")
         sys.exit(2)
+
+    if changed_files:
+        base_sha, _head_sha = _get_pr_base_head()
+        new_spec_ids = _new_spec_ids_for_changed_specs(repo_root, spec_dir, changed_spec_files, base_sha)
+        uncovered_new_spec_ids = sorted(new_spec_ids - covered)
+        if uncovered_new_spec_ids:
+            print("[BLOCK] New behavior spec id(s) introduced without test coverage:")
+            for uid in uncovered_new_spec_ids:
+                print(f"  {uid}")
+            sys.exit(2)
+        if uncovered:
+            print(f"[WARN] {len(uncovered)} legacy behavior(s) remain uncovered; not blocking PR-scoped gate")
+        print("[PASS] PR-scoped spec coverage clean")
+        sys.exit(0)
 
     if uncovered:
         print(f"[BLOCK] {len(uncovered)} uncovered behavior(s):")

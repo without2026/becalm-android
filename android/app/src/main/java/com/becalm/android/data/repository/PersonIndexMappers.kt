@@ -8,6 +8,7 @@ import com.becalm.android.domain.person.PersonIdentityTypes
 
 internal fun SourceEventParticipantEntity.toPersonEntityOrNull(): PersonEntity? {
     val id = personId ?: return null
+    if (identityType?.let(PersonIdentityTypes::isSourceLocal) == true) return null
     return PersonEntity(
         id = id,
         userId = userId,
