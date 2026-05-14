@@ -21,6 +21,23 @@ private val TAB_ROUTES = setOf(
     BecalmRoute.Commitments.path,
 )
 
+private val PUBLIC_AUTH_ROUTES = setOf(
+    BecalmRoute.Splash.path,
+    BecalmRoute.Terms.path,
+    BecalmRoute.Login.path,
+)
+
+internal fun shouldDispatchPendingDeepLink(
+    pendingRoute: String?,
+    currentRoute: String?,
+): Boolean {
+    if (pendingRoute.isNullOrBlank()) return false
+    if (pendingRoute in PUBLIC_AUTH_ROUTES) return currentRoute != null
+    return currentRoute != null &&
+        currentRoute !in PUBLIC_AUTH_ROUTES &&
+        !currentRoute.startsWith("onboarding/")
+}
+
 /**
  * Root composable that hosts the nav controller, scaffold, and bottom navigation.
  *
@@ -51,9 +68,10 @@ public fun BecalmApp(
         }
     }
 
-    LaunchedEffect(pendingDeepLinkRoute) {
-        if (!pendingDeepLinkRoute.isNullOrBlank()) {
-            navController.navigate(pendingDeepLinkRoute)
+    LaunchedEffect(pendingDeepLinkRoute, currentRoute) {
+        if (shouldDispatchPendingDeepLink(pendingDeepLinkRoute, currentRoute)) {
+            val target = requireNotNull(pendingDeepLinkRoute)
+            navController.navigate(target)
             onDeepLinkConsumed()
         }
     }
