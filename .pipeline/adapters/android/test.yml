@@ -123,13 +123,7 @@ jobs:
           api-level: 33
           target: google_apis
           arch: x86_64
-          script: |
-            ROOT="${{ steps.config.outputs.root }}"
-            (
-              cd "$ROOT/android"
-              ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
-            )
-            ADB="$(command -v adb)" ANDROID_SERIAL=emulator-5554 "$ROOT/qa/emulator/scripts/measure_android_readiness.sh"
+          script: bash -lc 'ROOT="${{ steps.config.outputs.root }}"; cd "$ROOT/android"; ./gradlew connectedDebugAndroidTest --no-daemon --console=plain; cd - >/dev/null; ADB="$(command -v adb)" ANDROID_SERIAL=emulator-5554 "$ROOT/qa/emulator/scripts/measure_android_readiness.sh"'
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7
