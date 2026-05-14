@@ -79,9 +79,9 @@ grep -rn "Observability\\|AnalyticsClient" android/app/src/main/java/com/becalm/
 ## 5. Proposed Fix
 
 ### 5.1 Files to change
-- **`app/build.gradle.kts`** — `implementation("Firebase Crashlytics SDK:7.+")` (버전은 lib 매뉴얼 검증). `Firebase Crashlytics configuration follows google-services.json`. Debug 빌드는 optional (DSN empty 면 `ObservabilityClient.Noop` 사용).
+- **`app/build.gradle.kts`** — `implementation("Firebase Crashlytics SDK:7.+")` (버전은 lib 매뉴얼 검증). `Firebase Crashlytics configuration follows google-services.json`. Debug 빌드는 optional (Firebase runtime config 미설정이면 `ObservabilityClient.Noop` 사용).
 - **`BecalmApplication.kt`** — `onCreate` 에서 `Firebase Crashlytics is initialized by Firebase at app startup`. PIPA: `beforeSend` callback 에 email/token pattern regex strip.
-- **`core/di/ObservabilityModule.kt`** — `@Provides @Singleton fun provideObservabilityClient(...): ObservabilityClient` — DSN 존재 시 `Firebase CrashlyticsObservabilityClient`, 아니면 `NoopObservabilityClient`.
+- **`core/di/ObservabilityModule.kt`** — `@Provides @Singleton fun provideObservabilityClient(...): ObservabilityClient` — Firebase runtime config 존재 시 `FirebaseCrashlyticsObservabilityClient`, 아니면 `NoopObservabilityClient`.
 - **`AndroidManifest.xml`** — `<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />` (SDK 33+ 자동 적용).
 - **`ui/onboarding/OnboardingViewModel.kt`** —
   - enum `OnboardingStep` 에 `NOTIFICATION_PERM` 추가 (BATTERY_OPT 앞).
@@ -98,8 +98,8 @@ grep -rn "Observability\\|AnalyticsClient" android/app/src/main/java/com/becalm/
   fun addBreadcrumb(category: String, message: String, data: Map<String, String>)
   fun setUserScope(userId: String?)  // pseudonymous only
   ```
-- **`core/observability/Firebase CrashlyticsObservabilityClient.kt`** — impl wrapping `Firebase Crashlytics SDK.Firebase Crashlytics`.
-- **`core/observability/NoopObservabilityClient.kt`** — debug/DSN 미설정 fallback.
+- **`core/observability/FirebaseCrashlyticsObservabilityClient.kt`** — impl wrapping Firebase Crashlytics.
+- **`core/observability/NoopObservabilityClient.kt`** — debug/Firebase runtime config 미설정 fallback.
 - **`ui/onboarding/NotificationPermissionScreen.kt`** — Compose. Android 13+ 에서 `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())` 로 POST_NOTIFICATIONS. SDK 32 이하는 skip 자동 처리 (step status=SKIPPED).
 - **tests**:
   - `OnboardingViewModelTest.reportOnboardingStepFailed_capturesMessageWithTags` — Fake ObservabilityClient.
@@ -162,7 +162,7 @@ revert 후:
 
 ## Appendix — Session handoff notes
 
-- **왜 `ObservabilityClient` 인터페이스로 감싸는가**: (1) DSN 미설정 debug 빌드에서도 compile 가능, (2) 테스트에서 Fake 주입 용이, (3) Firebase Crashlytics → Firebase Crashlytics 로의 교체 비용 최소화. 간접비용은 class 1개.
+- **왜 `ObservabilityClient` 인터페이스로 감싸는가**: (1) Firebase runtime config 미설정 debug 빌드에서도 compile 가능, (2) 테스트에서 Fake 주입 용이, (3) logger-backed 구현 → Firebase Crashlytics 구현으로의 교체 비용 최소화. 간접비용은 class 1개.
 - **`beforeSend` 에서 strip 해야 할 패턴**: `\\b[\\w.+-]+@[\\w-]+\\.[\\w.-]+\\b` (email), Authorization header, JWT pattern `ey[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`.
 - **`setUserScope`**: Supabase userId UUID 는 고유하지만 PII 아님. Firebase Crashlytics scope 에 기록해도 PIPA 무위반 — 단 `accountEmail` 은 **금지**.
 - **NOTIFICATION_PERM step 위치**: 권고 위치는 ColdSync 직전 (BATTERY_OPT 앞). "로그인 직후" 는 거부 시 온보딩 이탈률 증가 위험.
