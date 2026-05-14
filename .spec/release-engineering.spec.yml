@@ -89,7 +89,7 @@ behaviors:
     description: "Android release verification workflows는 main에서 수동 실행 가능해야 한다"
     trigger: "release manager가 베타 배포 전 Android gates/tests를 재검증함"
     precondition: "로컬 환경에 emulator/device가 없거나 NVD API key가 CI에만 있음"
-    expected: "android-tests.yml과 android-gates.yml은 workflow_call 외에 workflow_dispatch도 지원한다. android-tests.yml은 CI emulator에서 connectedDebugAndroidTest를 실행하고, android-gates.yml은 dependencyCheckAnalyze/lint/size gates를 실행한다"
+    expected: "android-tests.yml과 android-gates.yml은 workflow_call 외에 workflow_dispatch도 지원한다. android-tests.yml은 CI emulator에서 connectedDebugAndroidTest를 실행하고, 앱이 테스트 후 제거되어 있으면 debug APK를 재설치한 뒤 readiness 측정을 실행한다. android-gates.yml은 dependencyCheckAnalyze/lint/size gates를 실행한다"
     source: beta-readiness-hardening
     tests: [AndroidBuildWorkflowSpecTest]
 

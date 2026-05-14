@@ -11,6 +11,8 @@ else
   ADB_BIN="/mnt/c/Users/jakek/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 fi
 PACKAGE_NAME="${BECALM_PACKAGE:-com.becalm.android}"
+ACTIVITY_COMPONENT="${BECALM_ACTIVITY_COMPONENT:-$PACKAGE_NAME/.MainActivity}"
+APP_APK="${BECALM_APK:-$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk}"
 STRICT="${BECALM_READINESS_STRICT:-1}"
 MAX_COLD_START_MS="${BECALM_MAX_COLD_START_MS:-3000}"
 MAX_TOTAL_PSS_KB="${BECALM_MAX_TOTAL_PSS_KB:-262144}"
@@ -51,6 +53,20 @@ digits_only() {
 
 run_adb wait-for-device
 
+section "app_install"
+if run_adb shell pm path "$PACKAGE_NAME" 2>/dev/null | tr -d '\r' | grep -q "^package:"; then
+  metric package_installed "present"
+else
+  metric package_installed "missing"
+  if [[ ! -f "$APP_APK" ]]; then
+    metric app_apk "missing"
+    record_failure "app package missing and APK not found at $APP_APK"
+  else
+    metric app_apk "$APP_APK"
+    run_adb install -r "$APP_APK" | tr -d '\r' | tee -a "$REPORT"
+  fi
+fi
+
 section "device"
 metric model "$(run_adb shell getprop ro.product.model | tr -d '\r')"
 metric android "$(run_adb shell getprop ro.build.version.release | tr -d '\r')"
@@ -66,7 +82,7 @@ START_OUTPUT="$(
   run_adb shell am start -W \
     -a android.intent.action.MAIN \
     -c android.intent.category.LAUNCHER \
-    "$PACKAGE_NAME/.MainActivity" 2>/dev/null | tr -d '\r'
+    "$ACTIVITY_COMPONENT" 2>/dev/null | tr -d '\r'
 )"
 printf '%s\n' "$START_OUTPUT" | tee -a "$REPORT"
 TOTAL_TIME="$(printf '%s\n' "$START_OUTPUT" | awk -F': ' '/TotalTime/ {print $2; exit}')"

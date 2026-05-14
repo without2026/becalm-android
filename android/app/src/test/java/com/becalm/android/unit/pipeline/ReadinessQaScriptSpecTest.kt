@@ -13,6 +13,9 @@ class ReadinessQaScriptSpecTest {
 
         assertTrue(script.contains("command -v adb"))
         assertTrue(script.contains("STRICT=\"\${BECALM_READINESS_STRICT:-1}\""))
+        assertTrue(script.contains("APP_APK=\"\${BECALM_APK:-\$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.apk}\""))
+        assertTrue(script.contains("pm path \"\$PACKAGE_NAME\""))
+        assertTrue(script.contains("run_adb install -r \"\$APP_APK\""))
         assertTrue(script.contains("MAX_COLD_START_MS=\"\${BECALM_MAX_COLD_START_MS:-3000}\""))
         assertTrue(script.contains("MAX_TOTAL_PSS_KB=\"\${BECALM_MAX_TOTAL_PSS_KB:-262144}\""))
         assertTrue(script.contains("cold_start_threshold \"FAIL unavailable\""))
