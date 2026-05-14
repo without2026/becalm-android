@@ -6,6 +6,7 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.isCallSource
 import com.becalm.android.ui.components.isEmailSource
@@ -21,6 +22,7 @@ internal object PersonDetailProjector {
         enrichmentRows: List<PersonEnrichmentEntity>,
         interactions: List<PersonInteractionEntity>,
         rawEvents: List<RawIngestionEventEntity>,
+        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
     ): PersonDetailUiState {
         val enrichment = findEnrichment(identities, enrichmentRows)
         val displayFallback = identities.firstOrNull { !it.displayNameHint.isNullOrBlank() }?.displayNameHint
@@ -29,6 +31,7 @@ internal object PersonDetailProjector {
         val sourceEventCards = buildIndexedSourceEventCards(
             interactions = interactions,
             rawEvents = rawEvents,
+            scheduleLinks = scheduleLinks,
         )
         return PersonDetailUiState(
             personId = personId,
@@ -53,8 +56,11 @@ internal object PersonDetailProjector {
     private fun buildIndexedSourceEventCards(
         interactions: List<PersonInteractionEntity>,
         rawEvents: List<RawIngestionEventEntity>,
+        scheduleLinks: List<ScheduleEventLinkEntity>,
     ): List<SourceEventCardProjection> {
         val rawById = rawEvents.associateBy { it.id }
+        val linksByRawEventId = scheduleLinks.groupBy { it.rawEventId }
+        val linksByCalendarSource = scheduleLinks.groupBy { it.calendarSourceType to it.calendarSourceRef }
         val buckets = linkedMapOf<String, MutableSourceEventCard>()
         interactions.forEach { interaction ->
             if (interaction.isDecisionCommitment()) return@forEach
@@ -81,6 +87,10 @@ internal object PersonDetailProjector {
                     sourceRef = interaction.sourceRef,
                 )
             }
+            bucket.applyScheduleLinks(
+                linksByRawEventId[rawEventId].orEmpty() +
+                    linksByCalendarSource[interaction.sourceType to interaction.sourceRef].orEmpty(),
+            )
             if (interaction.interactionKind == "commitment") {
                 bucket.addCommitment(interaction.toSummary())
             } else {
@@ -208,6 +218,8 @@ internal object PersonDetailProjector {
         val myActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
         val theirActions: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
         val schedules: MutableList<PersonDetailCommitmentSummary> = mutableListOf(),
+        val relatedSourceTypes: MutableSet<String> = linkedSetOf(),
+        var linkedCalendarEventId: String? = null,
     ) {
         fun applySourceEvidence(
             rawEventId: String?,
@@ -230,6 +242,15 @@ internal object PersonDetailProjector {
             }
         }
 
+        fun applyScheduleLinks(links: List<ScheduleEventLinkEntity>) {
+            links.forEach { link ->
+                linkedCalendarEventId = linkedCalendarEventId ?: link.calendarEventId
+                if (link.sourceType != sourceType) {
+                    relatedSourceTypes += link.sourceType
+                }
+            }
+        }
+
         fun toProjection(): SourceEventCardProjection =
             SourceEventCardProjection(
                 sourceEventKey = sourceEventKey,
@@ -242,6 +263,8 @@ internal object PersonDetailProjector {
                 myActions = myActions.toList(),
                 theirActions = theirActions.toList(),
                 schedules = schedules.toList(),
+                linkedCalendarEventId = linkedCalendarEventId,
+                relatedSourceTypes = relatedSourceTypes.toList(),
             )
     }
 

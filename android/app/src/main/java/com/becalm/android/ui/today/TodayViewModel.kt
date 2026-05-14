@@ -10,6 +10,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.UiMessage
@@ -79,6 +80,7 @@ public sealed class TimelineItem {
     public data class CalendarEvent(
         val id: String,
         override val title: String,
+        val relatedSourceTypes: List<String> = emptyList(),
         override val sortKey: Instant,
         override val timelineAt: Instant = sortKey,
         override val isTimed: Boolean = true,
@@ -93,6 +95,7 @@ public sealed class TimelineItem {
         val id: String,
         override val title: String,
         val attendeesRaw: String?,
+        val relatedSourceTypes: List<String> = emptyList(),
         override val sortKey: Instant,
         override val timelineAt: Instant = sortKey,
         override val isTimed: Boolean = true,
@@ -190,6 +193,7 @@ public class TodayViewModel @Inject constructor(
     private val calendarEventRepository: CalendarEventRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository,
     private val workScheduler: WorkScheduler,
     private val sourceStatusRepository: SourceStatusRepository,
     private val authRepository: AuthRepository,
@@ -208,6 +212,7 @@ public class TodayViewModel @Inject constructor(
     private val stateSource = TodayScreenStateSource(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
+        scheduleEventLinkRepository = scheduleEventLinkRepository,
         sourceStatusRepository = sourceStatusRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
@@ -287,6 +292,7 @@ public class TodayViewModel @Inject constructor(
             commitmentRepository = commitmentRepository,
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
+            scheduleEventLinkRepository = scheduleEventLinkRepository,
             workScheduler = workScheduler,
             logger = logger,
         )

@@ -1080,6 +1080,52 @@ private val MIGRATION_19_20 = object : Migration(19, 20) {
     }
 }
 
+// ─── Migration 20 → 21 (schedule-event links mirror) ───────────────────────
+//
+// Mirrors backend-owned schedule_event_links rows. Calendar remains canonical;
+// these rows carry supporting evidence and user-review proposal status only.
+private val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `schedule_event_links` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `calendar_event_id` TEXT,
+                `calendar_source_type` TEXT,
+                `calendar_source_ref` TEXT,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT,
+                `raw_event_id` TEXT,
+                `commitment_id` TEXT,
+                `relation_type` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `confidence` REAL NOT NULL,
+                `proposed_start_at` INTEGER,
+                `proposed_end_at` INTEGER,
+                `proposed_title` TEXT,
+                `evidence` TEXT,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_calendar` " +
+                "ON `schedule_event_links` (`user_id`, `calendar_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_status_updated` " +
+                "ON `schedule_event_links` (`user_id`, `status`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_source` " +
+                "ON `schedule_event_links` (`user_id`, `source_type`, `source_ref`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1113,4 +1159,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_17_18,
     MIGRATION_18_19,
     MIGRATION_19_20,
+    MIGRATION_20_21,
 )

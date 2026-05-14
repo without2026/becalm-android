@@ -4,6 +4,9 @@ import com.becalm.android.R
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.isCalendarSource
@@ -16,6 +19,7 @@ internal object TodayTimelineProjector {
     fun buildTimeline(
         commitments: List<TodayCommitmentRow>,
         calendarEvents: List<CalendarEventEntity>,
+        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
     ): List<TimelineItem> {
         val scheduleCommitmentKeys = commitments
             .filter { row ->
@@ -24,10 +28,21 @@ internal object TodayTimelineProjector {
                     !row.sourceRef.isNullOrBlank()
             }
             .mapTo(mutableSetOf()) { row -> row.sourceType to row.sourceRef }
+        val confirmedLinks = scheduleLinks.filter {
+            it.relationType == ScheduleEventLinkRelationType.CONFIRMS &&
+                it.status in setOf(ScheduleEventLinkStatus.AUTO_LINKED, ScheduleEventLinkStatus.APPROVED) &&
+                it.commitmentId != null &&
+                it.calendarEventId != null
+        }
+        val confirmedCommitmentIds = confirmedLinks.mapNotNullTo(mutableSetOf()) { it.commitmentId }
+        val sourceTypesByCalendarId = confirmedLinks
+            .groupBy { it.calendarEventId.orEmpty() }
+            .mapValues { (_, rows) -> rows.map { it.sourceType }.distinct() }
+        val visibleCommitments = commitments.filterNot { row -> row.id in confirmedCommitmentIds }
         val visibleCalendarEvents = calendarEvents.filterNot { event ->
             event.sourceRef != null && (event.sourceType to event.sourceRef) in scheduleCommitmentKeys
         }
-        return (commitments.map { it.toTimelineItem() } + visibleCalendarEvents.map { it.toTimelineItem() })
+        return (visibleCommitments.map { it.toTimelineItem() } + visibleCalendarEvents.map { it.toTimelineItem(sourceTypesByCalendarId[it.id].orEmpty()) })
             .sortedWith(
                 compareBy<TimelineItem> { !it.isTimed }
                     .thenBy { it.timelineAt ?: it.sortKey }
@@ -56,18 +71,20 @@ internal object TodayTimelineProjector {
             isTimed = dueAt != null && !dueIsApproximate,
         )
 
-    private fun CalendarEventEntity.toTimelineItem(): TimelineItem =
+    private fun CalendarEventEntity.toTimelineItem(relatedSourceTypes: List<String>): TimelineItem =
         if (!attendeesRaw.isNullOrBlank()) {
             TimelineItem.Meeting(
                 id = id,
                 title = title,
                 attendeesRaw = attendeesRaw,
+                relatedSourceTypes = relatedSourceTypes,
                 sortKey = startAt,
             )
         } else {
             TimelineItem.CalendarEvent(
                 id = id,
                 title = title,
+                relatedSourceTypes = relatedSourceTypes,
                 sortKey = startAt,
             )
         }
@@ -90,6 +107,7 @@ internal object TodaySyncProjector {
         val timeline = TodayTimelineProjector.buildTimeline(
             commitments = snapshot.commitments,
             calendarEvents = snapshot.calendarEvents,
+            scheduleLinks = snapshot.scheduleLinks,
         )
         return TodayUiState(
             loading = false,

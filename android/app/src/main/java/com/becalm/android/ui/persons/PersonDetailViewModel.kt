@@ -12,6 +12,8 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.isCalendarSource
@@ -67,6 +69,8 @@ public data class SourceEventCardProjection(
     val theirActions: List<PersonDetailCommitmentSummary> = emptyList(),
     val schedules: List<PersonDetailCommitmentSummary> = emptyList(),
     val nextAction: PersonDetailNextAction? = null,
+    val linkedCalendarEventId: String? = null,
+    val relatedSourceTypes: List<String> = emptyList(),
 )
 
 /**
@@ -120,6 +124,7 @@ private const val PERSON_INTERACTIONS_LIMIT = 150
 public class PersonDetailViewModel @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val personIndexDao: PersonIndexDao,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -166,15 +171,31 @@ public class PersonDetailViewModel @Inject constructor(
                             personEnrichmentRepository.observeAll(),
                             personIndexDao.observeInteractionsForPerson(userId, personId, PERSON_INTERACTIONS_LIMIT),
                         ) { identities, enrichmentRows, interactions ->
-                            withContext(ioDispatcher) {
-                                PersonDetailProjector.buildIndexedState(
-                                    personId = personId,
-                                    identities = identities,
-                                    enrichmentRows = enrichmentRows,
-                                    interactions = interactions.filterRecentCalendarHistory(calendarCutoff),
-                                    rawEvents = emptyList(),
-                                )
+                            Triple(identities, enrichmentRows, interactions)
+                        }.flatMapLatest { (identities, enrichmentRows, interactions) ->
+                            val filteredInteractions = interactions.filterRecentCalendarHistory(calendarCutoff)
+                            val linksFlow = scheduleEventLinkRepository?.observeForProjectionRefs(
+                                userId = userId,
+                                commitmentIds = filteredInteractions.mapNotNull { it.commitmentId },
+                                rawEventIds = filteredInteractions.mapNotNull { it.sourceEventId },
+                                calendarEventIds = emptyList(),
+                            ) ?: flowOf(emptyList<ScheduleEventLinkEntity>())
+                            linksFlow.combine(flowOf(Triple(identities, enrichmentRows, filteredInteractions))) { links, triple ->
+                                Quad(triple.first, triple.second, triple.third, links)
                             }
+                        }.flatMapLatest { (identities, enrichmentRows, interactions, scheduleLinks) ->
+                            flowOf(
+                                withContext(ioDispatcher) {
+                                    PersonDetailProjector.buildIndexedState(
+                                        personId = personId,
+                                        identities = identities,
+                                        enrichmentRows = enrichmentRows,
+                                        interactions = interactions,
+                                        rawEvents = emptyList(),
+                                        scheduleLinks = scheduleLinks,
+                                    )
+                                },
+                            )
                         }.catch { e ->
                             logger.e(TAG, "observeDetail failed", e)
                             emit(
@@ -192,6 +213,13 @@ public class PersonDetailViewModel @Inject constructor(
                 }
         }
     }
+
+    private data class Quad<A, B, C, D>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+    )
 
     private fun calendarHistoryCutoff(): Instant =
         clock.today(KST).plus(DatePeriod(days = -1)).atStartOfDayIn(KST)

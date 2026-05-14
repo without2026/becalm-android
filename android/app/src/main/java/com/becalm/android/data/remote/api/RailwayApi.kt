@@ -22,7 +22,10 @@ import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
+import com.becalm.android.data.remote.dto.ScheduleEventLinkStatusPatchDto
+import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
+import com.becalm.android.data.remote.dto.SingleScheduleEventLinkResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
 import com.becalm.android.data.remote.dto.SourceEventParticipantsResponse
 import retrofit2.Response
@@ -133,6 +136,21 @@ public interface RailwayApi {
         @Query("person_id") personId: String? = null,
         @Query("commitment_id") commitmentId: String? = null,
     ): Response<CommitmentParticipantsResponse>
+
+    @GET("v1/schedule_event_links")
+    public suspend fun getScheduleEventLinks(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("status") status: String? = null,
+    ): Response<ScheduleEventLinksResponse>
+
+    @PATCH("v1/schedule_event_links/{id}")
+    public suspend fun patchScheduleEventLink(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ScheduleEventLinkStatusPatchDto,
+    ): Response<SingleScheduleEventLinkResponse>
 
     // =========================================================================
     // COMMITMENTS
