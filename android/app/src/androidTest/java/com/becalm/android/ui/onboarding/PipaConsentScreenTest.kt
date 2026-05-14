@@ -24,6 +24,7 @@ class PipaConsentScreenTest {
 
     @Test
     fun onb_pipa_renders_all_required_disclosure_bullets_and_actions() {
+        // spec: ONB-PIPA
         setScreen()
 
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_title)).assertIsDisplayed()

@@ -28,6 +28,7 @@ class PipaConsentUiTest {
 
     @Test
     fun `pipa consent content shows disclosure bullets and ctas`() {
+        // spec: ONB-PIPA
         composeRule.setContent {
             BecalmTheme {
                 PipaThirdPartyConsentContent(
