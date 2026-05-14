@@ -21,7 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       project_root: ${{ steps.read.outputs.project_root }}
+      adapter: ${{ steps.read.outputs.adapter }}
       deploy_backend: ${{ steps.read.outputs.deploy_backend }}
+      staging_mechanism: ${{ steps.read.outputs.staging_mechanism }}
       deploy_desktop: ${{ steps.read.outputs.deploy_desktop }}
       platform: ${{ steps.read.outputs.platform }}
       railway_service: ${{ steps.read.outputs.railway_service }}
@@ -45,9 +47,12 @@ jobs:
           monitoring = c.get('monitoring', {})
           health = deploy.get('health', {})
           deploy_gate = monitoring.get('deploy_gate', {})
+          staging = deploy.get('staging', {})
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f\"project_root={c.get('project_root', '.')}\n\")
+              out.write(f\"adapter={c.get('ci', {}).get('adapter', 'electron')}\n\")
               out.write(f\"deploy_backend={deploy.get('backend', 'railway')}\n\")
+              out.write(f\"staging_mechanism={staging.get('mechanism', '')}\n\")
               out.write(f\"deploy_desktop={deploy.get('desktop', 'github-releases')}\n\")
               out.write(f\"platform={c.get('platform', 'unknown')}\n\")
               out.write(f\"railway_service={deploy.get('railway', {}).get('service', 'app')}\n\")
@@ -76,6 +81,50 @@ jobs:
           fi
           npm install -g @railway/cli 2>/dev/null || true
           railway up --environment staging --service "${{ needs.load-config.outputs.railway_service }}" 2>&1
+
+  build-android:
+    needs: load-config
+    if: >-
+      needs.load-config.outputs.adapter == 'android'
+      && needs.load-config.outputs.staging_mechanism == 'firebase_app_distribution'
+    uses: ./.github/workflows/adapter-build.yml
+    with:
+      adapter: android
+      build_type: release
+      require_signing: true
+    secrets: inherit
+
+  deploy-android-staging:
+    needs: [load-config, build-android]
+    if: >-
+      needs.load-config.outputs.adapter == 'android'
+      && needs.load-config.outputs.staging_mechanism == 'firebase_app_distribution'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-aab
+          path: release-artifacts/android
+
+      - name: Resolve Android App Bundle
+        id: artifact
+        run: |
+          APP_FILE=$(find release-artifacts/android -name '*.aab' -type f | head -n 1)
+          if [ -z "$APP_FILE" ]; then
+            echo "::error::No Android AAB artifact found"
+            exit 1
+          fi
+          echo "file=$APP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Android AAB to Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          groups: ${{ secrets.FIREBASE_TESTER_GROUPS }}
+          file: ${{ steps.artifact.outputs.file }}
+          releaseNotes: "Staging build from ${{ github.sha }}"
 
   smoke-test:
     needs: [load-config, deploy-api]

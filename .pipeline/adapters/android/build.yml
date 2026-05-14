@@ -47,10 +47,19 @@ jobs:
 
       - name: Build app bundle
         working-directory: ${{ needs.read-config.outputs.root }}/android
+        env:
+          BECALM_API_BASE_URL: ${{ secrets.BECALM_API_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          BECALM_RELEASE_STORE_FILE: ${{ secrets.BECALM_RELEASE_STORE_FILE }}
+          BECALM_RELEASE_STORE_PASSWORD: ${{ secrets.BECALM_RELEASE_STORE_PASSWORD }}
+          BECALM_RELEASE_KEY_ALIAS: ${{ secrets.BECALM_RELEASE_KEY_ALIAS }}
+          BECALM_RELEASE_KEY_PASSWORD: ${{ secrets.BECALM_RELEASE_KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew 2>/dev/null || true
           if [ "${{ inputs.require_signing }}" = "true" ]; then
-            ./gradlew verifyReleaseSigningConfigured --no-daemon --console=plain
+            ./gradlew verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured --no-daemon --console=plain
           fi
           if [ "${{ inputs.build_type }}" = "release" ]; then
             ./gradlew bundleRelease --no-daemon --console=plain

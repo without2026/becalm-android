@@ -39,6 +39,17 @@ fun gradleOrLocalProp(key: String): String {
     return localProp(key)
 }
 
+fun requiredRuntimeConfig(key: String): String {
+    val gradleValue = findProperty(key)?.toString()
+    if (!gradleValue.isNullOrBlank()) return gradleValue
+    val envValue = System.getenv(key)
+    if (!envValue.isNullOrBlank()) return envValue
+    return localProp(key)
+}
+
+fun String.asBuildConfigString(): String =
+    "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 fun optionalGradleEnvOrLocalProp(gradleKey: String, envKey: String): String? {
     val gradleValue = findProperty(gradleKey)?.toString()
     if (!gradleValue.isNullOrBlank()) return gradleValue
@@ -69,6 +80,19 @@ val releaseSigningConfigured = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
+val becalmApiBaseUrl = requiredRuntimeConfig("BECALM_API_BASE_URL")
+val supabaseUrl = requiredRuntimeConfig("SUPABASE_URL")
+val supabaseAnonKey = requiredRuntimeConfig("SUPABASE_ANON_KEY")
+val googleWebClientId = optionalGradleEnvOrLocalProp(
+    gradleKey = "google.web.client.id",
+    envKey = "GOOGLE_WEB_CLIENT_ID",
+).orEmpty()
+val requiredReleaseRuntimeConfig = mapOf(
+    "BECALM_API_BASE_URL" to becalmApiBaseUrl,
+    "SUPABASE_URL" to supabaseUrl,
+    "SUPABASE_ANON_KEY" to supabaseAnonKey,
+    "GOOGLE_WEB_CLIENT_ID" to googleWebClientId,
+)
 
 android {
     namespace = "com.becalm.android"
@@ -83,9 +107,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "BECALM_API_BASE_URL", "\"${localProp("BECALM_API_BASE_URL")}\"")
-        buildConfigField("String", "SUPABASE_URL",        "\"${localProp("SUPABASE_URL")}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY",   "\"${localProp("SUPABASE_ANON_KEY")}\"")
+        buildConfigField("String", "BECALM_API_BASE_URL", becalmApiBaseUrl.asBuildConfigString())
+        buildConfigField("String", "SUPABASE_URL",        supabaseUrl.asBuildConfigString())
+        buildConfigField("String", "SUPABASE_ANON_KEY",   supabaseAnonKey.asBuildConfigString())
         // Google Web OAuth 2.0 Client ID registered against the Supabase project's
         // Google provider (S6-C). Developer overrides via Gradle property
         // `google.web.client.id` (typically in ~/.gradle/gradle.properties or
@@ -96,7 +120,7 @@ android {
         buildConfigField(
             "String",
             "GOOGLE_WEB_CLIENT_ID",
-            "\"${gradleOrLocalProp("google.web.client.id")}\"",
+            googleWebClientId.asBuildConfigString(),
         )
     }
 
@@ -207,6 +231,24 @@ tasks.register("verifyReleaseSigningConfigured") {
         val storeFile = rootProject.file(requireNotNull(releaseStoreFilePath))
         if (!storeFile.isFile) {
             throw GradleException("Android release upload keystore does not exist: ${storeFile.path}")
+        }
+    }
+}
+
+tasks.register("verifyReleaseRuntimeConfigured") {
+    group = "verification"
+    description = "Fails protected release builds when Android runtime API/Auth config is not configured."
+    doLast {
+        val missing = requiredReleaseRuntimeConfig
+            .filterValues { it.isBlank() }
+            .keys
+            .sorted()
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Android release runtime configuration is incomplete. Set " +
+                    missing.joinToString(", ") +
+                    " via environment variables, Gradle properties, or local.properties before protected release builds.",
+            )
         }
     }
 }

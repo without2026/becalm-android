@@ -82,8 +82,10 @@ jobs:
       project_root: ${{ steps.read.outputs.project_root }}
       adapter: ${{ steps.read.outputs.adapter }}
       deploy_backend: ${{ steps.read.outputs.deploy_backend }}
+      deploy_target: ${{ steps.read.outputs.deploy_target }}
       deploy_desktop: ${{ steps.read.outputs.deploy_desktop }}
       release_name: ${{ steps.read.outputs.release_name }}
+      play_console_track: ${{ steps.read.outputs.play_console_track }}
       railway_service: ${{ steps.read.outputs.railway_service }}
       production_api_url_secret: ${{ steps.read.outputs.production_api_url_secret }}
       health_path: ${{ steps.read.outputs.health_path }}
@@ -116,8 +118,10 @@ jobs:
               out.write(f\"project_root={c.get('project_root', '.')}\n\")
               out.write(f\"adapter={c.get('ci', {}).get('adapter', 'electron')}\n\")
               out.write(f\"deploy_backend={deploy.get('backend', 'railway')}\n\")
+              out.write(f\"deploy_target={deploy.get('target', '')}\n\")
               out.write(f\"deploy_desktop={deploy.get('desktop', 'github-releases')}\n\")
               out.write(f\"release_name={release.get('name', release_name)}\n\")
+              out.write(f\"play_console_track={deploy.get('play_console', {}).get('track', 'internal')}\n\")
               out.write(f\"railway_service={deploy.get('railway', {}).get('service', 'app')}\n\")
               out.write(f\"production_api_url_secret={deploy.get('endpoints', {}).get('production_api_url_secret', 'PROD_API_URL')}\n\")
               out.write(f\"health_path={health.get('path', '/health')}\n\")
@@ -157,7 +161,7 @@ jobs:
           echo "deployed=manual" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────
-  # Build + release desktop (Electron only; adapter-build.yml has no android/web packager yet)
+  # Build + release desktop (Electron only)
   # ──────────────────────────────────────────────
   build-desktop:
     needs: [load-config, deploy-api]
@@ -171,6 +175,45 @@ jobs:
       build_target: all
       require_signing: true
     secrets: inherit
+
+  # ──────────────────────────────────────────────
+  # Build + upload Android AAB (Play Console)
+  # ──────────────────────────────────────────────
+  build-android:
+    needs: [load-config, deploy-api]
+    if: >-
+      inputs.promote_existing_prerelease == false
+      && needs.load-config.outputs.adapter == 'android'
+      && needs.load-config.outputs.deploy_target == 'play-console'
+    uses: ./.github/workflows/adapter-build.yml
+    with:
+      adapter: android
+      build_type: release
+      require_signing: true
+    secrets: inherit
+
+  deploy-android:
+    needs: [load-config, build-android]
+    if: >-
+      inputs.promote_existing_prerelease == false
+      && needs.load-config.outputs.adapter == 'android'
+      && needs.load-config.outputs.deploy_target == 'play-console'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-aab
+          path: release-artifacts/android
+
+      - name: Upload Android AAB to Play Console
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.becalm.android
+          releaseFiles: release-artifacts/android/**/*.aab
+          track: ${{ needs.load-config.outputs.play_console_track }}
+          status: completed
 
   create-release:
     needs: [load-config, deploy-api, build-desktop]
