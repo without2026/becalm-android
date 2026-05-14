@@ -146,6 +146,7 @@ class CommitmentSheetsTest {
     }
 
     @Test
+    // spec: MAN-002
     fun commitment_create_content_shows_supersede_inputs_read_only_quote_and_save() {
         var title: String? = null
         var counterpartyRef: String? = null

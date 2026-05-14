@@ -264,6 +264,7 @@ class PersonsViewModelSpecTest {
     }
 
     @Test
+    // spec: ERR-001
     fun `SRC-007 offline badge state follows offline projection`() = runTest {
         val offlineAt = Instant.fromEpochMilliseconds(9_000)
         projectionPort.offline.value = PersonsOfflineStatus(isOffline = true, lastSyncAt = offlineAt)

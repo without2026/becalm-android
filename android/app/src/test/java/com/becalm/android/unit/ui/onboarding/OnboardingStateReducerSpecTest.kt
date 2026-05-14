@@ -10,6 +10,7 @@ import org.junit.Test
 class OnboardingStateReducerSpecTest {
 
     @Test
+    // spec: RUX-011
     fun `terminal gate uses shared terminal status policy`() {
         val terminal = OnboardingStep.entries.associateWith { StepStatus.SKIPPED } +
             mapOf(

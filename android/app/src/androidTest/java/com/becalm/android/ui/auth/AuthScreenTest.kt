@@ -48,6 +48,7 @@ class AuthScreenTest {
     }
 
     @Test
+    // spec: ONB-001
     fun splash_screen_navigates_to_terms_for_signed_out_without_terms() {
         var destination: String? = null
 
@@ -108,6 +109,7 @@ class AuthScreenTest {
     }
 
     @Test
+    // spec: ONB-SETUP
     fun splash_screen_navigates_to_onboarding_pipa_for_incomplete_session() {
         var destination: String? = null
 
@@ -169,6 +171,10 @@ class AuthScreenTest {
     }
 
     @Test
+    // spec: AUTH-003A
+    // spec: AUTH-012
+    // spec: RUX-001
+    // spec: RUX-005
     fun login_form_shows_empty_validation_and_disabled_google_cta() {
         composeTestRule.setContent {
             BecalmTheme {
@@ -192,6 +198,9 @@ class AuthScreenTest {
     }
 
     @Test
+    // spec: AUTH-012
+    // spec: RUX-004
+    // spec: RUX-010
     fun login_form_blocks_invalid_email_and_short_password() {
         var submitted = 0
 

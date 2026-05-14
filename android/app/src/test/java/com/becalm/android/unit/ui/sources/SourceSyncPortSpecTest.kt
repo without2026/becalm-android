@@ -53,6 +53,7 @@ class SourceSyncPortSpecTest {
     )
 
     @Test
+    // spec: ING-006
     fun `manual gmail sync refreshes commitments after backend sync succeeds`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         coEvery { api.syncMailSource(provider = SourceType.GMAIL) } returns Response.success(
@@ -109,6 +110,7 @@ class SourceSyncPortSpecTest {
     }
 
     @Test
+    // spec: ING-009
     fun `manual calendar sync refreshes calendar events and generated schedule commitments`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         coEvery { calendarEventRepository.triggerServerSync() } returns BecalmResult.Success(

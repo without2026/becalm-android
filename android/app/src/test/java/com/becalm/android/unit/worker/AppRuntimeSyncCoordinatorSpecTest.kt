@@ -66,6 +66,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
     }
 
     @Test
+    // spec: VOI-005
     fun `startup stops observer and cancels periodic enrichment when permissions are absent`() = runTest {
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)

@@ -192,6 +192,7 @@ class SourcesLocalIntegrationTest {
     }
 
     @Test
+    // spec: ERR-009
     fun `SMG-002 SMG-005 and ENR-008 source details project recent events sync metadata and contacts detail payload`() = runTest {
         val syncedAt = Instant.parse("2026-04-23T03:30:00Z")
         sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, syncedAt)

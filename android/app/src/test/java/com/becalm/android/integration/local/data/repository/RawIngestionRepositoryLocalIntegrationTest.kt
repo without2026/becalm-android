@@ -46,6 +46,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-015
     fun `insertLocalBatch returns existing id and stores one row for duplicate client event ids`() = runTest {
         val first = rawEvent(id = "raw-1", clientEventId = "client-event-1")
         val duplicate = rawEvent(id = "raw-2", clientEventId = "client-event-1")
@@ -64,6 +65,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-015
     fun `e2e 072 retry after process death does not duplicate source events`() = runTest {
         val firstAttempt = rawEvent(id = "raw-process-1", clientEventId = "client-process-1")
         val resumedAttempt = rawEvent(id = "raw-process-2", clientEventId = "client-process-1")
@@ -84,6 +86,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-006
     fun `refreshSince mirrors backend raw mail rows as synced local events`() = runTest {
         coEvery {
             api.getRawIngestionEvents(
@@ -147,6 +150,7 @@ class RawIngestionRepositoryLocalIntegrationTest {
     }
 
     @Test
+    // spec: EMAIL-005
     fun `uploadBatch sends email sender and recipient participants from email body metadata`() = runTest {
         val requestSlot = slot<BatchUploadRequest>()
         coEvery { api.batchUploadRawEvents(request = capture(requestSlot)) } returns Response.success(

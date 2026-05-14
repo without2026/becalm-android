@@ -69,6 +69,7 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
+    // spec: RUX-006
     fun `first run onboarding omits calendar oauth until provider is launch ready`() {
         val items = SourceConnectionProjector.sourceConnectionItems(
             stepStates = emptyMap(),

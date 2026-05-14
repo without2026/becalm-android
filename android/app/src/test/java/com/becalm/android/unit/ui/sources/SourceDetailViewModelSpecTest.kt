@@ -350,6 +350,7 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
+    // spec: MTG-001
     fun `SMG-006 meeting source exposes audio import only`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.MEETING) } returns
             flowOf(status(sourceType = SourceType.MEETING, status = SourceConnectionStatus.CONNECTED))

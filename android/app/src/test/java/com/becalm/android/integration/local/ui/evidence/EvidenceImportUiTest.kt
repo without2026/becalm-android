@@ -33,6 +33,7 @@ class EvidenceImportUiTest {
     val composeRule = createComposeRule()
 
     @Test
+    // spec: RUX-001
     fun `message screenshot action routes to screenshot import only`() {
         var screenshotImports = 0
 
@@ -49,6 +50,7 @@ class EvidenceImportUiTest {
     }
 
     @Test
+    // spec: MAN-001
     fun `sheet does not expose transcript or manual text paths`() {
         renderSheet()
 
@@ -113,6 +115,7 @@ class EvidenceImportUiTest {
     }
 
     @Test
+    // spec: RUX-002
     fun `import host renders persistent processing or review entry after upload`() {
         var reviewClicks = 0
         composeRule.setContent {

@@ -331,6 +331,28 @@ def _new_spec_ids_for_changed_specs(
     return new_ids
 
 
+def _scan_file_for_known_ids(path: pathlib.Path, known_ids: set[str]) -> set[str]:
+    """Return spec IDs explicitly named anywhere in a test file.
+
+    Kotlin tests in this repository commonly encode behavior IDs in test method
+    names, for example `fun `AUTH-001 email sign-in ...`()`. Treating those as
+    first-class traceability evidence keeps the gate aligned with the existing
+    test style while preserving orphan-ID validation against the spec index.
+    """
+    if not known_ids:
+        return set()
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+
+    refs: set[str] = set()
+    for spec_id in known_ids:
+        if re.search(rf"(?<![A-Z0-9]){re.escape(spec_id)}(?![A-Z0-9])", text):
+            refs.add(spec_id)
+    return refs
+
+
 def main() -> None:
     repo_root = _find_repo_root()
     config_path = repo_root / ".pipeline" / "platform.yml"
@@ -378,6 +400,10 @@ def main() -> None:
     for _lang, raw_patterns in test_file_patterns.items():
         for glob_pattern in _normalize_test_globs(raw_patterns):
             test_file_set.update(project_dir.glob(glob_pattern))
+    all_ids = set(behaviors.keys())
+    for test_path in test_file_set:
+        if test_path.is_file():
+            covered.update(_scan_file_for_known_ids(test_path, all_ids))
     for path in changed_under_project:
         if path in test_file_set:
             changed_test_files.append(path)
@@ -390,11 +416,10 @@ def main() -> None:
         and p.suffix in {".py", ".js", ".jsx", ".ts", ".tsx", ".cs", ".kt", ".java", ".swift"}
     ]
 
-    all_ids = set(behaviors.keys())
     uncovered = all_ids - covered
     orphan_refs = covered - all_ids
     changed_test_refs: dict[pathlib.Path, set[str]] = {
-        path: _scan_file_for_spec_ids(path, comment_regexes)
+        path: _scan_file_for_spec_ids(path, comment_regexes) | _scan_file_for_known_ids(path, all_ids)
         for path in changed_test_files
     }
     changed_tests_missing_refs = [

@@ -51,6 +51,7 @@ class EvidenceImportViewModelTest {
     }
 
     @Test
+    // spec: RUX-008
     fun `persistent projection status is restored by a new ViewModel instance`() = runTest {
         val recoveredStatus = EvidenceImportPersistentStatus.PROCESSING
         val first = EvidenceImportViewModel(sourceImportRepository, FakeStatusProjectionPort(recoveredStatus))
@@ -69,6 +70,7 @@ class EvidenceImportViewModelTest {
     }
 
     @Test
+    // spec: RUX-009
     fun `meeting speaker review confirmation sends escaped mapping json`() = runTest {
         val uri = mockk<Uri>(relaxed = true)
         val capturedContext = slot<MeetingSpeakerReviewContext>()

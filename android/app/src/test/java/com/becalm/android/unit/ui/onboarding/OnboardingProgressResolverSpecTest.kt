@@ -7,6 +7,7 @@ import org.junit.Test
 class OnboardingProgressResolverSpecTest {
 
     @Test
+    // spec: RUX-011
     fun `decode ignores unknown persisted step names and statuses`() {
         val decoded = OnboardingProgressResolver.decodeStepStatuses(
             mapOf(
@@ -37,6 +38,7 @@ class OnboardingProgressResolverSpecTest {
     }
 
     @Test
+    // spec: RUX-011
     fun `post login incomplete progress resumes to unified setup`() {
         val states = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED } +
             mapOf(

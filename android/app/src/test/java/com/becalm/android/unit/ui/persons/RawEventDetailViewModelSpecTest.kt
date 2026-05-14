@@ -84,6 +84,7 @@ class RawEventDetailViewModelSpecTest {
     }
 
     @Test
+    // spec: EMAIL-004
     fun `SRC-004 email detail joins full body and attachment metadata from Room without projection lookups`() = runTest {
         coEvery { rawIngestionRepository.findById("evt-1", "user-1") } returns
             rawEvent(

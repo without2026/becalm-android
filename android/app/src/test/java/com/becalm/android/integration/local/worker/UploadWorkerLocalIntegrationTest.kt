@@ -113,6 +113,8 @@ class UploadWorkerLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-002
+    // spec: ING-004
     fun `SYNC-001 SYNC-003 and SYNC-004 local worker path drains raw rows and records sync success`() = runTest {
         db.rawIngestionEventDao().insert(
             rawEvent(
@@ -141,6 +143,7 @@ class UploadWorkerLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-003
     fun `SYNC-004 local worker path leaves row pending and records sync error on retryable server failure`() = runTest {
         db.rawIngestionEventDao().insert(
             rawEvent(
