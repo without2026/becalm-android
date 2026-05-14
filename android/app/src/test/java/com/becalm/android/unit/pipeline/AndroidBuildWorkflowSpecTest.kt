@@ -167,6 +167,8 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(tests.contains("workflow_call:"))
         assertTrue(tests.contains("workflow_dispatch:"))
         assertTrue(tests.contains("./gradlew connectedDebugAndroidTest"))
+        assertTrue(tests.contains("measure_android_readiness.sh"))
+        assertTrue(tests.contains("qa/emulator/reports/readiness/"))
         assertTrue(gates.contains("workflow_call:"))
         assertTrue(gates.contains("workflow_dispatch:"))
         assertTrue(gates.contains("./gradlew dependencyCheckAnalyze"))
@@ -193,6 +195,7 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(combined.contains("android-instrumented-test-reports"))
         assertTrue(combined.contains("android-gate-reports"))
         assertTrue(combined.contains("app/build/reports/androidTests/connected"))
+        assertTrue(combined.contains("qa/emulator/reports/readiness"))
     }
 
     @Test
@@ -223,6 +226,7 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(combined.contains("android-instrumented-test-reports"))
         assertTrue(combined.contains("android-gate-reports"))
         assertTrue(combined.contains("app/build/reports/androidTests/connected"))
+        assertTrue(combined.contains("qa/emulator/reports/readiness"))
     }
 
     private fun repoFile(path: String): File {

@@ -96,6 +96,21 @@ jobs:
           java-version: "17"
           distribution: temurin
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Read project_root
+        id: config
+        run: |
+          pip install -q pyyaml 2>/dev/null || true
+          PROJECT_ROOT=$(python3 -c "
+          import yaml
+          with open('.pipeline/platform.yml') as f:
+              print(yaml.safe_load(f).get('project_root', '.'))
+          ")
+          echo "root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -109,8 +124,12 @@ jobs:
           target: google_apis
           arch: x86_64
           script: |
-            ROOT=$(python3 -c "import yaml; print(yaml.safe_load(open('.pipeline/platform.yml')).get('project_root', '.'))")
-            cd "$ROOT/android" && ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
+            ROOT="${{ steps.config.outputs.root }}"
+            (
+              cd "$ROOT/android"
+              ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
+            )
+            ADB="$(command -v adb)" ANDROID_SERIAL=emulator-5554 "$ROOT/qa/emulator/scripts/measure_android_readiness.sh"
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -119,6 +138,7 @@ jobs:
           path: |
             **/app/build/reports/androidTests/connected/
             **/app/build/outputs/androidTest-results/
+            **/qa/emulator/reports/readiness/
           if-no-files-found: ignore
 
   backend-tests:

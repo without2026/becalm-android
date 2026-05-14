@@ -104,7 +104,14 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
-          script: cd ${{ needs.read-config.outputs.root }}/android && chmod +x ./gradlew 2>/dev/null; ./gradlew connectedDebugAndroidTest
+          script: |
+            ROOT="${{ needs.read-config.outputs.root }}"
+            (
+              cd "$ROOT/android"
+              chmod +x ./gradlew 2>/dev/null || true
+              ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
+            )
+            ADB="$(command -v adb)" ANDROID_SERIAL=emulator-5554 "$ROOT/qa/emulator/scripts/measure_android_readiness.sh"
       - name: Upload instrumented test reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -113,6 +120,7 @@ jobs:
           path: |
             ${{ needs.read-config.outputs.root }}/android/app/build/reports/androidTests/connected/
             ${{ needs.read-config.outputs.root }}/android/app/build/outputs/androidTest-results/
+            ${{ needs.read-config.outputs.root }}/qa/emulator/reports/readiness/
           if-no-files-found: ignore
 
   backend-tests:

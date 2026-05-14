@@ -11,6 +11,7 @@ class ReadinessQaScriptSpecTest {
         // spec: REL-010
         val script = repoFile("qa/emulator/scripts/measure_android_readiness.sh").readText()
 
+        assertTrue(script.contains("command -v adb"))
         assertTrue(script.contains("STRICT=\"\${BECALM_READINESS_STRICT:-1}\""))
         assertTrue(script.contains("MAX_COLD_START_MS=\"\${BECALM_MAX_COLD_START_MS:-3000}\""))
         assertTrue(script.contains("MAX_TOTAL_PSS_KB=\"\${BECALM_MAX_TOTAL_PSS_KB:-262144}\""))

@@ -3,7 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DEVICE="${ANDROID_SERIAL:-emulator-5554}"
-ADB_BIN="${ADB:-/mnt/c/Users/jakek/AppData/Local/Android/Sdk/platform-tools/adb.exe}"
+if [[ -n "${ADB:-}" ]]; then
+  ADB_BIN="$ADB"
+elif command -v adb >/dev/null 2>&1; then
+  ADB_BIN="$(command -v adb)"
+else
+  ADB_BIN="/mnt/c/Users/jakek/AppData/Local/Android/Sdk/platform-tools/adb.exe"
+fi
 PACKAGE_NAME="${BECALM_PACKAGE:-com.becalm.android}"
 STRICT="${BECALM_READINESS_STRICT:-1}"
 MAX_COLD_START_MS="${BECALM_MAX_COLD_START_MS:-3000}"
