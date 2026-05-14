@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ public fun MainTabHeaderActions(
 @Composable
 public fun MainTabStatusHeader(
     state: MainTabHeaderState,
+    onOpenSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val sourceChips = buildChips(state.sourceStatus)
@@ -64,6 +66,7 @@ public fun MainTabStatusHeader(
         MainTabSourceAttentionBanner(
             disconnectedCount = sourceAttention.disconnectedCount,
             failedCount = sourceAttention.failedCount,
+            onOpenSettings = onOpenSettings,
             modifier = modifier,
         )
     }
@@ -76,6 +79,7 @@ public fun MainTabStatusHeader(
 private fun MainTabSourceAttentionBanner(
     disconnectedCount: Int,
     failedCount: Int,
+    onOpenSettings: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val text = when {
@@ -114,5 +118,10 @@ private fun MainTabSourceAttentionBanner(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+        if (onOpenSettings != null) {
+            TextButton(onClick = onOpenSettings) {
+                Text(text = stringResource(R.string.today_source_attention_action))
+            }
+        }
     }
 }

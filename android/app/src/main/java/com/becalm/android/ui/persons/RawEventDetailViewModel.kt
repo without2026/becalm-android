@@ -63,6 +63,7 @@ public data class RawEventDetailUiState(
     val archivedOriginal: ArchivedOriginalUi? = null,
     val attachmentCount: Int = 0,
     val commitmentsExtractedCount: Int = 0,
+    val syncStatus: String? = null,
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )

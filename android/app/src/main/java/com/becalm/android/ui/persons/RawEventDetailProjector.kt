@@ -39,6 +39,7 @@ internal object RawEventDetailProjector {
             archivedOriginal = archiveUi,
             attachmentCount = attachments.size,
             commitmentsExtractedCount = entity.commitmentsExtractedCount,
+            syncStatus = entity.syncStatus,
             loading = false,
         )
     }

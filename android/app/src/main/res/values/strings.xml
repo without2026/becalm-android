@@ -257,10 +257,11 @@
     <string name="today_syncing_fmt">동기화 중 %1$d/%2$d</string>
     <string name="today_synced_time_fmt">동기화됨 %1$s</string>
     <string name="today_synced_date_time_fmt">동기화됨 %1$s %2$s</string>
-    <string name="today_partial_failure">일부 소스 실패, 설정에서 확인</string>
+    <string name="today_partial_failure">서버 또는 일부 소스에 연결할 수 없습니다. 로컬 데이터만 표시 중입니다.</string>
     <string name="today_source_attention_disconnected_fmt">%1$d개 소스가 연결되지 않았습니다. 설정에서 연결하세요</string>
     <string name="today_source_attention_failed_fmt">%1$d개 소스 연결에 실패했습니다. 설정에서 확인하세요</string>
     <string name="today_source_attention_mixed_fmt">%1$d개 소스 미연결, %2$d개 소스 실패. 설정에서 확인하세요</string>
+    <string name="today_source_attention_action">설정 열기</string>
 
     <!-- Persons -->
     <string name="persons_title">사람</string>
@@ -317,6 +318,10 @@
     <string name="raw_event_detail_not_found">이벤트를 찾을 수 없습니다.</string>
     <string name="raw_event_detail_no_title">(제목 없음)</string>
     <string name="raw_event_detail_error_missing_id">이벤트 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
+    <string name="raw_event_sync_failed_title">업로드 실패</string>
+    <string name="raw_event_sync_failed_body">이 이벤트는 처리되지 않았습니다. 소스 상태를 확인한 뒤 다시 동기화해 주세요.</string>
+    <string name="raw_event_sync_awaiting_consent_title">동의 대기 중</string>
+    <string name="raw_event_sync_awaiting_consent_body">개인정보 제공 동의가 켜지면 이 이벤트 처리가 다시 시작됩니다.</string>
 
     <!-- Raw event detail — 이메일 분기 (S5-D ui-raw-event-email-rendering) -->
     <string name="raw_event_attachments_count">📎 첨부 %1$d건</string>

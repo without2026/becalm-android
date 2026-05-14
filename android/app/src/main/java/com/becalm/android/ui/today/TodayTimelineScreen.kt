@@ -212,7 +212,10 @@ public fun TodayTimelineContent(
                         )
                     }
                 }
-                MainTabStatusHeader(state = headerState)
+                MainTabStatusHeader(
+                    state = headerState,
+                    onOpenSettings = onOpenSettings,
+                )
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

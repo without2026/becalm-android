@@ -151,7 +151,10 @@ public fun PersonsScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            MainTabStatusHeader(state = headerState)
+            MainTabStatusHeader(
+                state = headerState,
+                onOpenSettings = onOpenSettings,
+            )
             if (state.showOfflineBadge) {
                 OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
             }
