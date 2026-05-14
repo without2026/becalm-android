@@ -20,6 +20,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class EffectCollectorsTest {
+    // spec: ONB-007
 
     @get:Rule
     val composeTestRule = createComposeRule()

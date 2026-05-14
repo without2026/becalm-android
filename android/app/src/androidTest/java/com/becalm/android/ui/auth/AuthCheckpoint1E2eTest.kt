@@ -32,6 +32,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AuthCheckpoint1E2eTest {
+    // spec: AUTH-012
 
     @get:Rule
     val composeTestRule = createComposeRule()

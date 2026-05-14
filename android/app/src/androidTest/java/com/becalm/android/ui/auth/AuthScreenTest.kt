@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 
 @RunWith(AndroidJUnit4::class)
 class AuthScreenTest {
+    // spec: AUTH-012
 
     @get:Rule
     val composeTestRule = createComposeRule()

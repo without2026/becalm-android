@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SettingsScreenTest {
+    // spec: PIPA-006
 
     @get:Rule
     val composeTestRule = createComposeRule()

@@ -39,6 +39,7 @@ import androidx.navigation.compose.rememberNavController
 
 @RunWith(AndroidJUnit4::class)
 class OnboardingScreenTest {
+    // spec: ONB-SETUP
 
     @get:Rule
     val composeTestRule = createComposeRule()
