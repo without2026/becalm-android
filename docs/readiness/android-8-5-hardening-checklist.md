@@ -3,9 +3,9 @@
 This checklist maps the current beta-readiness target to concrete evidence. It is intentionally product-facing: a passing unit test is not enough unless it covers a user-visible requirement.
 
 Last updated: 2026-05-15 KST.
-Executable code verified at: `a70d273`.
+Executable code verified at: `a176c5e`.
 
-Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that analytics/observability SDK implementation.
+Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that SDK implementation.
 
 ## Target Scores
 
@@ -50,6 +50,14 @@ Pass condition for 8.5:
 - Total PSS is under 256MB during the People/Person-detail smoke.
 - No ANR, OOM, or fatal exception appears in logcat during the beta-readiness smoke.
 
+Current CI emulator evidence:
+
+- `Android Tests` run `25878115788` reinstalled `app-debug.apk` when the target app package was missing after instrumentation.
+- `cold_start_total_ms=2082`, threshold `<=3000ms`.
+- `total_pss_kb=145190`, threshold `<=262144KB`.
+- `logcat_threshold=PASS no fatal/ANR/OOM patterns`.
+- `readiness_failure_count=0`.
+
 ## Code Quality
 
 Required evidence:
@@ -68,17 +76,15 @@ Pass condition for 8.5:
 
 Current main evidence:
 
-- `./gradlew lintDebug testDebugUnitTest bundleRelease --no-daemon --console=plain` passes.
-- `./gradlew lint --no-daemon --console=plain` passes.
-- `actionlint .github/workflows/*.yml` passes.
-- `python3 .pipeline/core/assert-guard.py` passes.
-- PR-scoped `python3 .pipeline/core/spec-coverage.py` passes for release-engineering changes.
-- `detect-secrets scan --baseline .secrets.baseline` passes.
+- `Android Deterministic Gates` run `25878115843` passes spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size.
+- `Android Tests` run `25878115788` passes unit tests, backend optional tests, API 33 emulator instrumentation, and release smoke.
+- Local focused verification passed for `AndroidBuildWorkflowSpecTest` and `ReadinessQaScriptSpecTest`.
+- `bash -n qa/emulator/scripts/measure_android_readiness.sh qa/emulator/scripts/verify_beta_readiness_qa.sh` passes.
+- Repo-wide legacy crash-vendor grep returns no matches.
 
 Known limits:
 
-- `./gradlew connectedDebugAndroidTest` was not run in the local container because no emulator/device is attached.
-- `dependencyCheckAnalyze` task exists and CI wires `NVD_API_KEY`, but a full local run without NVD API key is too slow/rate-limited to use as local evidence.
+- `dependencyCheckAnalyze` task exists. CI skips the full NVD-backed dependency database run unless `NVD_API_KEY` is present, and separately gates that the task is registered.
 
 ## UX / Product Readiness
 
@@ -103,7 +109,7 @@ Current main evidence:
 - Korean UI copy invariant tests exist and are part of `testDebugUnitTest`.
 - Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
 - `measure_android_readiness.sh` records cold start, PSS, frames, logcat scan, and strict pass/fail counters; `ReadinessQaScriptSpecTest` prevents regressions to warn-only measurement.
-- Current environment has no attached local emulator, so this document relies on the CI emulator run for the latest connected Android test evidence.
+- CI emulator run `25878115788` is the latest connected Android test evidence and passed.
 
 ## Release Engineering / CI
 
@@ -120,9 +126,9 @@ Required evidence:
 
 Current main evidence:
 
-- Latest `Android Deterministic Gates` run succeeded on executable code commit `a70d273`: https://github.com/without2026/becalm-android/actions/runs/25875177248
-- Latest `Android Tests` run succeeded on executable code commit `a70d273`: https://github.com/without2026/becalm-android/actions/runs/25875177207
-- Latest `Deploy Staging` run succeeded on executable code commit `a70d273`: https://github.com/without2026/becalm-android/actions/runs/25875168351
+- Latest `Android Deterministic Gates` run succeeded on executable code commit `a176c5e`: https://github.com/without2026/becalm-android/actions/runs/25878115843
+- Latest `Android Tests` run succeeded on executable code commit `a176c5e`: https://github.com/without2026/becalm-android/actions/runs/25878115788
+- Latest `Deploy Staging` run succeeded on executable code commit `a176c5e`: https://github.com/without2026/becalm-android/actions/runs/25878113794
 - Latest CI artifacts were uploaded and are not expired:
   - `android-gate-reports`
   - `android-unit-test-reports`
