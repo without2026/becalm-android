@@ -1,8 +1,8 @@
 # Android 8.5 Reviewer Request
 
 Date: 2026-05-15 KST
-Verified Android source commit: `e33e544`
-Executable code verified at: `e33e544`
+Verified Android source commit: `0cdd65c`
+Executable code verified at: `0cdd65c`
 
 This document is intentionally not a self-score. The reviewer should assign the
 score against the agreed rubric.
@@ -26,17 +26,17 @@ Explicitly excluded by user direction:
 
 | Rubric Area | Evidence | Status |
 |---|---|---|
-| Functional requirements | `Android Tests` run `25879240108`; `unit-tests`, `instrumented-tests`, and `release-smoke` jobs succeeded | Ready for reviewer |
+| Functional requirements | `Android Tests` run `25880469962`; `unit-tests`, `instrumented-tests`, and `release-smoke` jobs succeeded | Ready for reviewer |
 | Core user flows | `AuthCheckpoint1E2eTest`, `OnboardingCheckpoint1E2eTest`, `SourceConnectionsCheckpoint2E2eTest`, `PeoplePipelineCheckpoint4E2eTest`, `HappyPathFullJourneyE2eTest` exist and are covered by CI emulator instrumentation | Ready for reviewer |
 | Source recovery UX | Source recovery changes are in `7813678`; raw-event recovery coverage includes `RawEventDetailCheckpoint6E2eTest` | Ready for reviewer |
 | Non-functional requirements | `measure_android_readiness.sh` records cold start, memory, frame rows, and fails strict mode on unavailable or over-threshold metrics | Ready for reviewer |
-| Readiness smoke result | Run `25879240108` measured cold start `1969ms`, total PSS `146244KB`, logcat fatal/ANR/OOM pass, and `readiness_failure_count=0` | Ready for reviewer |
-| App install recovery | Run `25879240108` found the app missing after instrumentation, reinstalled `app-debug.apk`, and then completed readiness measurement | Ready for reviewer |
+| Readiness smoke result | Run `25880469962` measured cold start `2108ms`, total PSS `144665KB`, logcat fatal/ANR/OOM pass, and `readiness_failure_count=0` | Ready for reviewer |
+| App install recovery | Run `25880469962` found the app missing after instrumentation, reinstalled `app-debug.apk`, and then completed readiness measurement | Ready for reviewer |
 | Crash/ANR/OOM guard | `measure_android_readiness.sh` fails on logcat fatal exception, ANR, OOM, process death, and lowmemorykiller patterns | Ready for reviewer |
-| Code quality | `Android Deterministic Gates` run `25879240085` succeeded with spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and size check | Ready for reviewer |
+| Code quality | `Android Deterministic Gates` run `25880469987` succeeded with spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and size check | Ready for reviewer |
 | Play policy risk control | Battery optimization onboarding uses app settings guidance and no longer declares or invokes restricted battery optimization exemption APIs | Ready for reviewer |
-| Release smoke | `Android Tests` run `25879240108` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
-| Instrumented tests | `Android Tests` run `25879240108` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
+| Release smoke | `Android Tests` run `25880469962` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
+| Instrumented tests | `Android Tests` run `25880469962` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
 | Artifact retention | CI uploaded `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` | Ready for reviewer |
 | Legacy observability vendor removal | Repo-wide legacy crash-vendor grep returns no matches | Ready for reviewer |
 | Firebase + Amplitude scope | `.pipeline/platform.yml` declares `firebase_crashlytics_planned` and `amplitude_planned`; readiness docs state these are separate workstream items | Ready for reviewer |
