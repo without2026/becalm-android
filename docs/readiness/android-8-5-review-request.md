@@ -57,3 +57,6 @@ Explicitly excluded by user direction:
 
 Reviewer should assign scores for the agreed rubric and state whether the
 analytics-excluded readiness target is at least 8.5.
+
+Use `docs/readiness/android-8-5-reviewer-scorecard.md` to record reviewer-only
+scores without self-assessment.
