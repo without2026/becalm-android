@@ -10,20 +10,20 @@ private const val TAG = "Observability"
  * Production [ObservabilityClient] that fans structured events out to the project's
  * existing [Logger] abstraction.
  *
- * Why Logger and not Sentry directly? The Wave-6 alpha milestone requires the
+ * Why Logger and not a vendor SDK directly? The Wave-6 alpha milestone requires the
  * ONB-007 `onboarding_step_failed` signal to exist **somewhere** so that operators
  * can correlate onboarding churn even before a crash-reporting SDK is wired.
  * Funnelling through [Logger] means:
  *  - debug builds surface the signal in logcat (Timber tree planted in
  *    [com.becalm.android.BecalmApplication.onCreate]),
  *  - release builds that wire a remote logger pick it up automatically,
- *  - switching to Sentry later is a swap of the Hilt binding in
+ *  - switching to Firebase Crashlytics later is a swap of the Hilt binding in
  *    [com.becalm.android.core.di.ObservabilityModule] — no call-site churn.
  *
  * ## PII scrubbing
  * Tag values that match [PII_PATTERNS] (bearer tokens, JWTs, email addresses) are
- * replaced with `[redacted]` before being written to the log. Concrete Sentry /
- * Crashlytics bindings MUST preserve this contract via an equivalent `beforeSend`
+ * replaced with `[redacted]` before being written to the log. Concrete Crashlytics
+ * bindings MUST preserve this contract via an equivalent filtering
  * hook; the abstraction itself is not sufficient because vendor SDKs may otherwise
  * auto-enrich events with the raw string.
  *

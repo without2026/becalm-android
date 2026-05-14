@@ -89,8 +89,8 @@ public class RetentionSweepWorker @AssistedInject constructor(
 
         /**
          * Output data key for the number of `email_body` rows deleted by a given run.
-         * Surfaced via [Result.success] for downstream observability (the Sentry
-         * integration lands in a separate PR alongside EXTRACT-EMAIL-009 metrics).
+         * Surfaced via [Result.success] for downstream observability; remote
+         * analytics wiring is tracked separately alongside EXTRACT-EMAIL-009 metrics.
          */
         public const val KEY_EMAIL_DELETED: String = "email_deleted"
 

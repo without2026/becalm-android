@@ -48,7 +48,7 @@ public interface MetricsStore {
      * Emits the current `email_subject_only_skipped` count, defaulting to 0 when
      * no increment has yet occurred. Re-emits on every increment.
      *
-     * Surface for future debug screen / Sentry breadcrumb. No production UI
+     * Surface for a future debug screen / observability breadcrumb. No production UI
      * consumes this Flow yet — added with the counter so the read side is part
      * of the same PR contract.
      */

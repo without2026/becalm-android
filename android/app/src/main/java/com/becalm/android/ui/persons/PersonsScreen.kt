@@ -491,7 +491,7 @@ private fun PreviewPersonsScreenPopulated() {
                 BecalmTextField(
                     value = "",
                     onValueChange = {},
-                    placeholder = "Search people…",
+                    placeholder = stringResource(R.string.persons_search_placeholder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),

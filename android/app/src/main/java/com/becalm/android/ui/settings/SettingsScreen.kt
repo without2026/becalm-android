@@ -468,12 +468,12 @@ internal fun SettingsActionRow(
 private fun PreviewSettingsScreen() {
     BecalmTheme {
         BecalmScaffold(
-            title = "Settings",
+            title = stringResource(R.string.settings_title),
             navigationIcon = {
                 IconButton(onClick = {}) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.action_back),
                     )
                 }
             },

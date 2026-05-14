@@ -85,7 +85,8 @@ Run these before claiming this checklist is satisfied:
 ```bash
 cd android
 ./gradlew testDebugUnitTest --no-daemon --console=plain
-./gradlew lintDebug --no-daemon --console=plain
+./gradlew lint --no-daemon --console=plain
+./gradlew dependencyCheckAnalyze --no-daemon --console=plain
 ./gradlew assembleRelease lintRelease --no-daemon --console=plain
 ```
 
@@ -93,4 +94,7 @@ With an emulator:
 
 ```bash
 qa/emulator/scripts/verify_beta_readiness_qa.sh
+qa/emulator/scripts/run_source_instrumentation_smoke.sh
 ```
+
+`dependencyCheckAnalyze` requires the OWASP dependency-check Gradle plugin. CI should provide `NVD_API_KEY` when available; the task still exists without the secret, but the first database update can be slow or rate-limited.

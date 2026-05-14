@@ -57,7 +57,8 @@ import kotlinx.coroutines.launch
  *   [ActivityResultContracts.StartIntentSenderForResult] and re-call the VM so the
  *   AuthorizationClient second pass can claim the token after the user grants consent.
  * - [EmailConnectEvent.Failed] — show a localised Snackbar; the VM has already
- *   marked [OnboardingStep.LINK_GMAIL] [StepStatus.SKIPPED] + emitted Sentry so the
+ *   marked [OnboardingStep.LINK_GMAIL] [StepStatus.SKIPPED] + emitted the
+ *   `onboarding_step_failed` observability event so the
  *   terminal gate still accepts the flow.
  *
  * spec: AUTH-002, ONB-004, ONB-007, SMG-001

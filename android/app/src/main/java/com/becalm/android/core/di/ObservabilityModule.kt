@@ -13,9 +13,9 @@ import javax.inject.Singleton
  *
  * Production builds receive [LoggerObservabilityClient]; test builds may replace the
  * binding with a Hilt test module (`@TestInstallIn`) or override it via `@BindValue`
- * to capture emitted events. Swapping in a Sentry / Firebase Crashlytics impl later
- * is a one-line change to this module — call sites continue to depend on the
- * interface only.
+ * to capture emitted events. Swapping in the planned Firebase Crashlytics binding
+ * later is a one-line change to this module — call sites continue to depend on
+ * the interface only.
  */
 @Module
 @InstallIn(SingletonComponent::class)

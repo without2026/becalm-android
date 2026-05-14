@@ -52,7 +52,7 @@ metric cold_start_wait_ms "${WAIT_TIME:-unknown}"
 
 section "memory"
 run_adb shell dumpsys meminfo "$PACKAGE_NAME" | tee -a "$REPORT" >/dev/null
-TOTAL_PSS="$(run_adb shell dumpsys meminfo "$PACKAGE_NAME" | tr -d '\r' | awk '/TOTAL PSS:/ {print $3; exit}')"
+TOTAL_PSS="$(run_adb shell dumpsys meminfo "$PACKAGE_NAME" | tr -d '\r' | awk '/TOTAL PSS:/ && value == "" {value = $3} END {print value}')"
 metric total_pss_kb "${TOTAL_PSS:-unknown}"
 
 section "frames"
