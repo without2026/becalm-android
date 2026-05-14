@@ -1126,6 +1126,38 @@ private val MIGRATION_20_21 = object : Migration(20, 21) {
     }
 }
 
+// ─── Migration 21 → 22 (product analytics bounded queue) ───────────────────
+//
+// Room-owned upload queue for first-party beta observability. Rows are drained by
+// ProductAnalyticsFlushWorker; overflow policy is oldest-first drop at repository level.
+private val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `queued_product_events` (
+                `id` TEXT NOT NULL,
+                `event_id` TEXT NOT NULL,
+                `event_name` TEXT NOT NULL,
+                `occurred_at` INTEGER NOT NULL,
+                `session_id` TEXT,
+                `source` TEXT NOT NULL,
+                `properties_json` TEXT NOT NULL,
+                `created_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_queued_product_events_created` " +
+                "ON `queued_product_events` (`created_at`)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_queued_product_events_event_id` " +
+                "ON `queued_product_events` (`event_id`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1160,4 +1192,5 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_18_19,
     MIGRATION_19_20,
     MIGRATION_20_21,
+    MIGRATION_21_22,
 )

@@ -7,6 +7,9 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.PersonManualMatchRepository
+import com.becalm.android.productanalytics.NoopProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -145,6 +148,7 @@ public class PersonsViewModel @Inject constructor(
     projectionPort: PersonsScreenProjectionPort,
     private val refreshCoordinator: PersonsRefreshCoordinator,
     private val manualMatchRepository: PersonManualMatchRepository,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val stateSource = PersonsScreenStateSource(
@@ -157,6 +161,7 @@ public class PersonsViewModel @Inject constructor(
 
     /** Backing flow for the debounced search query. */
     private val _query: MutableStateFlow<String> = MutableStateFlow("")
+    private var lastTrackedSearchSignature: SearchAnalyticsSignature? = null
 
     init {
         observePeople()
@@ -172,6 +177,24 @@ public class PersonsViewModel @Inject constructor(
      */
     public fun onQueryChange(q: String) {
         _query.value = q
+    }
+
+    public fun onSearchResultPersonClick(personId: String) {
+        val state = _uiState.value
+        if (state.query.isBlank()) return
+
+        runCatching {
+            productAnalytics.track(
+                ProductAnalyticsNames.SEARCH_TO_DETAIL,
+                properties = mapOf(
+                    "surface" to "persons",
+                    "target_type" to "person",
+                    "result_rank_bucket" to personsSearchRankBucket(
+                        state.people.indexOfFirst { it.personId == personId },
+                    ),
+                ),
+            )
+        }
     }
 
     /**
@@ -232,7 +255,31 @@ public class PersonsViewModel @Inject constructor(
                 _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.persons_error_load_failed)) }
             }.collect { state ->
                 _uiState.value = state
+                trackSearchPerformedIfNeeded(state)
             }
+        }
+    }
+
+    private fun trackSearchPerformedIfNeeded(state: PersonsUiState) {
+        val query = state.query.trim()
+        if (query.isEmpty()) {
+            lastTrackedSearchSignature = null
+            return
+        }
+
+        val resultCountBucket = personsSearchResultCountBucket(state.people.size)
+        val signature = SearchAnalyticsSignature(query = query, resultCountBucket = resultCountBucket)
+        if (signature == lastTrackedSearchSignature) return
+
+        lastTrackedSearchSignature = signature
+        runCatching {
+            productAnalytics.track(
+                ProductAnalyticsNames.SEARCH_PERFORMED,
+                properties = mapOf(
+                    "surface" to "persons",
+                    "result_count_bucket" to resultCountBucket,
+                ),
+            )
         }
     }
 
@@ -240,3 +287,21 @@ public class PersonsViewModel @Inject constructor(
         const val PERSONS_PAGE_SIZE: Int = 20
     }
 }
+
+internal fun personsSearchResultCountBucket(count: Int): String = when {
+    count <= 0 -> "0"
+    count == 1 -> "1"
+    count <= 5 -> "2_5"
+    else -> "6_plus"
+}
+
+internal fun personsSearchRankBucket(index: Int): String = when (index) {
+    0 -> "top_1"
+    1, 2 -> "top_3"
+    else -> "below_3"
+}
+
+private data class SearchAnalyticsSignature(
+    val query: String,
+    val resultCountBucket: String,
+)

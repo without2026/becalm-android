@@ -7,6 +7,8 @@ import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.becalm.android.receiver.ReminderBroadcastReceiver
+import com.becalm.android.productanalytics.ProductAnalyticsFlushScheduler
+import com.becalm.android.productanalytics.ProductSessionTracker
 import com.becalm.android.worker.MatchingRequiredNotifier
 import com.becalm.android.worker.VoiceFailureNotifier
 import dagger.hilt.android.HiltAndroidApp
@@ -31,6 +33,12 @@ public class BecalmApplication : Application(), Configuration.Provider {
 
     @Inject
     public lateinit var workerFactory: HiltWorkerFactory
+
+    @Inject
+    public lateinit var productSessionTracker: ProductSessionTracker
+
+    @Inject
+    public lateinit var productAnalyticsFlushScheduler: ProductAnalyticsFlushScheduler
 
     private val workExecutor by lazy {
         val threadIndex = AtomicInteger(1)
@@ -61,6 +69,8 @@ public class BecalmApplication : Application(), Configuration.Provider {
         registerCommitmentDueSoonChannel()
         VoiceFailureNotifier.ensureChannel(this)
         MatchingRequiredNotifier.ensureChannel(this)
+        productSessionTracker.register(this)
+        productAnalyticsFlushScheduler.schedulePeriodicFlush()
     }
 
     private fun installDebugStrictMode() {

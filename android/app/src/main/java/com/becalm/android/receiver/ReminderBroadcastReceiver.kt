@@ -21,6 +21,9 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.productanalytics.CommitmentAnalyticsPayloads
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 import javax.inject.Inject
@@ -34,6 +37,8 @@ public data class ReminderNotificationSpec(
     val deepLinkUri: String,
     val title: String,
     val body: String,
+    val commitmentState: String,
+    val availableActions: List<String>,
 )
 
 /**
@@ -67,6 +72,9 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     public lateinit var logger: Logger
+
+    @Inject
+    public lateinit var productAnalytics: ProductAnalyticsClient
 
     @Inject
     @ApplicationScope
@@ -166,6 +174,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 commitmentId = commitmentId,
                 title = entity.title,
                 direction = requireNotNull(entity.direction) { "Reminder notifications require action direction" },
+                state = state,
             ),
         )
     }
@@ -191,6 +200,9 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             setPackage(context.packageName)
             setClass(context, MainActivity::class.java)
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ENTRY_SOURCE, "notification")
+            putExtra(EXTRA_COMMITMENT_STATE_AT_OPEN, spec.commitmentState)
+            putStringArrayListExtra(EXTRA_AVAILABLE_ACTIONS_AT_OPEN, ArrayList(spec.availableActions))
         }
         val tapPendingIntent = PendingIntent.getActivity(
             context,
@@ -209,6 +221,14 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
+        productAnalytics.track(
+            ProductAnalyticsNames.COMMITMENT_NOTIFICATION_POSTED,
+            properties = mapOf(
+                "commitment_id" to spec.commitmentId,
+                "commitment_state_at_post" to spec.commitmentState,
+                "available_actions_at_post" to spec.availableActions,
+            ),
+        )
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────
@@ -225,6 +245,9 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
          * (data-model.yml:476). A missing / blank value causes a silent drop.
          */
         public const val EXTRA_USER_ID: String = "user_id"
+        public const val EXTRA_ENTRY_SOURCE: String = "entry_source"
+        public const val EXTRA_COMMITMENT_STATE_AT_OPEN: String = "commitment_state_at_open"
+        public const val EXTRA_AVAILABLE_ACTIONS_AT_OPEN: String = "available_actions_at_open"
 
         private fun canPostNotifications(context: Context): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -261,6 +284,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             commitmentId: String,
             title: String,
             direction: String,
+            state: CommitmentState = CommitmentState.PENDING,
         ): ReminderNotificationSpec {
             val bodyResId = when (direction) {
                 "give" -> R.string.commitment_alarm_body_give_fmt
@@ -272,6 +296,8 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 deepLinkUri = "becalm://commitments/$commitmentId",
                 title = context.getString(R.string.commitment_alarm_title),
                 body = context.getString(bodyResId, title),
+                commitmentState = CommitmentAnalyticsPayloads.stateLabel(state),
+                availableActions = CommitmentAnalyticsPayloads.availableActionsForState(state),
             )
         }
     }
