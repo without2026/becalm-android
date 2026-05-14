@@ -34,6 +34,7 @@ class PrivacyManagementScreenTest {
             BecalmTheme {
                 PrivacyManagementScreenContent(
                     state = PrivacyManagementUiState(
+                        loading = false,
                         commitmentCount = 4,
                         enrichmentCount = 2,
                         emailCount = 9,
@@ -71,7 +72,7 @@ class PrivacyManagementScreenTest {
         composeTestRule.setContent {
             BecalmTheme {
                 PrivacyManagementScreenContent(
-                    state = PrivacyManagementUiState(),
+                    state = PrivacyManagementUiState(loading = false),
                     snackbarHostState = SnackbarHostState(),
                     onBack = {},
                     onExportClick = { exportClicks++ },

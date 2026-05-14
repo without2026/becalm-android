@@ -166,7 +166,7 @@ class AuthCheckpoint1E2eTest {
         }
 
         composeTestRule.onNodeWithTag("login-email").performTextInput("user@example.com")
-        composeTestRule.onNodeWithTag("login-password").performTextInput("secret")
+        composeTestRule.onNodeWithTag("login-password").performTextInput("secret123")
         composeTestRule.onAllNodesWithText(string(R.string.login_cta))[0].performClick()
 
         composeTestRule.waitForIdle()

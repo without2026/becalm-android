@@ -170,9 +170,9 @@ class OnboardingScreenTest {
     }
 
     @Test
-    fun email_pipa_screen_navigates_to_connect_route_after_agree_persist_success() {
+    fun email_pipa_screen_launches_oauth_after_agree_persist_success() {
         val persisted = mutableListOf<Pair<List<EmailPipaProvider>, Boolean>>()
-        var destination: String? = null
+        var connectedProvider: EmailPipaProvider? = null
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -183,7 +183,8 @@ class OnboardingScreenTest {
                         persisted += recipients to granted
                         true
                     },
-                    onNavigate = { destination = it },
+                    onConnectEmailProvider = { provider, _ -> connectedProvider = provider },
+                    onNavigate = {},
                 )
             }
         }
@@ -196,7 +197,7 @@ class OnboardingScreenTest {
                 listOf(listOf(EmailPipaProvider.OUTLOOK_MAIL) to true),
                 persisted,
             )
-            assertEquals(BecalmRoute.OnboardingOutlookMail.path, destination)
+            assertEquals(EmailPipaProvider.OUTLOOK_MAIL, connectedProvider)
         }
     }
 

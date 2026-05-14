@@ -37,6 +37,7 @@ class SettingsScreenTest {
             BecalmTheme {
                 SettingsScreenContent(
                     state = SettingsUiState(
+                        loading = false,
                         userEmail = "user@example.com",
                         processingPaused = true,
                     ),
@@ -73,6 +74,7 @@ class SettingsScreenTest {
             BecalmTheme {
                 SettingsScreenContent(
                     state = SettingsUiState(
+                        loading = false,
                         pipaConsentEnabled = false,
                     ),
                     snackbarHostState = SnackbarHostState(),
