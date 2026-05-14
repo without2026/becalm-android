@@ -61,8 +61,6 @@
     <string name="login_error_invalid_email">올바른 이메일 주소를 입력해 주세요.</string>
     <string name="login_error_short_password">비밀번호는 8자 이상이어야 합니다.</string>
     <string name="login_google_setup_required">Google 로그인 설정이 필요합니다. 이메일로 로그인해 주세요.</string>
-    <string name="login_signup_check_email">이메일을 확인해 계정을 인증한 뒤 로그인해 주세요.</string>
-    <string name="login_signup_failed">계정을 만들 수 없습니다. 로그인하거나 다른 이메일을 사용해 주세요.</string>
     <string name="auth_error_invalid_credentials">이메일 또는 비밀번호가 올바르지 않습니다.</string>
     <string name="auth_error_email_confirmation_required">이메일을 확인해 계정을 인증한 뒤 로그인해 주세요.</string>
     <string name="auth_error_sign_up_failed">계정을 만들 수 없습니다.</string>
@@ -157,10 +155,7 @@
     <string name="onb_imap_title">IMAP / 앱 비밀번호</string>
     <string name="onb_imap_headline">IMAP으로 연결</string>
     <string name="onb_imap_body">IMAP 서버 정보를 입력해 이메일 약속을 동기화하세요. 주 계정 비밀번호가 아닌 앱 전용 비밀번호를 사용하세요. 자격 증명은 이 기기에 암호화 저장됩니다.</string>
-    <string name="onb_imap_host_label">IMAP 서버</string>
-    <string name="onb_imap_host_placeholder">imap.example.com</string>
     <string name="onb_imap_email_label">이메일 주소</string>
-    <string name="onb_imap_email_placeholder">name@example.com</string>
     <string name="onb_imap_password_label">앱 비밀번호</string>
     <string name="onb_imap_password_placeholder">앱 전용 비밀번호</string>
     <string name="onb_imap_cta">저장</string>
@@ -248,8 +243,6 @@
     <string name="today_error_sign_in_required">오늘 할 일을 보려면 다시 로그인해 주세요.</string>
     <string name="today_error_load_failed">오늘 할 일을 불러오지 못했습니다.</string>
     <string name="today_section_commitments">약속</string>
-    <string name="today_section_meetings">회의</string>
-    <string name="today_section_events">이벤트</string>
     <string name="today_person_focus_title">오늘 챙길 사람</string>
     <string name="today_person_focus_subtitle_fmt">%1$d명에게 걸린 약속 %2$d건을 먼저 정리했어요</string>
     <string name="today_person_focus_commitments_fmt">약속 %1$d건</string>
@@ -288,7 +281,6 @@
     <string name="sources_last_error_generic">연결 실패</string>
 
     <!-- Person detail -->
-    <string name="person_detail_commitments_section">약속</string>
     <string name="person_detail_timeline_section_fmt">타임라인 (%1$d)</string>
     <string name="person_detail_timeline_filter_empty">이 출처의 항목이 없습니다.</string>
     <string name="person_detail_filter_all">전체</string>
@@ -312,8 +304,6 @@
 
     <!-- Raw event detail -->
     <string name="raw_event_detail_title">이벤트 상세</string>
-    <string name="raw_event_detail_source">출처</string>
-    <string name="raw_event_detail_timestamp">기록 시각</string>
     <string name="raw_event_detail_not_found">이벤트를 찾을 수 없습니다.</string>
     <string name="raw_event_detail_no_title">(제목 없음)</string>
     <string name="raw_event_detail_error_missing_id">이벤트 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
@@ -365,7 +355,6 @@
     <string name="person_header_nickname_fmt">(%1$s)</string>
     <string name="person_header_event_count_fmt">이벤트 %1$d건</string>
     <string name="person_header_pending_count_fmt">미이행 약속 %1$d건</string>
-    <string name="person_interaction_snippet_placeholder">(미리보기 없음)</string>
 
     <!-- Person 상세 섹션 (SRC-008) -->
 
@@ -463,7 +452,6 @@
     <!-- ─── Korean overrides for English defaults (i18n cleanup) ─── -->
 
     <!-- Common actions -->
-    <string name="action_delete_account">계정 삭제</string>
     <string name="action_sync_now">지금 동기화</string>
     <string name="action_revoke_permission">권한 회수</string>
 
@@ -607,12 +595,10 @@
     <string name="commitment_state_completed">완료</string>
     <string name="commitment_state_overdue">놓침</string>
     <string name="commitment_state_cancelled">취소됨</string>
-    <string name="commitment_detail_title">약속 상세</string>
     <string name="commitment_detail_quote_label">원문</string>
     <string name="commitment_detail_counterparty_label">상대방</string>
     <string name="commitment_detail_due_label">마감</string>
     <string name="commitment_detail_last_edited_fmt">마지막 수정: %1$s (본인)</string>
-    <string name="commitment_detail_disputed_badge_fmt">⚠ 원문 이의 제기됨 (%1$s)</string>
     <string name="commitment_detail_disputed_label_fmt">이의 제기됨, %1$s</string>
     <string name="commitment_detail_superseded_link">이전 약속 보기</string>
     <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
@@ -628,10 +614,8 @@
     <string name="commitment_action_edit">편집</string>
     <string name="commitment_manual_badge">📝 수동 추가</string>
     <string name="commitment_manual_sheet_title_supersede">다른 약속으로 교체</string>
-    <string name="commitment_manual_quote_hint">상대의 약속 내용을 메모하세요 (1~500자)</string>
     <string name="commitment_manual_supersede_quote_label">원문 (수정 불가)</string>
     <string name="commitment_manual_no_due_date">마감 없음</string>
-    <string name="commitment_manual_source_manual_fmt">사용자 직접 추가 %1$s KST</string>
     <string name="commitment_manual_error_title">제목을 1~200자로 입력해주세요</string>
     <string name="commitment_manual_error_direction">방향을 선택해주세요</string>
     <string name="commitment_manual_error_quote">약속 맥락을 1~500자로 입력해주세요</string>
@@ -645,7 +629,6 @@
     <string name="commitment_manual_field_due_pick">마감 선택</string>
     <string name="commitment_manual_field_due_hint">원문 표현 (예: 월말)</string>
     <string name="commitment_manual_field_due_approximate">대략적</string>
-    <string name="commitment_manual_save_failure">저장에 실패했습니다. 다시 시도해 주세요</string>
     <string name="evidence_import_fab_content_desc">증거 추가</string>
     <string name="evidence_import_sheet_title">증거 추가</string>
     <string name="evidence_import_message_screenshot">메신저 스크린샷</string>
@@ -682,10 +665,7 @@
     <string name="commitment_edit_field_direction_take">상대가 한 약속</string>
     <string name="commitment_edit_readonly_source_label">출처 정보</string>
     <string name="commitment_edit_readonly_quote_label">원문 (수정 불가, 법적 증거)</string>
-    <string name="commitment_edit_readonly_quote_disputed">이의 제기됨</string>
     <string name="commitment_edit_toggle_dispute">원문 이의 제기 토글</string>
-    <string name="commitment_edit_toggle_dispute_on">이의 제기</string>
-    <string name="commitment_edit_toggle_dispute_off">이의 해제</string>
     <string name="commitment_edit_save">저장</string>
     <string name="commitment_edit_cancel">취소</string>
     <string name="commitment_edit_delete">삭제</string>
