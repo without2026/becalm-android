@@ -146,7 +146,12 @@ def _enforce_index_rules(
 
 
 def _get_pr_base_head() -> tuple[str | None, str | None]:
-    """Return PR base/head SHAs from GitHub event payload or explicit env vars."""
+    """Return PR base/head SHAs from GitHub event payload or explicit env vars.
+
+    workflow_dispatch runs do not carry pull_request payloads. In CI, fall back to
+    the previous commit so deterministic gates stay PR-scoped instead of blocking
+    on historical uncovered specs.
+    """
     base = None
     head = None
 
@@ -165,6 +170,12 @@ def _get_pr_base_head() -> tuple[str | None, str | None]:
         base = os.environ.get("BASE_SHA")
     if not head:
         head = os.environ.get("HEAD_SHA")
+
+    if not base and not head and os.environ.get("GITHUB_ACTIONS") == "true":
+        github_sha = os.environ.get("GITHUB_SHA")
+        if github_sha:
+            head = github_sha
+            base = f"{github_sha}^"
 
     return base, head
 
@@ -260,6 +271,14 @@ def _scan_file_for_spec_ids(
             if match:
                 refs.add(match.group(1))
     return refs
+
+
+def _is_ci_infra_file(path: pathlib.Path, repo_root: pathlib.Path) -> bool:
+    try:
+        rel = path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return False
+    return rel.startswith(".pipeline/") or rel.startswith(".github/")
 
 
 def _collect_spec_ids_from_text(text: str) -> set[str]:
@@ -366,6 +385,7 @@ def main() -> None:
     changed_source_files = [
         p for p in changed_under_project
         if p.is_file()
+        and not _is_ci_infra_file(p, repo_root)
         and p not in test_file_set
         and p.suffix in {".py", ".js", ".jsx", ".ts", ".tsx", ".cs", ".kt", ".java", ".swift"}
     ]
