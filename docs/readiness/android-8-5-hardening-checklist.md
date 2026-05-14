@@ -2,6 +2,10 @@
 
 This checklist maps the current beta-readiness target to concrete evidence. It is intentionally product-facing: a passing unit test is not enough unless it covers a user-visible requirement.
 
+Last updated: 2026-05-14 KST, main `08f19af`.
+
+Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that analytics/observability SDK implementation.
+
 ## Target Scores
 
 - Functional Requirements: 8.5
@@ -60,6 +64,20 @@ Pass condition for 8.5:
 - No source status string exposes raw provider IDs, raw error bodies, tokens, or email addresses.
 - New code follows existing ViewModel/Repository/Projector boundaries.
 
+Current main evidence:
+
+- `./gradlew lintDebug testDebugUnitTest bundleRelease --no-daemon --console=plain` passes.
+- `./gradlew lint --no-daemon --console=plain` passes.
+- `actionlint .github/workflows/*.yml` passes.
+- `python3 .pipeline/core/assert-guard.py` passes.
+- PR-scoped `python3 .pipeline/core/spec-coverage.py` passes for release-engineering changes.
+- `detect-secrets scan --baseline .secrets.baseline` passes.
+
+Known limits:
+
+- `./gradlew connectedDebugAndroidTest` was not run in the local container because no emulator/device is attached.
+- `dependencyCheckAnalyze` task exists and CI wires `NVD_API_KEY`, but a full local run without NVD API key is too slow/rate-limited to use as local evidence.
+
 ## UX / Product Readiness
 
 Required evidence:
@@ -78,6 +96,39 @@ Pass condition for 8.5:
 - A recoverable source or upload failure has a visible next action.
 - Korean copy is consistent across first-run, source status, processing, and recovery states.
 
+Current main evidence:
+
+- Korean UI copy invariant tests exist and are part of `testDebugUnitTest`.
+- Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
+- Current environment has no attached emulator, so this document does not claim a fresh live UI smoke for `08f19af`.
+
+## Release Engineering / CI
+
+Required evidence:
+
+- Android deterministic gates include lint, dependency check, secret scan, spec coverage, and size check.
+- Android test workflow includes unit tests, release smoke, and CI emulator instrumentation.
+- Staging workflow is green on `main`.
+- Staging distribution is wired to Firebase App Distribution and does not fail main pushes when distribution secrets are not installed yet.
+- Production deploy builds a signed AAB and uploads it to Play Console with fail-closed runtime/signing checks.
+- GitHub Actions workflows pass static validation and do not contain untrusted PR branch interpolation in shell scripts.
+- GitHub first-party actions use Node 24-compatible major versions.
+
+Current main evidence:
+
+- Latest `Deploy Staging` run succeeded on main `08f19af`: https://github.com/without2026/becalm-android/actions/runs/25860968053
+- `.github/workflows/deploy-staging.yml` now runs `android-staging-preflight` and skips Firebase App Distribution with a warning until required Firebase/runtime/signing secrets are present.
+- `.github/workflows/deploy-production.yml` builds Android AAB through `adapter-build.yml` and uploads to Play Console using `r0adkll/upload-google-play@v1`.
+- `adapter-build.yml` runs `verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured` before protected Android release builds.
+- `adapter-build.yml`, `adapter-gates.yml`, and `adapter-tests.yml` no longer reference missing electron/web reusable workflows in this Android repo.
+- `ci-scenario-gen.yml` passes `github.head_ref` via `PR_HEAD_REF` env before shell use.
+- First-party actions are upgraded to `checkout@v6`, `setup-java@v5`, `setup-python@v6`, `upload-artifact@v7`, `download-artifact@v8`, and `cache@v5`.
+
+Known limits:
+
+- Firebase App Distribution is not actually uploading until these repository/environment secrets are configured: `BECALM_API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GOOGLE_WEB_CLIENT_ID`, `BECALM_RELEASE_*`, `FIREBASE_APP_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_TESTER_GROUPS`.
+- Production Play Console deploy path is wired but was not executed because protected production deploy requires release secrets and an explicit workflow dispatch.
+
 ## Commands
 
 Run these before claiming this checklist is satisfied:
@@ -88,6 +139,15 @@ cd android
 ./gradlew lint --no-daemon --console=plain
 ./gradlew dependencyCheckAnalyze --no-daemon --console=plain
 ./gradlew assembleRelease lintRelease --no-daemon --console=plain
+```
+
+From the repo root:
+
+```bash
+actionlint .github/workflows/*.yml
+python3 .pipeline/core/assert-guard.py
+python3 .pipeline/core/spec-coverage.py
+detect-secrets scan --baseline .secrets.baseline
 ```
 
 With an emulator:
