@@ -42,6 +42,7 @@ import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.sourcePresentationFor
 import com.becalm.android.ui.components.sourceStatusLabelRes
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.dispatchSourcesListNavigation
 import com.becalm.android.ui.theme.BecalmTheme
@@ -108,7 +109,8 @@ public fun SourcesListScreenContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    .testTag("sources-list"),
             ) {
                 items(items = state.items, key = { it.sourceType }) { row ->
                     SourceRowItem(
@@ -156,6 +158,27 @@ private fun SourceRowItem(
                         text = stringResource(R.string.sources_last_error_generic),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                row.help?.let { help ->
+                    Text(
+                        text = uiMessageStringResource(help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                row.recommendedActionLabelRes?.let { actionRes ->
+                    Text(
+                        text = stringResource(
+                            R.string.sources_status_recommended_action_fmt,
+                            stringResource(actionRes),
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (row.hasError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
             }

@@ -27,6 +27,7 @@ internal data class SourceStatePresentation(
     @StringRes val labelRes: Int,
     val tone: StatusTone,
     @StringRes val recommendedCtaRes: Int?,
+    @StringRes val recoveryCopyRes: Int? = null,
     val actionRequired: Boolean,
     val terminal: Boolean,
 )
@@ -50,6 +51,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_connected,
             tone = StatusTone.Success,
             recommendedCtaRes = null,
+            recoveryCopyRes = R.string.sources_status_help_connected,
             actionRequired = false,
             terminal = true,
         )
@@ -57,6 +59,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_syncing,
             tone = StatusTone.Progress,
             recommendedCtaRes = null,
+            recoveryCopyRes = R.string.sources_status_help_syncing,
             actionRequired = false,
             terminal = false,
         )
@@ -64,6 +67,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_stale,
             tone = StatusTone.Attention,
             recommendedCtaRes = R.string.action_sync_now,
+            recoveryCopyRes = R.string.sources_status_help_stale,
             actionRequired = true,
             terminal = false,
         )
@@ -71,6 +75,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_error,
             tone = StatusTone.Error,
             recommendedCtaRes = R.string.action_reconnect,
+            recoveryCopyRes = R.string.sources_status_help_error,
             actionRequired = true,
             terminal = false,
         )
@@ -78,6 +83,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_disconnected,
             tone = StatusTone.Muted,
             recommendedCtaRes = R.string.action_connect,
+            recoveryCopyRes = R.string.sources_status_help_disconnected,
             actionRequired = false,
             terminal = true,
         )
@@ -85,6 +91,7 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
             labelRes = R.string.sources_status_unknown,
             tone = StatusTone.Neutral,
             recommendedCtaRes = null,
+            recoveryCopyRes = R.string.sources_status_help_unknown,
             actionRequired = false,
             terminal = false,
         )
@@ -92,3 +99,11 @@ internal fun sourceStatePresentationFor(status: SourceSyncStatus): SourceStatePr
 
 internal fun sourceStatusToneFor(status: SourceSyncStatus): StatusTone =
     sourceStatePresentationFor(status).tone
+
+@StringRes
+internal fun sourceStatusRecoveryCopyRes(status: SourceSyncStatus): Int? =
+    sourceStatePresentationFor(status).recoveryCopyRes
+
+@StringRes
+internal fun sourceStatusRecommendedCtaRes(status: SourceSyncStatus): Int? =
+    sourceStatePresentationFor(status).recommendedCtaRes

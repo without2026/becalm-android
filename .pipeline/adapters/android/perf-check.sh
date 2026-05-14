@@ -26,8 +26,8 @@ check_size() {
   echo "[PASS] $label: ${size_mb}MB (limit: ${max_mb}MB)"
 }
 
-AAB_FILE=$(find app/build/outputs/bundle -name "*.aab" 2>/dev/null | head -1)
-APK_FILE=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | head -1)
+AAB_FILE=$(find app/build/outputs/bundle -name "*.aab" 2>/dev/null | head -1 || true)
+APK_FILE=$(find app/build/outputs/apk -name "*.apk" 2>/dev/null | head -1 || true)
 
 if [ -n "$AAB_FILE" ]; then
   check_size "$AAB_FILE" "$MAX_AAB_MB" "AAB"

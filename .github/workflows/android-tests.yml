@@ -42,6 +42,24 @@ jobs:
           chmod +x ./gradlew 2>/dev/null || true
           ./gradlew testDebugUnitTest --no-daemon --console=plain
 
+  release-smoke:
+    needs: read-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+      - name: Release build smoke
+        working-directory: ${{ needs.read-config.outputs.root }}/android
+        run: |
+          chmod +x ./gradlew 2>/dev/null || true
+          ./gradlew assembleRelease lintRelease --no-daemon --console=plain
+      - name: APK size smoke
+        working-directory: ${{ needs.read-config.outputs.root }}/android
+        run: bash ../.pipeline/adapters/android/perf-check.sh
+
   instrumented-tests:
     needs: read-config
     runs-on: ubuntu-latest

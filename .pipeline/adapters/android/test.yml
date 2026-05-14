@@ -13,9 +13,57 @@ jobs:
           java-version: "17"
           distribution: temurin
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read project_root
+        id: config
+        run: |
+          pip install -q pyyaml 2>/dev/null || true
+          PROJECT_ROOT=$(python3 -c "
+          import yaml
+          with open('.pipeline/platform.yml') as f:
+              print(yaml.safe_load(f).get('project_root', '.'))
+          ")
+          echo "root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
+
       - name: Unit tests
-        working-directory: BeCalmv3/android
-        run: ./gradlew testDebugUnitTest
+        working-directory: ${{ steps.config.outputs.root }}/android
+        run: ./gradlew testDebugUnitTest --no-daemon --console=plain
+
+  release-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read project_root
+        id: config
+        run: |
+          pip install -q pyyaml 2>/dev/null || true
+          PROJECT_ROOT=$(python3 -c "
+          import yaml
+          with open('.pipeline/platform.yml') as f:
+              print(yaml.safe_load(f).get('project_root', '.'))
+          ")
+          echo "root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Release build smoke
+        working-directory: ${{ steps.config.outputs.root }}/android
+        run: ./gradlew assembleRelease lintRelease --no-daemon --console=plain
+
+      - name: APK size smoke
+        working-directory: ${{ steps.config.outputs.root }}/android
+        run: bash ../.pipeline/adapters/android/perf-check.sh
 
   instrumented-tests:
     runs-on: ubuntu-latest
@@ -39,7 +87,9 @@ jobs:
           api-level: 33
           target: google_apis
           arch: x86_64
-          script: cd BeCalmv3/android && ./gradlew connectedDebugAndroidTest
+          script: |
+            ROOT=$(python3 -c "import yaml; print(yaml.safe_load(open('.pipeline/platform.yml')).get('project_root', '.'))")
+            cd "$ROOT/android" && ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
 
   backend-tests:
     runs-on: ubuntu-latest
@@ -50,13 +100,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install backend deps
-        working-directory: BeCalmv3/api
+      - name: Read project_root
+        id: config
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt 2>/dev/null || true
-          pip install pytest 2>/dev/null || true
+          pip install -q pyyaml 2>/dev/null || true
+          PROJECT_ROOT=$(python3 -c "
+          import yaml
+          with open('.pipeline/platform.yml') as f:
+              print(yaml.safe_load(f).get('project_root', '.'))
+          ")
+          echo "root=$PROJECT_ROOT" >> "$GITHUB_OUTPUT"
 
-      - name: Backend tests
-        working-directory: BeCalmv3/api
-        run: pytest -xvs tests/ --timeout=60
+      - name: Backend tests (optional Python API)
+        run: |
+          ROOT="${{ steps.config.outputs.root }}"
+          if [ ! -f "$ROOT/api/requirements.txt" ]; then
+            echo "[INFO] No api/requirements.txt — skipping backend pytest (Kotlin-only app OK)"
+            exit 0
+          fi
+          pip install --upgrade pip
+          pip install -r "$ROOT/api/requirements.txt" 2>/dev/null || true
+          pip install pytest pytest-timeout 2>/dev/null || true
+          if [ ! -d "$ROOT/api/tests" ]; then
+            echo "[INFO] No api/tests — skipping backend pytest"
+            exit 0
+          fi
+          (cd "$ROOT/api" && pytest -xvs tests/ --timeout=60)

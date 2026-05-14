@@ -22,6 +22,8 @@ import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.components.SourceStatusIndicator
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.sourceStatusRecoveryCopyRes
+import com.becalm.android.ui.components.sourceStatusRecommendedCtaRes
 import com.becalm.android.ui.components.uiMessageStringResource
 import kotlinx.datetime.Instant
 
@@ -77,6 +79,29 @@ internal fun SourceStatusSummarySection(
 
 @Composable
 private fun SourceStatusMeta(state: SourceDetailUiState) {
+    sourceStatusRecoveryCopyRes(state.status)?.let { helpRes ->
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = stringResource(helpRes),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    sourceStatusRecommendedCtaRes(state.status)?.let { actionRes ->
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(
+                R.string.sources_status_recommended_action_fmt,
+                stringResource(actionRes),
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (state.hasError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
     state.lastSyncAt?.let { at ->
         Spacer(modifier = Modifier.height(12.dp))
         Text(

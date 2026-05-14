@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -14,6 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Rule
@@ -50,6 +52,7 @@ class SourceResilienceCheckpoint6E2eTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.sources_status_connected)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.sources_status_help_connected)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.action_sync_now)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.source_detail_recent_events_section)).assertIsDisplayed()
         composeTestRule.onNodeWithText("계약 검토").assertIsDisplayed()
@@ -71,12 +74,15 @@ class SourceResilienceCheckpoint6E2eTest {
                                 status = SourceSyncStatus.Error,
                                 lastSyncAt = null,
                                 hasError = true,
+                                help = UiMessage.resource(R.string.sources_status_help_error),
+                                recommendedActionLabelRes = R.string.action_reconnect,
                             ),
                             SourceStatusRow(
                                 sourceType = "google_calendar",
                                 status = SourceSyncStatus.Connected,
                                 lastSyncAt = Instant.parse("2026-05-07T03:00:00Z"),
                                 hasError = false,
+                                help = UiMessage.resource(R.string.sources_status_help_connected),
                             ),
                         ),
                     ),
@@ -89,6 +95,15 @@ class SourceResilienceCheckpoint6E2eTest {
         composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_gmail)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.sources_status_error)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.sources_last_error_generic)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("sources-list", useUnmergedTree = true)
+            .performScrollToNode(hasText(string(R.string.sources_status_help_error)))
+        composeTestRule.onNodeWithText(string(R.string.sources_status_help_error)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(
+            string(
+                R.string.sources_status_recommended_action_fmt,
+                string(R.string.action_reconnect),
+            ),
+        ).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.raw_event_source_badge_google_calendar)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.sources_status_connected)).assertIsDisplayed()
     }
@@ -119,4 +134,7 @@ class SourceResilienceCheckpoint6E2eTest {
 
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
+
+    private fun string(resId: Int, vararg args: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
 }

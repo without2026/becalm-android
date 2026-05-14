@@ -94,7 +94,19 @@ class SourcesListViewModelSpecTest {
             assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.VOICE).status)
             assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.GMAIL).status)
             assertEquals(SourceSyncStatus.Error, rowsByType.getValue(SourceType.OUTLOOK_MAIL).status)
+            assertEquals(
+                com.becalm.android.R.string.sources_status_help_error,
+                rowsByType.getValue(SourceType.OUTLOOK_MAIL).help?.resId,
+            )
+            assertEquals(
+                com.becalm.android.R.string.action_reconnect,
+                rowsByType.getValue(SourceType.OUTLOOK_MAIL).recommendedActionLabelRes,
+            )
             assertEquals(SourceSyncStatus.Disconnected, rowsByType.getValue(SourceType.NAVER_IMAP).status)
+            assertEquals(
+                com.becalm.android.R.string.action_connect,
+                rowsByType.getValue(SourceType.NAVER_IMAP).recommendedActionLabelRes,
+            )
             assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.DAUM_IMAP).status)
             assertEquals(SourceSyncStatus.Disconnected, rowsByType.getValue(SourceType.OUTLOOK_CALENDAR).status)
             cancelAndIgnoreRemainingEvents()

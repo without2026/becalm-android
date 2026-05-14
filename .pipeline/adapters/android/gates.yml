@@ -55,4 +55,4 @@ jobs:
 
       - name: APK size check
         working-directory: ${{ steps.config.outputs.root }}/android
-        run: bash ../../.pipeline/adapters/android/perf-check.sh
+        run: bash ../.pipeline/adapters/android/perf-check.sh

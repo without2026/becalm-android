@@ -28,3 +28,11 @@ qa/emulator/scripts/verify_meeting_speaker_matching_qa.sh
 ```
 
 That script re-seeds the emulator, pushes a meeting audio fixture, verifies the persistent matching banner, selects an existing person for a speaker-label review item, opens the matched person detail timeline, and checks that local `memory.md` output exists for the matched person.
+
+For a single beta-readiness smoke that includes UI and non-functional measurements:
+
+```bash
+qa/emulator/scripts/verify_beta_readiness_qa.sh
+```
+
+That script runs the person rendering smoke, the meeting speaker matching smoke, then writes cold-start, memory, and frame-stat measurements under `qa/emulator/reports/readiness/`.

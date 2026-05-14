@@ -272,6 +272,34 @@ class PersonDetailViewModelSpecTest {
     }
 
     @Test
+    fun `large person timeline projection stays bounded to latest indexed interactions`() = runTest {
+        val personId = "person-1"
+        val interactions = (0 until 150).map { index ->
+            interaction(
+                id = "mail-$index",
+                personId = personId,
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw:mail-$index",
+                interactionKind = "email",
+                title = "고객 메일 $index",
+                snippet = "다음 액션과 일정이 포함된 최근 상호작용 $index",
+                occurredAt = Instant.fromEpochMilliseconds(index * 1_000L),
+            )
+        }
+        every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns flowOf(interactions)
+
+        val viewModel = buildViewModel(personId = personId)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.loading)
+        assertEquals(150, state.eventCount)
+        assertEquals(150, state.sourceEventCards.size)
+        assertEquals("고객 메일 149", state.sourceEventCards.first().title)
+        assertEquals("고객 메일 0", state.sourceEventCards.last().title)
+    }
+
+    @Test
     fun `empty person index does not fall back to legacy person ref reads`() = runTest {
         val personId = "person-1"
 
