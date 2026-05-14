@@ -91,6 +91,9 @@ class AndroidBuildWorkflowSpecTest {
 
         assertTrue(workflow.contains("adapter:"))
         assertTrue(workflow.contains("staging_mechanism:"))
+        assertTrue(workflow.contains("android-staging-preflight:"))
+        assertTrue(workflow.contains("distribution_enabled:"))
+        assertTrue(workflow.contains("needs.android-staging-preflight.outputs.distribution_enabled == 'true'"))
         assertTrue(workflow.contains("build-android:"))
         assertTrue(workflow.contains("deploy-android-staging:"))
         assertTrue(workflow.contains("adapter: android"))

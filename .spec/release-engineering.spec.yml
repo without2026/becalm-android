@@ -53,7 +53,7 @@ behaviors:
     description: "Staging deploy workflow는 Android adapter일 때 release AAB를 만들고 Firebase App Distribution으로 배포한다"
     trigger: "push to main deploy-staging.yml with platform ci.adapter=android"
     precondition: ".pipeline/platform.yml deploy.staging.mechanism=firebase_app_distribution"
-    expected: "deploy-staging.yml은 adapter=android에서 adapter-build.yml을 require_signing=true로 호출하고 android-aab artifact를 Firebase App Distribution action에 전달한다. Firebase app id, service account, tester groups는 GitHub secrets로 주입된다"
+    expected: "deploy-staging.yml은 Firebase/App signing/runtime secrets가 모두 설정된 경우 adapter=android에서 adapter-build.yml을 require_signing=true로 호출하고 android-aab artifact를 Firebase App Distribution action에 전달한다. secrets가 아직 없는 초기 repo에서는 staging preflight가 warning을 남기고 Android distribution만 skip하여 main push workflow를 red로 만들지 않는다"
     source: beta-readiness-hardening
     tests: [AndroidBuildWorkflowSpecTest]
 

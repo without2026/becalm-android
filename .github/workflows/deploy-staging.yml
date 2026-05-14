@@ -82,11 +82,62 @@ jobs:
           npm install -g @railway/cli 2>/dev/null || true
           railway up --environment staging --service "${{ needs.load-config.outputs.railway_service }}" 2>&1
 
-  build-android:
+  android-staging-preflight:
     needs: load-config
+    runs-on: ubuntu-latest
+    outputs:
+      distribution_enabled: ${{ steps.check.outputs.enabled }}
     if: >-
       needs.load-config.outputs.adapter == 'android'
       && needs.load-config.outputs.staging_mechanism == 'firebase_app_distribution'
+    steps:
+      - name: Check Firebase distribution secrets
+        id: check
+        env:
+          BECALM_API_BASE_URL: ${{ secrets.BECALM_API_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          BECALM_RELEASE_STORE_FILE: ${{ secrets.BECALM_RELEASE_STORE_FILE }}
+          BECALM_RELEASE_STORE_PASSWORD: ${{ secrets.BECALM_RELEASE_STORE_PASSWORD }}
+          BECALM_RELEASE_KEY_ALIAS: ${{ secrets.BECALM_RELEASE_KEY_ALIAS }}
+          BECALM_RELEASE_KEY_PASSWORD: ${{ secrets.BECALM_RELEASE_KEY_PASSWORD }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_TESTER_GROUPS: ${{ secrets.FIREBASE_TESTER_GROUPS }}
+        run: |
+          missing=()
+          for key in \
+            BECALM_API_BASE_URL \
+            SUPABASE_URL \
+            SUPABASE_ANON_KEY \
+            GOOGLE_WEB_CLIENT_ID \
+            BECALM_RELEASE_STORE_FILE \
+            BECALM_RELEASE_STORE_PASSWORD \
+            BECALM_RELEASE_KEY_ALIAS \
+            BECALM_RELEASE_KEY_PASSWORD \
+            FIREBASE_APP_ID \
+            FIREBASE_SERVICE_ACCOUNT_JSON \
+            FIREBASE_TESTER_GROUPS; do
+            if [ -z "${!key}" ]; then
+              missing+=("$key")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::warning::Skipping Android Firebase App Distribution; missing secrets: ${missing[*]}"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+  build-android:
+    needs: [load-config, android-staging-preflight]
+    if: >-
+      needs.load-config.outputs.adapter == 'android'
+      && needs.load-config.outputs.staging_mechanism == 'firebase_app_distribution'
+      && needs.android-staging-preflight.outputs.distribution_enabled == 'true'
     uses: ./.github/workflows/adapter-build.yml
     with:
       adapter: android
@@ -95,10 +146,11 @@ jobs:
     secrets: inherit
 
   deploy-android-staging:
-    needs: [load-config, build-android]
+    needs: [load-config, android-staging-preflight, build-android]
     if: >-
       needs.load-config.outputs.adapter == 'android'
       && needs.load-config.outputs.staging_mechanism == 'firebase_app_distribution'
+      && needs.android-staging-preflight.outputs.distribution_enabled == 'true'
     runs-on: ubuntu-latest
     environment: staging
     steps:
