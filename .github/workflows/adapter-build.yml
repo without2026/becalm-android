@@ -24,14 +24,6 @@ on:
         type: boolean
 
 jobs:
-  electron-build:
-    if: inputs.adapter == 'electron'
-    uses: ./.github/workflows/electron-build.yml
-    with:
-      build_target: ${{ inputs.build_target }}
-      require_signing: ${{ inputs.require_signing }}
-    secrets: inherit
-
   android-build:
     if: inputs.adapter == 'android'
     runs-on: ubuntu-latest
@@ -91,7 +83,7 @@ jobs:
           if-no-files-found: error
 
   unsupported-adapter:
-    if: inputs.adapter != 'electron' && inputs.adapter != 'android'
+    if: inputs.adapter != 'android'
     runs-on: ubuntu-latest
     steps:
       - name: Fail unsupported adapter

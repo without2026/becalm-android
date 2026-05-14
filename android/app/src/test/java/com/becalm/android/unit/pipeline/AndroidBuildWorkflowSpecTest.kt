@@ -20,7 +20,7 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(workflow.contains("./gradlew bundleRelease"))
         assertTrue(workflow.contains("name: android-aab"))
         assertTrue(workflow.contains("app/build/outputs/bundle/**/*.aab"))
-        assertTrue(workflow.contains("inputs.adapter != 'electron' && inputs.adapter != 'android'"))
+        assertTrue(workflow.contains("inputs.adapter != 'android'"))
         assertFalse(workflow.contains("BeCalmv3"))
     }
 
@@ -100,6 +100,24 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(workflow.contains("FIREBASE_APP_ID"))
         assertTrue(workflow.contains("FIREBASE_SERVICE_ACCOUNT_JSON"))
         assertTrue(workflow.contains("FIREBASE_TESTER_GROUPS"))
+    }
+
+    @Test
+    fun `android adapter dispatchers do not reference missing platform workflows`() {
+        // spec: REL-007
+        val build = repoFile(".github/workflows/adapter-build.yml").readText()
+        val gates = repoFile(".github/workflows/adapter-gates.yml").readText()
+        val tests = repoFile(".github/workflows/adapter-tests.yml").readText()
+
+        val combined = "$build\n$gates\n$tests"
+        assertFalse(combined.contains("electron-build.yml"))
+        assertFalse(combined.contains("electron-gates.yml"))
+        assertFalse(combined.contains("electron-tests.yml"))
+        assertFalse(combined.contains("web-gates.yml"))
+        assertFalse(combined.contains("web-tests.yml"))
+        assertTrue(build.contains("inputs.adapter != 'android'"))
+        assertTrue(gates.contains("inputs.adapter != 'android'"))
+        assertTrue(tests.contains("inputs.adapter != 'android'"))
     }
 
     private fun repoFile(path: String): File {

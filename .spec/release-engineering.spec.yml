@@ -57,6 +57,15 @@ behaviors:
     source: beta-readiness-hardening
     tests: [AndroidBuildWorkflowSpecTest]
 
+  - id: REL-007
+    type: ci_contract
+    description: "Android repo의 adapter dispatcher들은 존재하지 않는 electron/web reusable workflow를 참조하지 않는다"
+    trigger: "ci-review.yml 또는 deploy-staging.yml이 adapter dispatcher를 호출함"
+    precondition: ".pipeline/platform.yml ci.adapter=android"
+    expected: "adapter-build.yml, adapter-gates.yml, adapter-tests.yml은 Android reusable workflow만 참조하고, android 외 adapter는 명시적 unsupported job에서 실패한다. GitHub Actions parser가 missing reusable workflow 때문에 job 0개 실패를 만들면 안 된다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
 invariants:
   - "Android release artifact 경로는 .pipeline/platform.yml의 project_root를 기준으로 계산한다"
   - "adapter=android는 unsupported-adapter job으로 떨어지면 안 된다"

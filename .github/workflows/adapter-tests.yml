@@ -12,37 +12,35 @@ on:
         type: string
 
 jobs:
-  electron-tests:
-    if: inputs.adapter == 'electron'
-    uses: ./.github/workflows/electron-tests.yml
-    secrets: inherit
-
   android-tests:
     if: inputs.adapter == 'android'
     uses: ./.github/workflows/android-tests.yml
     secrets: inherit
 
-  web-tests:
-    if: inputs.adapter == 'web'
-    uses: ./.github/workflows/web-tests.yml
-    secrets: inherit
+  unsupported-adapter:
+    if: inputs.adapter != 'android'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unsupported adapter
+        run: |
+          echo "::error::No test workflow is configured for adapter=${{ inputs.adapter }}"
+          exit 1
 
   test-result:
     runs-on: ubuntu-latest
     if: always()
-    needs: [electron-tests, android-tests, web-tests]
+    needs: [android-tests, unsupported-adapter]
     steps:
       - name: Verify at least one adapter ran
         run: |
-          E="${{ needs.electron-tests.result }}"
           A="${{ needs.android-tests.result }}"
-          W="${{ needs.web-tests.result }}"
-          if [ "$E" = "success" ] || [ "$A" = "success" ] || [ "$W" = "success" ]; then
+          U="${{ needs.unsupported-adapter.result }}"
+          if [ "$A" = "success" ]; then
             echo "[PASS] Adapter tests completed"
-          elif [ "$E" = "skipped" ] && [ "$A" = "skipped" ] && [ "$W" = "skipped" ]; then
+          elif [ "$A" = "skipped" ] && [ "$U" = "success" ]; then
             echo "::error::No adapter matched: ${{ inputs.adapter }}"
             exit 1
           else
-            echo "::error::Adapter test failed (electron=$E, android=$A, web=$W)"
+            echo "::error::Adapter test failed (android=$A, unsupported=$U)"
             exit 1
           fi

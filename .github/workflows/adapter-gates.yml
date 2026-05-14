@@ -12,37 +12,35 @@ on:
         type: string
 
 jobs:
-  electron-gates:
-    if: inputs.adapter == 'electron'
-    uses: ./.github/workflows/electron-gates.yml
-    secrets: inherit
-
   android-gates:
     if: inputs.adapter == 'android'
     uses: ./.github/workflows/android-gates.yml
     secrets: inherit
 
-  web-gates:
-    if: inputs.adapter == 'web'
-    uses: ./.github/workflows/web-gates.yml
-    secrets: inherit
+  unsupported-adapter:
+    if: inputs.adapter != 'android'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unsupported adapter
+        run: |
+          echo "::error::No deterministic gate workflow is configured for adapter=${{ inputs.adapter }}"
+          exit 1
 
   gate-result:
     runs-on: ubuntu-latest
     if: always()
-    needs: [electron-gates, android-gates, web-gates]
+    needs: [android-gates, unsupported-adapter]
     steps:
       - name: Verify at least one adapter ran
         run: |
-          E="${{ needs.electron-gates.result }}"
           A="${{ needs.android-gates.result }}"
-          W="${{ needs.web-gates.result }}"
-          if [ "$E" = "success" ] || [ "$A" = "success" ] || [ "$W" = "success" ]; then
+          U="${{ needs.unsupported-adapter.result }}"
+          if [ "$A" = "success" ]; then
             echo "[PASS] Adapter gates completed"
-          elif [ "$E" = "skipped" ] && [ "$A" = "skipped" ] && [ "$W" = "skipped" ]; then
+          elif [ "$A" = "skipped" ] && [ "$U" = "success" ]; then
             echo "::error::No adapter matched: ${{ inputs.adapter }}"
             exit 1
           else
-            echo "::error::Adapter gate failed (electron=$E, android=$A, web=$W)"
+            echo "::error::Adapter gate failed (android=$A, unsupported=$U)"
             exit 1
           fi
