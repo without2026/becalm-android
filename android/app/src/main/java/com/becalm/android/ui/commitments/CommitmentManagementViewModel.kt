@@ -12,6 +12,7 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,6 +109,7 @@ public data class CommitmentRow(
      * visual discriminator.
      */
     val isManual: Boolean = false,
+    val deEmphasized: Boolean = false,
 )
 
 /**
@@ -245,6 +248,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val workScheduler: WorkScheduler,
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
@@ -294,6 +298,8 @@ public class CommitmentManagementViewModel @Inject constructor(
      * [onFilterChange] can re-apply a different filter without re-querying Room.
      */
     private val allRows: MutableStateFlow<List<CommitmentManagementRow>> = MutableStateFlow(emptyList())
+    private val allScheduleLinks: MutableStateFlow<List<com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity>> =
+        MutableStateFlow(emptyList())
 
     init {
         observeCommitments()
@@ -312,34 +318,55 @@ public class CommitmentManagementViewModel @Inject constructor(
     // spec: CMT-001, CMT-002
     private fun observeCommitments() {
         viewModelScope.launch {
-            val commitmentsByUser = userPrefsStore.observeCurrentUserId()
+            userPrefsStore.observeCurrentUserId()
                 .flatMapLatest { userId ->
-                    if (userId == null) {
-                        flowOf(emptyList())
-                    } else {
-                        commitmentRepository.observeManagementRowsForUser(userId)
-                    }
+                    if (userId == null) return@flatMapLatest flowOf(
+                        CommitmentRowsWithLinks(rows = emptyList(), scheduleLinks = emptyList()),
+                    )
+                    commitmentRepository.observeManagementRowsForUser(userId)
+                        .flatMapLatest { rows ->
+                            val repository = scheduleEventLinkRepository
+                            if (repository == null) {
+                                flowOf(CommitmentRowsWithLinks(rows = rows, scheduleLinks = emptyList()))
+                            } else {
+                                repository.observeForProjectionRefs(
+                                    userId = userId,
+                                    commitmentIds = rows.map { it.id },
+                                    rawEventIds = emptyList(),
+                                    calendarEventIds = emptyList(),
+                                ).map { links ->
+                                    CommitmentRowsWithLinks(rows = rows, scheduleLinks = links)
+                                }
+                            }
+                        }
                 }
-            commitmentsByUser
                 .catch {
                     _uiState.update {
                         it.copy(loading = false, error = UiMessage.resource(R.string.commitments_error_load_failed))
                     }
                 }
-                .collect { rows ->
+                .collect { snapshot ->
+                    val rows = snapshot.rows
+                    allRows.value = rows
+                    allScheduleLinks.value = snapshot.scheduleLinks
                     val projectedState = withContext(ioDispatcher) {
                         CommitmentManagementProjector.buildUiState(
                             current = _uiState.value,
                             rows = rows,
+                            scheduleLinks = snapshot.scheduleLinks,
                             loading = false,
                             now = clock.nowInstant(),
                         )
                     }
-                    allRows.value = rows
                     _uiState.value = projectedState
                 }
         }
     }
+
+    private data class CommitmentRowsWithLinks(
+        val rows: List<CommitmentManagementRow>,
+        val scheduleLinks: List<com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity>,
+    )
 
     // ─── Actions ──────────────────────────────────────────────────────────────
 
@@ -362,6 +389,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                 CommitmentManagementProjector.buildUiState(
                     current = _uiState.value,
                     rows = allRows.value,
+                    scheduleLinks = allScheduleLinks.value,
                     filter = filter,
                     now = clock.nowInstant(),
                 )
@@ -445,6 +473,7 @@ public class CommitmentManagementViewModel @Inject constructor(
             commitmentRepository = commitmentRepository,
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
+            scheduleEventLinkRepository = scheduleEventLinkRepository,
             workScheduler = workScheduler,
             logger = logger,
         )

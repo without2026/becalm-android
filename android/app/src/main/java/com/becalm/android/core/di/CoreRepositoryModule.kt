@@ -12,6 +12,8 @@ import com.becalm.android.data.repository.PersonMemoryRemoteRepository
 import com.becalm.android.data.repository.PersonMemoryRemoteRepositoryImpl
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepositoryImpl
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepositoryImpl
 import com.becalm.android.data.repository.SourceArtifactRepository
@@ -55,6 +57,12 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindCommitmentParticipantRepository(
         impl: CommitmentParticipantRepositoryImpl,
     ): CommitmentParticipantRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindScheduleEventLinkRepository(
+        impl: ScheduleEventLinkRepositoryImpl,
+    ): ScheduleEventLinkRepository
 
     @Binds
     @Singleton

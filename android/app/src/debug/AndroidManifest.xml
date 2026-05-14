@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
+        <activity android:name=".MainActivity">
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="becalm" android:host="qa" />
+            </intent-filter>
+        </activity>
+
         <receiver
             android:name=".debug.DebugPersonRenderingSeedReceiver"
             android:exported="true">

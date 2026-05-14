@@ -193,6 +193,12 @@ public interface UserPrefsStore {
      */
     public suspend fun setNotificationsEnabled(enabled: Boolean)
 
+    /** Emits the local kill switch for first-party product analytics. Defaults to true. */
+    public fun observeProductAnalyticsEnabled(): Flow<Boolean>
+
+    /** Persists the local first-party product analytics kill switch. */
+    public suspend fun setProductAnalyticsEnabled(enabled: Boolean)
+
     /**
      * Emits `true` when the user has granted PIPA 제3자 제공 + 국외 이전 동의
      * (third-party provision and international transfer consent) required for the voice
@@ -444,6 +450,7 @@ public data class PipaActionLogEntry(
  * | Locale tag                       | String   | `locale_tag`                     | null       |
  * | Doze prompt dismissed at         | Long     | `doze_whitelist_prompt_dismissed`| null       |
  * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
+ * | Product analytics enabled        | Boolean  | `product_analytics_enabled`      | true       |
  * | Terms accepted                   | Boolean  | `terms_accepted`                 | false      |
  * | IMAP store migrated (v1)         | Boolean  | `imap_credential_store_migrated_v1` | false   |
  *
@@ -476,6 +483,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val localeTagKey = stringPreferencesKey("locale_tag")
     private val dozePromptDismissedAtKey = longPreferencesKey("doze_whitelist_prompt_dismissed")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
+    private val productAnalyticsEnabledKey = booleanPreferencesKey("product_analytics_enabled")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
     private val imapCredentialStoreMigratedKey = booleanPreferencesKey("imap_credential_store_migrated_v1")
 
@@ -642,6 +650,13 @@ public class UserPrefsStoreImpl @Inject constructor(
 
     override suspend fun setNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[notificationsEnabledKey] = enabled }
+    }
+
+    override fun observeProductAnalyticsEnabled(): Flow<Boolean> =
+        dataStore.data.map { it[productAnalyticsEnabledKey] ?: true }
+
+    override suspend fun setProductAnalyticsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[productAnalyticsEnabledKey] = enabled }
     }
 
     override fun observeThirdPartyProvisionConsent(): Flow<Boolean> =

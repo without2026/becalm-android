@@ -21,8 +21,15 @@ import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
+import com.becalm.android.data.remote.dto.PmfSurveyRequestDto
+import com.becalm.android.data.remote.dto.PmfSurveyResponseDto
+import com.becalm.android.data.remote.dto.ProductAnalyticsBatchRequestDto
+import com.becalm.android.data.remote.dto.ProductAnalyticsBatchResponseDto
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
+import com.becalm.android.data.remote.dto.ScheduleEventLinkStatusPatchDto
+import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
+import com.becalm.android.data.remote.dto.SingleScheduleEventLinkResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
 import com.becalm.android.data.remote.dto.SourceEventParticipantsResponse
 import retrofit2.Response
@@ -61,6 +68,18 @@ import retrofit2.http.Query
  * SRC-001..003, SRC-006, ING-003..005, ING-011..013.
  */
 public interface RailwayApi {
+
+    @POST("v1/analytics/events:batch")
+    public suspend fun uploadProductAnalyticsEvents(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ProductAnalyticsBatchRequestDto,
+    ): Response<ProductAnalyticsBatchResponseDto>
+
+    @POST("v1/surveys/pmf")
+    public suspend fun submitPmfSurvey(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: PmfSurveyRequestDto,
+    ): Response<PmfSurveyResponseDto>
 
     // =========================================================================
     // RAW INGESTION EVENTS
@@ -133,6 +152,21 @@ public interface RailwayApi {
         @Query("person_id") personId: String? = null,
         @Query("commitment_id") commitmentId: String? = null,
     ): Response<CommitmentParticipantsResponse>
+
+    @GET("v1/schedule_event_links")
+    public suspend fun getScheduleEventLinks(
+        @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int? = null,
+        @Query("since") since: String? = null,
+        @Query("status") status: String? = null,
+    ): Response<ScheduleEventLinksResponse>
+
+    @PATCH("v1/schedule_event_links/{id}")
+    public suspend fun patchScheduleEventLink(
+        @Path("id") id: String,
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ScheduleEventLinkStatusPatchDto,
+    ): Response<SingleScheduleEventLinkResponse>
 
     // =========================================================================
     // COMMITMENTS

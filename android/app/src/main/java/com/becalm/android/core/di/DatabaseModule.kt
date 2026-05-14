@@ -7,7 +7,9 @@ import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.ProductAnalyticsDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
 import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import dagger.Module
@@ -121,6 +123,18 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): UserProfileDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::userProfileDao)
+
+    @Provides
+    public fun provideScheduleEventLinkDao(
+        provider: BeCalmDatabaseProvider,
+    ): ScheduleEventLinkDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::scheduleEventLinkDao)
+
+    @Provides
+    public fun provideProductAnalyticsDao(
+        provider: BeCalmDatabaseProvider,
+    ): ProductAnalyticsDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::productAnalyticsDao)
 
     private inline fun <reified T : Any> lazyDaoProxy(
         dbProvider: BeCalmDatabaseProvider?,
