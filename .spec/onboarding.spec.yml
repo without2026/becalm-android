@@ -27,11 +27,11 @@ behaviors:
 
   - id: ONB-PIPA
     type: consent
-    description: "PIPA 제3자 제공 + 국외 이전 동의는 standalone 필수 페이지가 아니라 관련 소스 연결 직전의 inline consent로 처리한다. 음성 녹음 폴더를 연결할 때는 Google LLC Vertex AI(미국 법인, 데이터 처리 리전 us-central1 미국 중부)에 오디오를 전송한다는 사실을 명시 고지하고 동의가 저장된 뒤 SAF picker를 실행한다"
+    description: "PIPA 제3자 제공 + 국외 이전 동의는 standalone 필수 페이지가 아니라 관련 소스 연결 직전의 inline consent로 처리한다. 음성 녹음 폴더를 연결할 때는 오디오 바이트가 NAVER Cloud CLOVA Speech로 전송되고, 전사 텍스트/화자 라벨이 Google LLC Vertex AI로 전달되어 약속/할 일 추출에 쓰인다는 사실을 명시 고지하고 동의가 저장된 뒤 SAF picker를 실행한다"
     screen: "OnboardingSetupScreen"
     interaction: "녹음 폴더 [연결] 또는 음성 처리 consent action"
     precondition: "ONB-001(terms_accepted=true) 및 Supabase Auth 로그인 완료, DataStore pipa_third_party_consent 미설정"
-    expected: "inline 고지문에 다음 내용이 표시됨 — (1) 제공받는 자: Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, (3) 제공 목적: 약속/할 일 자동 추출(Gemini 2.5 Flash audio multimodal), (4) 데이터 처리 리전: us-central1(미국 중부), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능은 정상 사용 가능. 동의 저장 후 녹음 폴더 SAF picker가 실행된다"
+    expected: "inline 고지문에 다음 내용이 표시됨 — (1) 제공받는 자: NAVER Cloud Corp. 및 Google LLC, (2) 제공 항목: 녹음 파일 전체 오디오 바이트, CLOVA 전사 텍스트, 화자 라벨, 요청 메타데이터, (3) 제공 목적: CLOVA Speech 음성 인식/화자 분리 및 약속/할 일 자동 추출, (4) 데이터 처리 리전: 대한민국(NAVER Cloud), us-central1(미국 중부, Google Vertex AI), (5) 보유 및 이용 기간: 요청 처리 후 즉시 삭제(ZDR, 원문 오디오/전사 전문 미저장), (6) 거부 권리 및 불이익: 동의 거부 시 음성 자동 처리 기능만 비활성화되고 나머지 앱 기능은 정상 사용 가능. 동의 저장 후 녹음 폴더 SAF picker가 실행된다"
     source: phase2-acceptance
     tests: []
 

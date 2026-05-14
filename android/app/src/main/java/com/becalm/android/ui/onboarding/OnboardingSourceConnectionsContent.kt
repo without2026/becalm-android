@@ -24,17 +24,17 @@ import com.becalm.android.ui.theme.BecalmTheme
 @Composable
 internal fun SourceConnectionsContent(
     items: List<SourceConnectionItemUi>,
-    headline: String = stringResource(R.string.onb_sources_headline),
-    body: String = stringResource(R.string.onb_sources_body),
     continueLabel: String,
-    skipLabel: String = stringResource(R.string.action_skip),
     onConnect: (OnboardingSourceProvider) -> Unit,
     onSkip: (OnboardingSourceProvider) -> Unit,
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier,
+    headline: String = stringResource(R.string.onb_sources_headline),
+    body: String = stringResource(R.string.onb_sources_body),
+    skipLabel: String = stringResource(R.string.action_skip),
     setupItems: List<OnboardingSetupItemUi> = emptyList(),
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
-    onContinue: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val requiredSection = stringResource(R.string.onb_setup_required_section)
     val recommendedSection = stringResource(R.string.onb_setup_recommended_section)

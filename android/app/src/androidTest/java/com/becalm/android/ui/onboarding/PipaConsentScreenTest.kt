@@ -10,6 +10,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,6 +35,9 @@ class PipaConsentScreenTest {
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_bullet_4_value)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_bullet_5_value)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_bullet_6_value)).assertIsDisplayed()
+        assertTrue(string(R.string.onb_pipa_bullet_1_value).contains("NAVER Cloud"))
+        assertTrue(string(R.string.onb_pipa_bullet_3_value).contains("CLOVA Speech"))
+        assertFalse(string(R.string.onb_pipa_bullet_3_value).contains("audio multimodal"))
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_button_agree))
             .assertIsDisplayed()
             .assertHasClickAction()

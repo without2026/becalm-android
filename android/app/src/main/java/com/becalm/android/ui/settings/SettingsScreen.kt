@@ -259,13 +259,13 @@ public fun SettingsScreenContent(
     onBack: () -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
     onTogglePipa: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
     onToggleCallLogMatching: (Boolean) -> Unit = {},
     onSourcesClick: () -> Unit,
     onProcessingStatusClick: () -> Unit = {},
     onPrivacyClick: () -> Unit,
     onRequestSignOut: () -> Unit,
     onRequestWipe: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     BecalmScaffold(
         modifier = modifier,
@@ -362,8 +362,8 @@ internal fun SettingsToggleRow(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    toggleTestTag: String? = null,
     modifier: Modifier = Modifier,
+    toggleTestTag: String? = null,
 ) {
     Row(
         modifier = modifier
@@ -389,8 +389,8 @@ internal fun SettingsToggleRow(
 internal fun SettingsNavigationRow(
     label: String,
     onClick: () -> Unit,
-    rowTestTag: String? = null,
     modifier: Modifier = Modifier,
+    rowTestTag: String? = null,
 ) {
     SettingsActionRow(
         title = label,
@@ -403,12 +403,12 @@ internal fun SettingsNavigationRow(
 @Composable
 internal fun SettingsActionRow(
     title: String,
-    subtitle: String? = null,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
     enabled: Boolean = true,
     destructive: Boolean = false,
     rowTestTag: String? = null,
-    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier

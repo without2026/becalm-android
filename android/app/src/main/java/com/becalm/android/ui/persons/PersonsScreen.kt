@@ -120,6 +120,7 @@ public fun PersonsScreenContent(
     snackbarHostState: SnackbarHostState,
     onQueryChange: (String) -> Unit,
     onPersonClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
     onOpenUnassigned: () -> Unit = {},
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onOpenSettings: () -> Unit = {},
@@ -129,7 +130,6 @@ public fun PersonsScreenContent(
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
     val hasUnassignedEvents = state.unassignedEvents.isNotEmpty()

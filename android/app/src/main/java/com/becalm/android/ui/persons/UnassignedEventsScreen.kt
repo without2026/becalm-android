@@ -123,9 +123,9 @@ public fun UnassignedEventsScreen(
 internal fun UnassignedEventsContent(
     loading: Boolean,
     unassignedEvents: List<UnassignedEventSummary>,
+    modifier: Modifier = Modifier,
     matchChoices: List<PersonMatchChoiceRow> = emptyList(),
     onManualMatch: (UnassignedEventSummary, String, String) -> Unit = { _, _, _ -> },
-    modifier: Modifier = Modifier,
 ) {
     var filter by remember { mutableStateOf(MatchQueueFilter.RECOMMENDED) }
     var completedIds by remember { mutableStateOf(setOf<String>()) }

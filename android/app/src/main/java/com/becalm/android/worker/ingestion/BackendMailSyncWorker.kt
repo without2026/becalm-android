@@ -115,7 +115,7 @@ public class BackendMailSyncWorker @AssistedInject constructor(
             request = ServerBackedSourceSyncRequest(
                 sourceType = provider.sourceType,
                 scanMessage = "Checking new mail",
-                geminiMessage = "Checking mail with Gemini",
+                geminiMessage = "내용 정리 중",
                 syncedMessage = "Checked recent mail",
                 recordSyncSuccessBeforeRefresh = true,
                 refreshFailureMessage = { "Relation refresh failed" },

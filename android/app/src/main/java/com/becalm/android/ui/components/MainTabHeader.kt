@@ -55,8 +55,8 @@ public fun MainTabHeaderActions(
 @Composable
 public fun MainTabStatusHeader(
     state: MainTabHeaderState,
-    onOpenSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     val sourceChips = buildChips(state.sourceStatus)
     val sourceAttention = buildSourceStatusAttention(state.sourceStatus)

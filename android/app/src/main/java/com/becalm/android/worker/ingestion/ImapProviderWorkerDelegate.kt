@@ -95,7 +95,7 @@ internal class ImapProviderWorkerDelegate(
         processingStatusRepository.recordScanResult(
             sourceType = profile.sourceType,
             itemCount = fetchedCount,
-            newItemsMessage = "Queued backend Gemini extraction",
+            newItemsMessage = "내용 정리 대기 중",
         )
         sourceStatusRepository.recordSyncSuccess(profile.sourceType, Clock.System.now())
         logger.d(profile.tag, "doWork complete")

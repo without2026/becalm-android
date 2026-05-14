@@ -32,7 +32,8 @@ import com.becalm.android.ui.theme.BecalmTheme
  * Onboarding step 3 of 13: PIPA 제3자 제공 + 국외 이전 동의.
  *
  * Displays the 6 mandatory disclosure items required by PIPA Article 17 (제3자 제공) and
- * Article 28-8 (국외 이전) before BeCalm may upload audio bytes to Google LLC / Vertex AI.
+ * Article 28-8 (국외 이전) before BeCalm may process audio through NAVER Cloud CLOVA
+ * Speech and structured extraction through Google LLC / Vertex AI.
  *
  * ## Navigation outcomes
  * - [동의]: writes pipa_third_party_consent=true → navigates to RecordingFolderScreen.

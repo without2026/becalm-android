@@ -147,9 +147,10 @@ public fun TodayTimelineScreen(
 @Composable
 public fun TodayTimelineContent(
     state: TodayUiState,
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onOpenSettings: () -> Unit,
     onPullRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onOpenCommitmentDetail: (String) -> Unit = {},
     onAddDueTime: (String) -> Unit = {},
     onMessageScreenshotImport: () -> Unit = {},
@@ -159,7 +160,6 @@ public fun TodayTimelineContent(
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
     onReviewRequiredClick: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
     val pullState = rememberPullRefreshState(

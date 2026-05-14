@@ -34,7 +34,7 @@ import okio.BufferedSink
 /**
  * [CoroutineWorker] that uploads a voice recording to Railway's
  * `POST /v1/extractions/commitments` endpoint, receives extracted business items from
- * Vertex AI Gemini 2.5 Flash, and persists the current action subset as
+ * the backend audio extraction pipeline, and persists the current action subset as
  * [CommitmentEntity] rows in Room.
  *
  * ## Inputs ([androidx.work.Data])
@@ -224,7 +224,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        processingStatusRepository.recordGemini(entity.sourceType, "Analyzing audio with Gemini")
+        processingStatusRepository.recordGemini(entity.sourceType, "내용 정리 중")
         delegate.uploadRunner().upload(
             SourceExtractionUploadRequest(
                 userId = context.userId,

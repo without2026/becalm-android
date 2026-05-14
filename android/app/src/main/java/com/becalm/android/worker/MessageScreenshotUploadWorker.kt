@@ -127,7 +127,7 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
-        processingStatusRepository.recordGemini(entity.sourceType, "Analyzing screenshot with Gemini")
+        processingStatusRepository.recordGemini(entity.sourceType, "내용 정리 중")
         delegate.uploadRunner().upload(
             SourceExtractionUploadRequest(
                 userId = context.userId,

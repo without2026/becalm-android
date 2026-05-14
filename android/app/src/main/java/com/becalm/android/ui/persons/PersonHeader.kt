@@ -46,12 +46,12 @@ internal fun PersonHeader(
     companyName: String?,
     jobTitle: String?,
     personId: String,
+    modifier: Modifier = Modifier,
     eventCount: Int = 0,
     emailInteractionCount: Int = 0,
     callInteractionCount: Int = 0,
     meetingCount: Int = 0,
     pendingCommitmentCount: Int = 0,
-    modifier: Modifier = Modifier,
 ) {
     val nameLine = displayName?.takeIf { it.isNotBlank() } ?: personId
     val subtitle = composeSubtitle(jobTitle = jobTitle, companyName = companyName)

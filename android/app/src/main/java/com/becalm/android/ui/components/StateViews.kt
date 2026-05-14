@@ -71,10 +71,10 @@ public data class EmptyStateAction(
 @Composable
 public fun EmptyState(
     title: String,
+    modifier: Modifier = Modifier,
     message: String? = null,
     icon: ImageVector? = null,
     action: EmptyStateAction? = null,
-    modifier: Modifier = Modifier,
 ) {
     // Box wraps the Column so [StateViewMaxContentWidth] can self-centre on
     // any parent context (phone, 600dp timeline column on tablet, full
@@ -145,10 +145,10 @@ public fun EmptyState(
 @Composable
 public fun ErrorState(
     title: String,
+    modifier: Modifier = Modifier,
     message: String? = null,
     onRetry: (() -> Unit)? = null,
     retryLabel: String = stringResource(R.string.error_state_retry),
-    modifier: Modifier = Modifier,
 ) {
     // Same self-centering wrapper as EmptyState — see note there.
     Box(

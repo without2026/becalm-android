@@ -146,7 +146,7 @@ class VoiceUploadWorkerNotificationSpecTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         coVerify(exactly = 1) {
-            processingStatusRepository.recordGemini(SourceType.VOICE, "Analyzing audio with Gemini")
+            processingStatusRepository.recordGemini(SourceType.VOICE, "내용 정리 중")
         }
         coVerify(exactly = 1) {
             voiceFailureNotifier.notifyFailure(
