@@ -96,7 +96,7 @@ jobs:
       provenance_checksum_manifest: ${{ steps.read.outputs.provenance_checksum_manifest }}
       rollout_strategy: ${{ steps.read.outputs.rollout_strategy }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Read platform.yml
         id: read
@@ -144,7 +144,7 @@ jobs:
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Deploy API via Railway
         id: deploy
@@ -201,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: android-aab
           path: release-artifacts/android
@@ -224,15 +224,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: desktop-*
           path: release-artifacts/desktop
           merge-multiple: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: sidecar-*
           path: release-artifacts/sidecar
@@ -408,12 +408,12 @@ jobs:
     if: inputs.promote_existing_prerelease == false && always() && needs.rollback.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -570,7 +570,7 @@ jobs:
 
       - name: Upload incident report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: incident-report
           path: |

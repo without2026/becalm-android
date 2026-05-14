@@ -123,6 +123,37 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(tests.contains("inputs.adapter != 'android'"))
     }
 
+    @Test
+    fun `workflows do not interpolate untrusted pr branch names in shell scripts`() {
+        // spec: REL-008
+        val workflow = repoFile(".github/workflows/ci-scenario-gen.yml").readText()
+
+        assertFalse(workflow.contains("HEAD:\${{ github.head_ref }}"))
+        assertTrue(workflow.contains("PR_HEAD_REF: \${{ github.head_ref }}"))
+        assertTrue(workflow.contains("git push origin \"HEAD:\$PR_HEAD_REF\""))
+    }
+
+    @Test
+    fun `github first party actions use node twenty four compatible majors`() {
+        // spec: REL-009
+        val workflows = repoFile(".github/workflows").walkTopDown()
+            .filter { it.isFile && it.extension == "yml" }
+            .joinToString("\n") { it.readText() }
+
+        assertFalse(workflows.contains("actions/checkout@v4"))
+        assertFalse(workflows.contains("actions/setup-java@v4"))
+        assertFalse(workflows.contains("actions/setup-python@v5"))
+        assertFalse(workflows.contains("actions/upload-artifact@v4"))
+        assertFalse(workflows.contains("actions/download-artifact@v4"))
+        assertFalse(workflows.contains("actions/cache@v4"))
+        assertTrue(workflows.contains("actions/checkout@v6"))
+        assertTrue(workflows.contains("actions/setup-java@v5"))
+        assertTrue(workflows.contains("actions/setup-python@v6"))
+        assertTrue(workflows.contains("actions/upload-artifact@v7"))
+        assertTrue(workflows.contains("actions/download-artifact@v8"))
+        assertTrue(workflows.contains("actions/cache@v5"))
+    }
+
     private fun repoFile(path: String): File {
         val fromAppDir = File("../../$path")
         if (fromAppDir.exists()) return fromAppDir

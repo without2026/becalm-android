@@ -66,6 +66,24 @@ behaviors:
     source: beta-readiness-hardening
     tests: [AndroidBuildWorkflowSpecTest]
 
+  - id: REL-008
+    type: security_contract
+    description: "PR branch 같은 untrusted GitHub context는 inline shell script에 직접 interpolation하지 않는다"
+    trigger: "pull_request workflow가 head_ref를 push/ref로 사용할 때"
+    precondition: "fork 또는 외부 branch 이름에 shell metacharacter가 포함될 수 있음"
+    expected: "workflow shell script는 github.head_ref를 직접 포함하지 않고, step env로 전달한 뒤 quoted shell variable로 사용한다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
+  - id: REL-009
+    type: ci_contract
+    description: "GitHub-hosted first-party actions는 Node 24 호환 major를 사용한다"
+    trigger: "main push 또는 pull_request workflow 실행"
+    precondition: "GitHub Actions runner가 Node 20 action deprecation warning을 표시함"
+    expected: "actions/checkout, setup-java, setup-python, upload-artifact, download-artifact, cache는 Node 24 지원 최신 major를 사용하여 deprecation warning을 제거한다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
 invariants:
   - "Android release artifact 경로는 .pipeline/platform.yml의 project_root를 기준으로 계산한다"
   - "adapter=android는 unsupported-adapter job으로 떨어지면 안 된다"

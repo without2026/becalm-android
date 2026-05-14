@@ -36,7 +36,7 @@ jobs:
       has_sensitive: ${{ steps.stats.outputs.sensitive }}
       pipeline_depth: ${{ steps.route.outputs.depth }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -96,7 +96,7 @@ jobs:
       platform: ${{ steps.read.outputs.platform }}
       project_root: ${{ steps.read.outputs.project_root }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Read platform.yml
         id: read
@@ -155,7 +155,7 @@ jobs:
     if: needs.classify.outputs.pipeline_depth != 'layer1'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -182,7 +182,7 @@ jobs:
             echo '{"issues":[],"verdict":"pass","summary":"No output"}' > claude-review.json
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: claude-review
           path: claude-review.json
@@ -213,7 +213,7 @@ jobs:
     if: needs.classify.outputs.pipeline_depth == 'full'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -234,7 +234,7 @@ jobs:
             echo '{"issues":[],"verdict":"pass","summary":"No output"}' > codex-review.json
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: codex-review
           path: codex-review.json
@@ -247,16 +247,16 @@ jobs:
     if: needs.classify.outputs.pipeline_depth == 'full'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: claude-review
           path: claude-review
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: codex-review
           path: codex-review
@@ -330,7 +330,7 @@ jobs:
       - name: Cross validate
         run: python .github/scripts/cross_validator.py
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cross-validated
           path: cross-validated.json
