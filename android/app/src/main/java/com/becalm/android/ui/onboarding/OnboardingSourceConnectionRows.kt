@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
@@ -199,12 +200,15 @@ private fun SourceConnectionActions(
             onClick = onPrimary,
             enabled = primaryEnabled,
             loading = primaryLoading,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .testTag("source-connection-primary"),
         )
         BecalmButton(
             text = skipLabel,
             onClick = onSkip,
             variant = BecalmButtonVariant.Text,
+            modifier = Modifier.testTag("source-connection-skip"),
         )
     }
 }

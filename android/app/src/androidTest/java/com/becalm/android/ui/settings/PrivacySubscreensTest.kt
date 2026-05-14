@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -48,12 +49,12 @@ class PrivacySubscreensTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Voice auto processing").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Outlook Mail").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Naver Email").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Daum Email").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("privacy-withdraw-gmail").performClick()
+        composeTestRule.onNodeWithTag("privacy-withdraw-voice").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-gmail").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-outlook-mail").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-naver").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-daum").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-gmail").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(WithdrawConsentTarget.GMAIL, withdrawn)
@@ -156,7 +157,7 @@ class PrivacySubscreensTest {
 
         composeTestRule.runOnIdle { showLogs = true }
 
-        composeTestRule.onNodeWithText("data_export").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_activity_action_data_export)).assertIsDisplayed()
         composeTestRule.onNodeWithText("2026-04-24T01:00:00Z").assertIsDisplayed()
     }
 

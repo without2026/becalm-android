@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -437,7 +438,9 @@ private fun OnboardingEmailPipaConsentContent(
             variant = BecalmButtonVariant.Primary,
             enabled = !agreeLoading,
             loading = agreeLoading,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("email-pipa-agree"),
         )
         Spacer(modifier = Modifier.height(12.dp))
         BecalmButton(
@@ -445,6 +448,7 @@ private fun OnboardingEmailPipaConsentContent(
             onClick = onDeny,
             variant = BecalmButtonVariant.Text,
             enabled = !agreeLoading,
+            modifier = Modifier.testTag("email-pipa-deny"),
         )
     }
 }

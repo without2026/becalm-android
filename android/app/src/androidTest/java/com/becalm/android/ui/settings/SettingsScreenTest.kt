@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -51,10 +52,10 @@ class SettingsScreenTest {
         }
 
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.settings_sources_label)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.settings_privacy_label)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.action_wipe_data)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings-sources-row").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("settings-privacy-row").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("settings-wipe-button").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, sourcesClicks)
@@ -85,7 +86,7 @@ class SettingsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("settings-pipa-toggle").performClick()
+        composeTestRule.onNodeWithTag("settings-pipa-toggle").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(true, lastToggle)
@@ -118,11 +119,14 @@ class SettingsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.settings_error_load_failed)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, navigateCount)
-            assertEquals(1, dismissCount)
+        val errorText = string(R.string.settings_error_load_failed)
+        composeTestRule.waitUntil(timeoutMillis = 3_000) {
+            runCatching {
+                composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
+            }.isSuccess
         }
+        composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 && dismissCount == 1 }
     }
 
     @Test
@@ -149,11 +153,11 @@ class SettingsScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.action_sign_out)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.action_sign_out)).performScrollTo().performClick()
         composeTestRule.onNodeWithText(string(R.string.settings_sign_out_confirm_title)).assertIsDisplayed()
         composeTestRule.onAllNodesWithText(string(R.string.action_sign_out))[1].performClick()
 
-        composeTestRule.onNodeWithText(string(R.string.action_wipe_data)).performClick()
+        composeTestRule.onNodeWithTag("settings-wipe-button").performScrollTo().performClick()
         composeTestRule.onNodeWithText(string(R.string.settings_wipe_confirm_title)).assertIsDisplayed()
         composeTestRule.onAllNodesWithText(string(R.string.action_wipe_data))[1].performClick()
 

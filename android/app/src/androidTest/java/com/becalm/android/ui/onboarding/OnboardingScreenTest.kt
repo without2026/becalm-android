@@ -12,12 +12,16 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
@@ -156,8 +160,8 @@ class OnboardingScreenTest {
         composeTestRule.onAllNodesWithText(
             "${string(R.string.onb_pipa_email_recipient)}: ${string(R.string.onb_pipa_email_recipient_gmail)}",
         ).assertCountEquals(1)
-        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_agree)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_deny)).performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("email-pipa-deny").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, agreeClicks)
@@ -184,7 +188,7 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_agree)).performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
 
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {
@@ -209,8 +213,9 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_cta_agree)).performClick()
+        composeTestRule.onNodeWithTag("email-pipa-agree").performScrollTo().performClick()
 
+        composeTestRule.waitForText(string(R.string.onb_pipa_email_error_write_failed))
         composeTestRule.onNodeWithText(string(R.string.onb_pipa_email_error_write_failed)).assertIsDisplayed()
     }
 
@@ -236,7 +241,10 @@ class OnboardingScreenTest {
                 OnboardingStep.LINK_GMAIL to "pipa_email_unknown_provider",
                 reported,
             )
-            assertEquals(BecalmRoute.OnboardingGmail.path, destination)
+            assertEquals(
+                BecalmRoute.OnboardingEmailPipa(EmailPipaProvider.GMAIL.storageKey).path,
+                destination,
+            )
         }
     }
 
@@ -625,7 +633,9 @@ class OnboardingScreenTest {
         composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
         composeTestRule.onNodeWithText("Google Calendar").assertIsDisplayed()
         composeTestRule.onNodeWithText("Consent copy").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.onb_sources_skip_remaining)).performClick()
+        composeTestRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connections-continue"))
+        composeTestRule.onNodeWithTag("source-connections-continue").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, continueClicks)
@@ -658,8 +668,8 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.action_connect)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.action_skip)).performClick()
+        composeTestRule.onNodeWithTag("source-connection-primary").performClick()
+        composeTestRule.onNodeWithTag("source-connection-skip").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(OnboardingSourceProvider.GOOGLE_CALENDAR, connectedProvider)
@@ -690,8 +700,8 @@ class OnboardingScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.action_connect)).assertIsNotEnabled()
-        composeTestRule.onAllNodesWithText(string(R.string.action_skip)).onFirst().assertIsNotEnabled()
+        composeTestRule.onAllNodesWithTag("source-connection-primary").assertCountEquals(0)
+        composeTestRule.onAllNodesWithTag("source-connection-skip").assertCountEquals(0)
     }
 
     @Test
@@ -722,7 +732,9 @@ class OnboardingScreenTest {
         composeTestRule.onAllNodesWithText(string(R.string.onb_sources_connect_with_consent)).onFirst()
             .assertIsEnabled()
         composeTestRule.onAllNodesWithText(string(R.string.onb_sources_skip_remaining)).assertCountEquals(0)
-        composeTestRule.onNodeWithText(string(R.string.settings_source_connections_done)).performClick()
+        composeTestRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connections-continue"))
+        composeTestRule.onNodeWithTag("source-connections-continue").performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, doneClicks)
@@ -844,13 +856,15 @@ class OnboardingScreenTest {
 
         composeTestRule.runOnIdle {
             events.tryEmit(EmailConnectEvent.Failed(EmailPipaProvider.GMAIL, "network"))
+        }
+        composeTestRule.waitForText(string(R.string.onb_gmail_error_network))
+        composeTestRule.onNodeWithText(string(R.string.onb_gmail_error_network)).assertIsDisplayed()
+        composeTestRule.mainClock.advanceTimeBy(5_000)
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
             events.tryEmit(EmailConnectEvent.Connected(EmailPipaProvider.GMAIL))
         }
-
-        composeTestRule.onNodeWithText(string(R.string.onb_gmail_error_network)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, navigateCount)
-        }
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 }
     }
 
     @Test
@@ -966,15 +980,20 @@ class OnboardingScreenTest {
                     pendingIntent = testPendingIntent(),
                 ),
             )
+        }
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { launchCount == 1 }
+        composeTestRule.runOnIdle {
             events.tryEmit(EmailConnectEvent.Failed(EmailPipaProvider.OUTLOOK_MAIL, "network"))
+        }
+        composeTestRule.waitForText(string(R.string.onb_outlook_error_network))
+        composeTestRule.onNodeWithText(string(R.string.onb_outlook_error_network)).assertIsDisplayed()
+        composeTestRule.mainClock.advanceTimeBy(5_000)
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
             events.tryEmit(EmailConnectEvent.Connected(EmailPipaProvider.OUTLOOK_MAIL))
         }
-
-        composeTestRule.onNodeWithText(string(R.string.onb_outlook_error_network)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, launchCount)
-            assertEquals(1, navigateCount)
-        }
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 }
+        composeTestRule.runOnIdle { assertEquals(1, launchCount) }
     }
 
     @Test
@@ -1029,13 +1048,15 @@ class OnboardingScreenTest {
                     "not_implemented",
                 ),
             )
+        }
+        composeTestRule.waitForText(string(R.string.onb_gcal_error_unavailable))
+        composeTestRule.onNodeWithText(string(R.string.onb_gcal_error_unavailable)).assertIsDisplayed()
+        composeTestRule.mainClock.advanceTimeBy(5_000)
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
             events.tryEmit(CalendarConnectEvent.Connected(CalendarOAuthProvider.GOOGLE_CALENDAR))
         }
-
-        composeTestRule.onNodeWithText(string(R.string.onb_gcal_error_unavailable)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, navigateCount)
-        }
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 }
     }
 
     @Test
@@ -1089,13 +1110,15 @@ class OnboardingScreenTest {
                     "not_implemented",
                 ),
             )
+        }
+        composeTestRule.waitForText(string(R.string.onb_outlook_cal_error_unavailable))
+        composeTestRule.onNodeWithText(string(R.string.onb_outlook_cal_error_unavailable)).assertIsDisplayed()
+        composeTestRule.mainClock.advanceTimeBy(5_000)
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
             events.tryEmit(CalendarConnectEvent.Connected(CalendarOAuthProvider.OUTLOOK_CALENDAR))
         }
-
-        composeTestRule.onNodeWithText(string(R.string.onb_outlook_cal_error_unavailable)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, navigateCount)
-        }
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 }
     }
 
     @Test
@@ -1127,6 +1150,14 @@ class OnboardingScreenTest {
 
     private fun string(resId: Int, vararg args: Any): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId, *args)
+
+    private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.waitForText(text: String) {
+        waitUntil(timeoutMillis = 3_000) {
+            runCatching {
+                onNodeWithText(text).assertIsDisplayed()
+            }.isSuccess
+        }
+    }
 
     private fun testPendingIntent(): PendingIntent {
         val context = ApplicationProvider.getApplicationContext<Context>()

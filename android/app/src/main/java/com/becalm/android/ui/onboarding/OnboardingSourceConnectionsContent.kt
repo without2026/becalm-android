@@ -122,7 +122,9 @@ internal fun SourceConnectionsContent(
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("source-connections-continue"),
             )
         }
     }

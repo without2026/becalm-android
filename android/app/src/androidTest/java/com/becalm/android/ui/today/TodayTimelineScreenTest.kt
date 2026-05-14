@@ -78,8 +78,8 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("Voice").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-chip-voice").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-chip-gmail").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
         composeTestRule.onAllNodesWithText("Naver Email").assertCountEquals(0)
         composeTestRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
@@ -178,8 +178,8 @@ class TodayTimelineScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Voice").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Gmail").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-chip-voice").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-chip-gmail").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
     }
 

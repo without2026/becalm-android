@@ -72,6 +72,11 @@ class EffectCollectorsTest {
             message = "저장되었습니다"
         }
 
+        composeTestRule.waitUntil(timeoutMillis = 3_000) {
+            runCatching {
+                composeTestRule.onNodeWithText("저장되었습니다").assertIsDisplayed()
+            }.isSuccess
+        }
         composeTestRule.onNodeWithText("저장되었습니다").assertIsDisplayed()
 
         composeTestRule.mainClock.advanceTimeBy(5_000)

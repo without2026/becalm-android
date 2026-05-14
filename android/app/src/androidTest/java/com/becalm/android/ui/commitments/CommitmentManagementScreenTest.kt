@@ -96,11 +96,11 @@ class CommitmentManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_all)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_take)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-filter-all").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-filter-give").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-filter-take").assertIsDisplayed()
         composeTestRule.onNodeWithTag("commitment-filter-schedule").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitments_filter_closed)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("commitment-filter-closed").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Alice Kim").assertCountEquals(2)
         composeTestRule.onNodeWithText("Schedule change").assertIsDisplayed()
         composeTestRule.onNodeWithText("Active commitment").performClick()

@@ -105,6 +105,7 @@ private fun SourceStatusChipView(
 
     Row(
         modifier = Modifier
+            .testTag("source-chip-${chip.sourceType}")
             .background(color = becalmColors.glassPanelFill, shape = ChipShape)
             .border(width = 1.dp, color = becalmColors.glassBorder, shape = ChipShape)
             .padding(horizontal = 10.dp, vertical = 6.dp),

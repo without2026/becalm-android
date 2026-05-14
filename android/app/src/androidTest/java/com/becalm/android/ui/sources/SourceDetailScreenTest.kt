@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -33,7 +34,9 @@ class SourceDetailScreenTest {
             state = baseState(),
         )
 
-        composeTestRule.onNodeWithText(string(R.string.source_detail_status_section)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.source_detail_status_section))
+            .onFirst()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.action_reconnect)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.action_sync_now)).assertIsDisplayed()
         composeTestRule.onNodeWithTag("source-detail-list")

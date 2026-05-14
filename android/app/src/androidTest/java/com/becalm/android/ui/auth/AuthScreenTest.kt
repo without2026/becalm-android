@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -361,6 +363,7 @@ class AuthScreenTest {
             }
         }
 
+        composeTestRule.waitForText("bad credentials")
         composeTestRule.onNodeWithText("bad credentials").assertIsDisplayed()
         composeTestRule.runOnIdle {
             assertEquals(1, dismissCount)
@@ -416,7 +419,7 @@ class AuthScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.login_title)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.login_title)).onFirst().assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.login_google_cta)).assertIsDisplayed()
     }
 
@@ -504,4 +507,12 @@ class AuthScreenTest {
 
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
+
+    private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.waitForText(text: String) {
+        waitUntil(timeoutMillis = 3_000) {
+            runCatching {
+                onNodeWithText(text).assertIsDisplayed()
+            }.isSuccess
+        }
+    }
 }

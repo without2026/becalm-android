@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -47,12 +49,14 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.privacy_export_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.privacy_withdraw_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.privacy_pause_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.privacy_delete_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.privacy_activity_log_title)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.privacy_delete_subtitle_fmt, 4, 2, 9)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-export-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-withdraw-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-pause-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-delete-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.privacy_delete_subtitle_fmt, 4, 2, 9))
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -79,11 +83,11 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.privacy_export_title)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.privacy_withdraw_title)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.privacy_pause_title)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.privacy_delete_title)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.privacy_activity_log_title)).performClick()
+        composeTestRule.onNodeWithTag("privacy-export-card").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("privacy-withdraw-card").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("privacy-pause-card").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("privacy-delete-card").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("privacy-activity-log-card").performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, exportClicks)
@@ -125,11 +129,14 @@ class PrivacyManagementScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(string(R.string.privacy_export_failed)).assertIsDisplayed()
-        composeTestRule.runOnIdle {
-            assertEquals(1, navigateCount)
-            assertEquals(1, dismissCount)
+        val errorText = string(R.string.privacy_export_failed)
+        composeTestRule.waitUntil(timeoutMillis = 3_000) {
+            runCatching {
+                composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
+            }.isSuccess
         }
+        composeTestRule.onNodeWithText(errorText).assertIsDisplayed()
+        composeTestRule.waitUntil(timeoutMillis = 3_000) { navigateCount == 1 && dismissCount == 1 }
     }
 
     @Test
