@@ -61,10 +61,18 @@ jobs:
             dependency-check-${{ runner.os }}-
 
       - name: Gradle dependency check
+        if: ${{ secrets.NVD_API_KEY != '' }}
         working-directory: ${{ steps.config.outputs.root }}/android
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: ./gradlew dependencyCheckAnalyze
+
+      - name: Gradle dependency check task presence
+        if: ${{ secrets.NVD_API_KEY == '' }}
+        working-directory: ${{ steps.config.outputs.root }}/android
+        run: |
+          echo "[WARN] NVD_API_KEY is not configured; validating dependencyCheckAnalyze task only."
+          ./gradlew tasks --all --console=plain | grep -q "dependencyCheckAnalyze"
 
       - name: Android Lint (security + a11y)
         working-directory: ${{ steps.config.outputs.root }}/android
