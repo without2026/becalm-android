@@ -177,6 +177,25 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
+    fun `android verification workflows bound runtime and preserve failure reports`() {
+        // spec: REL-010
+        val tests = repoFile(".github/workflows/android-tests.yml").readText()
+        val gates = repoFile(".github/workflows/android-gates.yml").readText()
+        val combined = "$tests\n$gates"
+
+        assertTrue(tests.contains("timeout-minutes: 15"))
+        assertTrue(tests.contains("timeout-minutes: 25"))
+        assertTrue(tests.contains("timeout-minutes: 30"))
+        assertTrue(gates.contains("timeout-minutes: 20"))
+        assertTrue(combined.contains("if: always()"))
+        assertTrue(combined.contains("android-unit-test-reports"))
+        assertTrue(combined.contains("android-release-smoke-reports"))
+        assertTrue(combined.contains("android-instrumented-test-reports"))
+        assertTrue(combined.contains("android-gate-reports"))
+        assertTrue(combined.contains("app/build/reports/androidTests/connected"))
+    }
+
+    @Test
     fun `android gate adapter template mirrors dependency check secret fallback`() {
         // spec: REL-010
         val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
@@ -185,6 +204,25 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY != '' }}"))
         assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY == '' }}"))
         assertTrue(gates.contains("./gradlew tasks --all --console=plain | grep -q \"dependencyCheckAnalyze\""))
+    }
+
+    @Test
+    fun `android adapter verification templates bound runtime and preserve failure reports`() {
+        // spec: REL-010
+        val tests = repoFile(".pipeline/adapters/android/test.yml").readText()
+        val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
+        val combined = "$tests\n$gates"
+
+        assertTrue(tests.contains("timeout-minutes: 15"))
+        assertTrue(tests.contains("timeout-minutes: 25"))
+        assertTrue(tests.contains("timeout-minutes: 30"))
+        assertTrue(gates.contains("timeout-minutes: 20"))
+        assertTrue(combined.contains("if: always()"))
+        assertTrue(combined.contains("android-unit-test-reports"))
+        assertTrue(combined.contains("android-release-smoke-reports"))
+        assertTrue(combined.contains("android-instrumented-test-reports"))
+        assertTrue(combined.contains("android-gate-reports"))
+        assertTrue(combined.contains("app/build/reports/androidTests/connected"))
     }
 
     private fun repoFile(path: String): File {

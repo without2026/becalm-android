@@ -10,6 +10,7 @@ on:
 jobs:
   gates:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
@@ -81,3 +82,13 @@ jobs:
       - name: APK size check
         working-directory: ${{ steps.config.outputs.root }}/android
         run: bash ../.pipeline/adapters/android/perf-check.sh
+
+      - name: Upload gate reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-gate-reports
+          path: |
+            ${{ steps.config.outputs.root }}/android/app/build/reports/
+            ${{ steps.config.outputs.root }}/android/build/reports/
+          if-no-files-found: ignore

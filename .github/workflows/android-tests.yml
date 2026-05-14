@@ -10,6 +10,7 @@ on:
 jobs:
   read-config:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       root: ${{ steps.config.outputs.root }}
     steps:
@@ -31,6 +32,7 @@ jobs:
   unit-tests:
     needs: read-config
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -42,10 +44,20 @@ jobs:
         run: |
           chmod +x ./gradlew 2>/dev/null || true
           ./gradlew testDebugUnitTest --no-daemon --console=plain
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-unit-test-reports
+          path: |
+            ${{ needs.read-config.outputs.root }}/android/app/build/reports/tests/testDebugUnitTest/
+            ${{ needs.read-config.outputs.root }}/android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
 
   release-smoke:
     needs: read-config
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -60,10 +72,20 @@ jobs:
       - name: APK size smoke
         working-directory: ${{ needs.read-config.outputs.root }}/android
         run: bash ../.pipeline/adapters/android/perf-check.sh
+      - name: Upload release smoke reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-release-smoke-reports
+          path: |
+            ${{ needs.read-config.outputs.root }}/android/app/build/reports/
+            ${{ needs.read-config.outputs.root }}/android/app/build/outputs/logs/
+          if-no-files-found: ignore
 
   instrumented-tests:
     needs: read-config
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -83,10 +105,20 @@ jobs:
           arch: x86_64
           profile: pixel_6
           script: cd ${{ needs.read-config.outputs.root }}/android && chmod +x ./gradlew 2>/dev/null; ./gradlew connectedDebugAndroidTest
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-instrumented-test-reports
+          path: |
+            ${{ needs.read-config.outputs.root }}/android/app/build/reports/androidTests/connected/
+            ${{ needs.read-config.outputs.root }}/android/app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
 
   backend-tests:
     needs: read-config
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

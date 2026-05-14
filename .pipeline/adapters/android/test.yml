@@ -5,6 +5,7 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -31,9 +32,19 @@ jobs:
       - name: Unit tests
         working-directory: ${{ steps.config.outputs.root }}/android
         run: ./gradlew testDebugUnitTest --no-daemon --console=plain
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-unit-test-reports
+          path: |
+            ${{ steps.config.outputs.root }}/android/app/build/reports/tests/testDebugUnitTest/
+            ${{ steps.config.outputs.root }}/android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
 
   release-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
@@ -64,9 +75,19 @@ jobs:
       - name: APK size smoke
         working-directory: ${{ steps.config.outputs.root }}/android
         run: bash ../.pipeline/adapters/android/perf-check.sh
+      - name: Upload release smoke reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-release-smoke-reports
+          path: |
+            ${{ steps.config.outputs.root }}/android/app/build/reports/
+            ${{ steps.config.outputs.root }}/android/app/build/outputs/logs/
+          if-no-files-found: ignore
 
   instrumented-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
@@ -90,9 +111,19 @@ jobs:
           script: |
             ROOT=$(python3 -c "import yaml; print(yaml.safe_load(open('.pipeline/platform.yml')).get('project_root', '.'))")
             cd "$ROOT/android" && ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-instrumented-test-reports
+          path: |
+            **/app/build/reports/androidTests/connected/
+            **/app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
 
   backend-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 

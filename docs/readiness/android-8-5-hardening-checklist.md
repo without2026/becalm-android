@@ -2,7 +2,7 @@
 
 This checklist maps the current beta-readiness target to concrete evidence. It is intentionally product-facing: a passing unit test is not enough unless it covers a user-visible requirement.
 
-Last updated: 2026-05-14 KST, main `08f19af`.
+Last updated: 2026-05-15 KST.
 
 Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that analytics/observability SDK implementation.
 
@@ -108,6 +108,7 @@ Required evidence:
 
 - Android deterministic gates include lint, dependency check, secret scan, spec coverage, and size check.
 - Android test workflow includes unit tests, release smoke, and CI emulator instrumentation.
+- Android verification workflows have bounded runtime and upload unit, release, instrumented, and gate reports as artifacts for failure triage.
 - Staging workflow is green on `main`.
 - Staging distribution is wired to Firebase App Distribution and does not fail main pushes when distribution secrets are not installed yet.
 - Production deploy builds a signed AAB and uploads it to Play Console with fail-closed runtime/signing checks.
@@ -123,6 +124,7 @@ Current main evidence:
 - `adapter-build.yml`, `adapter-gates.yml`, and `adapter-tests.yml` no longer reference missing electron/web reusable workflows in this Android repo.
 - `ci-scenario-gen.yml` passes `github.head_ref` via `PR_HEAD_REF` env before shell use.
 - First-party actions are upgraded to `checkout@v6`, `setup-java@v5`, `setup-python@v6`, `upload-artifact@v7`, `download-artifact@v8`, and `cache@v5`.
+- Android Tests and Android Deterministic Gates have job-level timeouts and preserve Gradle lint/test/report artifacts with `if: always()`.
 
 Known limits:
 
