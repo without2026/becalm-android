@@ -1,6 +1,7 @@
 package com.becalm.android.ui.onboarding
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +91,7 @@ public fun NotificationPermissionScreen(
             )(status)
         advance()
     }
+    @SuppressLint("InlinedApi")
     val requestPermission = onGrantPermission ?: { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val skip = onSkip ?: {
         (onMarkStepStatus

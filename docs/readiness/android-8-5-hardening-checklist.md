@@ -79,6 +79,7 @@ Current main evidence:
 - `Android Deterministic Gates` run `25879240085` passes spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size.
 - `Android Tests` run `25879240108` passes unit tests, backend optional tests, API 33 emulator instrumentation, and release smoke.
 - Local focused verification passed for `AndroidBuildWorkflowSpecTest` and `ReadinessQaScriptSpecTest`.
+- Local focused verification passed for `AndroidPlayPolicySpecTest`, and `lintDebug` no longer reports BatteryLife, InlinedApi, UnusedAttribute, or CredentialManager sign-in warnings.
 - `bash -n qa/emulator/scripts/measure_android_readiness.sh qa/emulator/scripts/verify_beta_readiness_qa.sh` passes.
 - Repo-wide legacy crash-vendor grep returns no matches.
 

@@ -28,6 +28,7 @@ self-scoring; the final score is assigned by the reviewer.
 | Prevent long-running CI jobs from hanging indefinitely | `.github/workflows/android-tests.yml` and `.github/workflows/android-gates.yml` define job-level `timeout-minutes`; mirrored in `.pipeline/adapters/android/test.yml` and `.pipeline/adapters/android/gates.yml` |
 | Keep workflow templates aligned with executable workflows | `AndroidBuildWorkflowSpecTest` checks action versions, dependency-check fallback, timeouts, and artifact uploads for both `.github/workflows` and `.pipeline/adapters/android` |
 | Keep release package identity aligned | `android/app/build.gradle.kts` uses `applicationId = "com.becalm.android"`; deploy config uses `packageName: com.becalm.android` |
+| Reduce Play policy review risk | Battery optimization onboarding opens app settings and no longer declares or invokes `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` |
 | Avoid reverting or hiding analytics requirement | No Firebase Crashlytics or Amplitude SDK implementation is claimed in this audit; that work remains explicitly excluded |
 
 ## Latest Run Evidence

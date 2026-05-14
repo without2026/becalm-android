@@ -34,6 +34,7 @@ Explicitly excluded by user direction:
 | App install recovery | Run `25879240108` found the app missing after instrumentation, reinstalled `app-debug.apk`, and then completed readiness measurement | Ready for reviewer |
 | Crash/ANR/OOM guard | `measure_android_readiness.sh` fails on logcat fatal exception, ANR, OOM, process death, and lowmemorykiller patterns | Ready for reviewer |
 | Code quality | `Android Deterministic Gates` run `25879240085` succeeded with spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and size check | Ready for reviewer |
+| Play policy risk control | Battery optimization onboarding uses app settings guidance and no longer declares or invokes restricted battery optimization exemption APIs | Ready for reviewer |
 | Release smoke | `Android Tests` run `25879240108` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
 | Instrumented tests | `Android Tests` run `25879240108` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
 | Artifact retention | CI uploaded `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` | Ready for reviewer |

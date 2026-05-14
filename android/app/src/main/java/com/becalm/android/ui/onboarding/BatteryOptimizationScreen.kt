@@ -29,11 +29,13 @@ import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 
 /**
- * Onboarding step: battery optimization exemption for reliable background capture.
+ * Onboarding step: battery optimization guidance for reliable background capture.
  *
- * Triggers [Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS] for the app package.
- * Additionally displays Samsung-specific guidance to remove app from Sleeping Apps list.
- * "Skip" advances without making any changes — the user can revisit in Settings.
+ * Opens the app settings page and displays Samsung-specific guidance to remove
+ * BeCalm from Sleeping Apps. It intentionally avoids restricted battery
+ * optimization exemption requests; foreground catch-up remains the reliable
+ * sync baseline.
+ * "Skip" advances without making any changes.
  *
  * spec: ONB-005
  *
@@ -73,7 +75,7 @@ public fun BatteryOptimizationScreen(
     }
     val requestBatteryExemption = onRequestBatteryExemption ?: {
         val intent = Intent(
-            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.parse("package:${context.packageName}"),
         )
         launcher.launch(intent)

@@ -1,5 +1,6 @@
 package com.becalm.android.ui.auth
 
+import android.annotation.SuppressLint
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ public class GoogleSignInHandle internal constructor(
      * [CredentialManager] with an empty server client id because that produces an
      * unrecoverable error that looks to the user like a random crash.
      */
+    @SuppressLint("CredentialManagerSignInWithGoogle")
     public fun launch() {
         if (!isConfigured) return
         scope.launch {

@@ -112,10 +112,11 @@ routes:
   - path: /onboarding/battery
     screen: BatteryOptimizationScreen
     data: []
-    components: [BatteryExemptButton, SamsungSleepingAppsGuide, SkipButton, WarningSnackbar]
+    components: [AppSettingsButton, SamsungSleepingAppsGuide, SkipButton, WarningSnackbar]
     auth: required
-    # ONB-005: 2-step: (1) standard REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog,
-    # (2) Samsung-only guidance screen (Build.MANUFACTURER=='samsung').
+    # ONB-005: Opens app settings and shows manufacturer guidance. Does not call
+    # REQUEST_IGNORE_BATTERY_OPTIMIZATIONS because Play policy treats that as
+    # restricted and BeCalm's foreground catch-up path is the reliability baseline.
 
   - path: /onboarding/cold-sync
     screen: ColdSyncScreen

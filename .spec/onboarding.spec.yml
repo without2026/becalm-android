@@ -76,11 +76,11 @@ behaviors:
 
   - id: ONB-005
     type: ui_interaction
-    description: "배터리 최적화 예외 요청은 첫 진입을 막지 않는 후속 추천이다. Setup 완료 조건에 포함하지 않으며 기존 BatteryOptimizationScreen은 설정/복구 경로로 유지한다"
+    description: "배터리 최적화 안내는 첫 진입을 막지 않는 후속 추천이다. Setup 완료 조건에 포함하지 않으며 BatteryOptimizationScreen은 앱 설정/복구 경로로 유지한다"
     screen: "OnboardingSetupScreen"
     interaction: "Setup 완료"
     precondition: "로그인 후 첫 setup"
-    expected: "BATTERY_OPT step은 skipped 또는 later 상태로 저장될 수 있으며 main 화면 진입을 막지 않는다"
+    expected: "BATTERY_OPT step은 skipped 또는 later 상태로 저장될 수 있으며 main 화면 진입을 막지 않는다. Play 정책 리스크가 있는 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 런타임 요청은 사용하지 않고 앱 설정과 제조사별 안내만 제공한다"
     source: phase2-acceptance
     tests: []
 

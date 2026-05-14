@@ -226,8 +226,8 @@
     <!-- Onboarding: Battery optimization -->
     <string name="onb_battery_title">백그라운드 실행</string>
     <string name="onb_battery_headline">BeCalm 백그라운드 유지</string>
-    <string name="onb_battery_body">약속을 안정적으로 캡처하려면 BeCalm이 백그라운드에서 실행되어야 합니다. BeCalm의 배터리 최적화를 비활성화해 주세요. 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
-    <string name="onb_battery_cta">배터리 최적화 비활성화</string>
+    <string name="onb_battery_body">일부 기기에서는 배터리 제한 때문에 동기화가 늦어질 수 있습니다. 앱 설정에서 백그라운드 사용을 허용하고, 삼성 기기에서는 절전 모드 앱 목록에서도 제거해 주세요.</string>
+    <string name="onb_battery_cta">앱 설정 열기</string>
     <string name="onb_battery_samsung_guide">삼성: 설정 → 디바이스 케어 → 배터리 → 백그라운드 사용 제한 → 절전 앱 → BeCalm 제거</string>
 
     <!-- Onboarding: Cold sync -->
