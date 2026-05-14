@@ -22,7 +22,7 @@ self-scoring; the final score is assigned by the reviewer.
 | Verify release smoke | `release-smoke` job in run `25883105600`, conclusion `success` |
 | Verify unit tests | `unit-tests` job in run `25883105600`, conclusion `success` |
 | Verify backend optional tests | `backend-tests` job in run `25883105600`, conclusion `success` |
-| Verify staging deploy does not block main | Docs-only `Deploy Staging` run `25884131103`, conclusion `success`; executable-code deploy run `25883089035`, conclusion `success` |
+| Verify staging deploy does not block main | Executable-code `Deploy Staging` run `25883089035`, conclusion `success`; docs-only pushes do not change executable Android code |
 | Preserve failure evidence for CI triage | Artifacts exist for `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` |
 | Enforce beta-readiness performance/logcat smoke criteria | `qa/emulator/scripts/measure_android_readiness.sh` fails by default on unavailable/over-threshold cold start, unavailable/over-threshold PSS, or app fatal/ANR/OOM logcat patterns |
 | Verify readiness smoke survives test APK cleanup | Run `25883105600` reinstalled `app-debug.apk` when `pm path com.becalm.android` was missing, then measured launch/memory/logcat |
@@ -40,7 +40,6 @@ self-scoring; the final score is assigned by the reviewer.
 |---|---:|---|---|
 | Android Deterministic Gates | `25883104187` | `e8f32f3` | success |
 | Android Tests | `25883105600` | `e8f32f3` | success |
-| Deploy Staging | `25884131103` | docs-only evidence update | success |
 | Deploy Staging | `25883089035` | `e8f32f3` | success |
 
 Android Tests job results:
