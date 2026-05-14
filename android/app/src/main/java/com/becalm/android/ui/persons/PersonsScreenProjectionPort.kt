@@ -6,8 +6,10 @@ import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
@@ -192,10 +194,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             matchingContextFlow,
         ) { events, participants, matchingContext ->
             events
-                .filterNot { event ->
-                    PersonIdentityResolver.isBlocked(event.suggestedLabel, matchingContext.blockedPersonRefs) ||
-                        PersonIdentityResolver.isLikelyAutomated(event.suggestedLabel)
-                }
+                .filterNot { event -> event.shouldHideFromManualMatching(matchingContext.blockedPersonRefs) }
                 .map { event ->
                     val eventCandidates = candidateSourceRefs(event.sourceRef)
                         .flatMap { ref ->
@@ -333,9 +332,25 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             ?.toCollection(linkedSetOf())
             ?: emptySet()
 
+    private fun UnmatchedPersonInteractionEntity.shouldHideFromManualMatching(
+        blockedPersonRefs: Set<String>,
+    ): Boolean {
+        if (PersonIdentityResolver.isBlocked(suggestedLabel, blockedPersonRefs)) return true
+        if (sourceType in AUDIO_MANUAL_MATCH_SOURCE_TYPES && suggestedLabel?.matches(SPEAKER_LABEL_REGEX) == true) {
+            return false
+        }
+        return PersonIdentityResolver.isLikelyAutomated(suggestedLabel)
+    }
+
     private companion object {
         const val PAGE_SIZE: Int = 20
         const val MATCH_CANDIDATE_LIMIT: Int = 200
+        val AUDIO_MANUAL_MATCH_SOURCE_TYPES: Set<String> = setOf(
+            SourceType.MEETING,
+            SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+        )
+        val SPEAKER_LABEL_REGEX: Regex = Regex("""(?i)^SPEAKER[_\s-]?\d+$""")
     }
 }
 

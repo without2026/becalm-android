@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+        Intentionally empty.
+
+        Keep this file in version control so future false-positive suppressions are reviewed
+        explicitly instead of being hidden in CI settings. The Gradle gate fails on CVSS >= 7.
+    -->
+</suppressions>

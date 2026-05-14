@@ -8,4 +8,14 @@ plugins {
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.hilt) apply false
     alias(libs.plugins.androidx.baselineprofile) apply false
+    alias(libs.plugins.owasp.dependencycheck)
+}
+
+dependencyCheck {
+    failBuildOnCVSS = 7.0F
+    formats = listOf("HTML", "JSON")
+    outputDirectory.set(layout.buildDirectory.dir("reports/dependency-check"))
+    suppressionFile = rootProject.file("config/dependency-check-suppression.xml").absolutePath
+    analyzers.assemblyEnabled = false
+    nvd.apiKey = providers.environmentVariable("NVD_API_KEY").orNull
 }

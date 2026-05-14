@@ -30,6 +30,13 @@ screenshot() {
   "$ADB_BIN" -s "$DEVICE" exec-out screencap -p > "$SCREENSHOT_DIR/$name.png"
 }
 
+focused_package_contains() {
+  local package_name="$1"
+  local window_dump
+  window_dump="$("$ADB_BIN" -s "$DEVICE" shell dumpsys window 2>/dev/null || true)"
+  grep -Fq "$package_name" <<< "$window_dump"
+}
+
 ui_excerpt() {
   tr '<' '\n' < "$TMP_XML" | grep -E 'text=|content-desc=' | head -n 160 >&2 || true
 }
@@ -75,12 +82,25 @@ PY
 
 open_deep_link() {
   local link="$1"
-  "$ADB_BIN" -s "$DEVICE" shell am start -S \
-    -a android.intent.action.VIEW \
-    -d "$link" \
-    -n com.becalm.android/.MainActivity >/dev/null
-  sleep 4
+  for _ in 1 2 3 4 5; do
+    "$ADB_BIN" -s "$DEVICE" shell am start -W \
+      -a android.intent.action.VIEW \
+      -d "$link" \
+      -n com.becalm.android/.MainActivity >/dev/null
+    sleep 2
+    if focused_package_contains "com.becalm.android"; then
+      dump_ui
+      return
+    fi
+    "$ADB_BIN" -s "$DEVICE" shell monkey -p com.becalm.android 1 >/dev/null 2>&1 || true
+    sleep 1
+  done
+  echo "Unable to bring BeCalm to foreground for deep link: $link" >&2
+  "$ADB_BIN" -s "$DEVICE" shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mTopActivity' >&2 || true
   dump_ui
+  ui_excerpt
+  screenshot "launch-failed"
+  exit 1
 }
 
 wait_for_text() {
@@ -137,7 +157,13 @@ require_text "사람 매칭"
 tap_text "사람 매칭"
 sleep 2
 
-open_deep_link "becalm://persons"
+"$ADB_BIN" -s "$DEVICE" shell input keyevent KEYCODE_BACK
+sleep 1
+dump_ui
+if ! grep -Fq "Customer Lee" "$TMP_XML"; then
+  open_deep_link "becalm://persons"
+  wait_for_text "Customer Lee" "persons-customer-after-match"
+fi
 tap_text "Customer Lee"
 sleep 1
 dump_ui

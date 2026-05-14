@@ -339,7 +339,7 @@ private fun PreviewPersonDetailScreenWithHistory() {
                 IconButton(onClick = {}) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.action_back),
                     )
                 }
             },

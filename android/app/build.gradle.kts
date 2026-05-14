@@ -39,6 +39,37 @@ fun gradleOrLocalProp(key: String): String {
     return localProp(key)
 }
 
+fun optionalGradleEnvOrLocalProp(gradleKey: String, envKey: String): String? {
+    val gradleValue = findProperty(gradleKey)?.toString()
+    if (!gradleValue.isNullOrBlank()) return gradleValue
+    val envValue = System.getenv(envKey)
+    if (!envValue.isNullOrBlank()) return envValue
+    return localProps.getProperty(gradleKey)?.takeIf { it.isNotBlank() }
+}
+
+val releaseStoreFilePath = optionalGradleEnvOrLocalProp(
+    gradleKey = "becalm.release.store.file",
+    envKey = "BECALM_RELEASE_STORE_FILE",
+)
+val releaseStorePassword = optionalGradleEnvOrLocalProp(
+    gradleKey = "becalm.release.store.password",
+    envKey = "BECALM_RELEASE_STORE_PASSWORD",
+)
+val releaseKeyAlias = optionalGradleEnvOrLocalProp(
+    gradleKey = "becalm.release.key.alias",
+    envKey = "BECALM_RELEASE_KEY_ALIAS",
+)
+val releaseKeyPassword = optionalGradleEnvOrLocalProp(
+    gradleKey = "becalm.release.key.password",
+    envKey = "BECALM_RELEASE_KEY_PASSWORD",
+)
+val releaseSigningConfigured = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.becalm.android"
     compileSdk = 35
@@ -69,9 +100,23 @@ android {
         )
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("releaseUpload") {
+                storeFile = rootProject.file(requireNotNull(releaseStoreFilePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("releaseUpload")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -145,6 +190,25 @@ baselineProfile {
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+tasks.register("verifyReleaseSigningConfigured") {
+    group = "verification"
+    description = "Fails protected release builds when Android upload signing is not configured."
+    doLast {
+        if (!releaseSigningConfigured) {
+            throw GradleException(
+                "Android release upload signing is not configured. Set " +
+                    "BECALM_RELEASE_STORE_FILE, BECALM_RELEASE_STORE_PASSWORD, " +
+                    "BECALM_RELEASE_KEY_ALIAS, and BECALM_RELEASE_KEY_PASSWORD " +
+                    "(or matching becalm.release.* Gradle/local.properties keys).",
+            )
+        }
+        val storeFile = rootProject.file(requireNotNull(releaseStoreFilePath))
+        if (!storeFile.isFile) {
+            throw GradleException("Android release upload keystore does not exist: ${storeFile.path}")
+        }
+    }
 }
 
 dependencies {

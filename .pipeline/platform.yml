@@ -66,8 +66,11 @@ test:
   a11y: android-lint
 
 monitoring:
-  crash_reporting: sentry
-  analytics: null
+  # Production crash/analytics SDK wiring is tracked in a separate Firebase +
+  # Amplitude workstream. The Android app currently emits through the
+  # vendor-neutral ObservabilityClient logger binding only.
+  crash_reporting: firebase_crashlytics_planned
+  analytics: amplitude_planned
   deploy_gate:
     max_failed_health_checks: 3
     max_p95_latency_ms: 2000
