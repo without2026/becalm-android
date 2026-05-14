@@ -215,7 +215,10 @@ public fun CommitmentManagementScreenContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            MainTabStatusHeader(state = headerState)
+            MainTabStatusHeader(
+                state = headerState,
+                onOpenSettings = onOpenSettings,
+            )
             FilterChipRow(
                 selectedFilter = state.filter,
                 onFilterSelect = onFilterChange,

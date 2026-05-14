@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import com.becalm.android.ui.components.IngestionTimestamp
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
+import com.becalm.android.ui.theme.glassPanel
 
 /**
  * Raw event detail screen — extended fields loaded from Room for a single ingestion event.
@@ -111,7 +113,9 @@ internal fun RawEventDetailContent(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        RawEventSyncStatusBanner(syncStatus = state.syncStatus)
         EvidenceCard(
             modifier = Modifier
                 .fillMaxWidth(),
@@ -125,6 +129,33 @@ internal fun RawEventDetailContent(
                 NonEmailEventDetailSection(state = state)
             }
         }
+    }
+}
+
+@Composable
+private fun RawEventSyncStatusBanner(syncStatus: String?) {
+    val (titleRes, bodyRes) = when (syncStatus) {
+        "failed", "quarantined" -> R.string.raw_event_sync_failed_title to R.string.raw_event_sync_failed_body
+        "awaiting_consent" -> R.string.raw_event_sync_awaiting_consent_title to R.string.raw_event_sync_awaiting_consent_body
+        else -> return
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassPanel(RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(titleRes),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        Text(
+            text = stringResource(bodyRes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

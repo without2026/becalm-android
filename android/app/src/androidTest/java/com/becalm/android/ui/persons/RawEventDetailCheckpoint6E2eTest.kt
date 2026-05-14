@@ -21,6 +21,50 @@ class RawEventDetailCheckpoint6E2eTest {
     val composeTestRule = createComposeRule()
 
     @Test
+    // spec: ERR-004
+    // spec: ERR-005
+    fun raw_event_detail_shows_upload_failure_recovery_copy() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                RawEventDetailContent(
+                    state = RawEventDetailUiState(
+                        eventId = "raw-failed",
+                        sourceType = SourceType.VOICE,
+                        eventTitle = "긴 녹음",
+                        timestamp = Instant.parse("2026-05-07T03:00:00Z"),
+                        syncStatus = "failed",
+                        loading = false,
+                    ),
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.raw_event_sync_failed_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_sync_failed_body)).assertIsDisplayed()
+    }
+
+    @Test
+    fun raw_event_detail_shows_awaiting_consent_recovery_copy() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                RawEventDetailContent(
+                    state = RawEventDetailUiState(
+                        eventId = "raw-awaiting",
+                        sourceType = SourceType.MESSAGE_SCREENSHOT,
+                        eventTitle = "메신저 캡처",
+                        timestamp = Instant.parse("2026-05-07T03:00:00Z"),
+                        syncStatus = "awaiting_consent",
+                        loading = false,
+                    ),
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.raw_event_sync_awaiting_consent_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_sync_awaiting_consent_body)).assertIsDisplayed()
+    }
+
+    @Test
     fun e2e_068_original_file_missing_shows_deleted_original_notice_without_crash() {
         composeTestRule.setContent {
             BecalmTheme {

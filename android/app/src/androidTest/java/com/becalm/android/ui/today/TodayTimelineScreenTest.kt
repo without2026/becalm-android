@@ -35,6 +35,8 @@ class TodayTimelineScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
+    // spec: ERR-002
+    // spec: ERR-003
     fun today_content_shows_processing_banner_active_source_chips_source_warning_and_settings_action() {
         var openSettingsCount = 0
 
@@ -78,6 +80,7 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_source_attention_action)).performClick()
         composeTestRule.onNodeWithTag("source-chip-voice").assertIsDisplayed()
         composeTestRule.onNodeWithTag("source-chip-gmail").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Outlook Mail").assertCountEquals(0)
@@ -85,7 +88,7 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeTestRule.runOnIdle {
-            assertEquals(1, openSettingsCount)
+            assertEquals(2, openSettingsCount)
         }
     }
 
@@ -155,6 +158,7 @@ class TodayTimelineScreenTest {
     }
 
     @Test
+    // spec: ERR-007
     fun overall_sync_indicator_shows_partial_failure_label() {
         composeTestRule.setContent {
             BecalmTheme {
