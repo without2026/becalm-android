@@ -11,9 +11,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
+import com.becalm.android.productanalytics.ProductSessionTracker
+import com.becalm.android.receiver.ReminderBroadcastReceiver
 import com.becalm.android.ui.navigation.AppDeepLinks
 import com.becalm.android.ui.theme.BecalmTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Single-activity entry point for the BeCalm Android app.
@@ -25,6 +30,12 @@ import dagger.hilt.android.AndroidEntryPoint
  */
 @AndroidEntryPoint
 public class MainActivity : ComponentActivity() {
+
+    @Inject
+    public lateinit var productSessionTracker: ProductSessionTracker
+
+    @Inject
+    public lateinit var productAnalytics: ProductAnalyticsClient
 
     /**
      * Holds the most recent incoming deep-link route so the Compose root can
@@ -43,7 +54,7 @@ public class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
 
-        pendingDeepLinkRoute.value = intent?.let(AppDeepLinks::routeFrom)
+        handleIncomingIntent(intent)
 
         setContent {
             BecalmTheme {
@@ -51,6 +62,7 @@ public class MainActivity : ComponentActivity() {
                 BecalmApp(
                     pendingDeepLinkRoute = deepLinkRoute,
                     onDeepLinkConsumed = { deepLinkRoute = null },
+                    productAnalytics = productAnalytics,
                 )
             }
         }
@@ -59,6 +71,37 @@ public class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        AppDeepLinks.routeFrom(intent)?.let { pendingDeepLinkRoute.value = it }
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        val route = intent?.let(AppDeepLinks::routeFrom)
+        if (route != null) {
+            val entrySource = intent.getStringExtra(ReminderBroadcastReceiver.EXTRA_ENTRY_SOURCE)
+            productSessionTracker.markNextEntrySource(
+                if (entrySource == ProductSessionTracker.ENTRY_NOTIFICATION) {
+                    ProductSessionTracker.ENTRY_NOTIFICATION
+                } else {
+                    ProductSessionTracker.ENTRY_DEEP_LINK
+                },
+            )
+            pendingDeepLinkRoute.value = route
+            if (entrySource == ProductSessionTracker.ENTRY_NOTIFICATION) {
+                productAnalytics.track(
+                    ProductAnalyticsNames.COMMITMENT_NOTIFICATION_OPENED,
+                    properties = mapOf(
+                        "commitment_id" to intent.data?.lastPathSegment.orEmpty(),
+                        "commitment_state_at_open" to intent.getStringExtra(
+                            ReminderBroadcastReceiver.EXTRA_COMMITMENT_STATE_AT_OPEN,
+                        ).orEmpty(),
+                        "available_actions_at_open" to (
+                            intent.getStringArrayListExtra(
+                                ReminderBroadcastReceiver.EXTRA_AVAILABLE_ACTIONS_AT_OPEN,
+                            ) ?: emptyList<String>()
+                            ),
+                    ),
+                )
+            }
+        }
     }
 }

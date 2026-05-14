@@ -21,6 +21,10 @@ import com.becalm.android.data.remote.dto.PersonListResponse
 import com.becalm.android.data.remote.dto.PersonMemoryDownloadResponseDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadRequestDto
 import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
+import com.becalm.android.data.remote.dto.PmfSurveyRequestDto
+import com.becalm.android.data.remote.dto.PmfSurveyResponseDto
+import com.becalm.android.data.remote.dto.ProductAnalyticsBatchRequestDto
+import com.becalm.android.data.remote.dto.ProductAnalyticsBatchResponseDto
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
 import com.becalm.android.data.remote.dto.ScheduleEventLinkStatusPatchDto
 import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
@@ -64,6 +68,18 @@ import retrofit2.http.Query
  * SRC-001..003, SRC-006, ING-003..005, ING-011..013.
  */
 public interface RailwayApi {
+
+    @POST("v1/analytics/events:batch")
+    public suspend fun uploadProductAnalyticsEvents(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: ProductAnalyticsBatchRequestDto,
+    ): Response<ProductAnalyticsBatchResponseDto>
+
+    @POST("v1/surveys/pmf")
+    public suspend fun submitPmfSurvey(
+        @Header("X-BeCalm-Idempotent") idem: String = "1",
+        @Body request: PmfSurveyRequestDto,
+    ): Response<PmfSurveyResponseDto>
 
     // =========================================================================
     // RAW INGESTION EVENTS

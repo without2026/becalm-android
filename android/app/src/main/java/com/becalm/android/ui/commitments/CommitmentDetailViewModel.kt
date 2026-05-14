@@ -11,6 +11,10 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.productanalytics.CommitmentAnalyticsPayloads
+import com.becalm.android.productanalytics.NoopProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsClient
+import com.becalm.android.productanalytics.ProductAnalyticsNames
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -119,6 +123,7 @@ public class CommitmentDetailViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val userPrefsStore: UserPrefsStore,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -152,8 +157,24 @@ public class CommitmentDetailViewModel @Inject constructor(
 
     public fun onEditClick() {
         if (_uiState.value.actionButtons.editEnabled) {
+            trackActionSelected("edit")
             _effects.tryEmit(CommitmentDetailEffect.OpenEdit(id))
         }
+    }
+
+    public fun trackActionSelected(action: String, source: String = "commitment_detail") {
+        val state = _uiState.value
+        productAnalytics.track(
+            ProductAnalyticsNames.COMMITMENT_ACTION_SELECTED,
+            properties = mapOf(
+                "commitment_id" to id,
+                "action" to action,
+                "commitment_state_before" to state.actionState.name,
+                "available_actions_at_action_time" to CommitmentAnalyticsPayloads.availableActions(state.actionButtons),
+                "source" to source,
+                "notification_open_event_id" to null,
+            ),
+        )
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────

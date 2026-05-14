@@ -154,18 +154,22 @@ public fun CommitmentDetailSheet(
                     actionButtons = state.actionButtons,
                     counterpartyDisplayName = state.counterpartyDisplayName,
                     onRemind = onRemind ?: {
+                        resolvedDetailViewModel?.trackActionSelected("remind")
                         requireNotNull(resolvedManagementViewModel).onRemind(commitmentId)
                         onDismiss()
                     },
                     onFollowUp = onFollowUp ?: {
+                        resolvedDetailViewModel?.trackActionSelected("follow_up")
                         requireNotNull(resolvedManagementViewModel).onFollowUp(commitmentId)
                         onDismiss()
                     },
                     onComplete = onComplete ?: {
+                        resolvedDetailViewModel?.trackActionSelected("complete")
                         requireNotNull(resolvedManagementViewModel).onComplete(commitmentId)
                         onDismiss()
                     },
                     onCancel = onCancel ?: {
+                        resolvedDetailViewModel?.trackActionSelected("cancel")
                         requireNotNull(resolvedManagementViewModel).onCancel(commitmentId)
                         onDismiss()
                     },
