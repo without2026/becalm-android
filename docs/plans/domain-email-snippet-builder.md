@@ -25,7 +25,7 @@
   > "body_plain이 있으면 사용. 없고 body_html만 있으면 Jsoup.parse(html).text() 결과 사용. 둘 다 비면 subject로 fallback 후 CommitmentExtractionWorker 호출 생략 — DataStore metric email_subject_only_skipped +=1로 모니터링. 모든 경우 앞 200자로 truncate + 연속 공백 1개로 정리"
 
 - **`.spec/email-pipeline.spec.yml:67-73`** — `EMAIL-007` (parse failure graceful degrade):
-  > "HTML 파싱 실패(잘못된 HTML / charset mismatch / Jsoup timeout)는 raw event를 quarantine으로 넘기지 않고 event_snippet=subject로 graceful degrade한다. Sentry에만 parse_failure 이벤트 기록"
+  > "HTML 파싱 실패(잘못된 HTML / charset mismatch / Jsoup timeout)는 raw event를 quarantine으로 넘기지 않고 event_snippet=subject로 graceful degrade한다. Firebase Crashlytics에만 parse_failure 이벤트 기록"
   > "raw_ingestion_events 정상 INSERT(event_snippet=subject 앞 200자), EmailBody.body_plain=null + body_html=원본 보존 + parse_failed=true 플래그"
 
 - **`.spec/data-ingestion.spec.yml:65`** — `ING-006` Gmail expected:
@@ -149,7 +149,7 @@ grep -rn "first 200 chars of body" android/app/src/main/java/
     - `interface MetricsStore { suspend fun incrementSubjectOnlySkipped(); fun observeSubjectOnlySkipped(): Flow<Int> }`
     - `class MetricsStoreImpl @Inject constructor(private val dataStore: DataStore<Preferences>) : MetricsStore` — 키 `intPreferencesKey("email_subject_only_skipped")`, 초기값 0, `edit { prefs -> prefs[KEY] = (prefs[KEY] ?: 0) + 1 }` 패턴 (이미 `SyncCursorStore` 에 유사 패턴 존재할 것 — 일관성 확인 필요).
     - Hilt `@Binds` 는 기존 `DataStoreModule` (또는 해당 모듈 이름) 에 등록.
-  - `observeSubjectOnlySkipped()` 는 debug surface (추후 settings 화면 또는 Sentry breadcrumb) 용. 이 PR 에서 UI 소비자는 추가하지 않음.
+  - `observeSubjectOnlySkipped()` 는 debug surface (추후 settings 화면 또는 Firebase Crashlytics breadcrumb) 용. 이 PR 에서 UI 소비자는 추가하지 않음.
 
 - **`android/app/src/test/java/com/becalm/android/domain/email/EmailSnippetBuilderTest.kt`** — JUnit4 + table-driven. Robolectric 불필요 (순수 domain; Jsoup 은 JVM 에서 동작).
   - 테스트 케이스 테이블(모든 이름은 backtick Kotlin fun 이름):
@@ -210,7 +210,7 @@ grep -rn "first 200 chars of body" android/app/src/main/java/
 - **워커 호출부 교체** — `GmailWorker`, `OutlookMailWorker`, `ImapNaverWorker`, `ImapDaumWorker` 에서 기존 snippet 생성 라인을 `EmailSnippetBuilder.buildSnippet(...)` 호출로 교체하는 작업. 이는 후속 PR `feat/worker/email-*` 시리즈 (PR#7/#8/#9) 가 담당. 이유: 워커 교체는 EmailBody entity (#1) 에 의존 — `bodyPlain` / `bodyHtml` 을 어디서 읽어올 것인지는 entity 스키마 landing 이후 결정.
 - **`CommitmentExtractionWorker` 호출 gate** — subject-only 메일은 LLM 추출을 건너뛰는 로직. 이는 #11 (CommitmentExtractionWorker PR) 이 담당.
 - **`EmailBody.parse_failed` 플래그 저장** — EmailBody entity (#1 `feat/db/email` PR) 가 선행. 이 PR 은 builder 가 `parseFailed` 를 반환하기만 함; 저장은 워커 교체 PR 몫.
-- **Sentry / Crashlytics** 에 `email_html_parse_failed` 이벤트 기록 — observability PR (별도 backlog).
+- **Firebase Crashlytics / Crashlytics** 에 `email_html_parse_failed` 이벤트 기록 — observability PR (별도 backlog).
 - **`QuotedBlockSplitter`** — `feat/domain/email` 브랜치 같은 stack 의 다음 commit (#11 CommitmentExtractor plan 참조).
 - **`EmailPromptBuilder`** — 동상. #11 에서 다룸.
 - **`MANUAL` / `CALL_RECORDING` 등 다른 enum 상수** — `feat/db/voice/call-recording-enum` 와 별도 PR.
@@ -292,7 +292,7 @@ git revert <commit-sha>
 3. **`Html.fromHtml`** 을 써서 Jsoup dep 회피 — 기각. android.text.Html 은 `Context` 가 필요 없지만 Android framework 결합 + JVM 단위 테스트 난도 증가 + HTML 태그 처리 품질 하락.
 4. **HTML parser 없이 regex 로 태그 strip** — 기각. `<script>`, CDATA, entity decoding 을 regex 로 완벽히 처리 불가 — spec EMAIL-007 의 "charset mismatch / malformed HTML" 모두 커버하려면 DOM parser 필요.
 5. **Builder 가 `SnippetResult` 대신 `String` 만 반환** — 기각. subject-fallback 여부를 caller 가 판별해야 하는데 string 만으로는 불가 (빈 문자열로 encode 하면 empty-subject 와 구분 불가). Sealed result type 이 가장 명확.
-6. **Builder 내부에서 Sentry breadcrumb emit** — 기각. Sentry 인프라 자체가 현재 연결되어 있지 않으며, domain unit 이 observability 레이어를 건드리면 테스트 순수성 훼손.
+6. **Builder 내부에서 Firebase Crashlytics breadcrumb emit** — 기각. Firebase Crashlytics 인프라 자체가 현재 연결되어 있지 않으며, domain unit 이 observability 레이어를 건드리면 테스트 순수성 훼손.
 
 ### 추가 참고 사항
 

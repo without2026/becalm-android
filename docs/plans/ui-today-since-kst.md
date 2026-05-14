@@ -148,7 +148,7 @@ grep -rn "분 전\|ago\|RelativeTime" android/app/src/main/java/com/becalm/andro
 - **절대시간 toggle (long-press → full datetime)** — 별도 plan.
 - **Localization past 24h (오늘 HH:mm 가 아니라 MM/DD 로 자동 fallback)** — Today 는 KST 하루 window 이므로 불필요. 만약 쿼리 경계에서 off-by-one 으로 window 밖 데이터가 들어오면 `else` 분기 `today_since_today_at` 가 잘못 "오늘" 로 표시할 수 있으나 — VM 이 window 필터링 책임을 가짐.
 - **`formatRelativeSinceInKst` 의 하루 이상 지원** — 위와 동일.
-- **sortKey 가 미래인 edge case (샘플 clock 불일치)** — `diffMinutes < 0` 인 경우 `today_since_just_now` 로 fallback. Sentry breadcrumb 로 수집.
+- **sortKey 가 미래인 edge case (샘플 clock 불일치)** — `diffMinutes < 0` 인 경우 `today_since_just_now` 로 fallback. Firebase Crashlytics breadcrumb 로 수집.
 
 ---
 

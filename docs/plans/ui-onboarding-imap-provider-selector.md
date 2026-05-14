@@ -15,7 +15,7 @@
 1. **ImapProviderSelector 없음** — 현재 `host` 를 사용자가 직접 입력하는 generic form (`ImapSetupScreen.kt:120-149`). spec 은 Naver/Daum 중 택일 + 해당 provider 의 preset IMAP host (naver: `imap.naver.com:993`, daum: `imap.daum.net:993`) 가 자동 적용되어야 함.
 2. **credentials 가 저장되지 않음** — `onSave = { /* TODO(BECALM-IMAP-001): persist credentials via ImapCredentialStore — deferred to next sprint */ ... }` (`ImapSetupScreen.kt:77-79`). 사용자 타이핑은 Composable local state 에만 존재 → 화면 이탈 시 증발.
 3. **`SourceType.NAVER_IMAP`/`DAUM_IMAP` 이 UI 에서 선택되지 않음** — `SourceTypes.kt:25, 28` 에 enum 은 존재하나 화면이 어느 provider 인지 결정하지 않으므로 저장 시 sourceType string 을 붙일 수 없음. 결과적으로 `SourceStatusRepository` 에 두 row 가 영원히 생성되지 않음 (→ UI-EMAIL-013 과 연결).
-4. **ONB-007 실패 경로 누락** — 저장 실패 (invalid credentials / network error) 시 Sentry breadcrumb + SKIPPED 처리 없음.
+4. **ONB-007 실패 경로 누락** — 저장 실패 (invalid credentials / network error) 시 Firebase Crashlytics breadcrumb + SKIPPED 처리 없음.
 
 `ImapCredentialStore` (`data/local/secure/ImapCredentialStore.kt`) 는 이미 존재. 본 plan 은 **UI 만** 수정하고, `ImapCredentialStore` 의 per-provider API 확장은 별도 plan **#6 `repo-imap-per-provider-credentials.md`** (선행 blocker) 가 담당한다.
 
@@ -32,7 +32,7 @@
 Provider 는 **네이버 + 다음** 두 옵션 (한국 IMAP 사용자 대다수). Custom host 는 MVP 범위 밖 — UI 상 disabled segment 로 표시해 향후 확장을 인지시키되 기능은 막는다.
 
 ### 2.3 `.spec/onboarding.spec.yml:86-93` — ONB-007
-> "온보딩 실패 이벤트가 Sentry에 전송된다 … OAuth 인증 실패 또는 권한 거부 발생 … `onboarding_step_failed` 이벤트"
+> "온보딩 실패 이벤트가 Firebase Crashlytics에 전송된다 … OAuth 인증 실패 또는 권한 거부 발생 … `onboarding_step_failed` 이벤트"
 
 IMAP 의 "실패" = 저장 단계에서 IMAP LOGIN 실패, 네트워크 오류, 잘못된 host 등. Skipped 나 Denied 가 아니므로 별도 분기.
 
@@ -110,7 +110,7 @@ grep -rn "NAVER_IMAP\|DAUM_IMAP" android/app/src/main/java/com/becalm/android/ui
 | host field | 자동 설정 (provider → preset) | 사용자 타이핑 | host field 삭제, provider 선택이 host 를 주입 |
 | credential 저장 | ImapCredentialStore.save(sourceType, host, email, appPassword) | TODO + state 폐기 | VM 메서드 + Store inject 필요 |
 | SourceType 태깅 | naver_imap / daum_imap 중 하나 | 태깅 안 됨 | selector 값 → sourceType 문자열 매핑 |
-| 저장 실패 처리 | Sentry `onboarding_step_failed` + SKIPPED | 실패 경로 없음 | 실패 분기 추가 |
+| 저장 실패 처리 | Firebase Crashlytics `onboarding_step_failed` + SKIPPED | 실패 경로 없음 | 실패 분기 추가 |
 | LINK_IMAP → COMPLETE 조건 | 저장 성공 시에만 | 즉시 COMPLETE | 성공 콜백에서만 마킹 |
 | Custom host (post-MVP) | disabled segment | — | disabled chip 추가 |
 
@@ -131,7 +131,7 @@ grep -rn "NAVER_IMAP\|DAUM_IMAP" android/app/src/main/java/com/becalm/android/ui
   - 신규 `fun saveImapCredentials(sourceType: String, host: String, port: Int, username: String, appPassword: String)`:
     - viewModelScope.launch
     - try: `imapCredentialStore.save(sourceType, ImapCredentials(host, port, username, appPassword))`. 저장 전 간단 validation (empty check, `@` 포함 여부 — IMAP 자체 LOGIN 검증은 post-MVP 로 **첫 동기화 시 확인**; 본 plan 은 저장까지만 동기 수행).
-    - catch: Sentry breadcrumb `onboarding_step_failed` (step="LINK_IMAP", error=e.javaClass.simpleName) + emit Failure.
+    - catch: Firebase Crashlytics breadcrumb `onboarding_step_failed` (step="LINK_IMAP", error=e.javaClass.simpleName) + emit Failure.
     - 성공 시: `sourceStatusRepository.markConnected(sourceType)` (if API 존재) **또는** initial row seed 는 **#5 의 `initializeDefaults` 에 위임** → 본 plan 에서는 상태 row 를 건드리지 않고 credential 만 저장.
     - `onMarkStepStatus(LINK_IMAP, COMPLETE)` 는 성공 시에만.
     - 실패 시: `onMarkStepStatus(LINK_IMAP, SKIPPED)` — 사용자가 재시도 가능하도록 SnackBar 표시 후 화면에 머무르게 할지, 아니면 바로 SKIPPED 처리할지 선택 지점. **권고: SnackBar + 화면 유지 (재시도 친화적)**. 사용자가 [스킵] 눌러야 navigation.
@@ -149,7 +149,7 @@ grep -rn "NAVER_IMAP\|DAUM_IMAP" android/app/src/main/java/com/becalm/android/ui
   - `onb_imap_provider_naver = "네이버"`, `onb_imap_provider_daum = "다음"`, `onb_imap_provider_custom = "직접 입력"`, `onb_imap_provider_custom_unavailable = "직접 입력은 추후 지원 예정입니다"`, `onb_imap_username_hint_naver = "naver.com 아이디"`, `onb_imap_username_hint_daum = "daum.net 아이디"`, `onb_imap_error_save_failed = "저장 중 오류가 발생했습니다. 다시 시도해주세요."`, `onb_imap_error_network = "네트워크 연결을 확인해주세요."`, `onb_imap_success = "%1$s 이메일이 연결되었습니다"`.
 - **tests**:
   - `OnboardingViewModelTest.saveImapCredentials_success_persistsAndMarksComplete` — fake `ImapCredentialStore.save` 호출 검증, LINK_IMAP=COMPLETE.
-  - `OnboardingViewModelTest.saveImapCredentials_failure_emitsSentryAndMarksSkipped` — exception-throwing fake, Sentry breadcrumb, LINK_IMAP=SKIPPED.
+  - `OnboardingViewModelTest.saveImapCredentials_failure_emitsFirebase CrashlyticsAndMarksSkipped` — exception-throwing fake, Firebase Crashlytics breadcrumb, LINK_IMAP=SKIPPED.
   - (선택) `ImapSetupScreenTest` (compose UI test) — SegmentedButton 선택 전환 시 username placeholder 가 naver/daum 로 바뀌는지.
 
 ### 5.3 Files to delete (dead code)
@@ -175,7 +175,7 @@ grep -rn "NAVER_IMAP\|DAUM_IMAP" android/app/src/main/java/com/becalm/android/ui
 - [ ] **Grep invariant**: `grep -rn "SegmentedButton" android/app/src/main/java/com/becalm/android/ui/onboarding/ImapSetupScreen.kt | wc -l` ≥ 1
 - [ ] **Grep invariant**: `grep -rn "imapCredentialStore\.save\|ImapCredentialStore" android/app/src/main/java/com/becalm/android/ui/onboarding/OnboardingViewModel.kt | wc -l` ≥ 1
 - [ ] **Unit test**: `OnboardingViewModelTest.saveImapCredentials_success_persistsAndMarksComplete` 통과
-- [ ] **Unit test**: `OnboardingViewModelTest.saveImapCredentials_failure_emitsSentryAndMarksSkipped` 통과
+- [ ] **Unit test**: `OnboardingViewModelTest.saveImapCredentials_failure_emitsFirebase CrashlyticsAndMarksSkipped` 통과
 - [ ] **Compile gate**: `./gradlew :app:assembleDebug :app:testDebugUnitTest` 성공
 - [ ] **Manual**: 네이버 선택 시 host label 이 숨겨지고 username placeholder 가 "naver.com 아이디" 로 변경됨. 다음 선택 시 동일 패턴. 직접 입력 segment 는 tap 무반응 (disabled).
 - [ ] **Manual FLAG_SECURE**: 화면 재확인 — screenshot 시도 시 검은 화면 (기존 동작 유지).
@@ -197,7 +197,7 @@ grep -rn "NAVER_IMAP\|DAUM_IMAP" android/app/src/main/java/com/becalm/android/ui
 ## 8. Dependencies
 
 - **Blocked by**: PR #6 — `fix/repo/imap` 브랜치, `ImapCredentialStore` 의 per-provider API. 본 plan 은 그 시그니처를 기대. #6 은 plan doc 작성 후 별도 세션에서 구현.
-- **Blocked by (soft)**: #12 Gmail + #13 Outlook — 같은 `OnboardingViewModel` 에 sentryClient inject 를 먼저 도입. 본 plan 은 그 DI 를 재사용.
+- **Blocked by (soft)**: #12 Gmail + #13 Outlook — 같은 `OnboardingViewModel` 에 observabilityClient inject 를 먼저 도입. 본 plan 은 그 DI 를 재사용.
 - **Blocks**:
   - `docs/plans/ui-sources-detail-actions-and-localization.md` (#5) — 본 plan 이 credential 저장 경로를 마련해야 Settings 쪽 disconnect 가 의미 있음.
 
@@ -229,7 +229,7 @@ revert 후:
 - **왜 host 를 preset 으로 강제**: generic host/port 조합에서 사용자 오타 → 연결 실패 → 온보딩 포기. spec 의 ImapProviderSelector 는 "provider 단위 UX" 를 의미.
 - **Username placeholder 동적 변경**: `selectedProvider` state 에 `remember` + `derivedStateOf` 로 placeholder string resource id 를 계산. Composable recomposition 비용 무시 가능.
 - **SSL/TLS 포트 993 고정**: naver/daum 모두 993 + STARTTLS 불필요 (implicit TLS). ImapProvider.port 는 Int 상수.
-- **Sentry breadcrumb payload**: PIPA 상 host / username / password 는 breadcrumb 에 포함 금지. `sourceType` 과 `errorClass` 만.
+- **Firebase Crashlytics breadcrumb payload**: PIPA 상 host / username / password 는 breadcrumb 에 포함 금지. `sourceType` 과 `errorClass` 만.
 - **ImapSaveResult sealed 설계**: `Success` / `Failure(errorStringRes: Int)` — errorStringRes 는 VM 이 throwable → string resource 매핑 후 emit (screen 쪽은 `stringResource()` 호출만). 이로써 테스트가 Throwable 종류에 독립적.
 - **첫 동기화 전 검증 미루기**: worker 가 실제 LOGIN 을 시도 → 실패 시 `SourceStatusRepository.markError("invalid_credentials")` → Sources 화면이 빨간 경고 표시. 이 경로는 **#5 의 error taxonomy** 와 **worker 레이어 plan** 이 함께 실현.
 - **SegmentedButton 접근성**: `Modifier.semantics { role = Role.RadioButton }` 로 TalkBack 지원. 본 plan 은 구현 세션에게 이를 상기시킴.

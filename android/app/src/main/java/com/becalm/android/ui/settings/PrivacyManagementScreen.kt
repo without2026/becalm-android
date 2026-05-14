@@ -79,20 +79,7 @@ public fun PrivacyManagementScreen(
     onOpenActivityLog: (() -> Unit)? = null,
     onDeleteSourceArchiveBefore: ((String) -> Unit)? = null,
 ) {
-    val privacyViewModel = if (
-        stateOverride == null ||
-            effectsOverride == null ||
-            onErrorDismissed == null ||
-            onExportRequested == null ||
-            onExportSaved == null ||
-            onExportFailed == null ||
-            onBack == null ||
-            onOpenConsentWithdraw == null ||
-            onOpenProcessingPause == null ||
-            onOpenAccountDeletion == null ||
-            onOpenActivityLog == null ||
-            onDeleteSourceArchiveBefore == null
-    ) {
+    val privacyViewModel = if (stateOverride == null || effectsOverride == null) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<PrivacyManagementViewModel>()
     } else {
         viewModel
@@ -112,7 +99,7 @@ public fun PrivacyManagementScreen(
     val createDocument = rememberLauncherForActivityResult(CreateDocument("application/zip")) { uri ->
         val bytes = pendingExportBytes
         if (uri == null || bytes == null) {
-            (onExportFailed ?: requireNotNull(privacyViewModel)::onExportFailed)(
+            (onExportFailed ?: { message: String -> privacyViewModel?.onExportFailed(message); Unit })(
                 context.getString(R.string.privacy_export_cancelled),
             )
             pendingExportBytes = null
@@ -123,9 +110,9 @@ public fun PrivacyManagementScreen(
                 stream.write(bytes)
             } ?: throw IOException("failed to open export destination")
         }.onSuccess {
-            (onExportSaved ?: requireNotNull(privacyViewModel)::onExportSaved)()
+            (onExportSaved ?: { privacyViewModel?.onExportSaved(); Unit })()
         }.onFailure { error ->
-            (onExportFailed ?: requireNotNull(privacyViewModel)::onExportFailed)(
+            (onExportFailed ?: { message: String -> privacyViewModel?.onExportFailed(message); Unit })(
                 error.message ?: context.getString(R.string.privacy_export_failed),
             )
         }
@@ -145,7 +132,7 @@ public fun PrivacyManagementScreen(
     HandleSnackbarMessage(
         errorMessage,
         snackbarHostState,
-        onErrorDismissed ?: requireNotNull(privacyViewModel)::onErrorDismissed,
+        onErrorDismissed ?: { privacyViewModel?.onErrorDismissed(); Unit },
     )
     CollectFlowEffect(effectsOverride ?: requireNotNull(privacyViewModel).effects) { effect ->
         when (effect) {
@@ -153,8 +140,8 @@ public fun PrivacyManagementScreen(
                 launchExportDocument.launch(
                     effect.fileName,
                     effect.bytes,
-                    onSaved = onExportSaved ?: requireNotNull(privacyViewModel)::onExportSaved,
-                    onFailed = onExportFailed ?: requireNotNull(privacyViewModel)::onExportFailed,
+                    onSaved = onExportSaved ?: { privacyViewModel?.onExportSaved(); Unit },
+                    onFailed = onExportFailed ?: { message -> privacyViewModel?.onExportFailed(message); Unit },
                 )
             }
             is PrivacyManagementEffect.SourceArchiveDeleted -> {
@@ -190,7 +177,7 @@ public fun PrivacyManagementScreen(
                     text = stringResource(R.string.action_confirm),
                     onClick = {
                         showExportConfirm = false
-                        (onExportRequested ?: requireNotNull(privacyViewModel)::onExportRequested)()
+                        (onExportRequested ?: { privacyViewModel?.onExportRequested(); Unit })()
                     },
                     variant = BecalmButtonVariant.Primary,
                 )
@@ -229,7 +216,9 @@ public fun PrivacyManagementScreen(
                     enabled = archiveCutoffDate.isNotBlank() && !state.sourceArchiveDeleting,
                     onClick = {
                         showArchiveDeleteConfirm = false
-                        (onDeleteSourceArchiveBefore ?: requireNotNull(privacyViewModel)::onDeleteSourceArchiveBefore)(
+                        (onDeleteSourceArchiveBefore ?: { cutoff: String ->
+                            privacyViewModel?.onDeleteSourceArchiveBefore(cutoff)
+                        })(
                             archiveCutoffDate,
                         )
                     },

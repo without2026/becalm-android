@@ -59,8 +59,8 @@ public fun NotificationPermissionScreen(
     onSkip: (() -> Unit)? = null,
 ) {
     val onboardingViewModel = if (
-        onMarkStepStatus == null ||
-            onGrantPermission == null ||
+        onMarkStepStatus == null &&
+            onGrantPermission == null &&
             onSkip == null
     ) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
@@ -74,7 +74,7 @@ public fun NotificationPermissionScreen(
     if (sdkInt < Build.VERSION_CODES.TIRAMISU) {
         LaunchedEffect(Unit) {
             (onMarkStepStatus
-                ?: { status -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
+                ?: { status -> onboardingViewModel?.onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
                 )(StepStatus.SKIPPED)
             advance()
         }
@@ -86,14 +86,14 @@ public fun NotificationPermissionScreen(
     ) { granted ->
         val status = if (granted) StepStatus.GRANTED else StepStatus.DENIED
         (onMarkStepStatus
-            ?: { stepStatus -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, stepStatus) }
+            ?: { stepStatus -> onboardingViewModel?.onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, stepStatus) }
             )(status)
         advance()
     }
     val requestPermission = onGrantPermission ?: { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val skip = onSkip ?: {
         (onMarkStepStatus
-            ?: { status -> requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
+            ?: { status -> onboardingViewModel?.onMarkStepStatus(OnboardingStep.NOTIFICATION_PERM, status) }
             )(StepStatus.SKIPPED)
         advance()
     }

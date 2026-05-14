@@ -151,11 +151,11 @@ wave N 종료 조건:
 | `BeCalmDatabase.kt` | db-auth-user-scoped, #17, #20, db-calendar, db-email | **linear**. 같은 wave 불가 |
 | `Migrations.kt` | #17, #20, db-calendar, db-email | **linear** |
 | `SourceTypes.kt` | #12 (PR #12), #21 (PR #21) | #12 → #21 순차 |
-| `AndroidManifest.xml` | repo-auth-msgraph, ui-auth-google, ui-onboarding-notifications-sentry, ui-onboarding-outlook-oauth, worker-sms-remove-dead-code | 동일 wave 여러 rebase 필요; 가능하면 다른 wave |
+| `AndroidManifest.xml` | repo-auth-msgraph, ui-auth-google, ui-onboarding-notifications-crashlytics, ui-onboarding-outlook-oauth, worker-sms-remove-dead-code | 동일 wave 여러 rebase 필요; 가능하면 다른 wave |
 | `WorkSchedulerImpl.kt` | domain-email-extractor, worker-sync-foreground-upload-trigger, worker-person-enrichment-periodic-observer, worker-retention-sweep, worker-commitment-overdue-sweep, worker-voice-retry-after-honor | 동일 wave 가능하지만 rebase 부담; 2-3개씩 sub-wave |
-| `BecalmApp.kt` | worker-retention-sweep, worker-coldsync-orchestrator, ui-error-global-banners, ui-onboarding-notifications-sentry | rebase 순차 |
-| `BecalmNavHost.kt` | domain-auth-signout, ui-commitment-detail-sheet, ui-settings-privacy-management + 5 sub, ui-onboarding-pipa-email-consent, ui-onboarding-notifications-sentry, ui-error-global-banners | umbrella 로 합쳐서 linear |
-| `Routes.kt` | ui-commitment-detail-sheet, ui-settings-privacy-management, ui-onboarding-pipa-email-consent, ui-onboarding-notifications-sentry, ui-error-global-banners | umbrella linear |
+| `BecalmApp.kt` | worker-retention-sweep, worker-coldsync-orchestrator, ui-error-global-banners, ui-onboarding-notifications-crashlytics | rebase 순차 |
+| `BecalmNavHost.kt` | domain-auth-signout, ui-commitment-detail-sheet, ui-settings-privacy-management + 5 sub, ui-onboarding-pipa-email-consent, ui-onboarding-notifications-crashlytics, ui-error-global-banners | umbrella 로 합쳐서 linear |
+| `Routes.kt` | ui-commitment-detail-sheet, ui-settings-privacy-management, ui-onboarding-pipa-email-consent, ui-onboarding-notifications-crashlytics, ui-error-global-banners | umbrella linear |
 | `CommitmentDao.kt` | #17, #20, worker-commitment-overdue-sweep, ui-today-since-kst, ui-commitment-edit-sheet, ui-commitment-cancel-action, ui-person-cards-detail-render | 대부분 DB wave 완료 후 접근 |
 | `CommitmentRepository.kt` | ui-commitment-edit-sheet, ui-commitment-manual-sheet, ui-commitment-action-state-alignment, ui-today-since-kst, ui-commitment-pull-refresh, ui-person-cards-detail-render | umbrella #22 안에서 linear |
 | `CommitmentCard.kt` | ui-commitment-dn-badge-kst, ui-commitment-action-state-alignment, ui-commitment-manual-sheet, ui-commitment-completed-section-undo | umbrella #22 linear |
@@ -345,7 +345,7 @@ Merge 순서: #17 → #20 → db-calendar → db-email (W1 최종 Migration chai
 | S6-B | `domain-auth-signout-preserve-data` | `refactor/domain/auth/signout-preserve-data` | db-auth-user-scoped |
 | S6-C | `ui-auth-google-signin-wiring` | `feat/ui/auth/google-signin-wiring` | none |
 | S6-D | `ui-onboarding-pipa-email-consent` | `feat/ui/onboarding` | none |
-| S6-E | `ui-onboarding-notifications-sentry` | `feat/ui/onboarding/notifications-sentry` | none |
+| S6-E | `ui-onboarding-notifications-crashlytics` | `feat/ui/onboarding/notifications-crashlytics` | none |
 | S6-F | `ui-onboarding-gmail-oauth` | `feat/ui/onboarding` | repo-auth-gmail (W2) |
 | S6-G | `ui-onboarding-outlook-oauth` | `feat/ui/onboarding` | repo-auth-msgraph (W3) |
 | S6-H | `ui-onboarding-imap-provider-selector` | `feat/ui/onboarding` | repo-imap (W2) |
@@ -478,7 +478,7 @@ ls docs/codex-reviews/wave-N-approval.md  # 존재해야 함
 | W3 | 6 | none (대부분 worker 별 파일) |
 | W4 | 1 (umbrella #22) | CommitmentManagementScreen/ViewModel |
 | W5 | 2-3 (TodayViewModel linear) | TodayViewModel.kt |
-| W6 | 1 (umbrella `feat/ui/onboarding`) + 3 (auth/sentry) | OnboardingViewModel.kt |
+| W6 | 1 (umbrella `feat/ui/onboarding`) + 3 (auth/crashlytics) | OnboardingViewModel.kt |
 | W7 | 1 (PIPA umbrella) | BecalmNavHost.kt, SettingsScreen.kt |
 | W8 | 2 (sources umbrella 1 + error 1 + contacts tiny 1) | SourceDetailScreen.kt |
 

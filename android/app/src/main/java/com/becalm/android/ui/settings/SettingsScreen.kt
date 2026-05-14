@@ -91,19 +91,7 @@ public fun SettingsScreen(
     onSignOut: (() -> Unit)? = null,
     onWipeLocalData: (() -> Unit)? = null,
 ) {
-    val settingsViewModel = if (
-        stateOverride == null ||
-            onErrorDismissed == null ||
-            onToggleNotifications == null ||
-            onTogglePipaConsent == null ||
-            onToggleCallLogMatchingConsent == null ||
-            onCallLogPermissionDenied == null ||
-            onOpenSources == null ||
-            onOpenProcessingStatus == null ||
-            onOpenPrivacy == null ||
-            onSignOut == null ||
-            onWipeLocalData == null
-    ) {
+    val settingsViewModel = if (stateOverride == null) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<SettingsViewModel>()
     } else {
         viewModel
@@ -118,10 +106,12 @@ public fun SettingsScreen(
     val signedOut = signedOutOverride ?: state.signedOut
     val navigateAfterSignOut = onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() }
     val context = LocalContext.current
-    val toggleCallLogMatching = onToggleCallLogMatchingConsent
-        ?: requireNotNull(settingsViewModel)::onToggleCallLogMatchingConsent
-    val handleCallLogPermissionDenied = onCallLogPermissionDenied
-        ?: requireNotNull(settingsViewModel)::onCallLogPermissionDenied
+    val toggleCallLogMatching = onToggleCallLogMatchingConsent ?: { enabled: Boolean ->
+        settingsViewModel?.onToggleCallLogMatchingConsent(enabled)
+    }
+    val handleCallLogPermissionDenied = onCallLogPermissionDenied ?: {
+        settingsViewModel?.onCallLogPermissionDenied()
+    }
     val callLogPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -150,7 +140,7 @@ public fun SettingsScreen(
     HandleSnackbarMessage(
         errorMessage,
         snackbarHostState,
-        onErrorDismissed ?: requireNotNull(settingsViewModel)::onErrorDismissed,
+        onErrorDismissed ?: { settingsViewModel?.onErrorDismissed(); Unit },
     )
 
     var showSignOutDialog by remember { mutableStateOf(false) }
@@ -167,7 +157,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showSignOutDialog = false
-                (onSignOut ?: requireNotNull(settingsViewModel)::onSignOut)()
+                (onSignOut ?: { settingsViewModel?.onSignOut(); Unit })()
             },
             onDismiss = { showSignOutDialog = false },
         ) {
@@ -182,7 +172,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showWipeDialog = false
-                (onWipeLocalData ?: requireNotNull(settingsViewModel)::onWipeLocalData)()
+                (onWipeLocalData ?: { settingsViewModel?.onWipeLocalData(); Unit })()
             },
             onDismiss = { showWipeDialog = false },
         ) {
@@ -198,7 +188,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showPipaEnableDialog = false
-                (onTogglePipaConsent ?: requireNotNull(settingsViewModel)::onTogglePipaConsent)(true)
+                (onTogglePipaConsent ?: { enabled: Boolean -> settingsViewModel?.onTogglePipaConsent(enabled); Unit })(true)
             },
             onDismiss = { showPipaEnableDialog = false },
             primaryConfirm = true,
@@ -217,7 +207,7 @@ public fun SettingsScreen(
             dismissText = stringResource(R.string.action_cancel),
             onConfirm = {
                 showPipaDisableDialog = false
-                (onTogglePipaConsent ?: requireNotNull(settingsViewModel)::onTogglePipaConsent)(false)
+                (onTogglePipaConsent ?: { enabled: Boolean -> settingsViewModel?.onTogglePipaConsent(enabled); Unit })(false)
             },
             onDismiss = { showPipaDisableDialog = false },
         ) {
@@ -245,7 +235,7 @@ public fun SettingsScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         onBack = navController::popBackStack,
-        onToggleNotifications = onToggleNotifications ?: requireNotNull(settingsViewModel)::onToggleNotifications,
+        onToggleNotifications = onToggleNotifications ?: { enabled -> settingsViewModel?.onToggleNotifications(enabled); Unit },
         onTogglePipa = { wantsEnabled ->
             if (wantsEnabled) showPipaEnableDialog = true
             else showPipaDisableDialog = true

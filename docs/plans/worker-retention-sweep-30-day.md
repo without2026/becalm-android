@@ -172,7 +172,7 @@ grep -rn "deleteOlderThan\|cutoffMillis" android/app/src/main/java/ | wc -l   # 
      ```
    - **순서 중요**: email_body 를 먼저 DELETE. 그렇지 않으면 raw_ingestion_events 가 먼저 DELETE 되어 CASCADE 로 email_body 가 이미 사라진 뒤 카운트가 0 이 되어 observability 손실 (CASCADE 가 email_body 카운트를 대신 지우는 것은 의도대로지만, metric 추적이 어렵다). 본 worker 는 **명시적 2단계** 로 진행.
    - 실패 처리: 예외 시 `Result.retry()` (최대 3회) — WorkManager default backoff.
-   - `Result.success()` 데이터에 카운트 기록 (Sentry breadcrumb 는 별도 PR).
+   - `Result.success()` 데이터에 카운트 기록 (Firebase Crashlytics breadcrumb 는 별도 PR).
 
 2. **`android/app/src/main/java/com/becalm/android/data/local/db/dao/RawIngestionEventDao.kt`** (편집 — 실제 파일은 기존 존재)
    - 신규 suspend fun 추가:
@@ -229,7 +229,7 @@ grep -rn "deleteOlderThan\|cutoffMillis" android/app/src/main/java/ | wc -l   # 
 - **`EmailBodyRepository` 를 통한 삭제 경로** → 본 worker 는 DAO 를 **직접 사용** (worker 의 일반 관례). Repository 는 insert/getByRawEventId 책임 (#2 참조).
 - **Retention 정책 duration 변경 (30d → other)** — spec 고정 상수. 변경 시 별도 spec 수정 PR 필요.
 - **commitments / calendar_events retention** — spec invariant 160 은 이 두 테이블을 **명시적으로 제외**. 향후 다른 retention 스펙이 생기면 별도 worker.
-- **Sentry breadcrumb / metric 전송** — 본 PR 은 Result.success output data 에 카운트만 기록. Sentry 통합은 EXTRACT-EMAIL-009 (DataStore metric email_subject_only_skipped) 와 묶어 별도 PR.
+- **Firebase Crashlytics breadcrumb / metric 전송** — 본 PR 은 Result.success output data 에 카운트만 기록. Firebase Crashlytics 통합은 EXTRACT-EMAIL-009 (DataStore metric email_subject_only_skipped) 와 묶어 별도 PR.
 - **Manual trigger UI** — 설정 화면의 "캐시 비우기" 같은 manual button 은 UX PR 별도.
 - **Voice transcript retention** — voice 의 `transcript` 는 별도 저장소이며 retention 정책이 다를 수 있음 — 본 PR 범위 밖.
 - **WorkManager 제약 튜닝** — 배터리 전용, 네트워크 없음은 보수적 기본값. 향후 성능 프로파일 후 조정.

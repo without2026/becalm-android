@@ -112,7 +112,7 @@ grep -n "Retry-After" becalm-android/android/app/src/main/java/com/becalm/androi
 | raw_ingestion_events 도달률 100% | synced 확인 전 DELETE 금지 — `RawIngestionEventDao.markSynced` 만 허용 |
 | 업로드 대상 = raw_ingestion_events batch + commitments | `RailwayApi.kt` 의 write 엔드포인트가 `batchUploadRawEvents`, `patchCommitment` 로 한정 |
 | transcripts/email_bodies 절대 업로드 금지 | `data/remote/dto` 디렉토리에 `Transcript`/`EmailBody` DTO 존재 **금지** |
-| 무음 실패 금지 | `markFailed` 가 호출되거나 Sentry 이벤트 발행 — `last_attempt_at` 기록됨 |
+| 무음 실패 금지 | `markFailed` 가 호출되거나 Firebase Crashlytics 이벤트 발행 — `last_attempt_at` 기록됨 |
 
 ---
 

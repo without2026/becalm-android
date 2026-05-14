@@ -57,7 +57,7 @@ No circling: each round's P1 set was strictly disjoint from the prior rounds, an
 Codex correctly classified the following as out of scope per the supplied rubric and plan §7 declarations:
 
 - W3/W5-era pre-existing test drift (`BecalmError.safeMessage` copy, `SettingsViewModelTest`, 67 unrelated failures, `ImapCredentialStoreTest` KeyStore issues)
-- Sentry / Firebase SDK integration — `LoggerObservabilityClient` is the confirmed alpha target
+- Firebase Crashlytics / Firebase SDK integration — `LoggerObservabilityClient` is the confirmed alpha target
 - AGP `META-INF/LICENSE.md` packaging collision in `assembleDebug` (pre-existing)
 - W7 items: PIPA consent revocation UI, PIPA action log UI, account deletion, per-source disconnect
 - W8 items: source-management error banners, Sources reconnect flow
@@ -74,7 +74,7 @@ Codex correctly classified the following as out of scope per the supplied rubric
 - S6-B domain-auth-signout-preserve-data
 - S6-C ui-auth-google-signin-wiring
 - S6-D ui-onboarding-pipa-email-consent
-- S6-E ui-onboarding-notifications-sentry
+- S6-E ui-onboarding-notifications-crashlytics
 - S6-F ui-onboarding-gmail-oauth
 - S6-G ui-onboarding-outlook-oauth
 - S6-H ui-onboarding-imap-provider-selector

@@ -52,8 +52,8 @@ public fun BatteryOptimizationScreen(
 ) {
     val context = LocalContext.current
     val onboardingViewModel = if (
-        onBatteryResult == null ||
-            onRequestBatteryExemption == null ||
+        onBatteryResult == null &&
+            onRequestBatteryExemption == null &&
             onSkip == null
     ) {
         viewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
@@ -67,7 +67,7 @@ public fun BatteryOptimizationScreen(
         ActivityResultContracts.StartActivityForResult(),
     ) {
         (onBatteryResult ?: {
-            requireNotNull(onboardingViewModel).onMarkStepStatus(OnboardingStep.BATTERY_OPT, StepStatus.COMPLETE)
+            onboardingViewModel?.onMarkStepStatus(OnboardingStep.BATTERY_OPT, StepStatus.COMPLETE)
         })()
         advance()
     }
@@ -79,7 +79,7 @@ public fun BatteryOptimizationScreen(
         launcher.launch(intent)
     }
     val skipBatteryOptimization = onSkip ?: {
-        requireNotNull(onboardingViewModel).onSkipStep(OnboardingStep.BATTERY_OPT)
+        onboardingViewModel?.onSkipStep(OnboardingStep.BATTERY_OPT)
         advance()
     }
 

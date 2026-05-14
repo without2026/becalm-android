@@ -187,7 +187,7 @@ public const val DAUM_IMAP: String = "daum_imap"
     2. prefs 에서 legacy key 4 개 (`imap_username`, `imap_app_password`, `imap_host`, `imap_port`) 읽기.
     3. 모두 존재 + host 값이 `imap.naver.com` 으로 시작 → `naver_imap_*` namespace 로 복사.
        host 값이 `imap.daum.net` 으로 시작 → `daum_imap_*` namespace 로 복사.
-       그 외 host → **migration 을 finalise 하지 않고 조용히 return**. legacy key 는 유지, flag 도 false 유지, `imap_migration_unknown_host` 경고 로그만 남긴다. 다음 app launch 에서 사용자가 onboarding 을 통해 host 를 수정했거나 재입력했다면 재시도. 초기 draft (2026-04 seed) 는 "defensively Naver 로 coerce + Sentry" 였으나 wave-2 adversarial review 에서 해당 coercion 이 Daum-ish / typo 튜플을 Naver namespace 로 밀어넣어 Daum worker 가 hard-coded host 로 접속 시 매번 AUTH 실패하는 silent breakage 를 유발함이 확인돼 수정됨 (CLAUDE.md "Fail loudly" 원칙 반영).
+       그 외 host → **migration 을 finalise 하지 않고 조용히 return**. legacy key 는 유지, flag 도 false 유지, `imap_migration_unknown_host` 경고 로그만 남긴다. 다음 app launch 에서 사용자가 onboarding 을 통해 host 를 수정했거나 재입력했다면 재시도. 초기 draft (2026-04 seed) 는 "defensively Naver 로 coerce + Firebase Crashlytics" 였으나 wave-2 adversarial review 에서 해당 coercion 이 Daum-ish / typo 튜플을 Naver namespace 로 밀어넣어 Daum worker 가 hard-coded host 로 접속 시 매번 AUTH 실패하는 silent breakage 를 유발함이 확인돼 수정됨 (CLAUDE.md "Fail loudly" 원칙 반영).
     4. host 분류 성공 시 에만: 4 개 namespaced key + 4 개 legacy key remove 를 **동일 `edit()` 에서 `commit()` (동기)** 로 atomic flush. `apply()` 는 비동기 flush 라 flag set 직전 process death → flag=true + keys 미상태 race 발생 가능.
     5. `commit()` 이 true 일 때만 DataStore 에 `imap_credential_store_migrated_v1 = true` 저장. false 이면 flag 미설정 — 다음 launch 재시도.
   - **Idempotent**: 재실행 시 플래그로 skip. 플래그만 있고 legacy key 도 없으면 no-op.
@@ -203,7 +203,7 @@ public const val DAUM_IMAP: String = "daum_imap"
 ### 5.6 Non-code changes
 
 - **DataStore key 추가**: `imap_credential_store_migrated_v1: Boolean` (기본 false). DataStore proto/Preferences 변경은 wire-compatible — migration 필요 없음.
-- **Warning log**: `imap_migration_unknown_host` emitted via `Logger.w(TAG, ...)` on the local device; a future Sentry breadcrumb ties into the same tag. Payload is a host hash (`{host_hash}`) to avoid PII.
+- **Warning log**: `imap_migration_unknown_host` emitted via `Logger.w(TAG, ...)` on the local device; a future Firebase Crashlytics breadcrumb ties into the same tag. Payload is a host hash (`{host_hash}`) to avoid PII.
 - **Manifest**: 변경 없음.
 - **Permission**: 변경 없음.
 
@@ -225,7 +225,7 @@ public const val DAUM_IMAP: String = "daum_imap"
 - [ ] **Unit test**: `ImapCredentialStoreMigratorTest — legacy tuple with imap.naver.com host migrates to naver_imap_* keys` 통과.
 - [ ] **Unit test**: `ImapCredentialStoreMigratorTest — legacy tuple with imap.daum.net host migrates to daum_imap_* keys` 통과.
 - [ ] **Unit test**: `ImapCredentialStoreMigratorTest — running twice is idempotent (no duplicate writes, flag stays true)` 통과.
-- [ ] **Unit test**: `ImapCredentialStoreMigratorTest — unknown host leaves legacy tuple in place and does not set migrated flag` 통과. (Initial draft prescribed "defaults to Naver with Sentry event" but wave-2 adversarial review identified that silent coercion creates AUTH-fail wedges for Daum-ish / typo'd tuples; the safer fail-loudly behaviour — leave legacy tuple, don't set flag, log `imap_migration_unknown_host` — is the shipped contract.)
+- [ ] **Unit test**: `ImapCredentialStoreMigratorTest — unknown host leaves legacy tuple in place and does not set migrated flag` 통과. (Initial draft prescribed "defaults to Naver with Firebase Crashlytics event" but wave-2 adversarial review identified that silent coercion creates AUTH-fail wedges for Daum-ish / typo'd tuples; the safer fail-loudly behaviour — leave legacy tuple, don't set flag, log `imap_migration_unknown_host` — is the shipped contract.)
 - [ ] **Integration test (Robolectric)**: `ImapConcurrentWorkersTest — concurrent run of ImapNaverWorker and ImapDaumWorker reads only their own namespace` 통과 — 두 워커를 `coroutineScope { launch … launch … }` 로 동시 실행 하더라도 각자 `SourceType.NAVER_IMAP` / `SourceType.DAUM_IMAP` namespace 만 load() 하고 서로의 credential 을 보지 않음을 증명. ING-011 parallel-execution invariant 의 직접 리그레션 가드.
 - [ ] **Compile gate**: `./gradlew :app:compileDebugKotlin :app:compileDebugUnitTestKotlin` 성공.
 
@@ -240,7 +240,7 @@ public const val DAUM_IMAP: String = "daum_imap"
 - **OAuth provider 구현** (`ADAPT-CRED-001`) — `feat/repo/auth` 브랜치에서 처리.
 - **IMAP 추가 provider 지원** (Outlook IMAP, Yahoo 등) — MVP 범위 외.
 - **EmailBody / attachments / headers 확장** — 별도 플랜들 (`ADAPT-EMAIL-*`).
-- **Migrator 가 Sentry 로 host 원본을 보내는 경로** — PIPA 위반 가능 → hash 만 보낸다 (plan 내 명시).
+- **Migrator 가 Firebase Crashlytics 로 host 원본을 보내는 경로** — PIPA 위반 가능 → hash 만 보낸다 (plan 내 명시).
 - **legacy key 를 Flag-off 상황에서 복구** — one-way migration, 복구 경로 없음 (rollback plan 참조).
 
 ---
@@ -286,7 +286,7 @@ Revert 시 동작:
   - 이미 `data/remote/dto/SourceTypes.kt` 에 wire-format string 이 정의됨 (`naver_imap`, `daum_imap`).
   - 별도 enum 을 추가하면 dual source-of-truth → CLAUDE.md "Explicit over implicit" 위반.
 - **Migrator 실패 시 기본 전략**:
-  - legacy key 가 읽히지 않는 경우 (Keystore 손상) → `ImapCredentialStore` 의 기존 "Keystore damage recovery" (file wipe + rebuild) 경로와 동일하게 동작. migrator 는 `migrateIfNeeded` 호출에서 try-catch 로 감싸되 **예외를 삼키지 말고** Sentry 에 `imap_migration_failed` 로 기록 후 flag 를 설정하지 않음 → 다음 app launch 에서 재시도.
+  - legacy key 가 읽히지 않는 경우 (Keystore 손상) → `ImapCredentialStore` 의 기존 "Keystore damage recovery" (file wipe + rebuild) 경로와 동일하게 동작. migrator 는 `migrateIfNeeded` 호출에서 try-catch 로 감싸되 **예외를 삼키지 말고** Firebase Crashlytics 에 `imap_migration_failed` 로 기록 후 flag 를 설정하지 않음 → 다음 app launch 에서 재시도.
   - "Fail loudly" 원칙: migrator 가 이유 없이 플래그만 true 로 세팅하는 경로 금지.
 - **동시성 고려**:
   - `EncryptedSharedPreferences` 는 thread-safe. 두 워커가 서로 다른 prefix 의 key 를 읽어도 충돌 없음.

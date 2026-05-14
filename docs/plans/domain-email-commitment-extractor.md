@@ -394,7 +394,7 @@ grep -rn "enqueueCommitmentExtraction\|COMMITMENT_EXTRACTION" android/app/src/ma
 - **Korean sentinel variant** (`'2023년 12월 18일 ... 님이 작성:'`) — QuotedBlockSplitter 는 MVP English-only. Korean 지원은 post-MVP.
 - **Prompt A/B 테스트 infra** — 1개 prompt 고정. 여러 prompt 비교 infra 는 post-MVP.
 - **LLM output validation / schema guard** — Moshi parse 실패만 Failure 로 처리. 추가 validation (due_at ISO format, direction enum whitelist 등) 은 후속 PR.
-- **Sentry / Crashlytics** 통합 — `Timber.w(...)` 로그만. Sentry 연결은 별도 observability PR.
+- **Firebase Crashlytics / Crashlytics** 통합 — `Timber.w(...)` 로그만. Firebase Crashlytics 연결은 별도 observability PR.
 - **Prompt caching (Anthropic-style)** — AICore 는 자체 cache 가 있을 수 있으나 이 PR 에서는 다루지 않음.
 - **Privacy / PIPA consent re-check** — AICore 는 on-device 이므로 PIPA invariant `EmailBody 로컬 only` 위반 없음. 별도 PR 없음.
 

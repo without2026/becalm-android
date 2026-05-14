@@ -117,18 +117,18 @@ grep -rn "pipa_third_party_consent\|ThirdPartyProvisionConsent" becalm-android/a
 
 ---
 
-## ONB-007 — 온보딩 실패 Sentry 이벤트
+## ONB-007 — 온보딩 실패 Firebase Crashlytics 이벤트
 
 | 단계 | 파일 | 심볼 |
 | --- | --- | --- |
-| VM error paths | `OnboardingViewModel.kt:207` | `setPipa` — Sentry breadcrumb 필요 |
-| Logger | `core/util/Logger.kt` | Sentry wrapper (존재 여부 확인) |
+| VM error paths | `OnboardingViewModel.kt:207` | `setPipa` — Firebase Crashlytics breadcrumb 필요 |
+| Logger | `core/util/Logger.kt` | Firebase Crashlytics wrapper (존재 여부 확인) |
 
 **Verify — GAP 주의**:
 ```
-grep -rn "Sentry\|Crashlytics" becalm-android/android/app/src/main/java
+grep -rn "Firebase Crashlytics\|Crashlytics" becalm-android/android/app/src/main/java
 ```
-- [ ] Sentry SDK 연동이 실제 존재하는지 확인. 없으면 ONB-007 은 **스펙과 구현 gap** 으로 보고.
+- [ ] Firebase Crashlytics SDK 연동이 실제 존재하는지 확인. 없으면 ONB-007 은 **스펙과 구현 gap** 으로 보고.
 
 ---
 

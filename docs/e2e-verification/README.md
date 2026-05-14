@@ -65,7 +65,7 @@ grep -nE '@(GET|POST|PATCH|DELETE|PUT)' becalm-android/android/app/src/main/java
 | # | 항목 | 파일/근거 | 설명 |
 | --- | --- | --- | --- |
 | G1 | SMS / CallLog observer 의 spec 부재 | `worker/ContentObserverBootstrap.kt:98/128` `registerSmsObserver` / `registerCallLogObserver` | 현재 9개 spec 어디에도 매핑 없음. PIPA invariant ("SMS/통화 기록 접근 없음") 와 충돌 가능 |
-| G2 | Sentry 연동 존재 여부 불확실 | ONB-007 / VOI-006 의 `onboarding_step_failed` / `voice_upload_quarantined` 이벤트 | `grep -rn "Sentry" becalm-android/android/app/src/main/java` 결과 확인 필요. 없으면 spec 과 구현 gap |
+| G2 | Firebase Crashlytics 연동 존재 여부 불확실 | ONB-007 / VOI-006 의 `onboarding_step_failed` / `voice_upload_quarantined` 이벤트 | `grep -rn "Firebase Crashlytics" becalm-android/android/app/src/main/java` 결과 확인 필요. 없으면 spec 과 구현 gap |
 | G3 | spec `tests: []` 전부 비어 있음 | 모든 9개 spec 파일 | 각 behavior ID 를 실제 테스트 함수에 annotation (e.g., `// spec: AUTH-001`) 으로 연결하고 spec 파일의 tests 배열을 채울 것 |
 | G4 | `SourceDetailViewModel.kt:110/141` "API gap: filter by sourceType in-memory" | 서버측 filter endpoint 부재 | perf 리스크 티켓 등록 |
 | G5 | `transcript` 필드가 `RawIngestionEventEntity` 에 존재하는지 불확실 | SRC-004 spec 은 voice 상세에서 transcript 표시 | 엔티티 확인 필요. voice-pipeline invariant ("transcript 영속 금지") 와 충돌하면 spec 수정 |

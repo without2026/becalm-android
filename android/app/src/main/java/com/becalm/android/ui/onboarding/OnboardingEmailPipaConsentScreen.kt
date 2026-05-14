@@ -82,13 +82,15 @@ public fun OnboardingEmailPipaConsentScreen(
     onConnectEmailProvider: ((EmailPipaProvider, Activity) -> Unit)? = null,
     onNavigate: ((String) -> Unit)? = null,
 ) {
-    val resolvedViewModel = if (onPersistConsent == null || onReportUnknownProvider == null) {
+    val resolvedViewModel = if (onPersistConsent == null) {
         viewModel ?: hiltViewModel()
     } else {
         viewModel
     }
     val persistConsent = onPersistConsent ?: requireNotNull(resolvedViewModel)::onEmailPipaConsent
-    val reportUnknownProvider = onReportUnknownProvider ?: requireNotNull(resolvedViewModel)::reportOnboardingStepFailed
+    val reportUnknownProvider = onReportUnknownProvider ?: { step: OnboardingStep, reason: String ->
+        resolvedViewModel?.reportOnboardingStepFailed(step, reason)
+    }
     val connectEmailProvider = onConnectEmailProvider ?: { provider: EmailPipaProvider, hostActivity: Activity ->
         requireNotNull(resolvedViewModel).onConnectEmailProvider(provider, hostActivity)
     }

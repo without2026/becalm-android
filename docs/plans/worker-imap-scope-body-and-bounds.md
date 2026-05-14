@@ -252,7 +252,7 @@ grep -rn "body_html\|bodyHtml\|attachments_meta" android/app/src/main/java/
     - `sourceRef` = JSON `SourceRefEnvelope(messageId = messageId ?: "$uidValidity:$uid", inReplyTo, references)` — Message-Id 헤더가 없으면 UIDVALIDITY:UID fallback (기존 스펙 `source_ref=UIDVALIDITY+UID` 와 호환).
     - `folder` 컬럼 set (PR #1 의 RawIngestionEventEntity.folder).
     - EmailBody insert: subject, fromAddress, toAddresses JSON, bodyPlain (원본, truncate 안 함), bodyHtml (원본), attachmentsMeta JSON, rawHeadersJson, parseFailed, groupEmail, receivedAt, folder.
-    - HTML 파싱 실패 분기 (EMAIL-007): bodyPlain 없고 bodyHtml 있을 때만 Jsoup parse → 실패 시 parseFailed=true + Sentry + eventSnippet=subject.take(200) (PR #10 EmailHtmlParser 경유).
+    - HTML 파싱 실패 분기 (EMAIL-007): bodyPlain 없고 bodyHtml 있을 때만 Jsoup parse → 실패 시 parseFailed=true + Firebase Crashlytics + eventSnippet=subject.take(200) (PR #10 EmailHtmlParser 경유).
 
 - `android/app/src/main/java/com/becalm/android/worker/ingestion/ImapDaumWorker.kt`
   - ImapNaverWorker 와 byte-identical 패턴 (KDoc 이미 명시 — clone of Naver). credentials loader 는 `imapCredentialStore.load(provider = "daum")`, mailbox keys `"daum_inbox"` / `"daum_sent"`, Sent 이름 fallback `"보낸편지함"`.
@@ -378,6 +378,6 @@ grep -rn "body_html\|bodyHtml\|attachments_meta" android/app/src/main/java/
 - **Test infra**: Jakarta Mail / Angus Mail 테스트는 보통 **GreenMail** (`com.icegreen:greenmail:2.0.x`) 을 사용. `build.gradle.kts` 에 `testImplementation("com.icegreen:greenmail:2.0.1")` 추가 필요 — 본 PR scope 에 포함. 또는 더 lightweight 하게 `ImapClient` 를 interface 화하고 fake 로 대체 (이미 interface — `ImapClient.kt:86`). unit test 는 fake 로 충분, integration test 만 GreenMail.
 - **UIDVALIDITY 는 folder-scoped**: Inbox 와 Sent 가 각각 독립 UIDVALIDITY. 한 folder 만 rebuild 되어도 다른 folder 는 incremental 유지. 따라서 4 cursor 설계는 필수.
 - **KDoc drift**: `ImapNaverWorker.kt:44-52` 의 KDoc "Incremental sync is driven by the UIDVALIDITY + UIDNEXT cursor pair persisted in [SyncCursorStore] under mailbox [MAILBOX_NAVER]" 는 단일 cursor 전제. 본 PR 에서 "Inbox / Sent 각각 독립 cursor" 로 업데이트.
-- **Sentry breadcrumb provider 문자열**: Naver 는 `"naver_imap"`, Daum 은 `"daum_imap"` 으로 통일 (기존 SourceType 값과 일치).
+- **Firebase Crashlytics breadcrumb provider 문자열**: Naver 는 `"naver_imap"`, Daum 은 `"daum_imap"` 으로 통일 (기존 SourceType 값과 일치).
 - **Retry 정책**: 두 folder pass 중 한 쪽만 retryable 실패 시 `Result.retry()` 반환 → WorkManager 가 전체 워커 재실행. 다음 실행에서 Inbox 는 이미 진행한 지점부터 재개 (cursor 기반 idempotent). 비효율적이지만 정확성 우선.
 - **polling cadence**: 기존 15 분 주기는 Gmail/Outlook 과 동일 유지. 폴더 2 개로 확장해도 동일 cadence.

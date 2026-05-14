@@ -151,7 +151,7 @@ grep -rn "toRecipients\|internetMessageHeaders" android/app/src/main/java/
 | person_ref | folder 분기 + To>10 quarantine | 항상 from | folder-aware |
 | event_snippet | body_plain[:200] or Jsoup(html) or subject | bodyPreview?.take(200) | EmailSnippetBuilder 경유 (PR #10) |
 | source_ref | JSON `{message_id, in_reply_to?, references?}` | plain id | Moshi envelope + internetMessageHeaders 파싱 |
-| parse_failed | HTML 실패 시 body_html 원본 + flag + Sentry | 없음 | try/catch |
+| parse_failed | HTML 실패 시 body_html 원본 + flag + Firebase Crashlytics | 없음 | try/catch |
 | EmailBody insert | 같은 트랜잭션 | 없음 | `emailBodyRepository.insert(...)` |
 | 30일 재동기화 | ING-013 bound | global delta full resync (무제한) | `$filter=receivedDateTime ge <now-30d>` 쿼리 추가 |
 
@@ -228,7 +228,7 @@ grep -rn "toRecipients\|internetMessageHeaders" android/app/src/main/java/
   - 첨부 fetch: `message.hasAttachments == true` 인 경우에만 `msGraphClient.messageAttachments(message.id)` 호출. 응답을 `attachmentsMeta` 에 채움. 실패 시 빈 리스트 + warning log (body insert 는 계속 진행).
   - HTML 파싱 실패 분기 (EMAIL-007):
     - `bodyPlain` 없고 `bodyHtml` 있으면 `EmailHtmlParser.parseOrFail(bodyHtml)` (PR #10).
-    - catch → parseFailed=true, bodyHtml 원본 보존, bodyPlain=null, Sentry breadcrumb `{error:"email_html_parse_failed", message_id, provider:"outlook"}`.
+    - catch → parseFailed=true, bodyHtml 원본 보존, bodyPlain=null, Firebase Crashlytics breadcrumb `{error:"email_html_parse_failed", message_id, provider:"outlook"}`.
   - `mapErrorToResult` — 410 분기에서 `syncCursorStore.clearCursor(cursorKey)` (인자로 전달). 기존에 하드코딩된 `CURSOR_KEY` 참조 제거.
 
 ### 5.2 Files to add

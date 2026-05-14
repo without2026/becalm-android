@@ -186,7 +186,7 @@ OAuth scope **반드시** `"https://www.googleapis.com/auth/gmail.readonly"` 한
 - **DB migration**: 없음. EncryptedSharedPreferences 는 DB 와 무관.
 - **Manifest**: Credential Manager 는 런타임 활동 기반 — manifest 변경 불필요.
 - **Google Cloud Console**: OAuth client ID (Android, package name + SHA-1) 등록 필요 — 이는 CTO 가 별도 작업. `strings.xml` 또는 BuildConfig 에 `googleOAuthClientId` 상수 주입 필요. 본 플랜은 **key 를 환경변수로 빼고 `GoogleAuthTokenProviderImpl` 는 `@Named("googleOAuthServerClientId") String` 을 inject** 하도록 설계 — 실 값은 repo 바깥.
-- **Sentry**: `Failure(UNKNOWN)` 분기에서 throwable 을 Sentry 로 전송 (crash-free OAuth UX).
+- **Firebase Crashlytics**: `Failure(UNKNOWN)` 분기에서 throwable 을 Firebase Crashlytics 로 전송 (crash-free OAuth UX).
 
 ---
 

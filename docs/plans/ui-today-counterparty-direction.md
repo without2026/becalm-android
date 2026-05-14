@@ -130,7 +130,7 @@ grep -n "counterpartyDisplayName\|counterparty" android/app/src/main/java/com/be
 
 ### 5.2 Files to add
 
-- **`android/app/src/main/java/com/becalm/android/ui/components/DirectionBadge.kt`** — `@Composable fun DirectionBadge(direction: String)`. 2-색 pill (give = primary container, take = secondary container). label 은 resource. 낯선 direction 값은 `today_direction_badge_unknown` 로 fallback + Sentry breadcrumb.
+- **`android/app/src/main/java/com/becalm/android/ui/components/DirectionBadge.kt`** — `@Composable fun DirectionBadge(direction: String)`. 2-색 pill (give = primary container, take = secondary container). label 은 resource. 낯선 direction 값은 `today_direction_badge_unknown` 로 fallback + Firebase Crashlytics breadcrumb.
 - **`android/app/src/main/java/com/becalm/android/ui/components/CounterpartyText.kt`** — `@Composable fun CounterpartyText(name: String?)`. null 이면 `today_counterparty_unknown` resource; single-line, `bodySmall`, `onSurfaceVariant`, ellipsis.
 - **Tests**:
   - `android/app/src/test/java/com/becalm/android/ui/today/DirectionBadgeTest.kt` — "give"/"take"/unknown 3 case label resolver 단위 테스트 (순수 함수).
@@ -196,4 +196,4 @@ revert 후:
 - **"give"/"take" 리터럴 하드코딩** — `CommitmentEntity.direction` 이 이미 이 두 문자열로 저장됨 (`CommitmentDao.kt`, `CommitmentRepositoryImpl.kt`). sealed enum 으로 대체하는 refactor 는 본 plan 범위 밖 — 문자열 비교만 수행.
 - **TDY-VM-09..12 테스트**: 이미 VM 레벨에서 fallback chain 검증 중. UI 테스트는 rendering 만 확인하면 됨 — VM 로직 재검증 금지.
 - **`today_counterparty_unknown` 은 왜?** — `counterpartyDisplayName` 이 `null` 인 경우 (personRef 와 counterpartyRaw 모두 null — 드물지만 가능) 빈 영역으로 레이아웃이 찌그러지지 않도록.
-- **direction 이 "give"/"take" 가 아닌 값** — `BecalmTheme` 색상 시스템에서 `tertiary` 를 써서 눈에 띄게 하고 Sentry `addBreadcrumb("unknown_direction_rendered")` 로 수집. 이는 데이터 품질 모니터링 용도.
+- **direction 이 "give"/"take" 가 아닌 값** — `BecalmTheme` 색상 시스템에서 `tertiary` 를 써서 눈에 띄게 하고 Firebase Crashlytics `addBreadcrumb("unknown_direction_rendered")` 로 수집. 이는 데이터 품질 모니터링 용도.

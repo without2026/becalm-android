@@ -120,11 +120,11 @@ grep -rn "chunk\|split" becalm-android/android/app/src/main/java/com/becalm/andr
 | Retry helper | `worker/WorkerRetry.kt` | backoff 계산 (30s → 60s → fail) |
 | 401 분기 | `VoiceUploadWorker.kt:93` | AuthInterceptor refresh 후 1회 재시도 |
 | 413/422 | `VoiceUploadWorker.kt:382` | 즉시 quarantine (retryable=false) |
-| Sentry event | (GAP 가능) | `voice_upload_quarantined` — 실제 호출부 존재 여부 확인 필요 |
+| Firebase Crashlytics event | (GAP 가능) | `voice_upload_quarantined` — 실제 호출부 존재 여부 확인 필요 |
 
 **Verify**:
 ```
-grep -rn "voice_upload_quarantined\|Sentry" becalm-android/android/app/src/main/java/com/becalm/android/worker
+grep -rn "voice_upload_quarantined\|Firebase Crashlytics" becalm-android/android/app/src/main/java/com/becalm/android/worker
 ```
 
 ---

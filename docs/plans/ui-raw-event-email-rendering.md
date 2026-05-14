@@ -228,7 +228,7 @@ grep -rn "raw_event_attachments_count" android/app/src/main/res/
 - **`android/app/src/main/java/com/becalm/android/ui/components/EmailAttachmentCountPill.kt`** — `@Composable fun EmailAttachmentCountPill(count: Int)`. 텍스트 only pill, `stringResource(R.string.raw_event_attachments_count, count)`. `📎` 이모지는 string resource 에 포함되어 있으므로 Composable 내부 이모지 하드코딩 금지.
 - **`android/app/src/main/java/com/becalm/android/ui/components/IngestionTimestamp.kt`** — `@Composable fun IngestionTimestamp(timestamp: Instant)`. KST `yyyy-MM-dd HH:mm` 포맷. `labelSmall`, `onSurfaceVariant`.
 - **`android/app/src/main/java/com/becalm/android/ui/persons/EmailBodyUi.kt`** — `data class EmailBodyUi(val bodyPlain: String?, val bodyHtml: String?, val attachmentsMeta: String?)` — VM → UI 간 DTO (Repository 의 domain entity 와 분리). PII 노출 최소화: `attachments_meta` 는 파싱 전 raw JSON 문자열 보관 → 필요 시 `parseAttachmentsMeta` 로 count 만 추출.
-- **`android/app/src/main/java/com/becalm/android/ui/persons/AttachmentMetaParser.kt`** — `internal fun parseAttachmentsMeta(json: String?): List<AttachmentMeta>` + `data class AttachmentMeta(val filename: String, val mime: String, val sizeBytes: Long)`. kotlinx.serialization `Json { ignoreUnknownKeys = true }`. 파싱 실패 시 empty list 반환 (graceful — UI 는 count=0 표시). `Sentry.addBreadcrumb("attachment_meta_parse_failed")` 만 남김.
+- **`android/app/src/main/java/com/becalm/android/ui/persons/AttachmentMetaParser.kt`** — `internal fun parseAttachmentsMeta(json: String?): List<AttachmentMeta>` + `data class AttachmentMeta(val filename: String, val mime: String, val sizeBytes: Long)`. kotlinx.serialization `Json { ignoreUnknownKeys = true }`. 파싱 실패 시 empty list 반환 (graceful — UI 는 count=0 표시). `Firebase Crashlytics.addBreadcrumb("attachment_meta_parse_failed")` 만 남김.
 - **`android/app/src/main/java/com/becalm/android/ui/persons/EmailSourceTypes.kt`** — `internal val EMAIL_SOURCE_TYPES: Set<String> = setOf(SourceType.GMAIL, SourceType.OUTLOOK_MAIL, SourceType.NAVER_IMAP, SourceType.DAUM_IMAP)`. 화면과 VM 이 공유.
 - **Tests**:
   - `android/app/src/test/java/com/becalm/android/ui/persons/RawEventDetailViewModelEmailTest.kt`:
@@ -293,7 +293,7 @@ grep -rn "raw_event_attachments_count" android/app/src/main/res/
 - **Attachment 다운로드 / 미리보기** — EMAIL-004 명시적으로 "바이트 다운로드 안 함, 메타데이터만". 본 plan 은 count pill 외 추가 UI 없음.
 - **Thread view (Re:/Fwd:)** — EMAIL-005 "MVP는 thread grouping 없이 각 메시지를 독립 raw event 로 저장". 본 plan 도 동일.
 - **RawEventDetailViewModel 의 non-email 파트 리팩토링** — UiState 필드 추가는 하되 기존 snippet/timestamp/title 로드 로직은 **수정하지 않음**.
-- **Sentry attachment parse_failure 이벤트 전송** — `AttachmentMetaParser` 는 `breadcrumb` 만 남기고 Sentry capture 는 안 함 (모든 failed parse 가 Sentry 로 가면 noise). 필요 시 별도 plan.
+- **Firebase Crashlytics attachment parse_failure 이벤트 전송** — `AttachmentMetaParser` 는 `breadcrumb` 만 남기고 Firebase Crashlytics capture 는 안 함 (모든 failed parse 가 Firebase Crashlytics 로 가면 noise). 필요 시 별도 plan.
 
 ---
 
