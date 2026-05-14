@@ -23,6 +23,7 @@ self-scoring; the final score is assigned by the reviewer.
 | Verify backend optional tests | `backend-tests` job in run `25871964540`, conclusion `success` |
 | Verify staging deploy does not block main | `Deploy Staging` run `25871940075`, conclusion `success` |
 | Preserve failure evidence for CI triage | Artifacts exist for `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` |
+| Enforce beta-readiness performance/logcat smoke criteria | `qa/emulator/scripts/measure_android_readiness.sh` fails by default on unavailable/over-threshold cold start, unavailable/over-threshold PSS, or app fatal/ANR/OOM logcat patterns |
 | Prevent long-running CI jobs from hanging indefinitely | `.github/workflows/android-tests.yml` and `.github/workflows/android-gates.yml` define job-level `timeout-minutes`; mirrored in `.pipeline/adapters/android/test.yml` and `.pipeline/adapters/android/gates.yml` |
 | Keep workflow templates aligned with executable workflows | `AndroidBuildWorkflowSpecTest` checks action versions, dependency-check fallback, timeouts, and artifact uploads for both `.github/workflows` and `.pipeline/adapters/android` |
 | Keep release package identity aligned | `android/app/build.gradle.kts` uses `applicationId = "com.becalm.android"`; deploy config uses `packageName: com.becalm.android` |
@@ -60,8 +61,10 @@ Artifact evidence:
 | Command | Result |
 |---|---|
 | `./gradlew testDebugUnitTest --tests '*AndroidBuildWorkflowSpecTest' --no-daemon --console=plain` | pass |
+| `./gradlew testDebugUnitTest --tests '*ReadinessQaScriptSpecTest' --no-daemon --console=plain` | pass |
 | `GITHUB_ACTIONS=true GITHUB_SHA=$(git rev-parse HEAD) python3 .pipeline/core/spec-coverage.py` | pass |
 | `actionlint .github/workflows/android-tests.yml .github/workflows/android-gates.yml` | pass |
+| `bash -n qa/emulator/scripts/measure_android_readiness.sh qa/emulator/scripts/verify_beta_readiness_qa.sh` | pass |
 | `git diff --check` | pass |
 
 ## Remaining Explicitly Excluded Work

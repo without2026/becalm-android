@@ -41,6 +41,7 @@ Required evidence:
   - `cold_start_total_ms`
   - `total_pss_kb`
   - `frame_rows`
+- Readiness measurement fails by default if cold start or PSS is unavailable, exceeds the configured threshold, or logcat contains app fatal/ANR/OOM signals.
 - Large person/detail datasets remain usable through seeded emulator QA, not just small previews.
 
 Pass condition for 8.5:
@@ -101,6 +102,7 @@ Current main evidence:
 
 - Korean UI copy invariant tests exist and are part of `testDebugUnitTest`.
 - Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
+- `measure_android_readiness.sh` records cold start, PSS, frames, logcat scan, and strict pass/fail counters; `ReadinessQaScriptSpecTest` prevents regressions to warn-only measurement.
 - Current environment has no attached local emulator, so this document relies on the CI emulator run for the latest connected Android test evidence.
 
 ## Release Engineering / CI
