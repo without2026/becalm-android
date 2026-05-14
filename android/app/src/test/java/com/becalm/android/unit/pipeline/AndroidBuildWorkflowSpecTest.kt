@@ -154,6 +154,21 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(workflows.contains("actions/cache@v5"))
     }
 
+    @Test
+    fun `android release verification workflows can be manually dispatched`() {
+        // spec: REL-010
+        val tests = repoFile(".github/workflows/android-tests.yml").readText()
+        val gates = repoFile(".github/workflows/android-gates.yml").readText()
+
+        assertTrue(tests.contains("workflow_call:"))
+        assertTrue(tests.contains("workflow_dispatch:"))
+        assertTrue(tests.contains("./gradlew connectedDebugAndroidTest"))
+        assertTrue(gates.contains("workflow_call:"))
+        assertTrue(gates.contains("workflow_dispatch:"))
+        assertTrue(gates.contains("./gradlew dependencyCheckAnalyze"))
+        assertTrue(gates.contains("./gradlew lint"))
+    }
+
     private fun repoFile(path: String): File {
         val fromAppDir = File("../../$path")
         if (fromAppDir.exists()) return fromAppDir

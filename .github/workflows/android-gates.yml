@@ -5,6 +5,7 @@ name: Android Deterministic Gates
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 jobs:
   gates:

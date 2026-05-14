@@ -5,6 +5,7 @@ name: Android Tests
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 jobs:
   read-config:
