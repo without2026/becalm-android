@@ -2,7 +2,8 @@
 
 This checklist maps the current beta-readiness target to concrete evidence. It is intentionally product-facing: a passing unit test is not enough unless it covers a user-visible requirement.
 
-Last updated: 2026-05-15 KST, main `c76fbc1`.
+Last updated: 2026-05-15 KST.
+Executable code verified at: `f4acf25`.
 
 Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that analytics/observability SDK implementation.
 
@@ -117,9 +118,9 @@ Required evidence:
 
 Current main evidence:
 
-- Latest `Android Deterministic Gates` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870504542
-- Latest `Android Tests` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870504458
-- Latest `Deploy Staging` run succeeded on main `c76fbc1`: https://github.com/without2026/becalm-android/actions/runs/25870500655
+- Latest `Android Deterministic Gates` run succeeded on executable code commit `f4acf25`: https://github.com/without2026/becalm-android/actions/runs/25871964541
+- Latest `Android Tests` run succeeded on executable code commit `f4acf25`: https://github.com/without2026/becalm-android/actions/runs/25871964540
+- Latest `Deploy Staging` run succeeded on executable code commit `f4acf25`: https://github.com/without2026/becalm-android/actions/runs/25871940075
 - Latest CI artifacts were uploaded and are not expired:
   - `android-gate-reports`
   - `android-unit-test-reports`
