@@ -422,6 +422,13 @@
     <string name="sources_status_error">오류</string>
     <string name="sources_status_disconnected">연결 안 됨</string>
     <string name="sources_status_unknown">상태 확인 중</string>
+    <string name="sources_status_help_connected">최근 동기화가 정상적으로 완료되었습니다.</string>
+    <string name="sources_status_help_syncing">새 항목을 확인하고 있습니다. 앱을 계속 사용할 수 있습니다.</string>
+    <string name="sources_status_help_stale">최근 동기화가 오래되었습니다. 지금 동기화로 최신 상태를 확인하세요.</string>
+    <string name="sources_status_help_error">연결을 다시 확인해야 합니다. 다시 연결하면 다음 동기화부터 이어집니다.</string>
+    <string name="sources_status_help_disconnected">아직 연결되지 않았습니다. 필요할 때 연결할 수 있습니다.</string>
+    <string name="sources_status_help_unknown">상태를 확인하는 중입니다. 잠시 후 다시 확인해 주세요.</string>
+    <string name="sources_status_recommended_action_fmt">권장 작업: %1$s</string>
 
     <!-- Bottom navigation -->
     <string name="nav_today">오늘</string>
@@ -506,7 +513,7 @@
     <string name="processing_phase_idle">최근 처리 없음</string>
     <string name="processing_phase_scanning">새 항목 확인 중</string>
     <string name="processing_phase_new_items">새 항목 발견</string>
-    <string name="processing_phase_gemini">Gemini 추출 중</string>
+    <string name="processing_phase_gemini">내용 정리 중</string>
     <string name="processing_phase_uploading">업로드 및 추출 중</string>
     <string name="processing_phase_no_new_items">새 항목 없음</string>
     <string name="processing_phase_synced">처리 완료</string>

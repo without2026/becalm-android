@@ -1,5 +1,6 @@
 package com.becalm.android.ui.sources
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.core.util.Logger
@@ -8,6 +9,7 @@ import com.becalm.android.data.repository.AuthState
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,6 +41,8 @@ public data class SourceStatusRow(
     val lastSyncAt: Instant?,
     val hasError: Boolean,
     val enrichedCount: Int? = null,
+    val help: UiMessage? = null,
+    @StringRes val recommendedActionLabelRes: Int? = null,
 )
 
 /**

@@ -24,16 +24,15 @@ if [[ ! -x "$ADB_BIN" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$FIXTURE_DIR" ]]; then
-  echo "Fixture directory missing: $FIXTURE_DIR" >&2
-  exit 1
-fi
-
 "$ADB_BIN" -s "$DEVICE" wait-for-device
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.photopicker >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell am force-stop com.google.android.apps.photos >/dev/null 2>&1 || true
 "$ADB_BIN" -s "$DEVICE" shell mkdir -p "$REMOTE_DIR"
-"$ADB_BIN" -s "$DEVICE" push "$FIXTURE_DIR/." "$REMOTE_DIR/"
+if [[ -d "$FIXTURE_DIR" ]]; then
+  "$ADB_BIN" -s "$DEVICE" push "$FIXTURE_DIR/." "$REMOTE_DIR/"
+else
+  echo "Fixture directory missing, continuing without sample screenshots: $FIXTURE_DIR" >&2
+fi
 if [[ -f "$MEETING_FIXTURE" ]]; then
   "$ADB_BIN" -s "$DEVICE" shell mkdir -p "$REMOTE_MEETING_DIR"
   "$ADB_BIN" -s "$DEVICE" push "$MEETING_FIXTURE" "$REMOTE_MEETING_DIR/meeting_001.wav" >/dev/null
@@ -51,7 +50,11 @@ while IFS= read -r image; do
       -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
       -d "file://$remote" >/dev/null || true
   fi
-done < <(find "$FIXTURE_DIR" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) | sort)
+done < <(
+  if [[ -d "$FIXTURE_DIR" ]]; then
+    find "$FIXTURE_DIR" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) | sort
+  fi
+)
 
 "$ADB_BIN" -s "$DEVICE" shell am broadcast \
   -a com.becalm.android.DEBUG_SEED_PERSON_RENDERING \
