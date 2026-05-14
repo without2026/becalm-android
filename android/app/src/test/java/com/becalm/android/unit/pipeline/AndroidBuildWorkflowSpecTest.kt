@@ -15,7 +15,8 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(workflow.contains("android-build:"))
         assertTrue(workflow.contains("if: inputs.adapter == 'android'"))
         assertTrue(workflow.contains("if [ \"\${{ inputs.require_signing }}\" = \"true\" ]; then"))
-        assertTrue(workflow.contains("./gradlew verifyReleaseSigningConfigured"))
+        assertTrue(workflow.contains("./gradlew verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured"))
+        assertTrue(workflow.contains("verifyReleaseSigningConfigured"))
         assertTrue(workflow.contains("./gradlew bundleRelease"))
         assertTrue(workflow.contains("name: android-aab"))
         assertTrue(workflow.contains("app/build/outputs/bundle/**/*.aab"))
@@ -30,7 +31,8 @@ class AndroidBuildWorkflowSpecTest {
 
         assertTrue(workflow.contains("Read project_root"))
         assertTrue(workflow.contains("if [ \"\${{ inputs.require_signing }}\" = \"true\" ]; then"))
-        assertTrue(workflow.contains("./gradlew verifyReleaseSigningConfigured"))
+        assertTrue(workflow.contains("./gradlew verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured"))
+        assertTrue(workflow.contains("verifyReleaseSigningConfigured"))
         assertTrue(workflow.contains("./gradlew bundleRelease"))
         assertTrue(workflow.contains("name: android-aab"))
         assertTrue(workflow.contains("app/build/outputs/bundle/**/*.aab"))
@@ -48,6 +50,56 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(buildFile.contains("BECALM_RELEASE_KEY_ALIAS"))
         assertTrue(buildFile.contains("BECALM_RELEASE_KEY_PASSWORD"))
         assertTrue(buildFile.contains("releaseUpload"))
+    }
+
+    @Test
+    fun `protected android release verifies runtime configuration before bundle`() {
+        // spec: REL-004
+        val buildFile = repoFile("android/app/build.gradle.kts").readText()
+        val workflow = repoFile(".github/workflows/adapter-build.yml").readText()
+        val adapterTemplate = repoFile(".pipeline/adapters/android/build.yml").readText()
+
+        assertTrue(buildFile.contains("verifyReleaseRuntimeConfigured"))
+        assertTrue(buildFile.contains("BECALM_API_BASE_URL"))
+        assertTrue(buildFile.contains("SUPABASE_URL"))
+        assertTrue(buildFile.contains("SUPABASE_ANON_KEY"))
+        assertTrue(buildFile.contains("GOOGLE_WEB_CLIENT_ID"))
+        assertTrue(workflow.contains("./gradlew verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured"))
+        assertTrue(adapterTemplate.contains("./gradlew verifyReleaseRuntimeConfigured verifyReleaseSigningConfigured"))
+    }
+
+    @Test
+    fun `production deploy wires android aab to play console`() {
+        // spec: REL-005
+        val workflow = repoFile(".github/workflows/deploy-production.yml").readText()
+
+        assertTrue(workflow.contains("play_console_track:"))
+        assertTrue(workflow.contains("build-android:"))
+        assertTrue(workflow.contains("deploy-android:"))
+        assertTrue(workflow.contains("adapter: android"))
+        assertTrue(workflow.contains("require_signing: true"))
+        assertTrue(workflow.contains("name: android-aab"))
+        assertTrue(workflow.contains("r0adkll/upload-google-play@v1"))
+        assertTrue(workflow.contains("packageName: com.becalm.android"))
+        assertTrue(workflow.contains("track: \${{ needs.load-config.outputs.play_console_track }}"))
+    }
+
+    @Test
+    fun `staging deploy wires android aab to firebase app distribution`() {
+        // spec: REL-006
+        val workflow = repoFile(".github/workflows/deploy-staging.yml").readText()
+
+        assertTrue(workflow.contains("adapter:"))
+        assertTrue(workflow.contains("staging_mechanism:"))
+        assertTrue(workflow.contains("build-android:"))
+        assertTrue(workflow.contains("deploy-android-staging:"))
+        assertTrue(workflow.contains("adapter: android"))
+        assertTrue(workflow.contains("require_signing: true"))
+        assertTrue(workflow.contains("name: android-aab"))
+        assertTrue(workflow.contains("wzieba/Firebase-Distribution-Github-Action@v1"))
+        assertTrue(workflow.contains("FIREBASE_APP_ID"))
+        assertTrue(workflow.contains("FIREBASE_SERVICE_ACCOUNT_JSON"))
+        assertTrue(workflow.contains("FIREBASE_TESTER_GROUPS"))
     }
 
     private fun repoFile(path: String): File {

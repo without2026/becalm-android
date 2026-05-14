@@ -30,8 +30,37 @@ behaviors:
     source: beta-readiness-hardening
     tests: [AndroidLoggingPrivacySpecTest]
 
+  - id: REL-004
+    type: ci_contract
+    description: "보호된 Android release build는 런타임 API/Auth 설정이 비어 있으면 AAB 생성을 차단한다"
+    trigger: "workflow_call adapter=android require_signing=true"
+    precondition: "Play Console internal track 또는 production deploy용 build"
+    expected: "adapter-build.yml은 bundleRelease 전에 Gradle verifyReleaseRuntimeConfigured를 실행한다. Gradle task는 BECALM_API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, GOOGLE_WEB_CLIENT_ID가 모두 설정되어 있을 때만 통과한다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
+  - id: REL-005
+    type: deploy_contract
+    description: "Production deploy workflow는 Android adapter일 때 release AAB를 만들고 Play Console track으로 업로드한다"
+    trigger: "workflow_dispatch deploy-production.yml with platform ci.adapter=android"
+    precondition: ".pipeline/platform.yml deploy.target=play-console"
+    expected: "deploy-production.yml은 adapter=android에서 adapter-build.yml을 require_signing=true로 호출하고 android-aab artifact를 r0adkll/upload-google-play에 전달한다. packageName은 com.becalm.android이며 track은 platform.yml의 play_console.track을 따른다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
+  - id: REL-006
+    type: deploy_contract
+    description: "Staging deploy workflow는 Android adapter일 때 release AAB를 만들고 Firebase App Distribution으로 배포한다"
+    trigger: "push to main deploy-staging.yml with platform ci.adapter=android"
+    precondition: ".pipeline/platform.yml deploy.staging.mechanism=firebase_app_distribution"
+    expected: "deploy-staging.yml은 adapter=android에서 adapter-build.yml을 require_signing=true로 호출하고 android-aab artifact를 Firebase App Distribution action에 전달한다. Firebase app id, service account, tester groups는 GitHub secrets로 주입된다"
+    source: beta-readiness-hardening
+    tests: [AndroidBuildWorkflowSpecTest]
+
 invariants:
   - "Android release artifact 경로는 .pipeline/platform.yml의 project_root를 기준으로 계산한다"
   - "adapter=android는 unsupported-adapter job으로 떨어지면 안 된다"
   - "로컬 release smoke는 signing 없이도 가능하지만, require_signing=true 배포 경로는 unsigned artifact를 만들 수 없다"
+  - "로컬 release smoke는 런타임 설정 없이도 가능하지만, require_signing=true 배포 경로는 빈 API/Auth 설정으로 artifact를 만들 수 없다"
+  - "staging과 production의 보호된 Android 배포 경로는 동일한 runtime/signing verifier를 통과한 artifact만 배포한다"
   - "route id, auth token, cookie, email, phone number는 logcat에 원문으로 기록하지 않는다"
