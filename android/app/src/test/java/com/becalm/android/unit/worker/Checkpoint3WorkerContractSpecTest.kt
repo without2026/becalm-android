@@ -14,6 +14,7 @@ import org.junit.Test
 class Checkpoint3WorkerContractSpecTest {
 
     @Test
+    // spec: ING-003
     fun e2e_026_backend_sync_timeout_during_raw_upload_maps_to_retry() {
         val outcome = mapErrorToOutcome(
             logger = NoopLogger,
@@ -44,6 +45,7 @@ class Checkpoint3WorkerContractSpecTest {
     }
 
     @Test
+    // spec: ING-014
     fun e2e_028_batch_upload_respects_railway_batch_contract_cap() {
         assertEquals(100, UploadWorker.BATCH_SIZE)
         assertTrue(UploadWorker.BATCH_SIZE <= 100)

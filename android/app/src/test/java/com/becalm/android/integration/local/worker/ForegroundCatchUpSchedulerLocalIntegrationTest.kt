@@ -22,6 +22,8 @@ import org.junit.Test
 class ForegroundCatchUpSchedulerLocalIntegrationTest {
 
     @Test
+    // spec: ING-006
+    // spec: ING-011
     fun `enabled source preferences fan out to matching foreground workers only`() = runTest {
         val userPrefsStore = UserPrefsStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("foreground-catchup"),
@@ -58,6 +60,8 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-001B
+    // spec: ING-011
     fun `meeting source preference is user scoped and fans out to media worker`() = runTest {
         val userPrefsStore = UserPrefsStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("foreground-meeting"),
@@ -85,6 +89,9 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
     }
 
     @Test
+    // spec: ING-007
+    // spec: ING-010
+    // spec: ING-011
     fun `onStart reads user scoped enabled sources from prefs before scheduling`() = runTest {
         val userPrefsStore = UserPrefsStoreImpl(
             dataStore = LocalIntegrationSupport.prefsDataStore("foreground-onstart"),

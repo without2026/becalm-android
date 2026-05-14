@@ -113,6 +113,9 @@ class CommitmentManagementScreenTest {
     }
 
     @Test
+    // spec: MSG-001
+    // spec: MAN-001
+    // spec: MAN-003
     fun commitment_management_fab_opens_evidence_import_sheet() {
         var screenshotImports = 0
         var meetingAudioImports = 0

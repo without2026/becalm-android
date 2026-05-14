@@ -51,6 +51,7 @@ class RetentionSweepWorkerLocalIntegrationTest {
     }
 
     @Test
+    // spec: MAN-006
     fun `EMAIL-006 retention sweep no longer prunes local source originals`() = runTest {
         val userId = "user-a"
         userPrefsStore.setCurrentUserId(userId)

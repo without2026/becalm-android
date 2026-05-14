@@ -32,6 +32,7 @@ class PersonsScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
+    // spec: ERR-001
     fun persons_screen_shows_offline_badge_and_unassigned_section_when_state_requires_them() {
         composeTestRule.setContent {
             BecalmTheme {

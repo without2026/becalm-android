@@ -112,6 +112,30 @@ class SourceImportRepositorySpecTest {
     }
 
     @Test
+    fun `MSG-004 import message screenshot parks awaiting consent without upload`() = runTest {
+        val uri = Uri.parse("content://screenshots/consent-needed")
+        val eventSlot = slot<RawIngestionEventEntity>()
+        arrangeContent(
+            uri = uri,
+            displayName = "consent-needed.png",
+            byteSize = null,
+            mimeType = "image/png",
+            bytes = pngBytes(width = 4, height = 4),
+        )
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(false)
+        coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
+            BecalmResult.Success(eventSlot.captured.id)
+        }
+
+        val result = repository().importMessageScreenshot(uri)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals("awaiting_consent", eventSlot.captured.syncStatus)
+        verify(exactly = 0) { workScheduler.enqueueMessageScreenshotUpload(any()) }
+    }
+
+    @Test
     fun `MSG-004 import message screenshot rejects source over-limit stream when provider omits size`() = runTest {
         val uri = Uri.parse("content://screenshots/oversized")
         val eventSlot = slot<RawIngestionEventEntity>()

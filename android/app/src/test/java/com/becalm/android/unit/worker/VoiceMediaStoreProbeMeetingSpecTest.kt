@@ -63,6 +63,7 @@ class VoiceMediaStoreProbeMeetingSpecTest {
     }
 
     @Test
+    // spec: ING-001B
     fun `MTG-007 meeting audio scanner inserts meeting raw event and enqueues upload`() = runTest {
         stubCommon()
         every {

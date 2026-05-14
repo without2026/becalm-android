@@ -77,6 +77,7 @@ class MessageScreenshotUploadWorkerSpecTest {
     }
 
     @Test
+    // spec: MSG-003
     fun `message screenshot worker uploads image modality through shared extraction runner`() = runTest {
         val image = temp.newFile("normalized-kakao-thread.jpg").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val imageSlot = io.mockk.slot<MultipartBody.Part>()

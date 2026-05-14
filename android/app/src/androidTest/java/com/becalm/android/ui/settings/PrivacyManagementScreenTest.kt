@@ -29,6 +29,7 @@ class PrivacyManagementScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
+    // spec: PIPA-001
     fun privacy_management_shows_all_pipa_actions_and_count_subtitle() {
         composeTestRule.setContent {
             BecalmTheme {
@@ -62,6 +63,8 @@ class PrivacyManagementScreenTest {
     }
 
     @Test
+    // spec: PIPA-001
+    // spec: PIPA-007
     fun privacy_management_dispatches_each_action_card_click() {
         var exportClicks = 0
         var withdrawClicks = 0

@@ -7,6 +7,8 @@ import org.junit.Test
 
 class SourceTypeContractTest {
     @Test
+    // spec: MSG-005
+    // spec: MAN-003
     fun `manual screenshot source is raw and product but text source is blocked`() {
         assertTrue(SourceType.MESSAGE_SCREENSHOT in SourceType.ALL)
         assertTrue(SourceType.MESSAGE_SCREENSHOT in SourceType.PRODUCT_SOURCES)

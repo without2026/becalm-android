@@ -129,6 +129,7 @@ class PrivacySubscreensTest {
     }
 
     @Test
+    // spec: PIPA-007
     fun activity_log_content_shows_empty_and_populated_rows() {
         var showLogs by mutableStateOf(false)
 

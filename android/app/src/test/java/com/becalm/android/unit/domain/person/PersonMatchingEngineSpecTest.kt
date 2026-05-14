@@ -136,6 +136,7 @@ class PersonMatchingEngineSpecTest {
     }
 
     @Test
+    // spec: RUX-007
     fun `speaker label never auto matches as canonical identity`() {
         val decision = engine().decide(
             participant = participant(displayName = "SPEAKER_01", evidence = "SPEAKER_01: 확인했습니다."),

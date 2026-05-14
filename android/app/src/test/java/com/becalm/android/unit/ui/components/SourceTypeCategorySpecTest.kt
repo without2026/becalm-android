@@ -8,6 +8,7 @@ import org.junit.Test
 class SourceTypeCategorySpecTest {
 
     @Test
+    // spec: RUX-003
     fun `source category helpers keep UI filters and next-action inference aligned`() {
         assertTrue(SourceType.GMAIL.isEmailSource())
         assertTrue(SourceType.NAVER_IMAP.isEmailSource())
