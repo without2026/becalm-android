@@ -10,8 +10,10 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.commitment.CommitmentEvent
 import com.becalm.android.domain.commitment.CommitmentState
@@ -29,6 +31,7 @@ import io.mockk.runs
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -52,6 +55,7 @@ class CommitmentManagementViewModelSpecTest {
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val reminderScheduler: ReminderScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
@@ -63,6 +67,9 @@ class CommitmentManagementViewModelSpecTest {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(emptyList())
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(any(), any(), any(), any())
+        } returns flowOf(emptyList())
         coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
             BecalmResult.Success(
                 SourceEventParticipantRepository.RefreshStats(
@@ -228,6 +235,36 @@ class CommitmentManagementViewModelSpecTest {
             )
             assertFalse(allAgain.items.any { it.id == "decision-1" })
 
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `CMT schedule link updates de-emphasize confirmed duplicate without commitment row requery`() = runTest {
+        val linkFlow = MutableStateFlow<List<ScheduleEventLinkEntity>>(emptyList())
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(entity(id = "schedule-1", itemType = "schedule", direction = null)),
+        )
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(
+                userId = "user-1",
+                commitmentIds = listOf("schedule-1"),
+                rawEventIds = emptyList(),
+                calendarEventIds = emptyList(),
+            )
+        } returns linkFlow
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val initial = awaitItem()
+            assertFalse(initial.items.single { it.id == "schedule-1" }.deEmphasized)
+
+            linkFlow.value = listOf(scheduleLink(commitmentId = "schedule-1"))
+
+            val updated = awaitItem()
+            assertTrue(updated.items.single { it.id == "schedule-1" }.deEmphasized)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -631,6 +668,7 @@ class CommitmentManagementViewModelSpecTest {
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
+        scheduleEventLinkRepository = scheduleEventLinkRepository,
         workScheduler = workScheduler,
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
@@ -709,4 +747,26 @@ class CommitmentManagementViewModelSpecTest {
                 dueHint = entity.dueHint,
             )
         }
+
+    private fun scheduleLink(commitmentId: String): ScheduleEventLinkEntity =
+        ScheduleEventLinkEntity(
+            id = "link-$commitmentId",
+            userId = "user-1",
+            calendarEventId = "calendar-1",
+            calendarSourceType = "google_calendar",
+            calendarSourceRef = "calendar-ref-1",
+            sourceType = "gmail",
+            sourceRef = "mail-1",
+            rawEventId = "raw-1",
+            commitmentId = commitmentId,
+            relationType = "confirms",
+            status = "auto_linked",
+            confidence = 0.95,
+            proposedStartAt = Instant.parse("2026-05-04T04:00:00Z"),
+            proposedEndAt = null,
+            proposedTitle = "title-$commitmentId",
+            evidence = "confirmed",
+            createdAt = Instant.parse("2026-05-04T03:00:00Z"),
+            updatedAt = Instant.parse("2026-05-04T03:00:00Z"),
+        )
 }

@@ -3,6 +3,9 @@ package com.becalm.android.ui.commitments
 import com.becalm.android.core.util.KST
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.domain.commitment.CommitmentState
@@ -16,11 +19,12 @@ internal object CommitmentManagementProjector {
     fun buildUiState(
         current: CommitmentUiState,
         rows: List<CommitmentManagementRow>,
+        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
         filter: CommitmentFilter = current.filter,
         loading: Boolean = current.loading,
         now: Instant,
     ): CommitmentUiState {
-        val projectedRows = applyFilter(rows, filter, now)
+        val projectedRows = applyFilter(rows, scheduleLinks, filter, now)
         return current.copy(
             filter = filter,
             items = projectedRows,
@@ -41,13 +45,21 @@ internal object CommitmentManagementProjector {
 
     fun applyFilter(
         rows: List<CommitmentManagementRow>,
+        scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
         filter: CommitmentFilter,
         now: Instant,
     ): List<CommitmentRow> {
+        val linkedConfirmCommitmentIds = scheduleLinks
+            .filter {
+                it.relationType == ScheduleEventLinkRelationType.CONFIRMS &&
+                    it.status in setOf(ScheduleEventLinkStatus.AUTO_LINKED, ScheduleEventLinkStatus.APPROVED)
+            }
+            .mapNotNullTo(mutableSetOf()) { it.commitmentId }
         val rowsWithState = rows.map { row ->
             ProjectableCommitmentRow(
                 row = row,
                 state = CommitmentState.fromWire(row.actionState),
+                deEmphasized = row.id in linkedConfirmCommitmentIds,
             )
         }
         val filtered = when (filter) {
@@ -77,6 +89,7 @@ internal object CommitmentManagementProjector {
     private data class ProjectableCommitmentRow(
         val row: CommitmentManagementRow,
         val state: CommitmentState,
+        val deEmphasized: Boolean,
     )
 
     private fun List<ProjectableCommitmentRow>.sortedForDisplay(now: Instant): List<ProjectableCommitmentRow> =
@@ -109,12 +122,13 @@ internal object CommitmentManagementProjector {
 
     private fun ProjectableCommitmentRow.toUiRow(): CommitmentRow {
         val exactDueAt = row.dueAt?.takeUnless { row.dueIsApproximate }
-        return row.toUiRow(state, exactDueAt)
+        return row.toUiRow(state, exactDueAt, deEmphasized)
     }
 
     private fun CommitmentManagementRow.toUiRow(
         state: CommitmentState,
         exactDueAt: Instant?,
+        deEmphasized: Boolean,
     ): CommitmentRow {
         return CommitmentRow(
             id = id,
@@ -133,6 +147,7 @@ internal object CommitmentManagementProjector {
             sourceOccurredAt = sourceOccurredAt,
             dueHint = null,
             isManual = sourceType == SourceType.MANUAL,
+            deEmphasized = deEmphasized,
         )
     }
 

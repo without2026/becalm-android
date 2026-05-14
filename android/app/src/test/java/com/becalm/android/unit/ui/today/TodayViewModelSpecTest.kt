@@ -19,6 +19,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
 import com.becalm.android.data.repository.SourceStatus
@@ -64,6 +65,7 @@ class TodayViewModelSpecTest {
     private val calendarEventRepository: CalendarEventRepository = mockk(relaxed = true)
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk(relaxed = true)
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk(relaxed = true)
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
@@ -82,6 +84,7 @@ class TodayViewModelSpecTest {
             ),
         )
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
         coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
             BecalmResult.Success(
@@ -647,6 +650,7 @@ class TodayViewModelSpecTest {
         calendarEventRepository = calendarEventRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
+        scheduleEventLinkRepository = scheduleEventLinkRepository,
         workScheduler = workScheduler,
         sourceStatusRepository = sourceStatusRepository,
         authRepository = authRepository,
