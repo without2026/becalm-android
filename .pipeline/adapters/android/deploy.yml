@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Deploy API to Railway
         if: inputs.environment == 'production'
@@ -30,9 +30,9 @@ jobs:
     environment: ${{ inputs.environment }}
     needs: deploy-api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: android-aab
           path: release-artifacts/

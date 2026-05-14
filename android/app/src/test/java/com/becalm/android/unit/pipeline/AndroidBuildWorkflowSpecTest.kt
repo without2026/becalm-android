@@ -134,24 +134,28 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
-    fun `github first party actions use node twenty four compatible majors`() {
+    fun `github workflows and android adapter templates use node twenty four compatible majors`() {
         // spec: REL-009
         val workflows = repoFile(".github/workflows").walkTopDown()
             .filter { it.isFile && it.extension == "yml" }
             .joinToString("\n") { it.readText() }
+        val androidAdapterTemplates = repoFile(".pipeline/adapters/android").walkTopDown()
+            .filter { it.isFile && it.extension == "yml" }
+            .joinToString("\n") { it.readText() }
+        val combined = "$workflows\n$androidAdapterTemplates"
 
-        assertFalse(workflows.contains("actions/checkout@v4"))
-        assertFalse(workflows.contains("actions/setup-java@v4"))
-        assertFalse(workflows.contains("actions/setup-python@v5"))
-        assertFalse(workflows.contains("actions/upload-artifact@v4"))
-        assertFalse(workflows.contains("actions/download-artifact@v4"))
-        assertFalse(workflows.contains("actions/cache@v4"))
-        assertTrue(workflows.contains("actions/checkout@v6"))
-        assertTrue(workflows.contains("actions/setup-java@v5"))
-        assertTrue(workflows.contains("actions/setup-python@v6"))
-        assertTrue(workflows.contains("actions/upload-artifact@v7"))
-        assertTrue(workflows.contains("actions/download-artifact@v8"))
-        assertTrue(workflows.contains("actions/cache@v5"))
+        assertFalse(combined.contains("actions/checkout@v4"))
+        assertFalse(combined.contains("actions/setup-java@v4"))
+        assertFalse(combined.contains("actions/setup-python@v5"))
+        assertFalse(combined.contains("actions/upload-artifact@v4"))
+        assertFalse(combined.contains("actions/download-artifact@v4"))
+        assertFalse(combined.contains("actions/cache@v4"))
+        assertTrue(combined.contains("actions/checkout@v6"))
+        assertTrue(combined.contains("actions/setup-java@v5"))
+        assertTrue(combined.contains("actions/setup-python@v6"))
+        assertTrue(combined.contains("actions/upload-artifact@v7"))
+        assertTrue(combined.contains("actions/download-artifact@v8"))
+        assertTrue(combined.contains("actions/cache@v5"))
     }
 
     @Test
@@ -166,7 +170,21 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(gates.contains("workflow_call:"))
         assertTrue(gates.contains("workflow_dispatch:"))
         assertTrue(gates.contains("./gradlew dependencyCheckAnalyze"))
+        assertTrue(gates.contains("NVD_API_KEY: ${'$'}{{ secrets.NVD_API_KEY }}"))
+        assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY != '' }}"))
+        assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY == '' }}"))
         assertTrue(gates.contains("./gradlew lint"))
+    }
+
+    @Test
+    fun `android gate adapter template mirrors dependency check secret fallback`() {
+        // spec: REL-010
+        val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
+
+        assertTrue(gates.contains("NVD_API_KEY: ${'$'}{{ secrets.NVD_API_KEY }}"))
+        assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY != '' }}"))
+        assertTrue(gates.contains("if: ${'$'}{{ env.NVD_API_KEY == '' }}"))
+        assertTrue(gates.contains("./gradlew tasks --all --console=plain | grep -q \"dependencyCheckAnalyze\""))
     }
 
     private fun repoFile(path: String): File {
