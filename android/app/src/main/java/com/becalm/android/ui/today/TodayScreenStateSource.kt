@@ -8,9 +8,11 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.TodayCommitmentRow
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.UiMessage
@@ -36,6 +38,7 @@ internal data class TodaySnapshot(
     val userId: String?,
     val commitments: List<TodayCommitmentRow>,
     val calendarEvents: List<CalendarEventEntity>,
+    val scheduleLinks: List<ScheduleEventLinkEntity>,
     val sourceStatuses: List<SourceStatus>,
     val processingPaused: Boolean,
 )
@@ -43,6 +46,7 @@ internal data class TodaySnapshot(
 internal class TodayScreenStateSource @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val calendarEventRepository: CalendarEventRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceStatusRepository: SourceStatusRepository,
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
@@ -81,16 +85,34 @@ internal class TodayScreenStateSource @Inject constructor(
             calendarEventRepository.observeForUser(userId, dayStart, dayEnd)
         }
 
+        val scheduleLinkFlow = userIdFlow.flatMapLatest { userId ->
+            if (userId == null || scheduleEventLinkRepository == null) return@flatMapLatest flowOf(emptyList())
+            combine(commitmentFlow, calendarFlow) { commitments, calendarEvents ->
+                commitments to calendarEvents
+            }.flatMapLatest { (commitments, calendarEvents) ->
+                val (dayStart, dayEnd) = todayRange()
+                scheduleEventLinkRepository.observeForTodayRange(
+                    userId = userId,
+                    rangeStart = dayStart,
+                    rangeEnd = dayEnd,
+                    calendarEventIds = calendarEvents.map { it.id },
+                    commitmentIds = commitments.map { it.id },
+                )
+            }
+        }
+
         val baseSnapshotFlow = combine(
             userIdFlow,
             commitmentFlow,
             calendarFlow,
+            scheduleLinkFlow,
             sourceStatusRepository.observeAll(),
-        ) { userId, commitments, calendarEvents, sourceStatuses ->
+        ) { userId, commitments, calendarEvents, scheduleLinks, sourceStatuses ->
             TodaySnapshot(
                 userId = userId,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
+                scheduleLinks = scheduleLinks,
                 sourceStatuses = sourceStatuses,
                 processingPaused = false,
             )

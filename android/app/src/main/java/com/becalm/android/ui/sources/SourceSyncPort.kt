@@ -11,6 +11,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.CalendarRelationRefresh
@@ -49,6 +50,7 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
@@ -151,6 +153,7 @@ public class DefaultSourceSyncPort @Inject constructor(
             commitmentRepository = commitmentRepository,
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
+            scheduleEventLinkRepository = scheduleEventLinkRepository,
             workScheduler = workScheduler,
             logger = logger,
         )

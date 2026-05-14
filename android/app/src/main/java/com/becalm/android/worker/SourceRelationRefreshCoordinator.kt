@@ -7,6 +7,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import kotlinx.datetime.Instant
 
@@ -25,6 +26,7 @@ internal class SourceRelationRefreshCoordinator(
     private val commitmentRepository: CommitmentRepository,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
     private val commitmentParticipantRepository: CommitmentParticipantRepository,
+    private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
 ) {
@@ -38,6 +40,7 @@ internal class SourceRelationRefreshCoordinator(
         var sourceParticipantUpserted = 0
         var commitmentUpserted = 0
         var commitmentParticipantUpserted = 0
+        var scheduleEventLinkUpserted = 0
 
         plan.rawSourceType?.let { sourceType ->
             val repository = rawIngestionRepository
@@ -131,12 +134,26 @@ internal class SourceRelationRefreshCoordinator(
             is BecalmResult.Failure -> return result
         }
 
+        scheduleEventLinkRepository?.let { repository ->
+            when (val result = repository.refreshSince(userId = userId, since = null)) {
+                is BecalmResult.Success -> {
+                    scheduleEventLinkUpserted = result.value.upserted
+                    logger.d(
+                        TAG,
+                        "schedule event link refresh source=${plan.sourceType} fetched=${result.value.fetched} upserted=${result.value.upserted}",
+                    )
+                }
+                is BecalmResult.Failure -> return result
+            }
+        }
+
         val stats = SourceRelationRefreshStats(
             rawUpserted = rawUpserted,
             calendarUpserted = calendarUpserted,
             sourceParticipantUpserted = sourceParticipantUpserted,
             commitmentUpserted = commitmentUpserted,
             commitmentParticipantUpserted = commitmentParticipantUpserted,
+            scheduleEventLinkUpserted = scheduleEventLinkUpserted,
             localWriteCount = plan.localWriteCount,
         )
         if (stats.changedCount > 0) {
@@ -177,6 +194,7 @@ internal data class SourceRelationRefreshStats(
     val sourceParticipantUpserted: Int,
     val commitmentUpserted: Int,
     val commitmentParticipantUpserted: Int,
+    val scheduleEventLinkUpserted: Int,
     val localWriteCount: Int,
 ) {
     val changedCount: Int =
@@ -185,5 +203,6 @@ internal data class SourceRelationRefreshStats(
             sourceParticipantUpserted +
             commitmentUpserted +
             commitmentParticipantUpserted +
+            scheduleEventLinkUpserted +
             localWriteCount
 }
