@@ -34,7 +34,6 @@
                 <action android:name="com.becalm.android.DEBUG_CRASHLYTICS_FORCE_CRASH" />
             </intent-filter>
         </receiver>
-
         <receiver
             android:name=".debug.DebugAmplitudeSmokeReceiver"
             android:exported="true"

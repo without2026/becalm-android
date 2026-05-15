@@ -79,22 +79,59 @@ private fun TrackScreenTelemetry(
     productAnalytics: ProductAnalyticsClient,
 ) {
     val previousRoute = androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    val routeEnteredAtMillis = androidx.compose.runtime.remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(currentRoute) {
+        val nowMillis = Clock.System.now().toEpochMilliseconds()
         val prior = previousRoute.value
         if (prior != null && prior != currentRoute) {
-            productAnalytics.track(screenEvent(ProductAnalyticsEvents.SCREEN_EXITED, prior))
+            val durationSeconds = routeEnteredAtMillis.value
+                ?.let { ((nowMillis - it) / 1000L).coerceAtLeast(0L) }
+                ?: 0L
+            productAnalytics.track(
+                screenEvent(
+                    eventName = ProductAnalyticsEvents.SCREEN_EXITED,
+                    route = prior,
+                    extra = mapOf(
+                        "duration_seconds" to durationSeconds,
+                        "meaningful_usage" to isMeaningfulRoute(prior),
+                    ),
+                ),
+            )
         }
         if (currentRoute != null && currentRoute != prior) {
             productAnalytics.track(screenEvent(ProductAnalyticsEvents.SCREEN_VIEWED, currentRoute))
+            routeEnteredAtMillis.value = nowMillis
         }
         previousRoute.value = currentRoute
     }
 }
 
-private fun screenEvent(eventName: String, route: String): ProductAnalyticsEvent =
+private fun screenEvent(
+    eventName: String,
+    route: String,
+    extra: Map<String, Any?> = emptyMap(),
+): ProductAnalyticsEvent =
     ProductAnalyticsEvent(
         eventId = UUID.randomUUID().toString(),
         eventName = eventName,
         occurredAt = Clock.System.now(),
-        properties = mapOf("route" to route),
+        properties = mapOf(
+            "route" to route,
+            "screen_group" to screenGroup(route),
+        ) + extra,
     )
+
+private fun isMeaningfulRoute(route: String): Boolean =
+    screenGroup(route) in setOf("today", "people", "commitments", "source_detail", "detail")
+
+private fun screenGroup(route: String): String =
+    when {
+        route == BecalmRoute.Today.path -> "today"
+        route == BecalmRoute.Persons.path -> "people"
+        route == BecalmRoute.Commitments.path -> "commitments"
+        route.startsWith("settings/sources") -> "source_detail"
+        route.contains("detail") || route.startsWith("persons/") || route.startsWith("commitments/") -> "detail"
+        route.startsWith("onboarding") -> "onboarding"
+        route == BecalmRoute.Settings.path -> "settings"
+        else -> "other"
+    }
