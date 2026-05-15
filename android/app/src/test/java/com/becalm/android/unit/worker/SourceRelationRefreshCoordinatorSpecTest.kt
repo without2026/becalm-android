@@ -84,6 +84,7 @@ class SourceRelationRefreshCoordinatorSpecTest {
 
     @Test
     fun `refresh pulls schedule event links and enqueues person index when calendar source truth changes`() = runTest {
+        // spec: TDY-006
         val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
         stubSourceParticipants(upserted = 0)
         stubCommitments(upserted = 0)

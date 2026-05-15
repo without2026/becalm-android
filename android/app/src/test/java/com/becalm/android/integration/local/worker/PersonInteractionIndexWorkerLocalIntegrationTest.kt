@@ -145,6 +145,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
 
     @Test
     fun `duplicate participants for one source and person render as one interaction`() = runTest {
+        // spec: SRC-008
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
         db.rawIngestionEventDao().insert(
