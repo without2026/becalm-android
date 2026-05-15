@@ -4,7 +4,7 @@ This checklist maps the current beta-readiness target to concrete evidence. It i
 
 Last updated: 2026-05-15 KST.
 Evidence document status: docs-only; does not change executable Android code.
-Executable code verified at: `e8f32f3`.
+Executable code verified at: `e6fb1cb`.
 
 Scope note: Firebase Crashlytics and Amplitude product analytics SDK wiring are tracked in a separate workstream. This checklist evaluates beta readiness excluding that SDK implementation.
 
@@ -53,9 +53,9 @@ Pass condition for 8.5:
 
 Current CI emulator evidence:
 
-- `Android Tests` run `25883105600` reinstalled `app-debug.apk` when the target app package was missing after instrumentation.
-- `cold_start_total_ms=2296`, threshold `<=3000ms`.
-- `total_pss_kb=145095`, threshold `<=262144KB`.
+- `Android Tests` run `25884778885` reinstalled `app-debug.apk` when the target app package was missing after instrumentation.
+- `cold_start_total_ms=1997`, threshold `<=3000ms`.
+- `total_pss_kb=143379`, threshold `<=262144KB`.
 - `logcat_threshold=PASS no fatal/ANR/OOM patterns`.
 - `readiness_failure_count=0`.
 
@@ -77,8 +77,8 @@ Pass condition for 8.5:
 
 Current main evidence:
 
-- `Android Deterministic Gates` run `25883104187` passes spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size.
-- `Android Tests` run `25883105600` passes unit tests, backend optional tests, API 33 emulator instrumentation, and release smoke.
+- `Android Deterministic Gates` run `25884778863` passes spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size.
+- `Android Tests` run `25884778885` passes unit tests, backend optional tests, API 33 emulator instrumentation, and release smoke.
 - Local focused verification passed for `AndroidBuildWorkflowSpecTest` and `ReadinessQaScriptSpecTest`.
 - Local focused verification passed for `AndroidPlayPolicySpecTest`, and `lintDebug` no longer reports BatteryLife, InlinedApi, UnusedAttribute, or CredentialManager sign-in warnings.
 - Local PIPA/processing focused verification passed and checks that onboarding discloses NAVER Cloud CLOVA Speech plus Google Vertex AI transcript extraction, while blocking stale Gemini audio-modal copy.
@@ -115,7 +115,7 @@ Current main evidence:
 - Source and upload processing status copy uses product language such as `내용 정리 중`, not vendor names.
 - Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
 - `measure_android_readiness.sh` records cold start, PSS, frames, logcat scan, and strict pass/fail counters; `ReadinessQaScriptSpecTest` prevents regressions to warn-only measurement.
-- CI emulator run `25883105600` is the latest connected Android test evidence and passed.
+- CI emulator run `25884778885` is the latest connected Android test evidence and passed.
 
 ## Release Engineering / CI
 
@@ -132,9 +132,9 @@ Required evidence:
 
 Current main evidence:
 
-- Latest `Android Deterministic Gates` run succeeded on executable code commit `e8f32f3`: https://github.com/without2026/becalm-android/actions/runs/25883104187
-- Latest `Android Tests` run succeeded on executable code commit `e8f32f3`: https://github.com/without2026/becalm-android/actions/runs/25883105600
-- Latest executable-code `Deploy Staging` run succeeded on commit `e8f32f3`: https://github.com/without2026/becalm-android/actions/runs/25883089035
+- Latest `Android Deterministic Gates` run succeeded on executable code commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884778863
+- Latest `Android Tests` run succeeded on executable code commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884778885
+- Latest executable-code `Deploy Staging` run succeeded on commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884772086
 - Subsequent docs-only evidence commits do not change executable Android code; check GitHub Actions for their current `Deploy Staging` status.
 - Latest CI artifacts were uploaded and are not expired:
   - `android-gate-reports`
