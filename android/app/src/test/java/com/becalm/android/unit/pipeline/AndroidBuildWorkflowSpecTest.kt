@@ -196,6 +196,7 @@ class AndroidBuildWorkflowSpecTest {
         val gates = repoFile(".github/workflows/android-gates.yml").readText()
         val combined = "$tests\n$gates"
 
+        assertTrue(tests.contains("BECALM_API_BASE_URL: https://dev-dev-7309.up.railway.app"))
         assertTrue(tests.contains("timeout-minutes: 15"))
         assertTrue(tests.contains("timeout-minutes: 25"))
         assertTrue(tests.contains("timeout-minutes: 30"))
@@ -243,6 +244,7 @@ class AndroidBuildWorkflowSpecTest {
         val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
         val combined = "$tests\n$gates"
 
+        assertTrue(tests.contains("BECALM_API_BASE_URL: https://dev-dev-7309.up.railway.app"))
         assertTrue(tests.contains("timeout-minutes: 15"))
         assertTrue(tests.contains("timeout-minutes: 25"))
         assertTrue(tests.contains("timeout-minutes: 30"))
