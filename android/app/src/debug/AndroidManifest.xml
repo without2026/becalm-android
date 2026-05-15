@@ -34,5 +34,14 @@
                 <action android:name="com.becalm.android.DEBUG_CRASHLYTICS_FORCE_CRASH" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".debug.DebugAmplitudeSmokeReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.becalm.android.DEBUG_AMPLITUDE_FAKE_CRASH_EVENT" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
