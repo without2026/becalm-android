@@ -7,6 +7,7 @@ import com.becalm.android.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import timber.log.Timber
 
 @Singleton
 public class AmplitudeProductAnalyticsClient @Inject constructor(
@@ -19,10 +20,18 @@ public class AmplitudeProductAnalyticsClient @Inject constructor(
         } else {
             Amplitude(
                 Configuration(apiKey, context).apply {
-                    flushQueueSize = 20
-                    flushIntervalMillis = 50_000
+                    flushQueueSize = if (BuildConfig.DEBUG) 1 else 20
+                    flushIntervalMillis = if (BuildConfig.DEBUG) 1_000 else 50_000
                     useBatch = true
                     optOut = false
+                    if (BuildConfig.DEBUG) {
+                        callback = { event, code, message ->
+                            Timber.i(
+                                "Amplitude product callback eventType=${event.eventType} " +
+                                    "statusCode=$code message=$message",
+                            )
+                        }
+                    }
                 },
             )
         }

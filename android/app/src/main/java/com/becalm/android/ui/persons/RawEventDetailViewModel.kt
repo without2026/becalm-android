@@ -4,6 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -13,6 +17,7 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceOriginalResolver
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 
 // ─── UI model ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +101,7 @@ public class RawEventDetailViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -146,7 +153,24 @@ public class RawEventDetailViewModel @Inject constructor(
                 )
             }
             _uiState.value = loadedState
+            trackHistoricalItemViewed(entity)
         }
+    }
+
+    private fun trackHistoricalItemViewed(entity: RawIngestionEventEntity) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.HISTORICAL_ITEM_VIEWED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "surface" to "raw_event_detail",
+                    "source_type" to entity.sourceType,
+                    "has_commitments" to (entity.commitmentsExtractedCount > 0),
+                    "core_active" to true,
+                ),
+            ),
+        )
     }
 
 }

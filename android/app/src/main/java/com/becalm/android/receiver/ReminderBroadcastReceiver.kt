@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 
 public data class ReminderNotificationSpec(
     val commitmentId: String,
+    val notificationInstanceId: String,
     val channelId: String,
     val deepLinkUri: String,
     val title: String,
@@ -197,6 +198,8 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
         val tapIntent = Intent(Intent.ACTION_VIEW, deepLink).apply {
             setPackage(context.packageName)
             setClass(context, MainActivity::class.java)
+            putExtra(EXTRA_COMMITMENT_ID, spec.commitmentId)
+            putExtra(EXTRA_NOTIFICATION_INSTANCE_ID, spec.notificationInstanceId)
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val tapPendingIntent = PendingIntent.getActivity(
@@ -223,6 +226,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
                 occurredAt = Clock.System.now(),
                 properties = mapOf(
                     "commitment_id" to spec.commitmentId,
+                    "notification_instance_id" to spec.notificationInstanceId,
                     "channel_id" to spec.channelId,
                 ),
             ),
@@ -234,6 +238,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
     public companion object {
         /** Intent extra key carrying the opaque commitment identifier. */
         public const val EXTRA_COMMITMENT_ID: String = "commitment_id"
+        public const val EXTRA_NOTIFICATION_INSTANCE_ID: String = "notification_instance_id"
 
         /**
          * Intent extra key carrying the user id that owned the commitment at
@@ -286,6 +291,7 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             }
             return ReminderNotificationSpec(
                 commitmentId = commitmentId,
+                notificationInstanceId = UUID.randomUUID().toString(),
                 channelId = CHANNEL_ID,
                 deepLinkUri = "becalm://commitments/$commitmentId",
                 title = context.getString(R.string.commitment_alarm_title),
