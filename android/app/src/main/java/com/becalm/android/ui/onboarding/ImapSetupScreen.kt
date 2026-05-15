@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -166,6 +169,8 @@ internal fun ImapForm(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
             .padding(horizontal = 16.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -183,12 +188,14 @@ internal fun ImapForm(
                         index = index,
                         count = providers.size,
                     ),
-                    modifier = Modifier.testTag(
-                        when (provider) {
-                            ImapProvider.Naver -> "imap-provider-naver"
-                            ImapProvider.Daum -> "imap-provider-daum"
-                        },
-                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag(
+                            when (provider) {
+                                ImapProvider.Naver -> "imap-provider-naver"
+                                ImapProvider.Daum -> "imap-provider-daum"
+                            },
+                        ),
                     label = { Text(stringResource(displayNameRes)) },
                 )
             }

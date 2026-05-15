@@ -23,6 +23,7 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
+import com.becalm.android.ui.navigation.returnToSettingsSourcesAfterSourceConnect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -171,11 +172,7 @@ internal fun SourceConnectionsScreen(
             { navController.navigateAfterSourceReconnectOr(BecalmRoute.OnboardingNotificationPerm.path) }
         }
         SourceConnectionsEntryPoint.Settings -> {
-            {
-                if (!navController.popBackStack()) {
-                    navController.navigate(BecalmRoute.SettingsSources.path)
-                }
-            }
+            { navController.returnToSettingsSourcesAfterSourceConnect() }
         }
     }
 
@@ -208,6 +205,11 @@ internal fun SourceConnectionsScreen(
         transientStates = transientStatesState,
         pendingIntentProvider = pendingIntentProviderState,
         onLaunchPendingIntent = launchPendingIntent,
+        onConnected = {
+            if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+                navigateComplete()
+            }
+        },
     )
     SourceConnectionCalendarEventEffect(
         events = calendarEventsOverride ?: requireNotNull(resolvedViewModel).calendarConnectEvents,
@@ -215,6 +217,11 @@ internal fun SourceConnectionsScreen(
         resources = resources,
         snackbarHostState = snackbarHostState,
         transientStates = transientStatesState,
+        onConnected = {
+            if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+                navigateComplete()
+            }
+        },
     )
 
     val items = SourceConnectionProjector.sourceConnectionItems(

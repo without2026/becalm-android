@@ -13,6 +13,7 @@ import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.today.TodayEffect
 
 private const val SOURCE_RECONNECT_RETURN_KEY = "source_reconnect_return"
+private const val SOURCE_RECONNECT_RETURN_ROUTE_KEY = "source_reconnect_return_route"
 
 internal fun NavHostController.dispatchTodayEffect(effect: TodayEffect) {
     when (effect) {
@@ -39,9 +40,11 @@ internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEf
                 SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
                 SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
             }
-            if (destinationRoute != BecalmRoute.SettingsSourceConnections.path) {
-                currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
-            }
+            currentBackStackEntry?.savedStateHandle?.set(
+                SOURCE_RECONNECT_RETURN_ROUTE_KEY,
+                BecalmRoute.SettingsSources.path,
+            )
+            currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
             navigate(destinationRoute)
         }
     }
@@ -49,11 +52,31 @@ internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEf
 
 internal fun NavHostController.navigateAfterSourceReconnectOr(route: String) {
     val previousHandle = previousBackStackEntry?.savedStateHandle
+    val returnRoute = previousHandle?.get<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
+    if (returnRoute != null) {
+        previousHandle.remove<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
+        previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        if (popBackStack(returnRoute, inclusive = false)) return
+        if (popBackStack()) return
+    }
     if (previousHandle?.get<Boolean>(SOURCE_RECONNECT_RETURN_KEY) == true) {
         previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
         if (popBackStack()) return
     }
     navigate(route)
+}
+
+internal fun NavHostController.returnToSettingsSourcesAfterSourceConnect() {
+    val previousHandle = previousBackStackEntry?.savedStateHandle
+    val returnRoute = previousHandle?.get<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
+    if (returnRoute != null) {
+        previousHandle.remove<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
+        previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        if (popBackStack(returnRoute, inclusive = false)) return
+    }
+    if (!popBackStack(BecalmRoute.SettingsSources.path, inclusive = false)) {
+        navigate(BecalmRoute.SettingsSources.path)
+    }
 }
 
 internal fun dispatchCommitmentManagementNavigation(

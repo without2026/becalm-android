@@ -743,6 +743,42 @@ class OnboardingScreenTest {
     }
 
     @Test
+    fun settings_source_connections_returns_when_source_connects() {
+        val emailEvents = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        val calendarEvents = MutableSharedFlow<CalendarConnectEvent>(extraBufferCapacity = 1)
+        var doneClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SettingsSourceConnectionsScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emailEvents,
+                    calendarEventsOverride = calendarEvents,
+                    stateOverride = OnboardingUiState(),
+                    onConnectSource = { _, _ -> },
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onNavigateDone = { doneClicks += 1 },
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            emailEvents.tryEmit(EmailConnectEvent.Connected(EmailPipaProvider.GMAIL))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(1, doneClicks)
+            calendarEvents.tryEmit(CalendarConnectEvent.Connected(CalendarOAuthProvider.GOOGLE_CALENDAR))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(2, doneClicks)
+        }
+    }
+
+    @Test
     fun cold_sync_screen_triggers_visible_complete_and_navigate_callbacks() {
         val effects = MutableSharedFlow<com.becalm.android.ui.today.ColdSyncEffect>(extraBufferCapacity = 1)
         var visibleCount = 0
