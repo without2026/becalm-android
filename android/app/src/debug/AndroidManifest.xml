@@ -40,6 +40,7 @@
             tools:ignore="ExportedReceiver">
             <intent-filter>
                 <action android:name="com.becalm.android.DEBUG_AMPLITUDE_FAKE_CRASH_EVENT" />
+                <action android:name="com.becalm.android.DEBUG_AMPLITUDE_METRICS_SMOKE" />
             </intent-filter>
         </receiver>
     </application>
