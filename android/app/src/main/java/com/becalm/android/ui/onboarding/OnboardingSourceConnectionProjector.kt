@@ -5,15 +5,36 @@ import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 
 internal object SourceConnectionProjector {
+    fun respectStepStatesFor(entryPoint: SourceConnectionsEntryPoint): Boolean =
+        entryPoint != SourceConnectionsEntryPoint.Settings
+
+    fun sourceProvidersFor(entryPoint: SourceConnectionsEntryPoint): Set<OnboardingSourceProvider> =
+        when (entryPoint) {
+            SourceConnectionsEntryPoint.Setup -> setOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+                OnboardingSourceProvider.GOOGLE_CALENDAR,
+            )
+            SourceConnectionsEntryPoint.Onboarding -> setOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+            )
+            SourceConnectionsEntryPoint.Settings -> OnboardingSourceProvider.entries.toSet()
+        }
+
     fun sourceConnectionItems(
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean = true,
         includeCalendarSources: Boolean = true,
+        includedProviders: Set<OnboardingSourceProvider>? = null,
         stringFor: (Int) -> String,
     ): List<SourceConnectionItemUi> =
         sourceSpecs
-            .filter { spec -> includeCalendarSources || spec.category != SourceConnectionCategory.Calendar }
+            .filter { spec ->
+                includedProviders?.contains(spec.provider)
+                    ?: (includeCalendarSources || spec.category != SourceConnectionCategory.Calendar)
+            }
             .map { spec ->
                 SourceConnectionItemUi(
                     provider = spec.provider,

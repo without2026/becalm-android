@@ -220,8 +220,8 @@ internal fun SourceConnectionsScreen(
     val items = SourceConnectionProjector.sourceConnectionItems(
         stepStates = state.stepStates,
         transientStates = transientStates,
-        respectStepStates = entryPoint == SourceConnectionsEntryPoint.Onboarding,
-        includeCalendarSources = entryPoint == SourceConnectionsEntryPoint.Settings,
+        respectStepStates = SourceConnectionProjector.respectStepStatesFor(entryPoint),
+        includedProviders = SourceConnectionProjector.sourceProvidersFor(entryPoint),
         stringFor = resources::getString,
     )
     val hasIncomplete = entryPoint == SourceConnectionsEntryPoint.Onboarding &&

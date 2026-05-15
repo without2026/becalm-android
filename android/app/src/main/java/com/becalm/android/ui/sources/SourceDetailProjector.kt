@@ -54,6 +54,11 @@ internal object SourceDetailProjector {
                 showManualSyncButton = true,
             )
             SourceConnectionStatus.ERROR,
+            -> DetailButtonVisibility(
+                showReconnectButton = true,
+                showDisconnectButton = false,
+                showManualSyncButton = true,
+            )
             SourceConnectionStatus.NEVER_CONNECTED,
             null,
             -> DetailButtonVisibility(

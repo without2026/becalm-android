@@ -336,6 +336,28 @@ class AuthViewModelSpecTest {
     }
 
     @Test
+    fun `AUTH google provider disabled surfaces setup-required message not network error`() = runTest {
+        coEvery { authRepository.signInWithGoogle("id-token") } returns
+            BecalmResult.Failure(
+                BecalmError.Validation(
+                    field = "auth_provider",
+                    message = "google_provider_disabled",
+                ),
+            )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onGoogleSignIn("id-token")
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.login_google_setup_required,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
+    }
+
+    @Test
     fun `AUTH-006 declining terms emits FinishApp effect`() = runTest {
         val viewModel = buildViewModel()
 

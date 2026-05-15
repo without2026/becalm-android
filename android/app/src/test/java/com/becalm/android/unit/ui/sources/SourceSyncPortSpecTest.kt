@@ -12,6 +12,8 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.DefaultSourceSyncPort
@@ -35,6 +37,8 @@ class SourceSyncPortSpecTest {
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk()
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
+    private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
@@ -47,6 +51,8 @@ class SourceSyncPortSpecTest {
         commitmentParticipantRepository = commitmentParticipantRepository,
         rawIngestionRepository = rawIngestionRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
+        sourceConnectionRepository = sourceConnectionRepository,
+        selfIdentityRepository = selfIdentityRepository,
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = workScheduler,
         logger = logger,
@@ -95,6 +101,8 @@ class SourceSyncPortSpecTest {
                     nextCursor = "commitment-participant-cursor-1",
                 ),
             )
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GMAIL)
@@ -105,6 +113,8 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
+        coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
@@ -152,6 +162,8 @@ class SourceSyncPortSpecTest {
                     nextCursor = "commitment-participant-cursor-1",
                 ),
             )
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GOOGLE_CALENDAR)
@@ -162,6 +174,8 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GOOGLE_CALENDAR, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
+        coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }

@@ -41,6 +41,9 @@ internal fun SourceConnectionsContent(
     val optionalSection = stringResource(R.string.onb_setup_optional_section)
     val mailSection = stringResource(R.string.onb_sources_mail_section)
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
+    val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
+    val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
+    val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty()
     LazyColumn(
         modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
@@ -88,6 +91,15 @@ internal fun SourceConnectionsContent(
                     skipLabel = skipLabel,
                 )
             }
+            if (showSetupRecommendedCalendar) {
+                sourceSection(
+                    title = calendarSection,
+                    items = calendarItems,
+                    onConnect = onConnect,
+                    onSkip = onSkip,
+                    skipLabel = skipLabel,
+                )
+            }
             item(key = "optional-setup-title") {
                 Text(
                     text = optionalSection,
@@ -97,7 +109,6 @@ internal fun SourceConnectionsContent(
                 )
             }
         }
-        val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
         if (mailItems.isNotEmpty()) {
             sourceSection(
                 title = mailSection,
@@ -107,8 +118,7 @@ internal fun SourceConnectionsContent(
                 skipLabel = skipLabel,
             )
         }
-        val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
-        if (calendarItems.isNotEmpty()) {
+        if (!showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
             sourceSection(
                 title = calendarSection,
                 items = calendarItems,

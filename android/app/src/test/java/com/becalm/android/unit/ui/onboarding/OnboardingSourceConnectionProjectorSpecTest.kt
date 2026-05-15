@@ -53,6 +53,32 @@ class OnboardingSourceConnectionProjectorSpecTest {
     }
 
     @Test
+    fun `setup source entry respects completed step states from backend oauth return`() {
+        assertTrue(SourceConnectionProjector.respectStepStatesFor(SourceConnectionsEntryPoint.Setup))
+        assertTrue(SourceConnectionProjector.respectStepStatesFor(SourceConnectionsEntryPoint.Onboarding))
+        assertEquals(
+            false,
+            SourceConnectionProjector.respectStepStatesFor(SourceConnectionsEntryPoint.Settings),
+        )
+    }
+
+    @Test
+    fun `setup source entry includes google calendar as a recommended first run source`() {
+        assertEquals(
+            setOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+                OnboardingSourceProvider.GOOGLE_CALENDAR,
+            ),
+            SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Setup),
+        )
+        assertEquals(
+            OnboardingSourceProvider.entries.toSet(),
+            SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Settings),
+        )
+    }
+
+    @Test
     fun `projected source items keep mail consent and category defaults stable`() {
         val items = SourceConnectionProjector.sourceConnectionItems(
             stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE),
@@ -70,18 +96,42 @@ class OnboardingSourceConnectionProjectorSpecTest {
 
     @Test
     // spec: RUX-006
-    fun `first run onboarding omits calendar oauth until provider is launch ready`() {
+    fun `legacy source onboarding omits calendar oauth until provider is launch ready`() {
         val items = SourceConnectionProjector.sourceConnectionItems(
             stepStates = emptyMap(),
             transientStates = emptyMap(),
             respectStepStates = true,
-            includeCalendarSources = false,
+            includedProviders = SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Onboarding),
             stringFor = { resId -> "res:$resId" },
         )
 
         assertEquals(
             listOf(OnboardingSourceProvider.GMAIL, OnboardingSourceProvider.OUTLOOK_MAIL),
             items.map { it.provider },
+        )
+    }
+
+    @Test
+    fun `setup source projection marks completed google calendar as connected`() {
+        val items = SourceConnectionProjector.sourceConnectionItems(
+            stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE),
+            transientStates = emptyMap(),
+            respectStepStates = SourceConnectionProjector.respectStepStatesFor(SourceConnectionsEntryPoint.Setup),
+            includedProviders = SourceConnectionProjector.sourceProvidersFor(SourceConnectionsEntryPoint.Setup),
+            stringFor = { resId -> "res:$resId" },
+        )
+
+        assertEquals(
+            listOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+                OnboardingSourceProvider.GOOGLE_CALENDAR,
+            ),
+            items.map { it.provider },
+        )
+        assertEquals(
+            SourceConnectionState.Connected,
+            items.first { it.provider == OnboardingSourceProvider.GOOGLE_CALENDAR }.state,
         )
     }
 

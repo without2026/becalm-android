@@ -12,6 +12,8 @@ import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.CalendarRelationRefresh
@@ -52,6 +54,8 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val rawIngestionRepository: RawIngestionRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceEventParticipantRepository: SourceEventParticipantRepository,
+    private val sourceConnectionRepository: SourceConnectionRepository,
+    private val selfIdentityRepository: SelfIdentityRepository,
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
@@ -113,7 +117,7 @@ public class DefaultSourceSyncPort @Inject constructor(
             is BecalmResult.Failure -> return onBackendSyncFailure(sourceType, refresh.error)
         }
         logger.d(TAG, "manual sync delegated to backend mail sourceType=$sourceType")
-        return finalizeBackendSyncSuccess(sourceType)
+        return finalizeBackendSyncSuccess(userId, sourceType)
     }
 
     private suspend fun syncBackendManagedCalendar(sourceType: String): BecalmResult<Unit> {
@@ -141,7 +145,7 @@ public class DefaultSourceSyncPort @Inject constructor(
                     )
                 }
                 logger.d(TAG, "manual sync delegated to backend calendar sourceType=$sourceType")
-                return finalizeBackendSyncSuccess(sourceType)
+                return finalizeBackendSyncSuccess(userId, sourceType)
             }
         }
     }
@@ -158,7 +162,8 @@ public class DefaultSourceSyncPort @Inject constructor(
             logger = logger,
         )
 
-    private suspend fun finalizeBackendSyncSuccess(sourceType: String): BecalmResult<Unit> {
+    private suspend fun finalizeBackendSyncSuccess(userId: String, sourceType: String): BecalmResult<Unit> {
+        refreshIdentityMirrorsAfterBackendSync(userId, sourceType)
         return when (val refresh = sourceStatusRepository.refreshFromServer()) {
             is BecalmResult.Success -> refresh
             is BecalmResult.Failure -> {
@@ -166,6 +171,15 @@ public class DefaultSourceSyncPort @Inject constructor(
                 sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
                 BecalmResult.Success(Unit)
             }
+        }
+    }
+
+    private suspend fun refreshIdentityMirrorsAfterBackendSync(userId: String, sourceType: String) {
+        if (sourceConnectionRepository.refresh(userId) is BecalmResult.Failure) {
+            logger.w(TAG, "source_connections refresh failed after backend sync sourceType=$sourceType")
+        }
+        if (selfIdentityRepository.refresh(userId) is BecalmResult.Failure) {
+            logger.w(TAG, "self_identity_anchors refresh failed after backend sync sourceType=$sourceType")
         }
     }
 

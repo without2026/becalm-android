@@ -364,7 +364,11 @@ private fun BecalmError.toAuthMessage(): UiMessage = when (this) {
     is BecalmError.Unauthorized -> UiMessage.resource(R.string.auth_error_invalid_credentials)
     is BecalmError.RateLimited -> UiMessage.resource(R.string.auth_error_rate_limited)
     is BecalmError.ServerError -> UiMessage.resource(R.string.auth_error_server)
-    is BecalmError.Validation -> UiMessage.resource(R.string.auth_error_validation)
+    is BecalmError.Validation -> if (message == "google_provider_disabled") {
+        UiMessage.resource(R.string.login_google_setup_required)
+    } else {
+        UiMessage.resource(R.string.auth_error_validation)
+    }
     is BecalmError.Io -> UiMessage.resource(R.string.auth_error_local_io)
     is BecalmError.Permission -> UiMessage.resource(R.string.auth_error_permission)
     is BecalmError.NotFound -> UiMessage.resource(R.string.auth_error_not_found)

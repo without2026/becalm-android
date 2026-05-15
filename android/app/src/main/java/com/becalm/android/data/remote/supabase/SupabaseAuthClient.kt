@@ -120,6 +120,9 @@ private const val TAG = "SupabaseAuthClient"
  * - [RestException] with status 429 → [BecalmError.RateLimited]
  * - [RestException] with status 5xx → [BecalmError.ServerError]
  * - [RestException] other → [BecalmError.Network]
+ * - Google ID-token auth provider disabled → [BecalmError.Validation] with
+ *   `message=google_provider_disabled` so the UI does not mislabel setup errors as
+ *   user network failures.
  * - [IOException] (network timeout, no connectivity) → [BecalmError.Network]
  * - Any other [Throwable] → [BecalmError.Unknown]
  */
@@ -168,7 +171,7 @@ public class SupabaseAuthClientImpl @Inject constructor(
         idToken: String,
     ): BecalmResult<SupabaseSession> = runCatchingAuth(
         tag = "signInWithGoogleIdToken",
-        restExceptionMapper = ::mapDefaultRestException,
+        restExceptionMapper = ::mapGoogleSignInRestException,
     ) {
         client.auth.signInWith(IDToken) {
             provider = Google
@@ -285,6 +288,15 @@ public class SupabaseAuthClientImpl @Inject constructor(
         400, 401, 422 -> BecalmError.Validation(field = "email", message = "signup_failed")
         else -> mapDefaultRestException(e)
     }
+
+    private fun mapGoogleSignInRestException(e: RestException): BecalmError =
+        if (e.statusCode == 400 && e.message?.contains("Provider", ignoreCase = true) == true &&
+            e.message?.contains("not enabled", ignoreCase = true) == true
+        ) {
+            BecalmError.Validation(field = "auth_provider", message = "google_provider_disabled")
+        } else {
+            mapDefaultRestException(e)
+        }
 
     private fun mapDefaultRestException(e: RestException): BecalmError = when (e.statusCode) {
         401 -> BecalmError.Unauthorized

@@ -136,7 +136,7 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
-    fun `SMG-003 error source detail exposes reconnect action and routes outlook mail to oauth reconnect`() = runTest {
+    fun `SMG-003 error source detail exposes reconnect and retry actions for backend-managed sources`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.OUTLOOK_MAIL) } returns
             flowOf(
                 SourceStatus(
@@ -159,7 +159,7 @@ class SourceDetailViewModelSpecTest {
             assertTrue(state.hasError)
             assertTrue(state.showReconnectButton)
             assertFalse(state.showDisconnectButton)
-            assertFalse(state.showManualSyncButton)
+            assertTrue(state.showManualSyncButton)
             cancelAndIgnoreRemainingEvents()
         }
 
