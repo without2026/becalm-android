@@ -3,6 +3,10 @@ package com.becalm.android.data.repository
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.UserPrefs
 import com.becalm.android.core.result.BecalmError
@@ -20,9 +24,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import java.io.IOException
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
+import kotlinx.datetime.Clock
 
 // ─── Supporting types ────────────────────────────────────────────────────────
 
@@ -189,6 +195,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     private val apiProvider: Provider<RailwayApi>,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) : SourceStatusRepository {
 
     private val api: RailwayApi
@@ -200,12 +207,14 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         api: RailwayApi,
         ioDispatcher: CoroutineDispatcher,
         logger: Logger,
+        productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     ) : this(
         cursorStore = cursorStore,
         userPrefs = userPrefs,
         apiProvider = Provider { api },
         ioDispatcher = ioDispatcher,
         logger = logger,
+        productAnalytics = productAnalytics,
     )
 
     // ─── Observation ─────────────────────────────────────────────────────────
@@ -246,6 +255,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             val response = api.getSourceStatus()
             if (!response.isSuccessful) {
                 logger.w(TAG, "refreshFromServer HTTP ${response.code()}")
+                trackStatusRefresh(success = false, sourceCount = 0, result = "http_${response.code()}")
                 return@withContext BecalmResult.Failure(
                     BecalmError.Network(response.code(), response.message()),
                 )
@@ -253,6 +263,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             val body = response.body()
             if (body == null) {
                 logger.w(TAG, "refreshFromServer null body")
+                trackStatusRefresh(success = false, sourceCount = 0, result = "null_body")
                 return@withContext BecalmResult.Failure(
                     BecalmError.Unknown(IllegalStateException("null body")),
                 )
@@ -266,13 +277,16 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 inProgress = SourceStatusPrefsKeys::inProgress,
             )
             logger.d(TAG, "refreshFromServer merged=${body.sources.size}")
+            trackStatusRefresh(success = true, sourceCount = body.sources.size, result = "success")
             BecalmResult.Success(Unit)
         } catch (e: IOException) {
             logger.w(TAG, "refreshFromServer IO error — offline fallback remains authoritative", e)
+            trackStatusRefresh(success = false, sourceCount = 0, result = "network_error")
             BecalmResult.Failure(BecalmError.Network(0, e.message ?: "IO"))
         } catch (e: Throwable) {
             e.rethrowIfCancellation()
             logger.e(TAG, "refreshFromServer unexpected failure", e)
+            trackStatusRefresh(success = false, sourceCount = 0, result = "unexpected_error")
             BecalmResult.Failure(BecalmError.Unknown(e))
         }
     }
@@ -289,6 +303,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
         }
         logger.d(TAG, "syncSuccess source=$sourceType at=$at")
+        trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_COMPLETED, sourceType, result = "success")
     }
 
     override suspend fun recordSyncError(
@@ -302,6 +317,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             prefs.remove(SourceStatusPrefsKeys.inProgress(sourceType))
         }
         logger.d(TAG, "syncError source=$sourceType error=$error at=$at")
+        trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_FAILED, sourceType, result = "error")
     }
 
     override suspend fun recordSyncStart(sourceType: String): BecalmResult<Unit> =
@@ -310,6 +326,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
                 prefs[SourceStatusPrefsKeys.inProgress(sourceType)] = true
             }
             logger.d(TAG, "syncStart source=$sourceType")
+            trackSourceSync(ProductAnalyticsEvents.SOURCE_SYNC_STARTED, sourceType, result = "started")
         }
 
     override suspend fun clear(sourceType: String): BecalmResult<Unit> =
@@ -365,5 +382,37 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         e.rethrowIfCancellation()
         logger.e(TAG, "$op source=$sourceType unexpected failure", e)
         BecalmResult.Failure(BecalmError.Unknown(e))
+    }
+
+    private fun trackStatusRefresh(success: Boolean, sourceCount: Int, result: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = if (success) {
+                    ProductAnalyticsEvents.SOURCE_STATUS_REFRESHED
+                } else {
+                    ProductAnalyticsEvents.SOURCE_STATUS_REFRESH_FAILED
+                },
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "source_count" to sourceCount,
+                    "result" to result,
+                ),
+            ),
+        )
+    }
+
+    private fun trackSourceSync(eventName: String, sourceType: String, result: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = eventName,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "source_type" to sourceType,
+                    "result" to result,
+                ),
+            ),
+        )
     }
 }

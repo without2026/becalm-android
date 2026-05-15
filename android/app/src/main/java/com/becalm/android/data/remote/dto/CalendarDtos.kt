@@ -107,4 +107,5 @@ public data class CalendarOAuthStatusResponse(
     @field:Json(name = "connected") val connected: Boolean,
     @field:Json(name = "account_email") val accountEmail: String? = null,
     @field:Json(name = "display_name") val displayName: String? = null,
+    @field:Json(name = "connections") val connections: List<SourceConnectionDto> = emptyList(),
 )

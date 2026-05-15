@@ -12,6 +12,8 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
@@ -206,6 +208,8 @@ public class OnboardingViewModel @Inject constructor(
     private val calendarOAuthConnector: CalendarOAuthConnector,
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val sourceConnectionRepository: SourceConnectionRepository,
+    private val selfIdentityRepository: SelfIdentityRepository,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
@@ -526,6 +530,7 @@ public class OnboardingViewModel @Inject constructor(
         onMarkStepStatus(provider.step, StepStatus.COMPLETE)
         appRuntimeSyncCoordinator.refresh()
         refreshSourceStatusAfterBackendSync(provider.sourceType)
+        refreshIdentityMirrorsAfterBackendSync(provider.sourceType)
         _calendarConnectEvents.emit(CalendarConnectEvent.Connected(provider))
     }
 
@@ -698,6 +703,7 @@ public class OnboardingViewModel @Inject constructor(
         onMarkStepStatus(oauthProvider.step, StepStatus.COMPLETE)
         appRuntimeSyncCoordinator.refresh()
         refreshSourceStatusAfterBackendSync(oauthProvider.sourceType)
+        refreshIdentityMirrorsAfterBackendSync(oauthProvider.sourceType)
         observability.captureMessage(
             message = "onboarding_email_connected",
             tags = mapOf("provider" to provider.storageKey, "owner" to "backend"),
@@ -712,6 +718,20 @@ public class OnboardingViewModel @Inject constructor(
                 logger.w(TAG, "source_status refresh failed after OAuth connect sourceType=$sourceType")
                 sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
             }
+        }
+    }
+
+    private suspend fun refreshIdentityMirrorsAfterBackendSync(sourceType: String) {
+        val userId = userPrefsStore.observeCurrentUserId().first()
+        if (userId.isNullOrBlank()) {
+            logger.w(TAG, "identity mirror refresh skipped without current user sourceType=$sourceType")
+            return
+        }
+        if (sourceConnectionRepository.refresh(userId) is BecalmResult.Failure) {
+            logger.w(TAG, "source_connections refresh failed after OAuth connect sourceType=$sourceType")
+        }
+        if (selfIdentityRepository.refresh(userId) is BecalmResult.Failure) {
+            logger.w(TAG, "self_identity_anchors refresh failed after OAuth connect sourceType=$sourceType")
         }
     }
 

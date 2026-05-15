@@ -6,12 +6,14 @@ import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.work.Data
 import androidx.work.ListenableWorker
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.ScheduleStatus
 import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceType
@@ -19,6 +21,7 @@ import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.remote.dto.SourceExtractedItemType
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -64,6 +67,7 @@ class AiPersonPipelineLocalIntegrationTest {
     private val parsedUri: Uri = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceExtractionApi: SourceExtractionApi = mockk()
+    private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
@@ -82,6 +86,10 @@ class AiPersonPipelineLocalIntegrationTest {
         every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
         every { userPrefsStore.observeBlockedPersonRefs() } returns flowOf(emptySet())
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionRepository.uploadBatch(any()) } returns BecalmResult.Success(
+            BatchUploadResponse(acknowledged = 1, failed = emptyList()),
+        )
+        coEvery { rawIngestionRepository.markSynced(any()) } returns BecalmResult.Success(Unit)
 
         mockkStatic(ContextCompat::class)
         mockkStatic(Uri::class)
@@ -181,7 +189,9 @@ class AiPersonPipelineLocalIntegrationTest {
             rawIngestionEventDao = db.rawIngestionEventDao(),
             commitmentDao = db.commitmentDao(),
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             sourceExtractionApi = sourceExtractionApi,
+            rawIngestionRepository = rawIngestionRepository,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,

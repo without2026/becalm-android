@@ -5,6 +5,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import kotlinx.coroutines.CoroutineDispatcher
@@ -24,6 +25,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private val contentObserverBootstrap: ContentObserverBootstrap,
     private val workScheduler: WorkScheduler,
     private val userPrefsStore: UserPrefsStore,
+    private val personIndexDao: PersonIndexDao,
     private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver,
     private val contactsPermissionChecker: ContactsPermissionChecker,
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker,
@@ -36,6 +38,7 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private var scheduledPeriodicSources: Set<String> = emptySet()
     private var backendMailScheduled: Boolean = false
     private var commonRecurringWorkScheduled: Boolean = false
+    private var sourceParticipantMirrorRetryScheduledForUser: String? = null
 
     public fun start() {
         registerForegroundCatchUp()
@@ -81,17 +84,19 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     }
 
     private suspend fun refreshNow() {
-        if (hasSignedInUser()) {
-            scheduleAuthenticatedRecurringWork()
+        val currentUserId = currentUserId()
+        if (currentUserId != null) {
+            scheduleAuthenticatedRecurringWork(currentUserId)
         } else {
             scheduledPeriodicSources = emptySet()
             backendMailScheduled = false
             commonRecurringWorkScheduled = false
+            sourceParticipantMirrorRetryScheduledForUser = null
         }
-        refreshPermissionManagedRegistrations()
+        refreshPermissionManagedRegistrations(currentUserId)
     }
 
-    private suspend fun scheduleAuthenticatedRecurringWork() {
+    private suspend fun scheduleAuthenticatedRecurringWork(userId: String) {
         val periodicSources = runtimeSyncSourceResolver.periodicSources()
         val newlyEnabledPeriodicSources = periodicSources - scheduledPeriodicSources
         newlyEnabledPeriodicSources.forEach(workScheduler::enqueuePeriodic)
@@ -114,10 +119,24 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             workScheduler.scheduleOverdueSweep()
             commonRecurringWorkScheduled = true
         }
+        enqueuePendingSourceParticipantMirrorsIfNeeded(userId)
     }
 
-    private suspend fun refreshPermissionManagedRegistrations() {
-        if (!hasSignedInUser()) {
+    private suspend fun enqueuePendingSourceParticipantMirrorsIfNeeded(userId: String) {
+        if (sourceParticipantMirrorRetryScheduledForUser == userId) return
+        val hasPendingMirror = personIndexDao.findPendingSourceParticipantMirrors(
+            userId = userId,
+            limit = 1,
+        ).isNotEmpty()
+        if (hasPendingMirror) {
+            workScheduler.enqueueSourceParticipantMirrorRetry()
+            sourceParticipantMirrorRetryScheduledForUser = userId
+            logger.d(TAG, "pending source participant mirror retry scheduled")
+        }
+    }
+
+    private suspend fun refreshPermissionManagedRegistrations(currentUserId: String?) {
+        if (currentUserId == null) {
             contentObserverBootstrap.stop()
             logger.d(TAG, "runtime sync disabled — no signed-in user")
             return
@@ -148,8 +167,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun hasSignedInUser(): Boolean =
-        !userPrefsStore.observeCurrentUserId().first().isNullOrBlank()
+    private suspend fun currentUserId(): String? =
+        userPrefsStore.observeCurrentUserId().first()?.takeUnless { it.isBlank() }
 
     private companion object {
         private const val TAG = "AppRuntimeSync"

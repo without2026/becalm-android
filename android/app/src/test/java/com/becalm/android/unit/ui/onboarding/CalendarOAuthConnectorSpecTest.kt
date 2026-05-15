@@ -1,5 +1,8 @@
 package com.becalm.android.unit.ui.onboarding
 
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.CalendarOAuthStatusResponse
@@ -21,10 +24,12 @@ class CalendarOAuthConnectorSpecTest {
 
     private val api: RailwayApi = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val productAnalytics = RecordingProductAnalyticsClient()
     private val connector = CalendarOAuthConnector(
         railwayApiProvider = Provider { api },
         moshi = Moshi.Builder().build(),
         logger = logger,
+        productAnalytics = productAnalytics,
     )
 
     @Test
@@ -43,5 +48,23 @@ class CalendarOAuthConnectorSpecTest {
         assertEquals(CalendarOAuthResult.Connected, result)
         coVerify(exactly = 1) { api.getCalendarOAuthStatus(SourceType.GOOGLE_CALENDAR) }
         coVerify(exactly = 0) { api.syncCalendarEvents() }
+        val statusEvent = productAnalytics.events.single {
+            it.eventName == ProductAnalyticsEvents.SOURCE_OAUTH_STATUS_CHECKED
+        }
+        assertEquals(SourceType.GOOGLE_CALENDAR, statusEvent.properties["source_type"])
+        assertEquals(true, statusEvent.properties["connected"])
+        assertEquals(false, statusEvent.properties.containsKey("account_email"))
+    }
+
+    private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
+        val events: MutableList<ProductAnalyticsEvent> = mutableListOf()
+
+        override fun track(event: ProductAnalyticsEvent) {
+            events += event
+        }
+
+        override fun setUserScope(userId: String?) = Unit
+
+        override fun resetUserScope() = Unit
     }
 }

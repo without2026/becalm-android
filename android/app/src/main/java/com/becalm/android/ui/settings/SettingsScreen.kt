@@ -86,6 +86,7 @@ public fun SettingsScreen(
     onTogglePipaConsent: ((Boolean) -> Unit)? = null,
     onToggleCallLogMatchingConsent: ((Boolean) -> Unit)? = null,
     onCallLogPermissionDenied: (() -> Unit)? = null,
+    onOpenIdentity: (() -> Unit)? = null,
     onOpenSources: (() -> Unit)? = null,
     onOpenProcessingStatus: (() -> Unit)? = null,
     onOpenPrivacy: (() -> Unit)? = null,
@@ -246,6 +247,7 @@ public fun SettingsScreen(
             if (wantsEnabled) showCallLogEnableDialog = true
             else toggleCallLogMatching(false)
         },
+        onIdentityClick = onOpenIdentity ?: { navController.navigate(BecalmRoute.SettingsIdentity.path) },
         onSourcesClick = onOpenSources ?: { navController.navigate(BecalmRoute.SettingsSources.path) },
         onProcessingStatusClick = onOpenProcessingStatus ?: { navController.navigate(BecalmRoute.ProcessingStatus.path) },
         onPrivacyClick = onOpenPrivacy ?: { navController.navigate(BecalmRoute.PrivacyManagement.path) },
@@ -264,6 +266,7 @@ public fun SettingsScreenContent(
     onTogglePipa: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onToggleCallLogMatching: (Boolean) -> Unit = {},
+    onIdentityClick: () -> Unit = {},
     onSourcesClick: () -> Unit,
     onProcessingStatusClick: () -> Unit = {},
     onPrivacyClick: () -> Unit,
@@ -308,6 +311,7 @@ public fun SettingsScreenContent(
                 }
                 SettingsAccountSection(
                     userEmail = state.userEmail,
+                    onIdentityClick = onIdentityClick,
                     onSignOutClick = onRequestSignOut,
                 )
 

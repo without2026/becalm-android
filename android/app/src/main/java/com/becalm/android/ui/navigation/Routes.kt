@@ -253,6 +253,9 @@ public sealed class BecalmRoute(public val path: String) {
     /** Settings root — accessed via top-right icon on TodayTimelineScreen. */
     public data object Settings : BecalmRoute("settings")
 
+    /** Settings profile surface for the user's own identity and source ownership anchors. */
+    public data object SettingsIdentity : BecalmRoute("settings/identity")
+
     /** PIPA rights execution hub under Settings. */
     public data object PrivacyManagement : BecalmRoute("settings/privacy")
 

@@ -167,6 +167,7 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.OUTLOOK_CAL,
         UniqueWorkKeys.BACKEND_MAIL,
         UniqueWorkKeys.PERSON_INDEX,
+        UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR,
         UniqueWorkKeys.ENRICHMENT,
         UniqueWorkKeys.UPLOAD,
         UniqueWorkKeys.UPLOAD_PERIODIC,
@@ -234,6 +235,28 @@ internal object WorkSchedulerRequests {
             policy = ExistingWorkPolicy.REPLACE,
             request = personIndexRequest(initialDelaySeconds.coerceAtLeast(0L)),
             logMessage = "enqueuePersonInteractionIndex key=${UniqueWorkKeys.PERSON_INDEX} delaySec=$initialDelaySeconds",
+        )
+
+    fun sourceParticipantMirrorRequest(initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(SourceParticipantMirrorWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun sourceParticipantMirrorPlan(initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR,
+            policy = ExistingWorkPolicy.REPLACE,
+            request = sourceParticipantMirrorRequest(initialDelaySeconds.coerceAtLeast(0L)),
+            logMessage = "enqueueSourceParticipantMirrorRetry key=${UniqueWorkKeys.SOURCE_PARTICIPANT_MIRROR} delaySec=$initialDelaySeconds",
         )
 
     fun profileMemoryRequest(personId: String, initialDelaySeconds: Long): OneTimeWorkRequest {

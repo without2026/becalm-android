@@ -370,6 +370,53 @@ public data class PersonIndexDirtySourceEntity(
     val updatedAt: Instant,
 )
 
+@Entity(
+    tableName = "pending_source_participant_mirrors",
+    indices = [
+        Index(
+            name = "idx_pending_source_participant_mirrors_user_updated",
+            value = ["user_id", "updated_at"],
+        ),
+    ],
+)
+public data class PendingSourceParticipantMirrorEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "participant_id")
+    val participantId: String,
+    @ColumnInfo(name = "user_id")
+    val userId: String,
+    @ColumnInfo(name = "person_id")
+    val personId: String?,
+    @ColumnInfo(name = "identity_type")
+    val identityType: String?,
+    @ColumnInfo(name = "normalized_value")
+    val normalizedValue: String?,
+    @ColumnInfo(name = "display_name_raw")
+    val displayNameRaw: String?,
+    @ColumnInfo(name = "email_raw")
+    val emailRaw: String?,
+    @ColumnInfo(name = "phone_raw")
+    val phoneRaw: String?,
+    @ColumnInfo(name = "organization_raw")
+    val organizationRaw: String?,
+    @ColumnInfo(name = "title_raw")
+    val titleRaw: String?,
+    @ColumnInfo(name = "confidence")
+    val confidence: Double?,
+    @ColumnInfo(name = "relation_to_user")
+    val relationToUser: String?,
+    @ColumnInfo(name = "resolution_status")
+    val resolutionStatus: String,
+    @ColumnInfo(name = "retry_count")
+    val retryCount: Int = 0,
+    @ColumnInfo(name = "last_error")
+    val lastError: String? = null,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Instant,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Instant,
+)
+
 /**
  * Room-only semantic projection generated from the same structured input as person memory.
  *

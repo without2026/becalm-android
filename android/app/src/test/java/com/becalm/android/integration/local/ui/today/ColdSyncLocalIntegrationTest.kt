@@ -190,6 +190,7 @@ class ColdSyncLocalIntegrationTest {
         override fun scheduleBackendMailSync() = Unit
         override fun enqueueEnrichment() = Unit
         override fun enqueuePersonInteractionIndex(initialDelaySeconds: Long) = Unit
+        override fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long) = Unit
         override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) = Unit
         override fun scheduleEnrichmentSweep() = Unit
         override fun cancelEnrichmentSweep() = Unit

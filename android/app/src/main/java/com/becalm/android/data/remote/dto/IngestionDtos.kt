@@ -206,6 +206,26 @@ public data class SourceEventParticipantsResponse(
     @field:Json(name = "has_more") val hasMore: Boolean,
 )
 
+@JsonClass(generateAdapter = true)
+public data class SourceEventParticipantPatchRequestDto(
+    @field:Json(name = "person_id") val personId: String? = null,
+    @field:Json(name = "identity_type") val identityType: String? = null,
+    @field:Json(name = "normalized_value") val normalizedValue: String? = null,
+    @field:Json(name = "display_name_raw") val displayNameRaw: String? = null,
+    @field:Json(name = "email_raw") val emailRaw: String? = null,
+    @field:Json(name = "phone_raw") val phoneRaw: String? = null,
+    @field:Json(name = "organization_raw") val organizationRaw: String? = null,
+    @field:Json(name = "title_raw") val titleRaw: String? = null,
+    @field:Json(name = "confidence") val confidence: Double? = null,
+    @field:Json(name = "relation_to_user") val relationToUser: String? = null,
+    @field:Json(name = "resolution_status") val resolutionStatus: String,
+)
+
+@JsonClass(generateAdapter = true)
+public data class SourceEventParticipantResponse(
+    @field:Json(name = "data") val data: SourceEventParticipantDto,
+)
+
 /**
  * Commitment-person edge emitted by backend relation intelligence.
  *

@@ -4,6 +4,10 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.remote.api.RailwayApi
@@ -11,9 +15,11 @@ import com.becalm.android.data.remote.dto.ErrorEnvelopeDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.squareup.moshi.Moshi
 import java.io.IOException
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
+import kotlinx.datetime.Clock
 
 /**
  * Thin production seam for backend-managed mail OAuth launches.
@@ -23,6 +29,7 @@ public class EmailOAuthConnector @Inject constructor(
     private val railwayApiProvider: Provider<RailwayApi>,
     private val moshi: Moshi,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) {
 
     private val railwayApi: RailwayApi
@@ -33,6 +40,11 @@ public class EmailOAuthConnector @Inject constructor(
         activity: Activity,
     ): EmailOAuthResult {
         logger.i(TAG, "mail OAuth start request provider=${provider.sourceType}")
+        trackOAuthEvent(
+            eventName = ProductAnalyticsEvents.SOURCE_OAUTH_STARTED,
+            provider = provider.sourceType,
+            phase = "start",
+        )
         val startResponse = try {
             railwayApi.startMailOAuth(provider.sourceType)
         } catch (e: IOException) {
@@ -56,10 +68,16 @@ public class EmailOAuthConnector @Inject constructor(
         try {
             activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizationUrl)))
         } catch (_: ActivityNotFoundException) {
+            trackOAuthStatus(provider.sourceType, phase = "browser_open", connected = false, result = "browser_unavailable")
             return EmailOAuthResult.Failed(errorCode = "browser_unavailable")
         }
 
         logger.i(TAG, "mail OAuth browser launched provider=${provider.sourceType}")
+        trackOAuthEvent(
+            eventName = ProductAnalyticsEvents.SOURCE_OAUTH_BROWSER_OPENED,
+            provider = provider.sourceType,
+            phase = "browser_open",
+        )
         return EmailOAuthResult.NotConnected
     }
 
@@ -76,6 +94,7 @@ public class EmailOAuthConnector @Inject constructor(
             railwayApi.getMailOAuthStatus(provider.sourceType)
         } catch (e: IOException) {
             logger.w(TAG, "mail OAuth status network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
+            trackOAuthStatus(provider.sourceType, phase = "status", connected = false, result = "network_error")
             return EmailOAuthResult.Failed(errorCode = "network_error")
         }
         logger.i(
@@ -83,13 +102,57 @@ public class EmailOAuthConnector @Inject constructor(
             "mail OAuth status response provider=${provider.sourceType} code=${statusResponse.code()} success=${statusResponse.isSuccessful}",
         )
         if (!statusResponse.isSuccessful) {
-            return EmailOAuthResult.Failed(errorCode = parseErrorCode(statusResponse.errorBody()?.string()))
+            val errorCode = parseErrorCode(statusResponse.errorBody()?.string())
+            trackOAuthStatus(provider.sourceType, phase = "status", connected = false, result = errorCode)
+            return EmailOAuthResult.Failed(errorCode = errorCode)
         }
-        val statusBody = statusResponse.body() ?: return EmailOAuthResult.Failed(errorCode = "oauth_status_empty")
+        val statusBody = statusResponse.body()
+            ?: run {
+                trackOAuthStatus(provider.sourceType, phase = "status", connected = false, result = "oauth_status_empty")
+                return EmailOAuthResult.Failed(errorCode = "oauth_status_empty")
+            }
         logger.i(TAG, "mail OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
+        trackOAuthStatus(
+            provider = provider.sourceType,
+            phase = "status",
+            connected = statusBody.connected,
+            result = if (statusBody.connected) "connected" else "not_connected",
+        )
         if (!statusBody.connected) return EmailOAuthResult.NotConnected
 
         return EmailOAuthResult.Connected
+    }
+
+    private fun trackOAuthEvent(eventName: String, provider: String, phase: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = eventName,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "source_type" to provider,
+                    "provider_family" to "mail",
+                    "phase" to phase,
+                ),
+            ),
+        )
+    }
+
+    private fun trackOAuthStatus(provider: String, phase: String, connected: Boolean, result: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.SOURCE_OAUTH_STATUS_CHECKED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "source_type" to provider,
+                    "provider_family" to "mail",
+                    "phase" to phase,
+                    "connected" to connected,
+                    "result" to result,
+                ),
+            ),
+        )
     }
 
     private fun parseErrorCode(rawBody: String?): String {

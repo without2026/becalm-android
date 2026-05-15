@@ -1,15 +1,19 @@
 package com.becalm.android.worker
 
 import androidx.work.ListenableWorker
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.squareup.moshi.Moshi
@@ -20,7 +24,9 @@ internal class LocalSourceExtractionDelegate(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val commitmentDao: CommitmentDao,
     private val personIndexDao: PersonIndexDao,
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val sourceExtractionApi: SourceExtractionApi,
+    private val rawIngestionRepository: RawIngestionRepository,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -30,6 +36,7 @@ internal class LocalSourceExtractionDelegate(
     private val tag: String,
     private val runAttemptCount: Int,
     private val maxAttempts: Int,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) {
     suspend fun loadContext(rawEventId: String): LocalSourceExtractionLoadResult {
         val userId = userPrefsStore.observeCurrentUserId().first()
@@ -67,6 +74,7 @@ internal class LocalSourceExtractionDelegate(
     fun uploadRunner(): SourceExtractionUploadRunner =
         SourceExtractionUploadRunner(
             sourceExtractionApi = sourceExtractionApi,
+            rawIngestionRepository = rawIngestionRepository,
             sourceExtractionInputAdapter = SourceExtractionInputAdapter(),
             extractionPersister = StructuredExtractionPersister(
                 rawIngestionEventDao = rawIngestionEventDao,
@@ -76,6 +84,7 @@ internal class LocalSourceExtractionDelegate(
                 processingStatusRepository = processingStatusRepository,
                 workScheduler = workScheduler,
                 logger = logger,
+                selfIdentityAnchorDao = selfIdentityAnchorDao,
             ),
             processingStatusRepository = processingStatusRepository,
             moshi = moshi,
@@ -83,6 +92,7 @@ internal class LocalSourceExtractionDelegate(
             tag = tag,
             runAttemptCount = runAttemptCount,
             maxAttempts = maxAttempts,
+            productAnalytics = productAnalytics,
         )
 
     private companion object {

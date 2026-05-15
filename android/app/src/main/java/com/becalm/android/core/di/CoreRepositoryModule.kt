@@ -14,6 +14,10 @@ import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.RawIngestionRepositoryImpl
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepositoryImpl
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SelfIdentityRepositoryImpl
+import com.becalm.android.data.repository.SourceConnectionRepository
+import com.becalm.android.data.repository.SourceConnectionRepositoryImpl
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepositoryImpl
 import com.becalm.android.data.repository.SourceArtifactRepository
@@ -63,6 +67,18 @@ public abstract class CoreRepositoryModule {
     public abstract fun bindScheduleEventLinkRepository(
         impl: ScheduleEventLinkRepositoryImpl,
     ): ScheduleEventLinkRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindSelfIdentityRepository(
+        impl: SelfIdentityRepositoryImpl,
+    ): SelfIdentityRepository
+
+    @Binds
+    @Singleton
+    public abstract fun bindSourceConnectionRepository(
+        impl: SourceConnectionRepositoryImpl,
+    ): SourceConnectionRepository
 
     @Binds
     @Singleton

@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasText
@@ -23,8 +24,12 @@ import com.becalm.android.ui.settings.ProcessingStatusRow
 import com.becalm.android.ui.settings.ProcessingStatusUiState
 import com.becalm.android.ui.settings.PrivacyManagementScreenContent
 import com.becalm.android.ui.settings.PrivacyManagementUiState
+import com.becalm.android.ui.settings.SelfIdentityAnchorUi
+import com.becalm.android.ui.settings.SettingsIdentityContent
+import com.becalm.android.ui.settings.SettingsIdentityUiState
 import com.becalm.android.ui.settings.SettingsScreenContent
 import com.becalm.android.ui.settings.SettingsUiState
+import com.becalm.android.ui.settings.SourceConnectionOwnershipUi
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -45,6 +50,7 @@ class SettingsUiTest {
         var sourcesClicks = 0
         var processingClicks = 0
         var privacyClicks = 0
+        var identityClicks = 0
         var wipeClicks = 0
 
         composeRule.setContent {
@@ -59,6 +65,7 @@ class SettingsUiTest {
                     onBack = {},
                     onToggleNotifications = {},
                     onTogglePipa = {},
+                    onIdentityClick = { identityClicks += 1 },
                     onSourcesClick = { sourcesClicks += 1 },
                     onProcessingStatusClick = { processingClicks += 1 },
                     onPrivacyClick = { privacyClicks += 1 },
@@ -70,12 +77,14 @@ class SettingsUiTest {
 
         composeRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.settings_sign_out_pipa_note)).assertIsDisplayed()
+        composeRule.onNodeWithTag("settings-identity-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-sources-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-processing-status-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-privacy-row").performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithTag("settings-wipe-button").performSemanticsAction(SemanticsActions.OnClick)
 
         composeRule.runOnIdle {
+            assertEquals(1, identityClicks)
             assertEquals(1, sourcesClicks)
             assertEquals(1, processingClicks)
             assertEquals(1, privacyClicks)
@@ -110,6 +119,79 @@ class SettingsUiTest {
 
         composeRule.runOnIdle {
             assertEquals(true, pipaToggle)
+        }
+    }
+
+    @Test
+    fun `identity content exposes profile anchors and source ownership actions`() {
+        var saveClicks = 0
+        var addAnchorClicks = 0
+        var archivedAnchor: String? = null
+        var ownershipChange: Pair<String, String>? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                SettingsIdentityContent(
+                    state = SettingsIdentityUiState(
+                        loading = false,
+                        displayName = "민홍",
+                        phone = "+821012345678",
+                        anchors = listOf(
+                            SelfIdentityAnchorUi(
+                                id = "anchor-1",
+                                type = "email",
+                                value = "me@example.com",
+                                status = "active",
+                                trust = "user_confirmed",
+                            ),
+                            SelfIdentityAnchorUi(
+                                id = "anchor-speaker",
+                                type = "speaker_label",
+                                value = "SPEAKER_01",
+                                status = "active",
+                                trust = "user_confirmed",
+                                scope = "source_event",
+                            ),
+                        ),
+                        connections = listOf(
+                            SourceConnectionOwnershipUi(
+                                id = "conn-1",
+                                title = "Gmail",
+                                accountLabel = "work@example.com",
+                                ownership = "unknown",
+                                status = "connected",
+                            ),
+                        ),
+                    ),
+                    onDisplayNameChange = {},
+                    onPhoneChange = {},
+                    onSaveProfile = { saveClicks += 1 },
+                    onAnchorTypeChange = {},
+                    onAnchorValueChange = {},
+                    onAddAnchor = { addAnchorClicks += 1 },
+                    onArchiveAnchor = { archivedAnchor = it },
+                    onSetConnectionOwnership = { id, ownership -> ownershipChange = id to ownership },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("settings-identity-save").performClick()
+        composeRule.onNodeWithTag("settings-identity-list")
+            .performScrollToNode(hasTestTag("settings-identity-anchor-add"))
+        composeRule.onNodeWithTag("settings-identity-anchor-add").performClick()
+        composeRule.onNodeWithTag("settings-identity-list")
+            .performScrollToNode(hasTestTag("settings-identity-anchor-archive"))
+        composeRule.onNodeWithTag("settings-identity-anchor-archive").performClick()
+        composeRule.onAllNodesWithText("SPEAKER_01").assertCountEquals(0)
+        composeRule.onNodeWithTag("settings-identity-list")
+            .performScrollToNode(hasText("Gmail"))
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_self)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, saveClicks)
+            assertEquals(1, addAnchorClicks)
+            assertEquals("anchor-1", archivedAnchor)
+            assertEquals("conn-1" to "self", ownershipChange)
         }
     }
 

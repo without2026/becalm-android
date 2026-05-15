@@ -8,7 +8,10 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
+import com.becalm.android.data.repository.MeetingSpeakerReviewContext
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -40,6 +43,7 @@ class MeetingImportRepositorySpecTest {
     private val resolver: ContentResolver = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
 
     private val sourceUri = Uri.parse("content://picked/standup")
@@ -118,6 +122,43 @@ class MeetingImportRepositorySpecTest {
     }
 
     @Test
+    fun `meeting audio import stores confirmed self speaker as source-event scoped self anchor`() = runTest {
+        val eventSlot = slot<RawIngestionEventEntity>()
+        val anchorSlot = slot<SelfIdentityAnchorEntity>()
+        val reviewContext = MeetingSpeakerReviewContext(
+            selfSpeakerId = "SPEAKER_01",
+            speakerMappingsJson = """[{"speaker_id":"SPEAKER_01","relation_to_user":"self"}]""",
+            speakerPreviewId = "preview-1",
+        )
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        io.mockk.coEvery { rawIngestionRepository.insertLocal(capture(eventSlot)) } answers {
+            BecalmResult.Success(eventSlot.captured.id)
+        }
+        io.mockk.coEvery { selfIdentityAnchorDao.upsert(capture(anchorSlot)) } returns 1L
+
+        val result = repository().importAudio(sourceUri, reviewContext)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals("speaker_label", anchorSlot.captured.anchorType)
+        assertEquals("speaker_01", anchorSlot.captured.normalizedValue)
+        assertEquals("SPEAKER_01", anchorSlot.captured.displayValue)
+        assertEquals("meeting_review", anchorSlot.captured.source)
+        assertEquals("source_event", anchorSlot.captured.scope)
+        assertEquals(eventSlot.captured.id, anchorSlot.captured.sourceEventId)
+        assertEquals("user_confirmed", anchorSlot.captured.trust)
+        assertEquals("active", anchorSlot.captured.status)
+        verify(exactly = 1) {
+            workScheduler.enqueueVoiceUpload(
+                eventSlot.captured.id,
+                targetUri.toString(),
+                "SPEAKER_01",
+                reviewContext.speakerMappingsJson,
+                "preview-1",
+            )
+        }
+    }
+
+    @Test
     // spec: MTG-006
     fun `meeting audio import parks awaiting consent and does not enqueue upload`() = runTest {
         val eventSlot = slot<RawIngestionEventEntity>()
@@ -138,6 +179,7 @@ class MeetingImportRepositorySpecTest {
             context = context,
             userPrefsStore = userPrefsStore,
             rawIngestionRepository = rawIngestionRepository,
+            selfIdentityAnchorDao = selfIdentityAnchorDao,
             workScheduler = workScheduler,
             ioDispatcher = Dispatchers.IO,
         )

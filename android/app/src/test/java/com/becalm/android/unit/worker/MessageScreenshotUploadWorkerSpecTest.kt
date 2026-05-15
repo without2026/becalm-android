@@ -11,15 +11,20 @@ import androidx.work.WorkerParameters
 import androidx.work.impl.utils.futures.SettableFuture
 import androidx.work.impl.utils.taskexecutor.TaskExecutor
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.MessageScreenshotUploadWorker
 import com.becalm.android.worker.ProcessingPauseGate
@@ -27,6 +32,7 @@ import com.becalm.android.worker.WorkScheduler
 import com.squareup.moshi.Moshi
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
@@ -53,7 +59,9 @@ class MessageScreenshotUploadWorkerSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao = mockk(relaxed = true)
     private val sourceExtractionApi: SourceExtractionApi = mockk()
+    private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -96,6 +104,10 @@ class MessageScreenshotUploadWorkerSpecTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         coEvery { rawIngestionEventDao.findById(RAW_ID, USER_ID) } returns entity
         coEvery { rawIngestionEventDao.update(any()) } returns 1
+        coEvery { rawIngestionRepository.uploadBatch(listOf(entity)) } returns BecalmResult.Success(
+            BatchUploadResponse(acknowledged = 1, failed = emptyList()),
+        )
+        coEvery { rawIngestionRepository.markSynced(listOf(RAW_ID)) } returns BecalmResult.Success(Unit)
         coEvery {
             sourceExtractionApi.commitmentExtract(
                 audio = null,
@@ -131,7 +143,40 @@ class MessageScreenshotUploadWorkerSpecTest {
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals("image/jpeg", imageSlot.captured.body.contentType().toString())
         coVerify(exactly = 1) { sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any()) }
+        coVerifyOrder {
+            rawIngestionRepository.uploadBatch(listOf(entity))
+            rawIngestionRepository.markSynced(listOf(RAW_ID))
+            sourceExtractionApi.commitmentExtract(audio = null, image = any(), inputModality = any(), sourceType = any(), clientEventId = any(), rawEventId = any(), durationSeconds = any(), timestamp = any(), counterpartyRef = any(), eventTitle = any(), folder = any(), conversationRef = any(), previousThreadContext = any(), selfSpeakerId = any(), speakerMappings = any(), speakerPreviewId = any())
+        }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `message screenshot worker does not extract when source event pre upload fails`() = runTest {
+        val image = temp.newFile("normalized-kakao-thread.jpg").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val entity = RawIngestionEventEntity(
+            id = RAW_ID,
+            userId = USER_ID,
+            clientEventId = "client-shot-1",
+            sourceType = SourceType.MESSAGE_SCREENSHOT,
+            sourceRef = Uri.fromFile(image).toString(),
+            eventTitle = "kakao-thread.png",
+            timestamp = Instant.parse("2026-05-08T01:00:00Z"),
+            syncStatus = "pending",
+        )
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf(USER_ID)
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionEventDao.findById(RAW_ID, USER_ID) } returns entity
+        coEvery { rawIngestionRepository.uploadBatch(listOf(entity)) } returns BecalmResult.Failure(
+            BecalmError.Network(503, "offline"),
+        )
+
+        val result = buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        coVerify(exactly = 1) { rawIngestionRepository.uploadBatch(listOf(entity)) }
+        coVerify(exactly = 0) { sourceExtractionApi.commitmentExtract(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     private fun buildWorker(): MessageScreenshotUploadWorker =
@@ -141,7 +186,9 @@ class MessageScreenshotUploadWorkerSpecTest {
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
+            selfIdentityAnchorDao = selfIdentityAnchorDao,
             sourceExtractionApi = sourceExtractionApi,
+            rawIngestionRepository = rawIngestionRepository,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,

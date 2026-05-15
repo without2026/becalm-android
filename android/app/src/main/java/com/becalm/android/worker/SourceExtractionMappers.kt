@@ -4,12 +4,15 @@ import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonIdentityTypes
 import kotlinx.datetime.Instant
+import java.util.Locale
 import java.util.UUID
 
 // 파일 분리 시 sync_status 리터럴 문자열을 재사용하기 위해 mapper 파일로 이동.
@@ -61,9 +64,11 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     sourceRef: String?,
     index: Int,
     now: Instant,
+    selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): SourceEventParticipantEntity {
     val anchor = email ?: phone
-    val resolved = PersonIdentityResolver.resolve(userId, anchor)
+    val selfMatch = matchesSelfIdentityAnchor(selfIdentityAnchors)
+    val resolved = if (selfMatch) null else PersonIdentityResolver.resolve(userId, anchor)
     val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
     val participantAnchor = anchor ?: normalizedValue ?: displayName ?: organization ?: rawValue
     val participantId = UUID.nameUUIDFromBytes(
@@ -77,7 +82,11 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         sourceRef = sourceRef,
         personId = resolved?.personId,
         role = role,
-        relationToUser = relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role),
+        relationToUser = if (selfMatch) {
+            "self"
+        } else {
+            relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role)
+        },
         identityType = identityType ?: resolved?.identityType,
         normalizedValue = normalized ?: displayName ?: organization ?: rawValue,
         displayNameRaw = displayName,
@@ -87,7 +96,11 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         titleRaw = title,
         evidence = evidence,
         confidence = confidence.coerceIn(0.0, 1.0),
-        resolutionStatus = if (resolved == null) "unresolved" else "resolved",
+        resolutionStatus = when {
+            selfMatch -> "self_resolved"
+            resolved == null -> "unresolved"
+            else -> "resolved"
+        },
         createdAt = now,
     )
 }
@@ -97,7 +110,9 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
     index: Int,
     fallbackPersonId: String? = null,
     now: Instant,
+    selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): CommitmentParticipantEntity? {
+    if (counterpartyRef.matchesSelfIdentityAnchor(selfIdentityAnchors)) return null
     val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef)
     val personId = resolved?.personId ?: fallbackPersonId ?: return null
     val participantId = UUID.nameUUIDFromBytes(
@@ -135,6 +150,7 @@ internal fun List<SourceEventParticipantEntity>.singleSourceCounterpartyPersonId
 }
 
 private val RELATION_TO_USER_VALUES = setOf("self", "counterparty", "participant", "referenced", "unknown")
+private val STRONG_SELF_EMAIL_TYPES = setOf("auth_email", "provider_email", "email")
 
 private fun relationToUserForRole(role: String): String =
     when (role.lowercase()) {
@@ -143,3 +159,84 @@ private fun relationToUserForRole(role: String): String =
         "self" -> "self"
         else -> "referenced"
     }
+
+private fun SourceExtractedParticipantDto.matchesSelfIdentityAnchor(
+    anchors: List<SelfIdentityAnchorEntity>,
+): Boolean =
+    anchors.any { anchor ->
+        when (anchor.anchorType) {
+            in STRONG_SELF_EMAIL_TYPES ->
+                participantEmails().any { value ->
+                    normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
+                }
+
+            "phone" ->
+                participantPhones().any { value ->
+                    normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
+                }
+
+            "alias" ->
+                participantAliases().any { value ->
+                    normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
+                }
+
+            PersonIdentityTypes.SPEAKER_LABEL ->
+                participantSpeakerLabels().any { value ->
+                    normalizedEquals(value, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
+                }
+
+            else -> false
+        }
+    }
+
+private fun SourceExtractedParticipantDto.participantEmails(): List<String?> =
+    listOf(email, normalizedValue.takeIf { identityType == "email" }, rawValue.takeIf { identityType == "email" })
+
+private fun SourceExtractedParticipantDto.participantPhones(): List<String?> =
+    listOf(phone, normalizedValue.takeIf { identityType == "phone" }, rawValue.takeIf { identityType == "phone" })
+
+private fun SourceExtractedParticipantDto.participantAliases(): List<String?> =
+    listOf(displayName, normalizedValue.takeIf { identityType == "name" }, rawValue.takeIf { identityType == "name" })
+
+private fun SourceExtractedParticipantDto.participantSpeakerLabels(): List<String?> =
+    listOf(
+        normalizedValue.takeIf { identityType == PersonIdentityTypes.SPEAKER_LABEL },
+        rawValue.takeIf { identityType == PersonIdentityTypes.SPEAKER_LABEL },
+        displayName.takeIf { identityType == PersonIdentityTypes.SPEAKER_LABEL || role.equals("speaker", ignoreCase = true) },
+    )
+
+private fun String?.matchesSelfIdentityAnchor(anchors: List<SelfIdentityAnchorEntity>): Boolean =
+    anchors.any { anchor ->
+        when (anchor.anchorType) {
+            in STRONG_SELF_EMAIL_TYPES ->
+                normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
+
+            "phone" ->
+                normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
+
+            "alias" ->
+                normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
+
+            PersonIdentityTypes.SPEAKER_LABEL ->
+                normalizedEquals(this, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
+
+            else -> false
+        }
+    }
+
+private fun normalizedEquals(
+    left: String?,
+    right: String?,
+    normalize: (String?) -> String?,
+): Boolean {
+    val normalizedLeft = normalize(left)
+    val normalizedRight = normalize(right)
+    return normalizedLeft != null && normalizedRight != null && normalizedLeft == normalizedRight
+}
+
+private fun normalizeSourceLocalIdentity(value: String?): String? =
+    value
+        ?.lowercase(Locale.ROOT)
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+        ?.takeIf { it.length >= 2 }

@@ -11,6 +11,7 @@
     <string name="action_confirm">확인</string>
     <string name="action_cancel">취소</string>
     <string name="action_sign_out">로그아웃</string>
+    <string name="action_save">저장</string>
     <string name="action_wipe_data">데이터 삭제</string>
     <string name="action_reconnect">다시 연결</string>
     <string name="action_disconnect">연결 해제</string>
@@ -395,6 +396,30 @@
     <!-- Settings -->
     <string name="settings_title">설정</string>
     <string name="settings_account_section">계정</string>
+    <string name="settings_identity_row_title">내 정보와 연결 계정</string>
+    <string name="settings_identity_row_subtitle">사람 매칭의 기준이 되는 이름, 전화번호, 연결 계정을 확인합니다.</string>
+    <string name="settings_identity_title">내 정보</string>
+    <string name="settings_identity_profile_section">본인 기준 정보</string>
+    <string name="settings_identity_profile_body">BeCalm이 메일, 통화, 미팅 속 참석자 중 사용자를 구분할 때 쓰는 기준입니다.</string>
+    <string name="settings_identity_display_name_label">표시 이름</string>
+    <string name="settings_identity_phone_label">전화번호</string>
+    <string name="settings_identity_anchors_section">본인 식별값</string>
+    <string name="settings_identity_anchors_body">업무용, 개인용 이메일이나 전화번호를 추가해 본인으로 인식하게 할 수 있습니다.</string>
+    <string name="settings_identity_anchor_email">이메일</string>
+    <string name="settings_identity_anchor_phone">전화번호</string>
+    <string name="settings_identity_anchor_value_label">이메일 또는 전화번호</string>
+    <string name="settings_identity_anchor_add">식별값 추가</string>
+    <string name="settings_identity_anchor_archive">비활성화</string>
+    <string name="settings_identity_connections_section">연결 계정 소유자</string>
+    <string name="settings_identity_connections_empty">아직 확인할 연결 계정이 없습니다.</string>
+    <string name="settings_identity_connection_self">내 계정</string>
+    <string name="settings_identity_connection_other">다른 사람</string>
+    <string name="settings_identity_error_no_user">로그인 정보를 확인하지 못했습니다.</string>
+    <string name="settings_identity_error_save_profile">내 정보를 저장하지 못했습니다.</string>
+    <string name="settings_identity_error_anchor_value">추가할 이메일 또는 전화번호를 입력해 주세요.</string>
+    <string name="settings_identity_error_add_anchor">식별값을 추가하지 못했습니다.</string>
+    <string name="settings_identity_error_update_anchor">식별값 상태를 바꾸지 못했습니다.</string>
+    <string name="settings_identity_error_update_connection">연결 계정 소유자를 바꾸지 못했습니다.</string>
     <string name="settings_preferences_section">환경설정</string>
     <string name="settings_data_section">데이터</string>
     <string name="settings_danger_section">위험 작업</string>
@@ -590,6 +615,7 @@
     <string name="person_match_no_existing_people">일치하는 기존 사람이나 연락처가 없습니다. 새 사람으로 추가할 수 있습니다.</string>
     <string name="person_match_confirm_action">확인</string>
     <string name="person_match_other_person_action">다른 사람</string>
+    <string name="person_match_self_action">이건 내 기록입니다</string>
     <string name="person_match_later_action">나중에</string>
     <string name="commitment_state_pending">미확인</string>
     <string name="commitment_state_reminded">리마인드됨</string>
