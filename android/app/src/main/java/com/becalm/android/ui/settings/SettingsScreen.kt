@@ -82,6 +82,7 @@ public fun SettingsScreen(
     onNavigateAfterSignOut: (() -> Unit)? = null,
     onErrorDismissed: (() -> Unit)? = null,
     onToggleNotifications: ((Boolean) -> Unit)? = null,
+    onToggleTelemetry: ((Boolean) -> Unit)? = null,
     onTogglePipaConsent: ((Boolean) -> Unit)? = null,
     onToggleCallLogMatchingConsent: ((Boolean) -> Unit)? = null,
     onCallLogPermissionDenied: (() -> Unit)? = null,
@@ -236,6 +237,7 @@ public fun SettingsScreen(
         snackbarHostState = snackbarHostState,
         onBack = navController::popBackStack,
         onToggleNotifications = onToggleNotifications ?: { enabled -> settingsViewModel?.onToggleNotifications(enabled); Unit },
+        onToggleTelemetry = onToggleTelemetry ?: { enabled -> settingsViewModel?.onToggleTelemetry(enabled); Unit },
         onTogglePipa = { wantsEnabled ->
             if (wantsEnabled) showPipaEnableDialog = true
             else showPipaDisableDialog = true
@@ -258,6 +260,7 @@ public fun SettingsScreenContent(
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
+    onToggleTelemetry: (Boolean) -> Unit = {},
     onTogglePipa: (Boolean) -> Unit,
     onToggleCallLogMatching: (Boolean) -> Unit = {},
     onSourcesClick: () -> Unit,
@@ -312,9 +315,11 @@ public fun SettingsScreenContent(
 
                 SettingsPipaSection(
                     notificationsEnabled = state.notificationsEnabled,
+                    telemetryEnabled = state.telemetryEnabled,
                     pipaConsentEnabled = state.pipaConsentEnabled,
                     callLogMatchingConsentEnabled = state.callLogMatchingConsentEnabled,
                     onToggleNotifications = onToggleNotifications,
+                    onToggleTelemetry = onToggleTelemetry,
                     onTogglePipa = onTogglePipa,
                     onToggleCallLogMatching = onToggleCallLogMatching,
                 )

@@ -9,6 +9,17 @@ plugins {
     alias(libs.plugins.androidx.baselineprofile)
 }
 
+val googleServicesJson = project.file("google-services.json")
+if (googleServicesJson.isFile) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+} else {
+    logger.warn(
+        "WARNING: app/google-services.json not found. Firebase Crashlytics Gradle tasks " +
+            "will be disabled for this local build; protected release builds fail verification.",
+    )
+}
+
 // Load local.properties for BuildConfig secrets.
 // Missing keys are substituted with empty strings and a Gradle WARNING is emitted.
 val localProps = Properties()
@@ -18,7 +29,7 @@ if (localPropsFile.exists()) {
 } else {
     logger.warn(
         "WARNING: local.properties not found. " +
-            "BECALM_API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY will be empty strings. " +
+            "BECALM_API_BASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, AMPLITUDE_API_KEY will be empty strings. " +
             "Copy local.properties.sample → local.properties and fill in values."
     )
 }
@@ -87,11 +98,17 @@ val googleWebClientId = optionalGradleEnvOrLocalProp(
     gradleKey = "google.web.client.id",
     envKey = "GOOGLE_WEB_CLIENT_ID",
 ).orEmpty()
+val amplitudeApiKey = requiredRuntimeConfig("AMPLITUDE_API_KEY")
+val telemetryEnabled = optionalGradleEnvOrLocalProp(
+    gradleKey = "telemetry.enabled",
+    envKey = "TELEMETRY_ENABLED",
+)?.toBooleanStrictOrNull() ?: true
 val requiredReleaseRuntimeConfig = mapOf(
     "BECALM_API_BASE_URL" to becalmApiBaseUrl,
     "SUPABASE_URL" to supabaseUrl,
     "SUPABASE_ANON_KEY" to supabaseAnonKey,
     "GOOGLE_WEB_CLIENT_ID" to googleWebClientId,
+    "AMPLITUDE_API_KEY" to amplitudeApiKey,
 )
 
 android {
@@ -122,6 +139,8 @@ android {
             "GOOGLE_WEB_CLIENT_ID",
             googleWebClientId.asBuildConfigString(),
         )
+        buildConfigField("String", "AMPLITUDE_API_KEY", amplitudeApiKey.asBuildConfigString())
+        buildConfigField("boolean", "TELEMETRY_ENABLED", telemetryEnabled.toString())
     }
 
     signingConfigs {
@@ -250,6 +269,12 @@ tasks.register("verifyReleaseRuntimeConfigured") {
                     " via environment variables, Gradle properties, or local.properties before protected release builds.",
             )
         }
+        if (telemetryEnabled && !googleServicesJson.isFile) {
+            throw GradleException(
+                "Android telemetry is enabled but app/google-services.json is missing. " +
+                    "Generate it from CI secrets or disable telemetry for non-protected local builds.",
+            )
+        }
     }
 }
 
@@ -273,6 +298,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.process)
 
     // ─── Navigation ──────────────────────────────────────────────────────────
     implementation(libs.androidx.navigation.compose)
@@ -332,6 +358,11 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation(libs.play.services.auth)
+
+    // ─── Product analytics + crash reporting ───────────────────────────────
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.amplitude.analytics.android)
 
     // ─── libphonenumber (E.164 normalization for call-recording person_ref) ──
     implementation(libs.libphonenumber)

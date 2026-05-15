@@ -3,6 +3,8 @@ package com.becalm.android.data.repository
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.result.onSuccess
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
@@ -153,6 +155,7 @@ public class AuthRepositoryImpl @Inject constructor(
     private val imapCredentialStore: ImapCredentialStore,
     private val oauthCredentialStore: OAuthCredentialStore,
     private val processRestarter: ProcessRestarter,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
 ) : AuthRepository {
@@ -226,6 +229,7 @@ public class AuthRepositoryImpl @Inject constructor(
         databaseProvider.ensureOpenFor(newHash)
         sessionFlow.value = session
         tokenProvider.primeCache()
+        productAnalytics.setUserScope(session.userId)
         if (priorHash != null && priorHash != newHash) {
             logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
             processRestarter.restart()
@@ -240,6 +244,7 @@ public class AuthRepositoryImpl @Inject constructor(
 
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
+        productAnalytics.resetUserScope()
 
         return preludeFailure.firstOrNull() ?: stepResult
     }
@@ -270,6 +275,7 @@ public class AuthRepositoryImpl @Inject constructor(
 
         // Broadcast the cleared state so observers transition to Unauthenticated.
         sessionFlow.value = null
+        productAnalytics.resetUserScope()
 
         return preludeFailure.firstOrNull() ?: stepResult
     }

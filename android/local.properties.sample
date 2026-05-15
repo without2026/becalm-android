@@ -21,6 +21,11 @@ SUPABASE_ANON_KEY=eyJ...
 # Example: 1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com
 google.web.client.id=
 
+# Product analytics / operational crash telemetry.
+# google-services.json is generated from CI secrets and must not be committed.
+AMPLITUDE_API_KEY=
+TELEMETRY_ENABLED=true
+
 # Optional Android release upload signing. Local debug/release smoke builds can
 # omit these. Protected CI builds with require_signing=true fail unless all four
 # values are provided and the keystore file exists.

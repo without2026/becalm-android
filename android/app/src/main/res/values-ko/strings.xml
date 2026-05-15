@@ -411,6 +411,7 @@
     <string name="settings_data_section">데이터</string>
     <string name="settings_danger_section">위험 작업</string>
     <string name="settings_notifications_label">알림</string>
+    <string name="settings_telemetry_label">진단 및 사용 데이터</string>
     <string name="settings_sources_label">데이터 소스</string>
     <string name="settings_sign_out_confirm_title">로그아웃하시겠습니까?</string>
     <string name="settings_sign_out_confirm_message">BeCalm에서 로그아웃됩니다. 데이터를 삭제하기 전까지 로컬 데이터는 유지됩니다.</string>
@@ -507,6 +508,7 @@
     <string name="settings_error_load_failed">설정을 불러오지 못했습니다. 다시 시도해 주세요.</string>
     <string name="settings_error_language_change_failed">언어 설정을 저장하지 못했습니다.</string>
     <string name="settings_error_notifications_toggle_failed">알림 설정을 저장하지 못했습니다.</string>
+    <string name="settings_error_telemetry_toggle_failed">진단 및 사용 데이터 설정을 저장하지 못했습니다.</string>
     <string name="settings_error_calllog_matching_toggle_failed">통화기록 기반 인물 매칭 설정을 저장하지 못했습니다.</string>
     <string name="settings_error_calllog_permission_required">인물 매칭을 사용하려면 통화기록 권한이 필요합니다.</string>
     <string name="settings_error_consent_toggle_failed">동의 설정을 저장하지 못했습니다.</string>

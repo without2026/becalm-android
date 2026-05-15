@@ -1,6 +1,6 @@
 package com.becalm.android.ui.onboarding
 
-import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.lifecycle.Lifecycle
@@ -57,7 +56,7 @@ public fun OutlookMailOAuthScreen(
     onNavigateDownstream: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

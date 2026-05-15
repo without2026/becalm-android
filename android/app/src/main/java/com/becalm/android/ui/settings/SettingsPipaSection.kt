@@ -29,9 +29,11 @@ import com.becalm.android.R
 @Composable
 internal fun SettingsPipaSection(
     notificationsEnabled: Boolean,
+    telemetryEnabled: Boolean,
     pipaConsentEnabled: Boolean,
     callLogMatchingConsentEnabled: Boolean,
     onToggleNotifications: (Boolean) -> Unit,
+    onToggleTelemetry: (Boolean) -> Unit,
     onTogglePipa: (Boolean) -> Unit,
     onToggleCallLogMatching: (Boolean) -> Unit,
 ) {
@@ -46,6 +48,13 @@ internal fun SettingsPipaSection(
             checked = notificationsEnabled,
             onCheckedChange = onToggleNotifications,
             toggleTestTag = "settings-notifications-toggle",
+        )
+        HorizontalDivider()
+        SettingsToggleRow(
+            label = stringResource(R.string.settings_telemetry_label),
+            checked = telemetryEnabled,
+            onCheckedChange = onToggleTelemetry,
+            toggleTestTag = "settings-telemetry-toggle",
         )
         HorizontalDivider()
         SettingsToggleRow(

@@ -15,6 +15,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.becalm.android.MainActivity
 import com.becalm.android.R
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.ApplicationScope
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
@@ -24,6 +27,7 @@ import com.becalm.android.domain.commitment.CommitmentState
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -67,6 +71,9 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     public lateinit var logger: Logger
+
+    @Inject
+    public lateinit var productAnalytics: ProductAnalyticsClient
 
     @Inject
     @ApplicationScope
@@ -209,6 +216,17 @@ public open class ReminderBroadcastReceiver : BroadcastReceiver() {
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_NOTIFICATION_POSTED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "commitment_id" to spec.commitmentId,
+                    "channel_id" to spec.channelId,
+                ),
+            ),
+        )
     }
 
     // ── Companion ─────────────────────────────────────────────────────────────

@@ -5,7 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
+import com.becalm.android.core.analytics.TelemetryLifecycleObserver
+import com.becalm.android.core.analytics.TelemetryPrivacyController
+import com.becalm.android.core.observability.FirebaseCrashlyticsPort
 import com.becalm.android.receiver.ReminderBroadcastReceiver
 import com.becalm.android.worker.MatchingRequiredNotifier
 import com.becalm.android.worker.VoiceFailureNotifier
@@ -32,6 +36,15 @@ public class BecalmApplication : Application(), Configuration.Provider {
     @Inject
     public lateinit var workerFactory: HiltWorkerFactory
 
+    @Inject
+    public lateinit var telemetryLifecycleObserver: TelemetryLifecycleObserver
+
+    @Inject
+    public lateinit var crashlytics: FirebaseCrashlyticsPort
+
+    @Inject
+    public lateinit var telemetryPrivacyController: TelemetryPrivacyController
+
     private val workExecutor by lazy {
         val threadIndex = AtomicInteger(1)
         Executors.newFixedThreadPool(WORK_MANAGER_THREAD_COUNT) { runnable ->
@@ -53,6 +66,9 @@ public class BecalmApplication : Application(), Configuration.Provider {
             Timber.plant(Timber.DebugTree())
             installDebugStrictMode()
         }
+        crashlytics.setCollectionEnabled(BuildConfig.TELEMETRY_ENABLED)
+        telemetryPrivacyController.start()
+        ProcessLifecycleOwner.get().lifecycle.addObserver(telemetryLifecycleObserver)
 
         // CMT-008: register the commitment_due_soon high-importance notification
         // channel at process start. createNotificationChannel is idempotent on API 26+,
