@@ -90,24 +90,6 @@ public class CalendarOAuthConnector @Inject constructor(
         logger.i(TAG, "calendar OAuth status body provider=${provider.sourceType} connected=${statusBody.connected}")
         if (!statusBody.connected) return CalendarOAuthResult.NotConnected
 
-        // Sync is best-effort follow-up data fetch. Network failure here must not
-        // flip the Connected result — the OAuth session itself succeeded.
-        // SocketTimeoutException previously crashed the app on background-resume
-        // because the suspended HTTP/2 stream eventually timed out and the
-        // exception propagated unhandled into viewModelScope.launch.
-        logger.i(TAG, "calendar OAuth sync request provider=${provider.sourceType}")
-        try {
-            val syncResponse = railwayApi.syncCalendarEvents()
-            logger.i(
-                TAG,
-                "calendar OAuth sync response provider=${provider.sourceType} code=${syncResponse.code()} success=${syncResponse.isSuccessful}",
-            )
-            if (!syncResponse.isSuccessful) {
-                logger.w(TAG, "calendar sync after connect failed code=${syncResponse.code()}")
-            }
-        } catch (e: IOException) {
-            logger.w(TAG, "calendar sync after connect network error provider=${provider.sourceType} error=${e.javaClass.simpleName}", e)
-        }
         return CalendarOAuthResult.Connected
     }
 
