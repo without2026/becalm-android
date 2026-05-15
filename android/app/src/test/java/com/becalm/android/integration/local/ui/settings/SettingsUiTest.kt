@@ -7,10 +7,12 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
@@ -201,6 +203,67 @@ class SettingsUiTest {
         ).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.raw_event_source_badge_unknown)).assertIsDisplayed()
         composeRule.onAllNodesWithText("raw_source_type").assertCountEquals(0)
+    }
+
+    @Test
+    fun `processing status groups active action needed and quiet rows with summary`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(
+                        rows = listOf(
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GMAIL,
+                                phase = ProcessingPhase.GEMINI,
+                                itemCount = 4,
+                                message = null,
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = SourceType.OUTLOOK_MAIL,
+                                phase = ProcessingPhase.ERROR,
+                                itemCount = 0,
+                                message = "token expired",
+                                updatedAt = null,
+                            ),
+                            ProcessingStatusRow(
+                                sourceType = SourceType.GOOGLE_CALENDAR,
+                                phase = ProcessingPhase.SYNCED,
+                                itemCount = 2,
+                                message = null,
+                                updatedAt = null,
+                            ),
+                        ),
+                    ),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.processing_status_summary_active_action_fmt, 1, 1)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_status_group_active)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_phase_memory), substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_status_group_action_needed)).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.processing_phase_attention_needed), substring = true)
+            .assertCountEquals(3)
+        composeRule.onNodeWithTag("processing-status-list")
+            .performScrollToNode(hasText(string(R.string.processing_status_group_quiet)))
+        composeRule.onNodeWithText(string(R.string.processing_status_group_quiet)).assertExists()
+    }
+
+    @Test
+    fun `processing status empty state explains future incoming work`() {
+        composeRule.setContent {
+            BecalmTheme {
+                ProcessingStatusContent(
+                    state = ProcessingStatusUiState(rows = emptyList()),
+                    onBack = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.processing_status_empty_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.processing_status_empty_message)).assertIsDisplayed()
     }
 
     private fun string(resId: Int, vararg args: Any): String =

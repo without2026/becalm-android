@@ -130,6 +130,27 @@ class AuthUiTest {
     }
 
     @Test
+    fun `login form explains trusted source approval loading and inline auth error`() {
+        composeRule.setContent {
+            BecalmTheme {
+                LoginForm(
+                    isLoading = true,
+                    googleSignInEnabled = false,
+                    authErrorMessage = string(R.string.auth_error_network),
+                    onSignIn = { _, _ -> },
+                    onSignUp = { _, _ -> },
+                    onGoogleSignIn = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.login_trust_note)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.login_loading_status)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.auth_error_network)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.login_google_setup_required)).assertIsDisplayed()
+    }
+
+    @Test
     fun `login form blocks invalid email and short password before submit`() {
         var submitted = 0
 

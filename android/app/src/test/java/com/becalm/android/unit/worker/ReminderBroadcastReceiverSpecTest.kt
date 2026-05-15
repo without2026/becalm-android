@@ -94,13 +94,17 @@ class ReminderBroadcastReceiverSpecTest {
         commitmentId: String,
         userId: String,
     ) {
-        receiver.javaClass.getMethod(
-            "handle\$app_debug",
-            Context::class.java,
-            String::class.java,
-            String::class.java,
-            Continuation::class.java,
-        ).invoke(
+        receiver.javaClass.methods.single {
+            it.name.startsWith("handle\$app_") &&
+                it.parameterTypes.contentEquals(
+                    arrayOf(
+                        Context::class.java,
+                        String::class.java,
+                        String::class.java,
+                        Continuation::class.java,
+                    ),
+                )
+        }.invoke(
             receiver,
             context,
             commitmentId,

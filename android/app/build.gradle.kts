@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.android.application)
@@ -388,6 +389,7 @@ dependencies {
     // ─── Compose tooling (debug only) ────────────────────────────────────────
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    add("benchmarkImplementation", libs.androidx.compose.ui.test.manifest)
 
     // ─── Unit Tests ──────────────────────────────────────────────────────────
     testImplementation(libs.junit)
@@ -416,4 +418,13 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+}
+
+tasks.withType<Test>().configureEach {
+    if (name == "testReleaseUnitTest") {
+        // Compose UI tests need androidx.compose.ui:ui-test-manifest, which must stay out of
+        // release artifacts. Run those UI suites on debug/benchmark variants and keep release
+        // unit tests focused on non-UI logic.
+        exclude("com/becalm/android/integration/local/ui/**")
+    }
 }
