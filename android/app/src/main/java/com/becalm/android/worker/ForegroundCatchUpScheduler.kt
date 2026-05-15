@@ -118,32 +118,15 @@ public class ForegroundCatchUpScheduler @Inject constructor(
      * [onStart], so there is exactly one code path that maps source types to expedited
      * workers.
      */
-    public fun triggerCatchUp() {
+    public fun triggerCatchUp(): Job =
         scope.launch {
             try {
-                if (!hasSignedInUser()) {
-                    logger.d(TAG, "triggerCatchUp: no authenticated user — skipping")
-                    return@launch
-                }
-                if (processingPauseGate.isPaused()) {
-                    logger.d(TAG, "triggerCatchUp: processing paused — skipping")
-                    return@launch
-                }
-                val enabledSources: Set<String> = runtimeSyncSourceResolver.foregroundSources()
-
-                if (enabledSources.isEmpty()) {
-                    logger.d(TAG, "triggerCatchUp: no enabled sources — skipping")
-                    return@launch
-                }
-
-                logger.d(TAG, "triggerCatchUp: enqueueing for sources=$enabledSources")
-                enqueueForSources(enabledSources)
+                runCatchUp(owner = "triggerCatchUp", dedupeAutomatic = false)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.e(TAG, "triggerCatchUp: failed to enqueue catch-up work", e)
             }
         }
-    }
 
     // ── DefaultLifecycleObserver ──────────────────────────────────────────────
 
@@ -164,30 +147,7 @@ public class ForegroundCatchUpScheduler @Inject constructor(
         onStartCatchUpJob = scope.launch {
             try {
                 delay(ON_START_CATCH_UP_DELAY_MS)
-                if (!hasSignedInUser()) {
-                    logger.d(TAG, "onStart: no authenticated user — skipping catch-up enqueue")
-                    return@launch
-                }
-                if (processingPauseGate.isPaused()) {
-                    logger.d(TAG, "onStart: processing paused — skipping catch-up enqueue")
-                    return@launch
-                }
-                val enabledSources: Set<String> = runtimeSyncSourceResolver.foregroundSources()
-
-                if (enabledSources.isEmpty()) {
-                    logger.d(TAG, "onStart: no enabled sources — skipping catch-up enqueue")
-                    return@launch
-                }
-
-                val pendingSources = enabledSources - automaticCatchUpEnqueuedSources
-                if (pendingSources.isEmpty()) {
-                    logger.d(TAG, "onStart: catch-up already enqueued for sources=$enabledSources — skipping")
-                    return@launch
-                }
-
-                automaticCatchUpEnqueuedSources += pendingSources
-                logger.d(TAG, "onStart: enqueueing catch-up for sources=$pendingSources")
-                enqueueForSources(pendingSources)
+                runCatchUp(owner = "onStart", dedupeAutomatic = true)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.e(TAG, "onStart: failed to enqueue catch-up work", e)
@@ -230,7 +190,45 @@ public class ForegroundCatchUpScheduler @Inject constructor(
      * a future source type added to [SourceType] but not yet handled here does not
      * crash the scheduler.
      */
-    private fun enqueueForSources(sources: Set<String>) {
+    internal val pendingOnStartCatchUpJob: Job?
+        get() = onStartCatchUpJob
+
+    private suspend fun runCatchUp(owner: String, dedupeAutomatic: Boolean): CatchUpResult {
+        if (!hasSignedInUser()) {
+            logger.d(TAG, "$owner: no authenticated user — skipping")
+            return CatchUpResult.Skipped(CatchUpSkipReason.NoAuthenticatedUser)
+        }
+        if (processingPauseGate.isPaused()) {
+            logger.d(TAG, "$owner: processing paused — skipping")
+            return CatchUpResult.Skipped(CatchUpSkipReason.ProcessingPaused)
+        }
+        val enabledSources: Set<String> = runtimeSyncSourceResolver.foregroundSources()
+
+        if (enabledSources.isEmpty()) {
+            logger.d(TAG, "$owner: no enabled sources — skipping")
+            return CatchUpResult.Skipped(CatchUpSkipReason.NoEnabledSources)
+        }
+
+        val pendingSources = if (dedupeAutomatic) {
+            enabledSources - automaticCatchUpEnqueuedSources
+        } else {
+            enabledSources
+        }
+        if (pendingSources.isEmpty()) {
+            logger.d(TAG, "$owner: catch-up already enqueued for sources=$enabledSources — skipping")
+            return CatchUpResult.Skipped(CatchUpSkipReason.AlreadyEnqueued)
+        }
+
+        logger.d(TAG, "$owner: enqueueing catch-up for sources=$pendingSources")
+        val enqueuedSources = enqueueForSources(pendingSources)
+        if (dedupeAutomatic) {
+            automaticCatchUpEnqueuedSources += enqueuedSources
+        }
+        return CatchUpResult.Enqueued(enqueuedSources)
+    }
+
+    private fun enqueueForSources(sources: Set<String>): Set<String> {
+        val enqueuedSources = linkedSetOf<String>()
         for (sourceType in sources) {
             val entry = dispatchTable[sourceType]
             if (entry == null) {
@@ -241,11 +239,13 @@ public class ForegroundCatchUpScheduler @Inject constructor(
             try {
                 logger.d(TAG, logMessage)
                 enqueue()
+                enqueuedSources += sourceType
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logger.w(TAG, "onStart: failed to enqueue catch-up for source='$sourceType'", e)
             }
         }
+        return enqueuedSources
     }
 
     private suspend fun hasSignedInUser(): Boolean =
@@ -257,4 +257,16 @@ public class ForegroundCatchUpScheduler @Inject constructor(
         private const val TAG = "ForegroundCatchUpScheduler"
         private const val ON_START_CATCH_UP_DELAY_MS: Long = 8_000L
     }
+}
+
+private sealed interface CatchUpResult {
+    data class Enqueued(val sources: Set<String>) : CatchUpResult
+    data class Skipped(val reason: CatchUpSkipReason) : CatchUpResult
+}
+
+private enum class CatchUpSkipReason {
+    NoAuthenticatedUser,
+    ProcessingPaused,
+    NoEnabledSources,
+    AlreadyEnqueued,
 }

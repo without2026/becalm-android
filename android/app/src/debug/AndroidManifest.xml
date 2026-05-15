@@ -24,5 +24,15 @@
                 <action android:name="com.becalm.android.DEBUG_SEED_MEETING_SPEAKER_JOURNEY" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".debug.DebugCrashlyticsSmokeReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.becalm.android.DEBUG_CRASHLYTICS_NON_FATAL" />
+                <action android:name="com.becalm.android.DEBUG_CRASHLYTICS_FORCE_CRASH" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

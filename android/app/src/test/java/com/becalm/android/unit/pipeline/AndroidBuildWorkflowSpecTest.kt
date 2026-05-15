@@ -53,6 +53,18 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
+    fun `android jvm unit tests disable real telemetry sdk clients`() {
+        // spec: REL-002
+        val buildFile = repoFile("android/app/build.gradle.kts").readText()
+        val localPropertiesSample = repoFile("android/local.properties.sample").readText()
+
+        assertTrue(buildFile.contains("fun isJvmUnitTestInvocation()"))
+        assertTrue(buildFile.contains("val telemetryEnabled = if (isJvmUnitTestInvocation()) false"))
+        assertTrue(buildFile.contains("localProps.getProperty(envKey)"))
+        assertTrue(localPropertiesSample.contains("TELEMETRY_ENABLED=true"))
+    }
+
+    @Test
     fun `android app targets current compile sdk for beta release compatibility`() {
         // spec: REL-003
         val appBuildFile = repoFile("android/app/build.gradle.kts").readText()
@@ -196,6 +208,7 @@ class AndroidBuildWorkflowSpecTest {
         val gates = repoFile(".github/workflows/android-gates.yml").readText()
         val combined = "$tests\n$gates"
 
+        assertTrue(tests.contains("BECALM_API_BASE_URL: https://dev-dev-7309.up.railway.app"))
         assertTrue(tests.contains("timeout-minutes: 15"))
         assertTrue(tests.contains("timeout-minutes: 25"))
         assertTrue(tests.contains("timeout-minutes: 30"))
@@ -207,6 +220,22 @@ class AndroidBuildWorkflowSpecTest {
         assertTrue(combined.contains("android-gate-reports"))
         assertTrue(combined.contains("app/build/reports/androidTests/connected"))
         assertTrue(combined.contains("qa/emulator/reports/readiness"))
+    }
+
+    @Test
+    fun `ci review merge gate only requires deterministic gates and android tests by default`() {
+        // spec: REL-010
+        val workflow = repoFile(".github/workflows/ci-review.yml").readText()
+
+        assertTrue(workflow.contains("vars.ENABLE_LAYER2_REVIEW == 'true'"))
+        assertTrue(workflow.contains("GATES: \${{ needs.deterministic-gates.result }}"))
+        assertTrue(workflow.contains("TESTS: \${{ needs.tests.result }}"))
+        assertFalse(workflow.contains("CLAUDE: \${{ needs.layer2-claude-review.result }}"))
+        assertFalse(workflow.contains("CODEX: \${{ needs.layer2-codex-review.result }}"))
+        assertFalse(workflow.contains("CROSS: \${{ needs.cross-validate.result }}"))
+        assertFalse(workflow.contains("Claude review required for depth="))
+        assertFalse(workflow.contains("Codex review required for depth="))
+        assertFalse(workflow.contains("cross-validate required for depth="))
     }
 
     @Test
@@ -227,6 +256,7 @@ class AndroidBuildWorkflowSpecTest {
         val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
         val combined = "$tests\n$gates"
 
+        assertTrue(tests.contains("BECALM_API_BASE_URL: https://dev-dev-7309.up.railway.app"))
         assertTrue(tests.contains("timeout-minutes: 15"))
         assertTrue(tests.contains("timeout-minutes: 25"))
         assertTrue(tests.contains("timeout-minutes: 30"))

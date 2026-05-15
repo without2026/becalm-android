@@ -64,10 +64,20 @@ fun String.asBuildConfigString(): String =
 fun optionalGradleEnvOrLocalProp(gradleKey: String, envKey: String): String? {
     val gradleValue = findProperty(gradleKey)?.toString()
     if (!gradleValue.isNullOrBlank()) return gradleValue
+    val gradleEnvAliasValue = findProperty(envKey)?.toString()
+    if (!gradleEnvAliasValue.isNullOrBlank()) return gradleEnvAliasValue
     val envValue = System.getenv(envKey)
     if (!envValue.isNullOrBlank()) return envValue
-    return localProps.getProperty(gradleKey)?.takeIf { it.isNotBlank() }
+    val localGradleValue = localProps.getProperty(gradleKey)
+    if (!localGradleValue.isNullOrBlank()) return localGradleValue
+    return localProps.getProperty(envKey)?.takeIf { it.isNotBlank() }
 }
+
+fun isJvmUnitTestInvocation(): Boolean =
+    gradle.startParameter.taskNames.any { taskName ->
+        val normalized = taskName.substringAfterLast(':')
+        normalized == "test" || normalized.contains("UnitTest", ignoreCase = true)
+    }
 
 val releaseStoreFilePath = optionalGradleEnvOrLocalProp(
     gradleKey = "becalm.release.store.file",
@@ -99,10 +109,11 @@ val googleWebClientId = optionalGradleEnvOrLocalProp(
     envKey = "GOOGLE_WEB_CLIENT_ID",
 ).orEmpty()
 val amplitudeApiKey = requiredRuntimeConfig("AMPLITUDE_API_KEY")
-val telemetryEnabled = optionalGradleEnvOrLocalProp(
+val configuredTelemetryEnabled = optionalGradleEnvOrLocalProp(
     gradleKey = "telemetry.enabled",
     envKey = "TELEMETRY_ENABLED",
-)?.toBooleanStrictOrNull() ?: true
+)?.toBooleanStrictOrNull()
+val telemetryEnabled = if (isJvmUnitTestInvocation()) false else configuredTelemetryEnabled ?: true
 val requiredReleaseRuntimeConfig = mapOf(
     "BECALM_API_BASE_URL" to becalmApiBaseUrl,
     "SUPABASE_URL" to supabaseUrl,

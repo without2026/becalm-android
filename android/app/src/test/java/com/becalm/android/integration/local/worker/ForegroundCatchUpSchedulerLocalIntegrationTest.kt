@@ -12,7 +12,7 @@ import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.RuntimeSyncSourceResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -49,8 +49,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
             userPrefsStore.observeEnabledSources().first(),
         )
 
-        scheduler.triggerCatchUp()
-        advanceUntilIdle()
+        scheduler.triggerCatchUp().join()
 
         assertEquals(1, workScheduler.mediaStoreCount)
         assertEquals(1, workScheduler.imapDaumCount)
@@ -82,8 +81,7 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         assertEquals(true, userPrefsStore.observeSourceEnabled(SourceType.MEETING).first())
         assertEquals(setOf(SourceType.MEETING), userPrefsStore.observeEnabledSources().first())
 
-        scheduler.triggerCatchUp()
-        advanceUntilIdle()
+        scheduler.triggerCatchUp().join()
 
         assertEquals(1, workScheduler.mediaStoreCount)
     }
@@ -116,7 +114,8 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         )
 
         scheduler.onStart(FakeLifecycleOwner)
-        advanceUntilIdle()
+        advanceTimeBy(8_000)
+        scheduler.pendingOnStartCatchUpJob?.join()
 
         assertEquals(1, workScheduler.outlookCalCount)
         assertTrue(workScheduler.enqueuedSources.containsAll(listOf("outlook_calendar")))
@@ -141,9 +140,11 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
 
         scheduler.onStart(FakeLifecycleOwner)
-        advanceUntilIdle()
+        advanceTimeBy(8_000)
+        scheduler.pendingOnStartCatchUpJob?.join()
         scheduler.onStart(FakeLifecycleOwner)
-        advanceUntilIdle()
+        advanceTimeBy(8_000)
+        scheduler.pendingOnStartCatchUpJob?.join()
 
         assertEquals(1, workScheduler.mediaStoreCount)
         assertEquals(listOf(SourceType.VOICE), workScheduler.enqueuedSources)
@@ -167,9 +168,10 @@ class ForegroundCatchUpSchedulerLocalIntegrationTest {
         userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
         userPrefsStore.setSourceEnabled(SourceType.GOOGLE_CALENDAR, true)
 
-        scheduler.triggerCatchUp()
+        scheduler.triggerCatchUp().join()
         scheduler.onStart(FakeLifecycleOwner)
-        advanceUntilIdle()
+        advanceTimeBy(8_000)
+        scheduler.pendingOnStartCatchUpJob?.join()
 
         assertTrue(workScheduler.enqueuedSources.isEmpty())
         assertEquals(0, workScheduler.mediaStoreCount)

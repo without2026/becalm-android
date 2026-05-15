@@ -7,6 +7,11 @@ on:
   workflow_call:
   workflow_dispatch:
 
+env:
+  # local.properties is intentionally gitignored, so CI must provide the same
+  # non-secret backend URL explicitly for debug/unit/instrumented runtime graphs.
+  BECALM_API_BASE_URL: https://dev-dev-7309.up.railway.app
+
 jobs:
   read-config:
     runs-on: ubuntu-latest

@@ -152,7 +152,7 @@ jobs:
   # ──────────────────────────────────────────────
   layer2-claude-review:
     needs: [classify, deterministic-gates]
-    if: needs.classify.outputs.pipeline_depth != 'layer1'
+    if: vars.ENABLE_LAYER2_REVIEW == 'true' && needs.classify.outputs.pipeline_depth != 'layer1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -210,7 +210,7 @@ jobs:
   # ──────────────────────────────────────────────
   layer2-codex-review:
     needs: [classify, deterministic-gates]
-    if: needs.classify.outputs.pipeline_depth == 'full'
+    if: vars.ENABLE_LAYER2_REVIEW == 'true' && needs.classify.outputs.pipeline_depth == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -244,7 +244,7 @@ jobs:
   # ──────────────────────────────────────────────
   cross-validate:
     needs: [classify, layer2-claude-review, layer2-codex-review]
-    if: needs.classify.outputs.pipeline_depth == 'full'
+    if: vars.ENABLE_LAYER2_REVIEW == 'true' && needs.classify.outputs.pipeline_depth == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -378,9 +378,6 @@ jobs:
       - classify
       - deterministic-gates
       - tests
-      - layer2-claude-review
-      - layer2-codex-review
-      - cross-validate
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -389,33 +386,14 @@ jobs:
           DEPTH: ${{ needs.classify.outputs.pipeline_depth }}
           GATES: ${{ needs.deterministic-gates.result }}
           TESTS: ${{ needs.tests.result }}
-          CLAUDE: ${{ needs.layer2-claude-review.result }}
-          CODEX: ${{ needs.layer2-codex-review.result }}
-          CROSS: ${{ needs.cross-validate.result }}
         run: |
           set -euo pipefail
           echo "pipeline_depth=$DEPTH"
-          echo "gates=$GATES tests=$TESTS claude=$CLAUDE codex=$CODEX cross=$CROSS"
+          echo "gates=$GATES tests=$TESTS"
 
           fail() { echo "::error::$1"; exit 1; }
 
           [ "$GATES" = "success" ] || fail "Deterministic gates did not succeed (got $GATES)"
           [ "$TESTS" = "success" ] || fail "Tests did not succeed (got $TESTS)"
-
-          case "$DEPTH" in
-            layer1)
-              ;;
-            claude_only)
-              [ "$CLAUDE" = "success" ] || fail "Claude review required for depth=claude_only (got $CLAUDE)"
-              ;;
-            full)
-              [ "$CLAUDE" = "success" ] || fail "Claude review required for depth=full (got $CLAUDE)"
-              [ "$CODEX" = "success" ] || fail "Codex review required for depth=full (got $CODEX)"
-              [ "$CROSS" = "success" ] || fail "cross-validate required for depth=full (got $CROSS)"
-              ;;
-            *)
-              fail "Unknown pipeline_depth=$DEPTH"
-              ;;
-          esac
 
           echo "All required gates passed"
