@@ -41,6 +41,7 @@ self-scoring; the final score is assigned by the reviewer.
 | Android Deterministic Gates | `25884778863` | `e6fb1cb` | success |
 | Android Tests | `25884778885` | `e6fb1cb` | success |
 | Deploy Staging | `25884772086` | `e6fb1cb` | success |
+| Deploy Staging docs-only | `25904877962` | docs-only evidence update | success |
 
 Android Tests job results:
 

@@ -135,7 +135,8 @@ Current main evidence:
 - Latest `Android Deterministic Gates` run succeeded on executable code commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884778863
 - Latest `Android Tests` run succeeded on executable code commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884778885
 - Latest executable-code `Deploy Staging` run succeeded on commit `e6fb1cb`: https://github.com/without2026/becalm-android/actions/runs/25884772086
-- Subsequent docs-only evidence commits do not change executable Android code; check GitHub Actions for their current `Deploy Staging` status.
+- Latest docs-only `Deploy Staging` run also succeeded: https://github.com/without2026/becalm-android/actions/runs/25904877962
+- Subsequent docs-only evidence commits do not change executable Android code.
 - Latest CI artifacts were uploaded and are not expired:
   - `android-gate-reports`
   - `android-unit-test-reports`

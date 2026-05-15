@@ -37,6 +37,7 @@ Explicitly excluded by user direction:
 | Play policy risk control | Battery optimization onboarding uses app settings guidance and no longer declares or invokes restricted battery optimization exemption APIs | Ready for reviewer |
 | Release smoke | `Android Tests` run `25884778885` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
 | Instrumented tests | `Android Tests` run `25884778885` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
+| Latest docs-only staging | `Deploy Staging` run `25904877962` succeeded; no executable Android code changed after `e6fb1cb` | Ready for reviewer |
 | Artifact retention | CI uploaded `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` | Ready for reviewer |
 | Audio privacy disclosure | Onboarding/PIPA spec, Korean/English strings, and PIPA tests disclose NAVER Cloud CLOVA Speech plus Google Vertex AI transcript extraction and reject stale audio-modal copy | Ready for reviewer |
 | User-facing vendor status removal | Upload and source processing copy uses product language like `내용 정리 중`; repo-wide stale Gemini audio/status grep returns no user-facing matches | Ready for reviewer |

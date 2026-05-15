@@ -53,6 +53,17 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
+    fun `android app targets current compile sdk for beta release compatibility`() {
+        // spec: REL-003
+        val appBuildFile = repoFile("android/app/build.gradle.kts").readText()
+        val baselineProfileBuildFile = repoFile("android/baselineprofile/build.gradle.kts").readText()
+
+        assertTrue(appBuildFile.contains("compileSdk = 35"))
+        assertTrue(appBuildFile.contains("targetSdk = 35"))
+        assertTrue(baselineProfileBuildFile.contains("targetSdk = 35"))
+    }
+
+    @Test
     fun `protected android release verifies runtime configuration before bundle`() {
         // spec: REL-004
         val buildFile = repoFile("android/app/build.gradle.kts").readText()
