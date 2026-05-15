@@ -2,7 +2,7 @@
 
 Date: 2026-05-15 KST
 Evidence document status: docs-only; does not change executable Android code.
-Executable code verified at: `e6fb1cb`
+Executable code verified at: `b78e190`
 
 This document is intentionally not a self-score. The reviewer should assign the
 score against the agreed rubric.
@@ -26,18 +26,19 @@ Explicitly excluded by user direction:
 
 | Rubric Area | Evidence | Status |
 |---|---|---|
-| Functional requirements | `Android Tests` run `25884778885`; `unit-tests`, `instrumented-tests`, and `release-smoke` jobs succeeded | Ready for reviewer |
+| Functional requirements | `Android Tests` run `25905324256`; `unit-tests`, `instrumented-tests`, and `release-smoke` jobs succeeded | Ready for reviewer |
 | Core user flows | `AuthCheckpoint1E2eTest`, `OnboardingCheckpoint1E2eTest`, `SourceConnectionsCheckpoint2E2eTest`, `PeoplePipelineCheckpoint4E2eTest`, `HappyPathFullJourneyE2eTest` exist and are covered by CI emulator instrumentation | Ready for reviewer |
 | Source recovery UX | Source recovery changes are in `7813678`; raw-event recovery coverage includes `RawEventDetailCheckpoint6E2eTest` | Ready for reviewer |
 | Non-functional requirements | `measure_android_readiness.sh` records cold start, memory, frame rows, and fails strict mode on unavailable or over-threshold metrics | Ready for reviewer |
-| Readiness smoke result | Run `25884778885` measured cold start `1997ms`, total PSS `143379KB`, logcat fatal/ANR/OOM pass, and `readiness_failure_count=0` | Ready for reviewer |
-| App install recovery | Run `25884778885` found the app missing after instrumentation, reinstalled `app-debug.apk`, and then completed readiness measurement | Ready for reviewer |
+| Readiness smoke result | Run `25905324256` measured cold start `1994ms`, total PSS `144766KB`, logcat fatal/ANR/OOM pass, and `readiness_failure_count=0` | Ready for reviewer |
+| App install recovery | Run `25905324256` found the app missing after instrumentation, reinstalled `app-debug.apk`, and then completed readiness measurement | Ready for reviewer |
 | Crash/ANR/OOM guard | `measure_android_readiness.sh` fails on logcat fatal exception, ANR, OOM, process death, and lowmemorykiller patterns | Ready for reviewer |
-| Code quality | `Android Deterministic Gates` run `25884778863` succeeded with spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and size check | Ready for reviewer |
+| Android 15 / Play target compatibility | App `compileSdk` and `targetSdk` are both `35`; `AndroidBuildWorkflowSpecTest` enforces app/baseline profile SDK alignment; `Android Tests` run `25905324256` passed after Robolectric `4.16.1` update | Ready for reviewer |
+| Code quality | `Android Deterministic Gates` run `25905324259` succeeded with spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and size check | Ready for reviewer |
 | Play policy risk control | Battery optimization onboarding uses app settings guidance and no longer declares or invokes restricted battery optimization exemption APIs | Ready for reviewer |
-| Release smoke | `Android Tests` run `25884778885` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
-| Instrumented tests | `Android Tests` run `25884778885` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
-| Latest docs-only staging | `Deploy Staging` run `25904877962` succeeded; no executable Android code changed after `e6fb1cb` | Ready for reviewer |
+| Release smoke | `Android Tests` run `25905324256` succeeded for `assembleRelease lintRelease` and APK size smoke | Ready for reviewer |
+| Instrumented tests | `Android Tests` run `25905324256` succeeded for API 33 emulator `connectedDebugAndroidTest` | Ready for reviewer |
+| Latest staging | `Deploy Staging` run `25905319248` succeeded on executable commit `b78e190` | Ready for reviewer |
 | Artifact retention | CI uploaded `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` | Ready for reviewer |
 | Audio privacy disclosure | Onboarding/PIPA spec, Korean/English strings, and PIPA tests disclose NAVER Cloud CLOVA Speech plus Google Vertex AI transcript extraction and reject stale audio-modal copy | Ready for reviewer |
 | User-facing vendor status removal | Upload and source processing copy uses product language like `내용 정리 중`; repo-wide stale Gemini audio/status grep returns no user-facing matches | Ready for reviewer |

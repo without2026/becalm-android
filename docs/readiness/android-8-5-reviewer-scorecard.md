@@ -2,9 +2,8 @@
 
 Date: 2026-05-15 KST
 Evidence document status: docs-only; does not change executable Android code.
-Executable code verified at: `e6fb1cb`
-Reviewer update: includes backend scope and latest docs-only Deploy Staging run
-`25904877962`, conclusion `success`.
+Executable code verified at: `b78e190`
+Reviewer update: includes backend scope and latest executable-code CI runs on `b78e190`.
 
 This scorecard is for reviewer scoring only. Do not fill the score column from
 implementation intent or self-assessment. Assign each score from the linked
@@ -34,12 +33,12 @@ Excluded by user direction:
 
 | Rubric Area | Evidence To Inspect | Reviewer Score | Pass At 8.5? |
 |---|---|---:|---|
-| Functional Requirements | `Android Tests` run `25884778885`; unit, backend, API 33 instrumented, and release-smoke jobs succeeded. Core flow tests named in `android-8-5-review-request.md`. Backend `/v1` contract and `python3 -m pytest -q` pass: `128 passed, 8 skipped`. |  |  |
-| Non-Functional Requirements | `readiness-20260514T210124Z.txt` from run `25884778885`: cold start `1997ms`, total PSS `143379KB`, fatal/ANR/OOM pass, failure count `0`. Firebase Crashlytics SDK wiring is a separate workstream and is not claimed here. |  |  |
+| Functional Requirements | `Android Tests` run `25905324256`; unit, backend, API 33 instrumented, and release-smoke jobs succeeded. Core flow tests named in `android-8-5-review-request.md`. Backend `/v1` contract and `python3 -m pytest -q` pass: `128 passed, 8 skipped`. |  |  |
+| Non-Functional Requirements | `readiness-20260515T072402Z.txt` from run `25905324256`: cold start `1994ms`, total PSS `144766KB`, fatal/ANR/OOM pass, failure count `0`. Firebase Crashlytics SDK wiring is a separate workstream and is not claimed here. |  |  |
 | Architecture Criteria | Android has UI/data/domain/core/worker separation, Hilt modules, repositories, Room, StateFlow/SharedFlow, and secure local stores. Backend has FastAPI `/v1`, service modules, DB migrations, and explicit contract docs. |  |  |
 | Design Patterns | MVVM, repository, state-holder, observer/reactive, WorkManager, DTO/entity/domain separation, and backend service-contract patterns are consistently present. |  |  |
 | Testing Criteria | Android CI passed unit, release smoke, and API 33 instrumentation. Backend local tests passed. External live provider tests are present but skipped unless env is configured. |  |  |
-| Code Quality | `Android Deterministic Gates` run `25884778863`: spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size passed. Local lint/release evidence in `android-8-5-completion-audit.md`; release lint still has warnings. |  |  |
+| Code Quality | `Android Deterministic Gates` run `25905324259`: spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size passed. App `targetSdk = 35` is enforced by `AndroidBuildWorkflowSpecTest`; release lint still has warnings. |  |  |
 | Security / Privacy | Android Keystore/EncryptedSharedPreferences, HTTPS default, backup disabled, PIPA copy, no full email original persistence, backend RLS migrations, token-auth middleware. |  |  |
 | Release Engineering | Release smoke and staging deploy succeeded. Firebase App Distribution and Play upload paths are wired, but real Firebase distribution and production Play deploy depend on protected secrets and were not proven as completed uploads. |  |  |
 | Observability | Backend `product_events` and PMF tables exist; Android has vendor-neutral `ObservabilityClient` logger binding with PII redaction. Firebase Crashlytics and Amplitude SDKs are explicitly planned in a separate workstream, not shipped or scored here. |  |  |
@@ -80,7 +79,6 @@ Conditions before inviting testers:
 - Completion audit: `docs/readiness/android-8-5-completion-audit.md`
 - Hardening checklist: `docs/readiness/android-8-5-hardening-checklist.md`
 - Review request: `docs/readiness/android-8-5-review-request.md`
-- Android Deterministic Gates: https://github.com/without2026/becalm-android/actions/runs/25884778863
-- Android Tests: https://github.com/without2026/becalm-android/actions/runs/25884778885
-- Executable-code Deploy Staging: https://github.com/without2026/becalm-android/actions/runs/25884772086
-- Latest docs-only Deploy Staging: https://github.com/without2026/becalm-android/actions/runs/25904877962
+- Android Deterministic Gates: https://github.com/without2026/becalm-android/actions/runs/25905324259
+- Android Tests: https://github.com/without2026/becalm-android/actions/runs/25905324256
+- Executable-code Deploy Staging: https://github.com/without2026/becalm-android/actions/runs/25905319248
