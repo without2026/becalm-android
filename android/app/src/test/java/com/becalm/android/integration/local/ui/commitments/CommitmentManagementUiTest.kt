@@ -112,7 +112,7 @@ class CommitmentManagementUiTest {
         composeRule.onNodeWithTag("commitment-list").performScrollToNode(hasText("활성 약속"))
         composeRule.onNodeWithText("활성 약속").performClick()
         composeRule.onNodeWithTag("evidence-import-fab").performClick()
-        composeRule.onNodeWithText("증거 추가").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_sheet_title)).assertIsDisplayed()
         composeRule.onNodeWithTag("commitment-filter-schedule").performClick()
 
         composeRule.runOnIdle {

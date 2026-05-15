@@ -1,5 +1,6 @@
 package com.becalm.android.ui.today
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +47,7 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.CounterpartyText
@@ -675,6 +677,7 @@ private fun typeLabelFor(item: TimelineItem): String = when (item) {
     is TimelineItem.Meeting -> stringResource(R.string.today_type_meeting)
 }
 
+@Composable
 private fun relatedSourceLabel(item: TimelineItem): String? {
     val sourceTypes = when (item) {
         is TimelineItem.CalendarEvent -> item.relatedSourceTypes
@@ -682,7 +685,28 @@ private fun relatedSourceLabel(item: TimelineItem): String? {
         is TimelineItem.Commitment -> emptyList()
     }
     if (sourceTypes.isEmpty()) return null
-    return sourceTypes.distinct().joinToString(prefix = "관련 ", separator = ", ")
+    val distinctSources = sourceTypes.distinct()
+    var labels = ""
+    for ((index, sourceType) in distinctSources.withIndex()) {
+        if (index > 0) labels += ", "
+        labels += stringResource(sourceTypeLabelRes(sourceType))
+    }
+    return stringResource(R.string.person_detail_related_records_fmt, labels)
+}
+
+@StringRes
+private fun sourceTypeLabelRes(sourceType: String): Int = when (sourceType) {
+    SourceType.GMAIL -> R.string.raw_event_source_badge_gmail
+    SourceType.OUTLOOK_MAIL -> R.string.raw_event_source_badge_outlook_mail
+    SourceType.NAVER_IMAP -> R.string.raw_event_source_badge_naver_imap
+    SourceType.DAUM_IMAP -> R.string.raw_event_source_badge_daum_imap
+    SourceType.GOOGLE_CALENDAR -> R.string.raw_event_source_badge_google_calendar
+    SourceType.OUTLOOK_CALENDAR -> R.string.raw_event_source_badge_outlook_calendar
+    SourceType.VOICE -> R.string.raw_event_source_badge_voice
+    SourceType.CALL_RECORDING -> R.string.raw_event_source_badge_call_recording
+    SourceType.MEETING -> R.string.raw_event_source_badge_meeting
+    SourceType.MESSAGE_SCREENSHOT -> R.string.raw_event_source_badge_message_screenshot
+    else -> R.string.raw_event_source_badge_unknown
 }
 
 private fun formatKstTime(instant: Instant): String {

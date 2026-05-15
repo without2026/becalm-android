@@ -3,6 +3,7 @@ package com.becalm.android.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.amplitude.android.Amplitude
 import com.amplitude.android.Configuration
 import com.becalm.android.BuildConfig
@@ -13,11 +14,16 @@ public class DebugAmplitudeSmokeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(ACTION_FAKE_CRASH_EVENT, ACTION_METRICS_SMOKE)) return
 
+        Log.i(TAG, "Amplitude debug smoke received action=${intent.action}")
         val pending = goAsync()
         Thread {
             runCatching { sendSmokeEvents(context.applicationContext, intent.action.orEmpty()) }
-                .onFailure { Timber.e(it, "Amplitude debug smoke failed") }
+                .onFailure {
+                    Log.e(TAG, "Amplitude debug smoke failed", it)
+                    Timber.e(it, "Amplitude debug smoke failed")
+                }
             Thread.sleep(AMPLITUDE_FLUSH_WAIT_MILLIS)
+            Log.i(TAG, "Amplitude debug smoke finished action=${intent.action}")
             pending.finish()
         }.start()
     }
@@ -25,6 +31,7 @@ public class DebugAmplitudeSmokeReceiver : BroadcastReceiver() {
     private fun sendSmokeEvents(context: Context, action: String) {
         val apiKey = BuildConfig.AMPLITUDE_API_KEY
         if (!BuildConfig.TELEMETRY_ENABLED || apiKey.isBlank()) {
+            Log.w(TAG, "Amplitude debug smoke skipped because telemetry is disabled or API key is blank")
             Timber.w("Amplitude debug smoke skipped because telemetry is disabled or API key is blank")
             return
         }
@@ -35,6 +42,11 @@ public class DebugAmplitudeSmokeReceiver : BroadcastReceiver() {
                 flushIntervalMillis = 1_000
                 useBatch = true
                 callback = { event, code, message ->
+                    Log.i(
+                        TAG,
+                        "Amplitude debug smoke callback eventType=${event.eventType} " +
+                            "statusCode=$code message=$message",
+                    )
                     Timber.i(
                         "Amplitude debug smoke callback eventType=${event.eventType} " +
                             "statusCode=$code message=$message",
@@ -66,6 +78,7 @@ public class DebugAmplitudeSmokeReceiver : BroadcastReceiver() {
             )
         }
         amplitude.flush()
+        Log.i(TAG, "Amplitude debug smoke queued smokeRunId=$smokeRunId metricCount=${METRIC_SMOKE_NAMES.size}")
         Timber.i("Amplitude debug smoke queued smokeRunId=$smokeRunId metricCount=${METRIC_SMOKE_NAMES.size}")
     }
 
@@ -173,6 +186,7 @@ public class DebugAmplitudeSmokeReceiver : BroadcastReceiver() {
             "com.becalm.android.DEBUG_AMPLITUDE_METRICS_SMOKE"
         public const val EVENT_FAKE_CRASH_REPORTED: String = "debug_fake_crash_reported"
         public const val EVENT_METRIC_OBSERVED: String = "debug_metric_observed"
+        private const val TAG: String = "BecalmAmplitudeSmoke"
         private val METRIC_SMOKE_NAMES: List<String> = listOf(
             "notification_open_rate",
             "eligible_action_conversion",

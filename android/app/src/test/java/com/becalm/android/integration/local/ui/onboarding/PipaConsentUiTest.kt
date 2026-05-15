@@ -44,7 +44,7 @@ class PipaConsentUiTest {
         composeRule.onNodeWithText(string(R.string.onb_pipa_bullet_1_value)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_pipa_bullet_2_value)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_pipa_bullet_3_value)).assertIsDisplayed()
-        assertTrue(string(R.string.onb_pipa_bullet_1_value).contains("NAVER Cloud"))
+        assertTrue(string(R.string.onb_pipa_bullet_1_value).contains("네이버 클라우드"))
         assertTrue(string(R.string.onb_pipa_bullet_1_value).contains("Google LLC"))
         assertTrue(string(R.string.onb_pipa_bullet_3_value).contains("CLOVA Speech"))
         assertTrue(!string(R.string.onb_pipa_bullet_3_value).contains("audio multimodal"))

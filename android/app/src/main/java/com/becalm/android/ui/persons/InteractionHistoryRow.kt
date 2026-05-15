@@ -1,5 +1,6 @@
 package com.becalm.android.ui.persons
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.components.CommitmentsExtractedBadge
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.EventSourceBadge
@@ -66,14 +68,23 @@ internal fun SourceEventCardRow(
             CommitmentBucket(label = stringResource(R.string.commitment_item_type_schedule), items = card.schedules)
             if (card.linkedCalendarEventId != null) {
                 Text(
-                    text = "연결된 일정",
+                    text = stringResource(R.string.person_detail_linked_calendar),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
             if (card.relatedSourceTypes.isNotEmpty()) {
+                val distinctSources = card.relatedSourceTypes.distinct()
+                var relatedLabels = ""
+                for ((index, sourceType) in distinctSources.withIndex()) {
+                    if (index > 0) relatedLabels += ", "
+                    relatedLabels += stringResource(sourceTypeLabelRes(sourceType))
+                }
                 Text(
-                    text = "관련 ${card.relatedSourceTypes.distinct().joinToString()}",
+                    text = stringResource(
+                        R.string.person_detail_related_records_fmt,
+                        relatedLabels,
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -83,6 +94,21 @@ internal fun SourceEventCardRow(
             }
         }
     }
+}
+
+@StringRes
+private fun sourceTypeLabelRes(sourceType: String): Int = when (sourceType) {
+    SourceType.GMAIL -> R.string.raw_event_source_badge_gmail
+    SourceType.OUTLOOK_MAIL -> R.string.raw_event_source_badge_outlook_mail
+    SourceType.NAVER_IMAP -> R.string.raw_event_source_badge_naver_imap
+    SourceType.DAUM_IMAP -> R.string.raw_event_source_badge_daum_imap
+    SourceType.GOOGLE_CALENDAR -> R.string.raw_event_source_badge_google_calendar
+    SourceType.OUTLOOK_CALENDAR -> R.string.raw_event_source_badge_outlook_calendar
+    SourceType.VOICE -> R.string.raw_event_source_badge_voice
+    SourceType.CALL_RECORDING -> R.string.raw_event_source_badge_call_recording
+    SourceType.MEETING -> R.string.raw_event_source_badge_meeting
+    SourceType.MESSAGE_SCREENSHOT -> R.string.raw_event_source_badge_message_screenshot
+    else -> R.string.raw_event_source_badge_unknown
 }
 
 @Composable
