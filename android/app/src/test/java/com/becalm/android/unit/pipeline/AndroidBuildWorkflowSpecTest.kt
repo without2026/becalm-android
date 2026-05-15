@@ -53,6 +53,18 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
+    fun `android jvm unit tests disable real telemetry sdk clients`() {
+        // spec: REL-002
+        val buildFile = repoFile("android/app/build.gradle.kts").readText()
+        val localPropertiesSample = repoFile("android/local.properties.sample").readText()
+
+        assertTrue(buildFile.contains("fun isJvmUnitTestInvocation()"))
+        assertTrue(buildFile.contains("val telemetryEnabled = if (isJvmUnitTestInvocation()) false"))
+        assertTrue(buildFile.contains("localProps.getProperty(envKey)"))
+        assertTrue(localPropertiesSample.contains("TELEMETRY_ENABLED=true"))
+    }
+
+    @Test
     fun `android app targets current compile sdk for beta release compatibility`() {
         // spec: REL-003
         val appBuildFile = repoFile("android/app/build.gradle.kts").readText()
