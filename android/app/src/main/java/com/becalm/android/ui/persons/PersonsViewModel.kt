@@ -164,6 +164,7 @@ public class PersonsViewModel @Inject constructor(
 
     /** Backing flow for the debounced search query. */
     private val _query: MutableStateFlow<String> = MutableStateFlow("")
+    private var lastTrackedSearchLength: Int = 0
 
     init {
         observePeople()
@@ -178,7 +179,45 @@ public class PersonsViewModel @Inject constructor(
      * Covers SRC-002.
      */
     public fun onQueryChange(q: String) {
+        val normalized = q.trim()
+        if (normalized.isNotEmpty() && normalized.length != lastTrackedSearchLength) {
+            lastTrackedSearchLength = normalized.length
+            productAnalytics.track(
+                ProductAnalyticsEvent(
+                    eventId = UUID.randomUUID().toString(),
+                    eventName = ProductAnalyticsEvents.SEARCH_PERFORMED,
+                    occurredAt = Clock.System.now(),
+                    properties = mapOf(
+                        "surface" to "persons",
+                        "query_length" to normalized.length,
+                        "core_active" to true,
+                    ),
+                ),
+            )
+        } else if (normalized.isEmpty()) {
+            lastTrackedSearchLength = 0
+        }
         _query.value = q
+    }
+
+    public fun onPersonSelected(personId: String) {
+        val normalized = _query.value.trim()
+        if (normalized.isNotEmpty()) {
+            productAnalytics.track(
+                ProductAnalyticsEvent(
+                    eventId = UUID.randomUUID().toString(),
+                    eventName = ProductAnalyticsEvents.SEARCH_TO_DETAIL,
+                    occurredAt = Clock.System.now(),
+                    properties = mapOf(
+                        "surface" to "persons",
+                        "query_length" to normalized.length,
+                        "result_type" to "person",
+                        "has_target" to personId.isNotBlank(),
+                        "core_active" to true,
+                    ),
+                ),
+            )
+        }
     }
 
     /**

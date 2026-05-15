@@ -98,6 +98,7 @@ public fun PersonsScreen(
         snackbarHostState = snackbarHostState,
         onQueryChange = viewModel::onQueryChange,
         onPersonClick = { personId ->
+            viewModel.onPersonSelected(personId)
             navController.navigate(BecalmRoute.PersonDetail(personId).path)
         },
         onOpenUnassigned = {

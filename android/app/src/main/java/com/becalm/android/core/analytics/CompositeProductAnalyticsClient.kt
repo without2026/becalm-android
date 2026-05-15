@@ -18,6 +18,7 @@ public class CompositeProductAnalyticsClient @Inject constructor(
     private val amplitude: AmplitudeProductAnalyticsClient,
     private val backendMirror: BackendProductEventsMirrorClient,
     private val observability: ObservabilityClient,
+    private val analyticsContext: ProductAnalyticsContext,
     @ApplicationScope applicationScope: CoroutineScope,
 ) : ProductAnalyticsClient {
 
@@ -34,11 +35,12 @@ public class CompositeProductAnalyticsClient @Inject constructor(
 
     override fun track(event: ProductAnalyticsEvent) {
         if (!BuildConfig.TELEMETRY_ENABLED) return
-        if (!ProductAnalyticsValidation.isValid(event)) {
-            observability.addBreadcrumb("analytics", "product_event_dropped", mapOf("event_name" to event.eventName))
+        val enriched = analyticsContext.enrich(event)
+        if (!ProductAnalyticsValidation.isValid(enriched)) {
+            observability.addBreadcrumb("analytics", "product_event_dropped", mapOf("event_name" to enriched.eventName))
             return
         }
-        events.trySend(event)
+        events.trySend(enriched)
     }
 
     override fun setUserScope(userId: String?) {

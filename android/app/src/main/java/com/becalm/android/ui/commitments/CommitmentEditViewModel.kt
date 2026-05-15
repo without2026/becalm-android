@@ -3,6 +3,10 @@ package com.becalm.android.ui.commitments
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -15,6 +19,7 @@ import com.becalm.android.ui.components.CommitmentWire
 import com.becalm.android.domain.commitment.CommitmentEditValidator.ValidationResult
 import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 // ─── UI state ─────────────────────────────────────────────────────────────────
@@ -138,6 +144,7 @@ public class CommitmentEditViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val userPrefsStore: com.becalm.android.data.local.datastore.UserPrefsStore,
     savedStateHandle: SavedStateHandle,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     private val logger: Logger,
 ) : ViewModel() {
 
@@ -216,7 +223,10 @@ public class CommitmentEditViewModel @Inject constructor(
             val result = commitmentRepository.editCommitment(id, patch)
             _uiState.update { it.copy(saving = false) }
             when (result) {
-                is BecalmResult.Success -> _dismiss.tryEmit(EditDismissEvent.Saved)
+                is BecalmResult.Success -> {
+                    trackEditAction("edit", "corrected_extraction")
+                    _dismiss.tryEmit(EditDismissEvent.Saved)
+                }
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "editCommitment failed id=${hashId(id)} error=${result.error}")
                     _uiState.update { it.copy(saveError = CommitmentEditProjector.toSaveError(result.error)) }
@@ -238,6 +248,10 @@ public class CommitmentEditViewModel @Inject constructor(
             }
             when (result) {
                 is BecalmResult.Success -> {
+                    trackEditAction(
+                        action = if (readOnly.quoteDisputed) "quote_dispute_cleared" else "quote_disputed",
+                        precisionSignal = if (readOnly.quoteDisputed) "dispute_retracted" else "possible_false_positive",
+                    )
                     _uiState.update {
                         it.copy(
                             saving = false,
@@ -267,7 +281,10 @@ public class CommitmentEditViewModel @Inject constructor(
             val result = commitmentRepository.softDelete(id)
             _uiState.update { it.copy(saving = false) }
             when (result) {
-                is BecalmResult.Success -> _dismiss.tryEmit(EditDismissEvent.Deleted)
+                is BecalmResult.Success -> {
+                    trackEditAction("soft_delete", "false_positive_or_obsolete")
+                    _dismiss.tryEmit(EditDismissEvent.Deleted)
+                }
                 is BecalmResult.Failure -> {
                     logger.e(TAG, "softDelete failed id=${hashId(id)} error=${result.error}")
                     _uiState.update {
@@ -282,6 +299,31 @@ public class CommitmentEditViewModel @Inject constructor(
     public fun onCancel() {
         _dismiss.tryEmit(EditDismissEvent.Cancelled)
     }
+
+    private fun trackEditAction(action: String, precisionSignal: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_ACTION_SELECTED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "commitment_id" to id,
+                    "action" to action,
+                    "action_strength" to actionStrength(action),
+                    "core_active" to true,
+                    "high_intent" to (action == "edit"),
+                    "precision_signal" to precisionSignal,
+                ),
+            ),
+        )
+    }
+
+    private fun actionStrength(action: String): String =
+        when (action) {
+            "edit" -> "strong"
+            "soft_delete", "quote_disputed" -> "cleanup"
+            else -> "other"
+        }
 
     /** Clears a one-shot [EditUiState.saveError] after the Composable displays it. */
     public fun clearSaveError() {

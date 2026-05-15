@@ -678,16 +678,45 @@ public class CommitmentManagementViewModel @Inject constructor(
             "onCancel" -> "cancel"
             else -> name
         }
+        val row = allRows.value.firstOrNull { it.id == id }
+        val now = clock.nowInstant()
         productAnalytics.track(
             ProductAnalyticsEvent(
                 eventId = UUID.randomUUID().toString(),
                 eventName = ProductAnalyticsEvents.COMMITMENT_ACTION_SELECTED,
-                occurredAt = clock.nowInstant(),
+                occurredAt = now,
                 properties = mapOf(
                     "commitment_id" to id,
                     "action" to action,
+                    "action_strength" to actionStrength(action),
+                    "core_active" to true,
+                    "high_intent" to (action in HIGH_INTENT_ACTIONS),
+                    "prior_action_state" to (row?.actionState ?: "unknown"),
+                    "item_type" to (row?.itemType ?: "unknown"),
+                    "source_type" to (row?.sourceType ?: "unknown"),
+                    "due_bucket" to dueBucket(row?.dueAt, now),
                 ),
             ),
         )
+    }
+
+    private fun actionStrength(action: String): String =
+        when (action) {
+            "remind" -> "weak"
+            "cancel" -> "cleanup"
+            "follow_up", "complete", "edit" -> "strong"
+            else -> "other"
+        }
+
+    private fun dueBucket(dueAt: Instant?, now: Instant): String =
+        when {
+            dueAt == null -> "none"
+            dueAt < now -> "past_due"
+            dueAt.toEpochMilliseconds() - now.toEpochMilliseconds() <= 86_400_000L -> "next_24h"
+            else -> "future"
+        }
+
+    private companion object {
+        private val HIGH_INTENT_ACTIONS = setOf("follow_up", "complete", "edit")
     }
 }
