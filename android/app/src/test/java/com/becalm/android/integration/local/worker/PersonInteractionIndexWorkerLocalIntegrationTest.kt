@@ -144,6 +144,50 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `duplicate participants for one source and person render as one interaction`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-duplicate-1",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-duplicate-sender",
+                    sourceEventId = "raw-duplicate-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-duplicate",
+                    personId = personId,
+                    email = CUSTOMER_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+                sourceParticipant(
+                    id = "participant-duplicate-mentioned",
+                    sourceEventId = "raw-duplicate-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-duplicate",
+                    personId = personId,
+                    email = CUSTOMER_EMAIL,
+                    role = "mentioned",
+                    relationToUser = "referenced",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
+        assertEquals(listOf("raw:raw-duplicate-1"), interactions.map { it.sourceRef })
+        assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
+    }
+
+    @Test
     fun `raw commitments and calendar rows without relation rows do not create people index rows`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(
