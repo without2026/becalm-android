@@ -16,6 +16,7 @@ APP_APK="${BECALM_APK:-$ROOT_DIR/android/app/build/outputs/apk/debug/app-debug.a
 STRICT="${BECALM_READINESS_STRICT:-1}"
 MAX_COLD_START_MS="${BECALM_MAX_COLD_START_MS:-3000}"
 MAX_TOTAL_PSS_KB="${BECALM_MAX_TOTAL_PSS_KB:-262144}"
+MAX_SKIPPED_FRAMES="${BECALM_MAX_SKIPPED_FRAMES:-60}"
 OUT_DIR="$ROOT_DIR/qa/emulator/reports/readiness"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 REPORT="$OUT_DIR/readiness-$STAMP.txt"
@@ -74,6 +75,7 @@ metric heap "$(run_adb shell getprop dalvik.vm.heapsize | tr -d '\r')"
 metric strict "$STRICT"
 metric max_cold_start_ms "$MAX_COLD_START_MS"
 metric max_total_pss_kb "$MAX_TOTAL_PSS_KB"
+metric max_skipped_frames "$MAX_SKIPPED_FRAMES"
 
 section "cold_start"
 run_adb logcat -c >/dev/null 2>&1 || true
@@ -91,6 +93,8 @@ TOTAL_TIME="$(printf '%s' "${TOTAL_TIME:-}" | digits_only)"
 WAIT_TIME="$(printf '%s' "${WAIT_TIME:-}" | digits_only)"
 metric cold_start_total_ms "${TOTAL_TIME:-unknown}"
 metric cold_start_wait_ms "${WAIT_TIME:-unknown}"
+APP_PID="$(run_adb shell pidof "$PACKAGE_NAME" 2>/dev/null | tr -d '\r' | awk '{print $1}')"
+metric app_pid "${APP_PID:-unknown}"
 
 section "memory"
 run_adb shell dumpsys meminfo "$PACKAGE_NAME" | tee -a "$REPORT" >/dev/null
@@ -144,6 +148,25 @@ fi
 section "logcat"
 LOGCAT_OUTPUT="$(run_adb logcat -d -v time 2>/dev/null | tr -d '\r' || true)"
 printf '%s\n' "$LOGCAT_OUTPUT" | tee -a "$REPORT" >/dev/null
+SKIPPED_FRAMES_MAX="0"
+if [[ -n "${APP_PID:-}" ]]; then
+  SKIPPED_FRAMES_MAX="$(
+    printf '%s\n' "$LOGCAT_OUTPUT" |
+      grep -E "Choreographer\\([[:space:]]*${APP_PID}\\): Skipped [0-9]+ frames" |
+      sed -E 's/.*Skipped ([0-9]+) frames.*/\1/' |
+      sort -nr |
+      head -n1 ||
+      true
+  )"
+fi
+SKIPPED_FRAMES_MAX="${SKIPPED_FRAMES_MAX:-0}"
+metric skipped_frames_max "$SKIPPED_FRAMES_MAX"
+if [[ "$SKIPPED_FRAMES_MAX" =~ ^[0-9]+$ && "$SKIPPED_FRAMES_MAX" -gt "$MAX_SKIPPED_FRAMES" ]]; then
+  metric skipped_frames_threshold "FAIL over ${MAX_SKIPPED_FRAMES} frames"
+  record_failure "skipped_frames_max=${SKIPPED_FRAMES_MAX} over ${MAX_SKIPPED_FRAMES}"
+else
+  metric skipped_frames_threshold "PASS <=${MAX_SKIPPED_FRAMES} frames"
+fi
 LOGCAT_FAILURES="$(
   printf '%s\n' "$LOGCAT_OUTPUT" |
     grep -E "FATAL EXCEPTION|ANR in ${PACKAGE_NAME}|OutOfMemoryError|lowmemorykiller.*${PACKAGE_NAME}|Force finishing activity.*${PACKAGE_NAME}|Process ${PACKAGE_NAME}.*has died" ||

@@ -24,7 +24,8 @@ self-scoring; the final score is assigned by the reviewer.
 | Verify backend optional tests | `backend-tests` job in run `25905324256`, conclusion `success` |
 | Verify staging deploy does not block main | Executable-code `Deploy Staging` run `25905319248`, conclusion `success`; docs-only pushes do not change executable Android code |
 | Preserve failure evidence for CI triage | Artifacts exist for `android-gate-reports`, `android-unit-test-reports`, `android-instrumented-test-reports`, and `android-release-smoke-reports` |
-| Enforce beta-readiness performance/logcat smoke criteria | `qa/emulator/scripts/measure_android_readiness.sh` fails by default on unavailable/over-threshold cold start, unavailable/over-threshold PSS, or app fatal/ANR/OOM logcat patterns |
+| Enforce beta-readiness performance/logcat smoke criteria | `qa/emulator/scripts/measure_android_readiness.sh` fails by default on unavailable/over-threshold cold start, unavailable/over-threshold PSS, excessive app Choreographer skipped frames, or app fatal/ANR/OOM logcat patterns |
+| Keep source/person business projection stable | `PersonInteractionIndexWorkerLocalIntegrationTest` covers duplicate source participants collapsing to one person interaction; `SourceRelationRefreshCoordinatorSpecTest` covers schedule-event-link mirror changes enqueueing the person index |
 | Verify readiness smoke survives test APK cleanup | Run `25905324256` reinstalled `app-debug.apk` when `pm path com.becalm.android` was missing, then measured launch/memory/logcat |
 | Keep app target SDK current for Play/release compatibility | `android/app/build.gradle.kts` uses `compileSdk = 35` and `targetSdk = 35`; `AndroidBuildWorkflowSpecTest` enforces app and baseline profile SDK alignment; Robolectric updated to `4.16.1` so unit tests run against target SDK 35 |
 | Prevent long-running CI jobs from hanging indefinitely | `.github/workflows/android-tests.yml` and `.github/workflows/android-gates.yml` define job-level `timeout-minutes`; mirrored in `.pipeline/adapters/android/test.yml` and `.pipeline/adapters/android/gates.yml` |
@@ -63,6 +64,13 @@ Readiness smoke artifact from `Android Tests` run `25905324256`:
 | Logcat fatal/ANR/OOM scan | pass |
 | Readiness failure count | `0` |
 
+New readiness QA gate in the current working tree:
+
+| Metric | Guard |
+|---|---|
+| `skipped_frames_max` | parsed from app-pid Choreographer logcat lines |
+| `skipped_frames_threshold` | strict failure over configurable `BECALM_MAX_SKIPPED_FRAMES`, default `60` |
+
 Artifact evidence:
 
 | Artifact | Size |
@@ -78,6 +86,7 @@ Artifact evidence:
 |---|---|
 | `./gradlew testDebugUnitTest --tests '*AndroidBuildWorkflowSpecTest' --no-daemon --console=plain` | pass after app `targetSdk = 35` and Robolectric `4.16.1` update |
 | `./gradlew testDebugUnitTest --tests '*AndroidBuildWorkflowSpecTest' --tests '*ReadinessQaScriptSpecTest' --no-daemon --console=plain` | pass |
+| `./gradlew testDebugUnitTest --tests '*ReadinessQaScriptSpecTest' --tests '*SourceRelationRefreshCoordinatorSpecTest' --tests '*PersonInteractionIndexWorkerLocalIntegrationTest' --no-daemon --console=plain` | pass |
 | `./gradlew testDebugUnitTest --tests '*AndroidPlayPolicySpecTest' --tests '*OnboardingUiTest' --no-daemon --console=plain` | pass |
 | `./gradlew testDebugUnitTest --tests '*PipaConsentUiTest' --tests '*VoiceUploadWorkerNotificationSpecTest' --tests '*SettingsUiTest' --tests '*TodayTimelineUiTest' --tests '*PersonsUiTest' --tests '*CommitmentManagementUiTest' --no-daemon --console=plain` | pass |
 | `./gradlew testDebugUnitTest --no-daemon --console=plain` | pass |

@@ -42,13 +42,14 @@ Required evidence:
   - `cold_start_total_ms`
   - `total_pss_kb`
   - `frame_rows`
-- Readiness measurement fails by default if cold start or PSS is unavailable, exceeds the configured threshold, or logcat contains app fatal/ANR/OOM signals.
+- Readiness measurement fails by default if cold start or PSS is unavailable, exceeds the configured threshold, app Choreographer skipped frames exceed the configured threshold, or logcat contains app fatal/ANR/OOM signals.
 - Large person/detail datasets remain usable through seeded emulator QA, not just small previews.
 
 Pass condition for 8.5:
 
 - Cold start is under 3000ms on the target emulator after app install and QA seed.
 - Total PSS is under 256MB during the People/Person-detail smoke.
+- App-pid Choreographer skipped frames stay under the configured beta-readiness threshold.
 - No ANR, OOM, or fatal exception appears in logcat during the beta-readiness smoke.
 
 Current CI emulator evidence:
@@ -116,7 +117,7 @@ Current main evidence:
 - Onboarding/PIPA copy is aligned with the current audio pipeline: audio bytes are processed by NAVER Cloud CLOVA Speech for STT/diarization, then transcript and speaker labels go to Google Vertex AI for structured extraction.
 - Source and upload processing status copy uses product language such as `내용 정리 중`, not vendor names.
 - Emulator screenshot and QA artifacts exist under `docs/ui-smoke-screenshots/` and `qa/emulator/`.
-- `measure_android_readiness.sh` records cold start, PSS, frames, logcat scan, and strict pass/fail counters; `ReadinessQaScriptSpecTest` prevents regressions to warn-only measurement.
+- `measure_android_readiness.sh` records cold start, PSS, frames, app skipped-frame max, logcat scan, and strict pass/fail counters; `ReadinessQaScriptSpecTest` prevents regressions to warn-only measurement.
 - CI emulator run `25905324256` is the latest connected Android test evidence and passed.
 
 ## Release Engineering / CI

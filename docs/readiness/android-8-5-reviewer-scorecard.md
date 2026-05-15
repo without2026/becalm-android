@@ -1,9 +1,10 @@
 # Android 8.5 Reviewer Scorecard
 
 Date: 2026-05-15 KST
-Evidence document status: docs-only; does not change executable Android code.
-Executable code verified at: `b78e190`
-Reviewer update: includes backend scope and latest executable-code CI runs on `b78e190`.
+Evidence document status: reviewer re-check after analytics/Crashlytics changes.
+Executable code verified at: current `becalm-android` working tree on top of
+`074ec85`; `becalm-backend` at `22e9752`.
+Reviewer update: previous CI evidence is stale for the current working tree.
 
 This scorecard is for reviewer scoring only. Do not fill the score column from
 implementation intent or self-assessment. Assign each score from the linked
@@ -24,7 +25,7 @@ Included:
 - Backend `/v1/*` API, Supabase persistence contract, migrations, and local
   backend test suite.
 
-Excluded by user direction:
+Previously excluded, but now present in current Android code:
 
 - Firebase Crashlytics SDK wiring.
 - Amplitude SDK/client instrumentation.
@@ -33,46 +34,49 @@ Excluded by user direction:
 
 | Rubric Area | Evidence To Inspect | Reviewer Score | Pass At 8.5? |
 |---|---|---:|---|
-| Functional Requirements | `Android Tests` run `25905324256`; unit, backend, API 33 instrumented, and release-smoke jobs succeeded. Core flow tests named in `android-8-5-review-request.md`. Backend `/v1` contract and `python3 -m pytest -q` pass: `128 passed, 8 skipped`. |  |  |
-| Non-Functional Requirements | `readiness-20260515T072402Z.txt` from run `25905324256`: cold start `1994ms`, total PSS `144766KB`, fatal/ANR/OOM pass, failure count `0`. Firebase Crashlytics SDK wiring is a separate workstream and is not claimed here. |  |  |
-| Architecture Criteria | Android has UI/data/domain/core/worker separation, Hilt modules, repositories, Room, StateFlow/SharedFlow, and secure local stores. Backend has FastAPI `/v1`, service modules, DB migrations, and explicit contract docs. |  |  |
-| Design Patterns | MVVM, repository, state-holder, observer/reactive, WorkManager, DTO/entity/domain separation, and backend service-contract patterns are consistently present. |  |  |
-| Testing Criteria | Android CI passed unit, release smoke, and API 33 instrumentation. Backend local tests passed. External live provider tests are present but skipped unless env is configured. |  |  |
-| Code Quality | `Android Deterministic Gates` run `25905324259`: spec coverage, assert guard, secret detection, dependency-check task presence, Android lint, and APK size passed. App `targetSdk = 35` is enforced by `AndroidBuildWorkflowSpecTest`; release lint still has warnings. |  |  |
-| Security / Privacy | Android Keystore/EncryptedSharedPreferences, HTTPS default, backup disabled, PIPA copy, no full email original persistence, backend RLS migrations, token-auth middleware. |  |  |
-| Release Engineering | Release smoke and staging deploy succeeded. Firebase App Distribution and Play upload paths are wired, but real Firebase distribution and production Play deploy depend on protected secrets and were not proven as completed uploads. |  |  |
-| Observability | Backend `product_events` and PMF tables exist; Android has vendor-neutral `ObservabilityClient` logger binding with PII redaction. Firebase Crashlytics and Amplitude SDKs are explicitly planned in a separate workstream, not shipped or scored here. |  |  |
-| UX / Product Readiness | PIPA/CLOVA copy alignment, Korean processing copy, source recovery UX, user-facing vendor status removal, settings/privacy surfaces, and emulator screenshot evidence. |  |  |
+| Functional Requirements | Previous CI flow evidence exists, but current `./gradlew testDebugUnitTest` fails 4 foreground catch-up/source sync tests. Backend `/v1` contract passes locally with `130 passed, 8 skipped`. | 7.8 | No |
+| Non-Functional Requirements | Previous CI readiness smoke measured cold start `1994ms`, total PSS `144766KB`, fatal/ANR/OOM pass, failure count `0`; however current telemetry/Crashlytics code has not been re-measured on emulator. | 7.4 | No |
+| Architecture Criteria | Android now has separate product analytics and observability abstractions, Composite clients, backend mirror, Crashlytics port, and PII validation. Some telemetry calls sit in Activity/AuthRepository/ViewModel/Receiver boundaries, not deep domain logic. | 8.3 | No |
+| Design Patterns | MVVM/repository/state-holder/reactive patterns remain. Analytics uses facade + composite + bounded channel; backend analytics validation is split into `analytics_contract.py`. | 8.3 | No |
+| Testing Criteria | Backend tests pass. Android focused workflow/readiness tests pass, but full `testDebugUnitTest` fails: `ForegroundCatchUpSchedulerLocalIntegrationTest` has 4 failures. No dedicated analytics/Crashlytics unit tests were found. | 6.2 | No |
+| Code Quality | `lintDebug` passes. Current code has stale readiness claims, target SDK mismatch (`compileSdk = 35`, `targetSdk = 34` while docs claim target 35), and failing unit tests. | 6.8 | No |
+| Security / Privacy | Keystore/HTTPS/PIPA/RLS controls remain. Analytics adds property PII filtering, Crashlytics sanitization, telemetry opt-out, and backend property size/depth checks. Needs explicit test coverage and policy verification. | 8.2 | No |
+| Release Engineering | Firebase/Amplitude dependencies are wired and local debug builds can compile with missing Amplitude key. Protected release still depends on secrets, current full tests fail, and targetSdk documentation is inconsistent with build config. | 6.5 | No |
+| Observability | Crashlytics and Amplitude are now implemented via abstractions, with backend `product_events` mirror and PMF tables. No local dashboard proof, no analytics-specific unit tests, and current docs still describe SDK work as excluded. | 7.4 | No |
+| UX / Product Readiness | UX copy/readiness evidence largely remains, but source catch-up test failures affect the freshness guarantee behind source-driven user journeys. | 8.0 | No |
 
-Weighted readiness score for a controlled 10-user / 5-day beta: reviewer to fill.
+Weighted readiness score for a controlled 10-user / 5-day beta: **7.3 / 10**.
 
 ## Reviewer Decision
 
-Decision: reviewer to fill.
+Decision: **no-go** for a controlled 10-user / 5-day beta until the current
+working tree is made internally consistent and green.
 
-- Functional Requirements score:
-- Non-Functional Requirements score:
-- Architecture Criteria score:
-- Design Patterns score:
-- Testing Criteria score:
-- Code Quality score:
-- Security / Privacy score:
-- Release Engineering score:
-- Observability score:
-- UX / Product Readiness score:
-- Controlled 10-user / 5-day beta accepted:
-- Public/open beta accepted:
+- Functional Requirements score: 7.8
+- Non-Functional Requirements score: 7.4
+- Architecture Criteria score: 8.3
+- Design Patterns score: 8.3
+- Testing Criteria score: 6.2
+- Code Quality score: 6.8
+- Security / Privacy score: 8.2
+- Release Engineering score: 6.5
+- Observability score: 7.4
+- UX / Product Readiness score: 8.0
+- Controlled 10-user / 5-day beta accepted: no
+- Public/open beta accepted: no
 
-Conditions before inviting testers:
+Blockers before inviting testers:
 
-- Configure the protected staging/runtime/signing/Firebase secrets or use Play
-  Console Internal Testing with the same signed release artifact.
-- Keep a daily beta ops loop: crash/user report intake, Supabase/backend error
-  review, source-status review, and issue triage.
-- Treat Firebase Crashlytics and Amplitude as the separate observability
-  workstream before any beta beyond this controlled 10-user / 5-day cohort.
-- Run at least one real-provider smoke for the tester source mix: Google/Outlook
-  mail/calendar and one audio path if those are in the beta script.
+- Fix `ForegroundCatchUpSchedulerLocalIntegrationTest` failures and restore a
+  passing full `./gradlew testDebugUnitTest`.
+- Reconcile target SDK evidence: either set `targetSdk = 35` or update docs and
+  reviewer claims to match `targetSdk = 34`.
+- Add focused tests for product analytics validation, bounded queue/drop behavior,
+  backend mirror failure isolation, Crashlytics PII sanitization, and user opt-out.
+- Re-run emulator readiness smoke after Firebase/Amplitude wiring and record new
+  cold start, PSS, skipped-frame, and fatal/ANR/OOM evidence.
+- Update readiness docs so they no longer claim Firebase/Amplitude SDK work is
+  excluded when current code ships those SDKs.
 
 ## Evidence Links
 

@@ -45,6 +45,17 @@ jobs:
           java-version: "17"
           distribution: temurin
 
+      - name: Restore google-services.json
+        working-directory: ${{ needs.read-config.outputs.root }}/android
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
+          else
+            echo "[WARN] GOOGLE_SERVICES_JSON_B64 is not configured; Firebase plugins remain disabled."
+          fi
+
       - name: Build app bundle
         working-directory: ${{ needs.read-config.outputs.root }}/android
         env:
@@ -52,6 +63,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          AMPLITUDE_API_KEY: ${{ secrets.AMPLITUDE_API_KEY }}
           BECALM_RELEASE_STORE_FILE: ${{ secrets.BECALM_RELEASE_STORE_FILE }}
           BECALM_RELEASE_STORE_PASSWORD: ${{ secrets.BECALM_RELEASE_STORE_PASSWORD }}
           BECALM_RELEASE_KEY_ALIAS: ${{ secrets.BECALM_RELEASE_KEY_ALIAS }}

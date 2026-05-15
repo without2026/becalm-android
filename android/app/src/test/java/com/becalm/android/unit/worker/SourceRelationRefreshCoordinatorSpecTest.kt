@@ -7,6 +7,7 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.worker.CalendarRelationRefresh
 import com.becalm.android.worker.SourceRelationRefreshCoordinator
@@ -81,13 +82,40 @@ class SourceRelationRefreshCoordinatorSpecTest {
         verify(exactly = 0) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
-    private fun coordinator(): SourceRelationRefreshCoordinator =
+    @Test
+    fun `refresh pulls schedule event links and enqueues person index when calendar source truth changes`() = runTest {
+        // spec: TDY-006
+        val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
+        stubSourceParticipants(upserted = 0)
+        stubCommitments(upserted = 0)
+        stubCommitmentParticipants(upserted = 0)
+        coEvery { scheduleEventLinkRepository.refreshSince("user-1", null, null) } returns
+            BecalmResult.Success(ScheduleEventLinkRepository.RefreshStats(fetched = 1, upserted = 1, hasMore = false, nextCursor = null))
+
+        val result = coordinator(scheduleEventLinkRepository = scheduleEventLinkRepository).refresh(
+            userId = "user-1",
+            plan = SourceRelationRefreshPlan(
+                sourceType = "gmail",
+                sourceParticipantRefreshScope = SourceParticipantRefreshScope.SOURCE,
+            ),
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, (result as BecalmResult.Success).value.changedCount)
+        coVerify(exactly = 1) { scheduleEventLinkRepository.refreshSince("user-1", null, null) }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    private fun coordinator(
+        scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
+    ): SourceRelationRefreshCoordinator =
         SourceRelationRefreshCoordinator(
             rawIngestionRepository = rawIngestionRepository,
             calendarEventRepository = calendarEventRepository,
             commitmentRepository = commitmentRepository,
             sourceEventParticipantRepository = sourceEventParticipantRepository,
             commitmentParticipantRepository = commitmentParticipantRepository,
+            scheduleEventLinkRepository = scheduleEventLinkRepository,
             workScheduler = workScheduler,
             logger = logger,
         )
