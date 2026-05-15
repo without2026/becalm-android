@@ -210,6 +210,22 @@ class AndroidBuildWorkflowSpecTest {
     }
 
     @Test
+    fun `ci review merge gate only requires deterministic gates and android tests by default`() {
+        // spec: REL-010
+        val workflow = repoFile(".github/workflows/ci-review.yml").readText()
+
+        assertTrue(workflow.contains("vars.ENABLE_LAYER2_REVIEW == 'true'"))
+        assertTrue(workflow.contains("GATES: \${{ needs.deterministic-gates.result }}"))
+        assertTrue(workflow.contains("TESTS: \${{ needs.tests.result }}"))
+        assertFalse(workflow.contains("CLAUDE: \${{ needs.layer2-claude-review.result }}"))
+        assertFalse(workflow.contains("CODEX: \${{ needs.layer2-codex-review.result }}"))
+        assertFalse(workflow.contains("CROSS: \${{ needs.cross-validate.result }}"))
+        assertFalse(workflow.contains("Claude review required for depth="))
+        assertFalse(workflow.contains("Codex review required for depth="))
+        assertFalse(workflow.contains("cross-validate required for depth="))
+    }
+
+    @Test
     fun `android gate adapter template mirrors dependency check secret fallback`() {
         // spec: REL-010
         val gates = repoFile(".pipeline/adapters/android/gates.yml").readText()
