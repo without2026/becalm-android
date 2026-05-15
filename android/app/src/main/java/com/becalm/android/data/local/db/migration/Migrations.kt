@@ -1126,6 +1126,106 @@ private val MIGRATION_20_21 = object : Migration(20, 21) {
     }
 }
 
+// ─── Migration 21 → 22 (identity anchors and source connections) ────────────
+//
+// Mirrors backend-owned identity/source ownership state. Android reads these tables
+// reactively and only refreshes/patches them through explicit repository calls.
+private val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `self_identity_anchors` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `anchor_type` TEXT NOT NULL,
+                `normalized_value` TEXT NOT NULL,
+                `display_value` TEXT,
+                `source` TEXT NOT NULL,
+                `scope` TEXT NOT NULL,
+                `source_connection_id` TEXT,
+                `source_event_id` TEXT,
+                `trust` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `created_at` INTEGER,
+                `updated_at` INTEGER,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_self_identity_anchors_user_status_value` " +
+                "ON `self_identity_anchors` (`user_id`, `status`, `anchor_type`, `normalized_value`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_self_identity_anchors_user_source_connection` " +
+                "ON `self_identity_anchors` (`user_id`, `source_connection_id`)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `source_connections` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `provider` TEXT NOT NULL,
+                `capability` TEXT NOT NULL,
+                `account_identifier` TEXT,
+                `account_display_name` TEXT,
+                `ownership` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `linked_self_anchor_id` TEXT,
+                `last_sync_at` INTEGER,
+                `last_error` TEXT,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_connections_user_provider_account` " +
+                "ON `source_connections` (`user_id`, `provider`, `capability`, `account_identifier`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_source_connections_user_ownership_status` " +
+                "ON `source_connections` (`user_id`, `ownership`, `status`)",
+        )
+    }
+}
+
+// ─── Migration 22 → 23 (durable source participant mirror retry) ───────────
+//
+// Manual/self person matching is local-first. This queue preserves backend patch
+// payloads when the immediate mirror call fails transiently.
+private val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `pending_source_participant_mirrors` (
+                `participant_id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `person_id` TEXT,
+                `identity_type` TEXT,
+                `normalized_value` TEXT,
+                `display_name_raw` TEXT,
+                `email_raw` TEXT,
+                `phone_raw` TEXT,
+                `organization_raw` TEXT,
+                `title_raw` TEXT,
+                `confidence` REAL,
+                `relation_to_user` TEXT,
+                `resolution_status` TEXT NOT NULL,
+                `retry_count` INTEGER NOT NULL,
+                `last_error` TEXT,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`participant_id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_pending_source_participant_mirrors_user_updated` " +
+                "ON `pending_source_participant_mirrors` (`user_id`, `updated_at`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1160,4 +1260,6 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_18_19,
     MIGRATION_19_20,
     MIGRATION_20_21,
+    MIGRATION_21_22,
+    MIGRATION_22_23,
 )

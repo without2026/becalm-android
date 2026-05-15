@@ -24,6 +24,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -37,6 +38,7 @@ import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.sourcePresentationFor
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -108,6 +110,16 @@ internal fun ProcessingStatusContent(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val visibleRows = state.rows.filter { it.phase != ProcessingPhase.IDLE }
+    val activeRows = visibleRows.filter { it.phase.isActive }
+    val actionRows = visibleRows.filter { it.phase == ProcessingPhase.BLOCKED || it.phase == ProcessingPhase.ERROR }
+    val quietRows = visibleRows.filter { row ->
+        !row.phase.isActive && row.phase != ProcessingPhase.BLOCKED && row.phase != ProcessingPhase.ERROR
+    }
+    val activeTitle = stringResource(R.string.processing_status_group_active)
+    val actionTitle = stringResource(R.string.processing_status_group_action_needed)
+    val quietTitle = stringResource(R.string.processing_status_group_quiet)
+
     BecalmScaffold(
         modifier = modifier,
         title = stringResource(R.string.processing_status_title),
@@ -120,17 +132,81 @@ internal fun ProcessingStatusContent(
             }
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(state.rows, key = { it.sourceType }) { row ->
-                ProcessingStatusItem(row)
+        if (visibleRows.isEmpty()) {
+            EmptyState(
+                title = stringResource(R.string.processing_status_empty_title),
+                message = stringResource(R.string.processing_status_empty_message),
+                modifier = Modifier.padding(padding),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .testTag("processing-status-list"),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "summary") {
+                    ProcessingSummary(activeCount = activeRows.size, actionCount = actionRows.size)
+                }
+                processingGroup(
+                    key = "active",
+                    title = activeTitle,
+                    rows = activeRows,
+                )
+                processingGroup(
+                    key = "action",
+                    title = actionTitle,
+                    rows = actionRows,
+                )
+                processingGroup(
+                    key = "quiet",
+                    title = quietTitle,
+                    rows = quietRows,
+                )
             }
         }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
+    key: String,
+    title: String,
+    rows: List<ProcessingStatusRow>,
+) {
+    if (rows.isEmpty()) return
+    item(key = "$key-title") {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+    items(rows, key = { "$key-${it.sourceType}" }) { row ->
+        ProcessingStatusItem(row)
+    }
+}
+
+@Composable
+private fun ProcessingSummary(activeCount: Int, actionCount: Int) {
+    val text = when {
+        activeCount > 0 && actionCount > 0 ->
+            stringResource(R.string.processing_status_summary_active_action_fmt, activeCount, actionCount)
+        activeCount > 0 -> stringResource(R.string.processing_status_summary_active_fmt, activeCount)
+        actionCount > 0 -> stringResource(R.string.processing_status_summary_action_fmt, actionCount)
+        else -> stringResource(R.string.processing_status_summary_quiet)
+    }
+    EvidenceCard(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -193,12 +269,13 @@ private fun phaseLabelRes(phase: ProcessingPhase): Int = when (phase) {
     ProcessingPhase.IDLE -> R.string.processing_phase_idle
     ProcessingPhase.SCANNING -> R.string.processing_phase_scanning
     ProcessingPhase.NEW_ITEMS -> R.string.processing_phase_new_items
-    ProcessingPhase.GEMINI -> R.string.processing_phase_gemini
+    ProcessingPhase.GEMINI -> R.string.processing_phase_memory
     ProcessingPhase.UPLOADING -> R.string.processing_phase_uploading
     ProcessingPhase.NO_NEW_ITEMS -> R.string.processing_phase_no_new_items
     ProcessingPhase.SYNCED -> R.string.processing_phase_synced
-    ProcessingPhase.BLOCKED -> R.string.processing_phase_blocked
-    ProcessingPhase.ERROR -> R.string.processing_phase_error
+    ProcessingPhase.BLOCKED,
+    ProcessingPhase.ERROR,
+    -> R.string.processing_phase_attention_needed
 }
 
 private fun formatTimeHHmm(at: Instant): String {

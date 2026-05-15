@@ -5,6 +5,7 @@ import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.PersonIndexDirtySources
@@ -22,6 +23,7 @@ internal class StructuredExtractionPersister(
     private val processingStatusRepository: ProcessingStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
 ) {
     suspend fun persist(
         userId: String,
@@ -45,6 +47,10 @@ internal class StructuredExtractionPersister(
             commitmentDao.insertAll(commitmentEntities)
         }
 
+        val selfIdentityAnchors = selfIdentityAnchorDao.findActiveForMatching(
+            userId = userId,
+            sourceEventId = entity.id,
+        )
         val sourceParticipants = body.sourceEventParticipants.mapIndexed { index, dto ->
             dto.toSourceEventParticipantEntity(
                 userId = userId,
@@ -53,6 +59,7 @@ internal class StructuredExtractionPersister(
                 sourceRef = entity.sourceRef,
                 index = index,
                 now = now,
+                selfIdentityAnchors = selfIdentityAnchors,
             )
         }
         if (sourceParticipants.isNotEmpty()) {
@@ -68,6 +75,7 @@ internal class StructuredExtractionPersister(
                 index = index,
                 fallbackPersonId = fallbackPersonId,
                 now = now,
+                selfIdentityAnchors = selfIdentityAnchors,
             )
         }
         if (commitmentParticipants.isNotEmpty()) {

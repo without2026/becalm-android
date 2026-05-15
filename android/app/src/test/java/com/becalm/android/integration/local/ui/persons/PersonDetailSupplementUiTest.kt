@@ -163,6 +163,38 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
+    fun `unassigned events self action routes selected event`() {
+        var selfMatchedEventId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-self",
+                            sourceType = SourceType.GMAIL,
+                            title = "내가 보낸 메일",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onSelfMatch = { event ->
+                        selfMatchedEventId = event.id
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-self-event-self")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("event-self", selfMatchedEventId)
+        }
+    }
+
+    @Test
     fun `unassigned events other person renders existing people and matches selected row`() {
         var matchedAnchor: String? = null
         var matchedNickname: String? = null
@@ -211,10 +243,18 @@ class PersonDetailSupplementUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.person_match_other_person_action)).performClick()
-        composeRule.onNodeWithText("김민지").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("박서연").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("김민지").performScrollTo().performClick()
+        composeRule.onNodeWithTag("unassigned-match-other-event-other")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("unassigned-match-choice-event-other-minji@corp.com")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("unassigned-match-choice-event-other-+82109998888")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("unassigned-match-choice-event-other-minji@corp.com")
+            .performScrollTo()
+            .performClick()
         composeRule.onNodeWithText(string(R.string.persons_manual_match_action))
             .performScrollTo()
             .performClick()

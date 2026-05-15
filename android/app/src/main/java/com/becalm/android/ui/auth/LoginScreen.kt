@@ -174,6 +174,7 @@ public fun LoginScreen(
             modifier = Modifier.padding(padding),
             isLoading = state is AuthUiState.Loading,
             googleSignInEnabled = googleEnabled,
+            authErrorMessage = authErrorMessage,
             onSignIn = { email, password ->
                 onEmailSignIn?.invoke(email, password)
                     ?: requireNotNull(authViewModel).onEmailSignIn(email, password)
@@ -223,6 +224,7 @@ internal fun LoginForm(
     modifier: Modifier = Modifier,
     isLoading: Boolean,
     googleSignInEnabled: Boolean,
+    authErrorMessage: String? = null,
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String) -> Unit,
     onGoogleSignIn: () -> Unit,
@@ -245,14 +247,22 @@ internal fun LoginForm(
                 .widthIn(max = LoginFormMaxContentWidth)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 24.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             LoginProviderSection(
-                googleSignInEnabled = googleSignInEnabled && !isLoading,
+                googleSignInEnabled = googleSignInEnabled,
+                isLoading = isLoading,
                 onGoogleSignIn = onGoogleSignIn,
             )
-            LoginDivider(modifier = Modifier.padding(vertical = 20.dp))
+            if (isLoading || !authErrorMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LoginStatusMessages(
+                    isLoading = isLoading,
+                    authErrorMessage = authErrorMessage,
+                )
+            }
+            LoginDivider(modifier = Modifier.padding(vertical = 14.dp))
             LoginEmailFields(
                 email = email,
                 password = password,
@@ -260,7 +270,7 @@ internal fun LoginForm(
                 onEmailChange = { email = it; validationErrors = emptySet() },
                 onPasswordChange = { password = it; validationErrors = emptySet() },
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             LoginActionButtons(
                 isLoading = isLoading,
                 onSignIn = {
@@ -283,8 +293,33 @@ internal fun LoginForm(
 }
 
 @Composable
+private fun LoginStatusMessages(
+    isLoading: Boolean,
+    authErrorMessage: String?,
+) {
+    if (isLoading) {
+        Text(
+            text = stringResource(R.string.login_loading_status),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    if (!authErrorMessage.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = authErrorMessage,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
 private fun LoginProviderSection(
     googleSignInEnabled: Boolean,
+    isLoading: Boolean,
     onGoogleSignIn: () -> Unit,
 ) {
     Text(
@@ -293,11 +328,18 @@ private fun LoginProviderSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     )
-    Spacer(modifier = Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = stringResource(R.string.login_trust_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(12.dp))
     GoogleSignInButton(
         text = stringResource(R.string.login_google_cta),
         onClick = onGoogleSignIn,
-        enabled = googleSignInEnabled,
+        enabled = googleSignInEnabled && !isLoading,
         loading = false,
         modifier = Modifier.fillMaxWidth(),
     )
@@ -338,7 +380,7 @@ private fun LoginEmailFields(
             .fillMaxWidth()
             .testTag("login-email"),
     )
-    Spacer(modifier = Modifier.height(16.dp))
+    Spacer(modifier = Modifier.height(12.dp))
     BecalmTextField(
         value = password,
         onValueChange = onPasswordChange,

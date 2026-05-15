@@ -2,6 +2,8 @@ package com.becalm.android.unit.worker
 
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
@@ -26,10 +28,15 @@ class AppRuntimeSyncCoordinatorSpecTest {
     private val contentObserverBootstrap: ContentObserverBootstrap = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
+    private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
     private val runtimeSyncSourceResolver: RuntimeSyncSourceResolver = mockk(relaxed = true)
     private val contactsPermissionChecker: ContactsPermissionChecker = mockk(relaxed = true)
     private val mediaAudioPermissionChecker: MediaAudioPermissionChecker = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+
+    init {
+        coEvery { personIndexDao.findPendingSourceParticipantMirrors(any(), any()) } returns emptyList()
+    }
 
     @Test
     fun `startup starts foreground catch-up and schedules periodic redundancy when capabilities are available`() = runTest {
@@ -177,6 +184,67 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { workScheduler.scheduleOverdueSweep() }
     }
 
+    @Test
+    fun `startup re-enqueues pending source participant mirror queue for signed in user`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery {
+            personIndexDao.findPendingSourceParticipantMirrors(userId = "user-1", limit = 1)
+        } returns listOf(mockk<PendingSourceParticipantMirrorEntity>(relaxed = true))
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        verify(exactly = 1) { workScheduler.enqueueSourceParticipantMirrorRetry() }
+    }
+
+    @Test
+    fun `refresh does not repeatedly replace pending source participant mirror work in same process`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery {
+            personIndexDao.findPendingSourceParticipantMirrors(userId = "user-1", limit = 1)
+        } returns listOf(mockk<PendingSourceParticipantMirrorEntity>(relaxed = true))
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+        coordinator.refresh()
+
+        verify(exactly = 1) { workScheduler.enqueueSourceParticipantMirrorRetry() }
+    }
+
+    @Test
+    fun `startup does not enqueue source participant mirror retry when queue is empty`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        verify(exactly = 0) { workScheduler.enqueueSourceParticipantMirrorRetry() }
+    }
+
     private fun buildCoordinator(): AppRuntimeSyncCoordinator =
         AppRuntimeSyncCoordinator(
             scope = CoroutineScope(Dispatchers.Unconfined),
@@ -184,6 +252,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
             contentObserverBootstrap = contentObserverBootstrap,
             workScheduler = workScheduler,
             userPrefsStore = userPrefsStore,
+            personIndexDao = personIndexDao,
             runtimeSyncSourceResolver = runtimeSyncSourceResolver,
             contactsPermissionChecker = contactsPermissionChecker,
             mediaAudioPermissionChecker = mediaAudioPermissionChecker,

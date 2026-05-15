@@ -12,16 +12,20 @@ import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.impl.utils.futures.SettableFuture
 import androidx.work.impl.utils.taskexecutor.TaskExecutor
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
+import com.becalm.android.data.remote.dto.BatchUploadResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.worker.ProcessingPauseGate
 import com.becalm.android.worker.VoiceFailureNotifier
@@ -60,7 +64,9 @@ class VoiceUploadWorkerNotificationSpecTest {
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao = mockk(relaxed = true)
     private val sourceExtractionApi: SourceExtractionApi = mockk()
+    private val rawIngestionRepository: RawIngestionRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk()
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
@@ -93,6 +99,10 @@ class VoiceUploadWorkerNotificationSpecTest {
         mockkStatic(Uri::class)
         every { ContextCompat.checkSelfPermission(any(), any()) } returns android.content.pm.PackageManager.PERMISSION_GRANTED
         every { Uri.parse(any()) } returns parsedUri
+        coEvery { rawIngestionRepository.uploadBatch(any()) } returns BecalmResult.Success(
+            BatchUploadResponse(acknowledged = 1, failed = emptyList()),
+        )
+        coEvery { rawIngestionRepository.markSynced(any()) } returns BecalmResult.Success(Unit)
     }
 
     @After
@@ -289,7 +299,9 @@ class VoiceUploadWorkerNotificationSpecTest {
         rawIngestionEventDao = rawIngestionEventDao,
         commitmentDao = commitmentDao,
         personIndexDao = personIndexDao,
+        selfIdentityAnchorDao = selfIdentityAnchorDao,
         sourceExtractionApi = sourceExtractionApi,
+        rawIngestionRepository = rawIngestionRepository,
         userPrefsStore = userPrefsStore,
         sourceStatusRepository = sourceStatusRepository,
         processingStatusRepository = processingStatusRepository,

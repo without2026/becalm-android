@@ -7,6 +7,8 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
@@ -14,9 +16,11 @@ import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.toPlainRequestBody
 import com.squareup.moshi.Moshi
@@ -84,7 +88,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
+    private val selfIdentityAnchorDaoProvider: Provider<SelfIdentityAnchorDao>,
     private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
+    private val rawIngestionRepository: RawIngestionRepository,
     private val userPrefsStore: UserPrefsStore,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -93,6 +99,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     private val voiceFailureNotifier: VoiceFailureNotifier,
     private val moshi: Moshi,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : CoroutineWorker(appContext, workerParams) {
 
@@ -103,6 +110,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         commitmentDao: CommitmentDao,
         personIndexDao: PersonIndexDao,
         sourceExtractionApi: SourceExtractionApi,
+        rawIngestionRepository: RawIngestionRepository,
         userPrefsStore: UserPrefsStore,
         sourceStatusRepository: SourceStatusRepository,
         processingStatusRepository: ProcessingStatusRepository,
@@ -112,13 +120,17 @@ public class VoiceUploadWorker @AssistedInject constructor(
         moshi: Moshi,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
+        selfIdentityAnchorDao: SelfIdentityAnchorDao,
+        productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     ) : this(
         appContext = appContext,
         workerParams = workerParams,
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
         personIndexDaoProvider = Provider { personIndexDao },
+        selfIdentityAnchorDaoProvider = Provider { selfIdentityAnchorDao },
         sourceExtractionApiProvider = Provider { sourceExtractionApi },
+        rawIngestionRepository = rawIngestionRepository,
         userPrefsStore = userPrefsStore,
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
         processingStatusRepository = processingStatusRepository,
@@ -127,6 +139,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         voiceFailureNotifier = voiceFailureNotifier,
         moshi = moshi,
         logger = logger,
+        productAnalytics = productAnalytics,
         ioDispatcher = ioDispatcher,
     )
 
@@ -138,6 +151,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
+
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao
+        get() = selfIdentityAnchorDaoProvider.get()
 
     private val sourceExtractionApi: SourceExtractionApi
         get() = sourceExtractionApiProvider.get()
@@ -268,7 +284,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
             personIndexDao = personIndexDao,
+            selfIdentityAnchorDao = selfIdentityAnchorDao,
             sourceExtractionApi = sourceExtractionApi,
+            rawIngestionRepository = rawIngestionRepository,
             userPrefsStore = userPrefsStore,
             sourceStatusRepository = sourceStatusRepository,
             processingStatusRepository = processingStatusRepository,
@@ -278,6 +296,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
             tag = TAG,
             runAttemptCount = runAttemptCount,
             maxAttempts = MAX_ATTEMPTS,
+            productAnalytics = productAnalytics,
         )
 
     /**

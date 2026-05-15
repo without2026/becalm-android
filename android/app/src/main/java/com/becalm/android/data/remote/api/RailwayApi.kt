@@ -29,7 +29,18 @@ import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
 import com.becalm.android.data.remote.dto.SingleScheduleEventLinkResponse
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
+import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
+import com.becalm.android.data.remote.dto.SourceEventParticipantResponse
 import com.becalm.android.data.remote.dto.SourceEventParticipantsResponse
+import com.becalm.android.data.remote.dto.SelfIdentityAnchorCreateRequestDto
+import com.becalm.android.data.remote.dto.SelfIdentityAnchorPatchRequestDto
+import com.becalm.android.data.remote.dto.SelfIdentityAnchorResponseDto
+import com.becalm.android.data.remote.dto.SelfIdentityAnchorsResponseDto
+import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
+import com.becalm.android.data.remote.dto.SourceConnectionResponseDto
+import com.becalm.android.data.remote.dto.SourceConnectionsResponseDto
+import com.becalm.android.data.remote.dto.UserProfilePatchRequestDto
+import com.becalm.android.data.remote.dto.UserProfileResponseDto
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -128,6 +139,12 @@ public interface RailwayApi {
         @Query("source_type") sourceType: String? = null,
         @Query("resolution_status") resolutionStatus: String? = null,
     ): Response<SourceEventParticipantsResponse>
+
+    @PATCH("v1/source_event_participants/{participant_id}")
+    public suspend fun patchSourceEventParticipant(
+        @Path("participant_id") participantId: String,
+        @Body request: SourceEventParticipantPatchRequestDto,
+    ): Response<SourceEventParticipantResponse>
 
     /**
      * Lists backend-persisted commitment/person edges for current user.
@@ -278,6 +295,37 @@ public interface RailwayApi {
      */
     @GET("v1/source_status")
     public suspend fun getSourceStatus(): Response<SourceStatusResponseDto>
+
+    @GET("v1/user_profile")
+    public suspend fun getUserProfile(): Response<UserProfileResponseDto>
+
+    @PATCH("v1/user_profile")
+    public suspend fun patchUserProfile(
+        @Body request: UserProfilePatchRequestDto,
+    ): Response<UserProfileResponseDto>
+
+    @GET("v1/self_identity_anchors")
+    public suspend fun getSelfIdentityAnchors(): Response<SelfIdentityAnchorsResponseDto>
+
+    @POST("v1/self_identity_anchors")
+    public suspend fun createSelfIdentityAnchor(
+        @Body request: SelfIdentityAnchorCreateRequestDto,
+    ): Response<SelfIdentityAnchorResponseDto>
+
+    @PATCH("v1/self_identity_anchors/{id}")
+    public suspend fun patchSelfIdentityAnchor(
+        @Path("id") id: String,
+        @Body request: SelfIdentityAnchorPatchRequestDto,
+    ): Response<SelfIdentityAnchorResponseDto>
+
+    @GET("v1/source_connections")
+    public suspend fun getSourceConnections(): Response<SourceConnectionsResponseDto>
+
+    @PATCH("v1/source_connections/{id}")
+    public suspend fun patchSourceConnection(
+        @Path("id") id: String,
+        @Body request: SourceConnectionPatchRequestDto,
+    ): Response<SourceConnectionResponseDto>
 
     // =========================================================================
     // CALENDAR EVENTS

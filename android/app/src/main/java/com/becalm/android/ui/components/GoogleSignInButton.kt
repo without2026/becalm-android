@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -53,16 +54,19 @@ public fun GoogleSignInButton(
             CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
-                color = Color(0xFF1F1F1F),
+                color = LocalContentColor.current,
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GoogleGMark(modifier = Modifier.size(18.dp))
+                GoogleGMark(
+                    enabled = interactive,
+                    modifier = Modifier.size(18.dp),
+                )
                 Spacer(modifier = Modifier.size(12.dp))
                 Text(
                     text = text,
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFF1F1F1F),
+                    color = if (interactive) Color(0xFF1F1F1F) else Color(0xFF7A766F),
                 )
             }
         }
@@ -70,48 +74,53 @@ public fun GoogleSignInButton(
 }
 
 @Composable
-private fun GoogleGMark(modifier: Modifier = Modifier) {
+private fun GoogleGMark(
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
     Canvas(modifier = modifier) {
+        fun markColor(enabledColor: Color): Color =
+            if (enabled) enabledColor else Color(0xFF7A766F)
         val strokeWidth = size.minDimension * 0.16f
         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Square)
         val inset = strokeWidth / 2f
         drawGoogleArc(
-            color = Color(0xFF4285F4),
+            color = markColor(Color(0xFF4285F4)),
             startAngle = -35f,
             sweepAngle = 95f,
             inset = inset,
             stroke = stroke,
         )
         drawGoogleArc(
-            color = Color(0xFF34A853),
+            color = markColor(Color(0xFF34A853)),
             startAngle = 60f,
             sweepAngle = 95f,
             inset = inset,
             stroke = stroke,
         )
         drawGoogleArc(
-            color = Color(0xFFFBBC05),
+            color = markColor(Color(0xFFFBBC05)),
             startAngle = 155f,
             sweepAngle = 72f,
             inset = inset,
             stroke = stroke,
         )
         drawGoogleArc(
-            color = Color(0xFFEA4335),
+            color = markColor(Color(0xFFEA4335)),
             startAngle = 227f,
             sweepAngle = 98f,
             inset = inset,
             stroke = stroke,
         )
         drawLine(
-            color = Color(0xFF4285F4),
+            color = markColor(Color(0xFF4285F4)),
             start = Offset(size.width * 0.54f, size.height * 0.50f),
             end = Offset(size.width * 0.94f, size.height * 0.50f),
             strokeWidth = strokeWidth,
             cap = StrokeCap.Square,
         )
         drawLine(
-            color = Color(0xFF4285F4),
+            color = markColor(Color(0xFF4285F4)),
             start = Offset(size.width * 0.78f, size.height * 0.50f),
             end = Offset(size.width * 0.78f, size.height * 0.66f),
             strokeWidth = strokeWidth,

@@ -12,6 +12,8 @@ import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
+import com.becalm.android.data.local.db.dao.SourceConnectionDao
 import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
@@ -20,12 +22,15 @@ import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
+import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.db.entity.SourceArtifactEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
@@ -64,6 +69,10 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   `item_type`, `schedule_status`, and `decision_status`, and by relaxing
  *   `direction` to nullable for non-action rows. Action-only queries now filter
  *   `item_type='action'`; person-detail flows can read `action + schedule + decision`.
+ * - v22: mirrors backend-owned `self_identity_anchors` and `source_connections`.
+ *   These rows let Android render and patch the authenticated user's identity/source
+ *   ownership state without deriving it from raw events on hot UI paths.
+ * - v23: adds a durable retry queue for backend source-participant manual/self match mirrors.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -116,8 +125,11 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         EmailBodyEntity::class,
         UserProfileEntity::class,
         ScheduleEventLinkEntity::class,
+        SelfIdentityAnchorEntity::class,
+        SourceConnectionEntity::class,
+        PendingSourceParticipantMirrorEntity::class,
     ],
-    version = 21,
+    version = 23,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -127,8 +139,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 21) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 21) literal"
+        require(DATABASE_VERSION == 23) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 23) literal"
         }
     }
 
@@ -168,6 +180,12 @@ public abstract class BeCalmDatabase : RoomDatabase() {
 
     /** Returns the DAO for schedule/event evidence and review proposal links. */
     public abstract fun scheduleEventLinkDao(): ScheduleEventLinkDao
+
+    /** Returns the DAO for backend-owned self identity anchors. */
+    public abstract fun selfIdentityAnchorDao(): SelfIdentityAnchorDao
+
+    /** Returns the DAO for backend-owned source account connections. */
+    public abstract fun sourceConnectionDao(): SourceConnectionDao
 
     public companion object {
 
@@ -209,7 +227,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 21
+        public const val DATABASE_VERSION: Int = 23
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

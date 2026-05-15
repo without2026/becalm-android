@@ -168,6 +168,10 @@ public fun SourceDetailScreenContent(
         }
 
         item {
+            SourceProcessingFlowSection(state = state)
+        }
+
+        item {
             SourceDetailSectionHeader(text = stringResource(R.string.source_detail_recent_events_section))
         }
 

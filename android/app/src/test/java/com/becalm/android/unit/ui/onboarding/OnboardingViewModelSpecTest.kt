@@ -9,6 +9,8 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.onboarding.ContactsPermissionEffect
 import com.becalm.android.ui.onboarding.CalendarConnectEvent
@@ -57,6 +59,8 @@ class OnboardingViewModelSpecTest {
     private val calendarOAuthConnector: CalendarOAuthConnector = mockk(relaxed = true)
     private val appRuntimeSyncCoordinator: AppRuntimeSyncCoordinator = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
+    private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -68,6 +72,8 @@ class OnboardingViewModelSpecTest {
             every { userPrefsStore.observeEmailPipaConsent(provider) } returns flowOf(false)
         }
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
+        coEvery { sourceConnectionRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
     }
 
     @After
@@ -757,5 +763,7 @@ class OnboardingViewModelSpecTest {
         calendarOAuthConnector = calendarOAuthConnector,
         appRuntimeSyncCoordinator = appRuntimeSyncCoordinator,
         sourceStatusRepository = sourceStatusRepository,
+        sourceConnectionRepository = sourceConnectionRepository,
+        selfIdentityRepository = selfIdentityRepository,
     )
 }

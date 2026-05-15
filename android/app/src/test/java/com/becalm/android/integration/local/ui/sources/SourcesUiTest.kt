@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -122,9 +123,11 @@ class SourcesUiTest {
             }
         }
 
-        composeRule.onNodeWithText("계약 메일").assertExists()
         composeRule.onNodeWithTag("source-detail-reconnect").performClick()
         composeRule.onNodeWithTag("source-detail-sync-now").performClick()
+        composeRule.onNodeWithTag("source-detail-list")
+            .performScrollToNode(hasText("계약 메일"))
+        composeRule.onNodeWithText("계약 메일").assertExists()
         composeRule.onNodeWithTag("source-detail-list")
             .performScrollToNode(hasTestTag("source-detail-disconnect"))
         composeRule.onNodeWithTag("source-detail-disconnect").performClick()
@@ -138,6 +141,36 @@ class SourcesUiTest {
             assertEquals(1, dismissClicks)
             assertEquals(0, confirmClicks)
         }
+    }
+
+    @Test
+    fun `source detail explains incoming processing flow for active source`() {
+        composeRule.setContent {
+            BecalmTheme {
+                SourceDetailScreenContent(
+                    state = SourceDetailUiState(
+                        sourceType = "gmail",
+                        status = SourceSyncStatus.Syncing,
+                        lastSyncAt = Instant.parse("2026-04-24T01:00:00Z"),
+                        eventsSyncedCount = 3,
+                        showManualSyncButton = true,
+                    ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(),
+                    onReconnect = {},
+                    onManualSync = {},
+                    onDisconnectClick = {},
+                    onDisconnectDismiss = {},
+                    onDisconnectConfirm = {},
+                    onMeetingAudioAdd = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_section)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_connected)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_checking)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_memory)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(com.becalm.android.R.string.source_detail_flow_checking_active)).assertIsDisplayed()
     }
 
     @Test

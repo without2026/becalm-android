@@ -47,6 +47,9 @@ public object UniqueWorkKeys {
     /** Local person identity/interaction index rebuild. */
     public const val PERSON_INDEX: String = "person.index"
 
+    /** Durable retry queue for backend source-participant manual/self match mirrors. */
+    public const val SOURCE_PARTICIPANT_MIRROR: String = "person.source_participant_mirror"
+
     /**
      * Person memory markdown generation via [com.becalm.android.worker.ProfileMemoryWorker].
      *

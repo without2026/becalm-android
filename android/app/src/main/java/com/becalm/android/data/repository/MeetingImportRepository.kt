@@ -9,15 +9,19 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.domain.meeting.MeetingImportFolders
+import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -43,6 +47,7 @@ public class MeetingImportRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionRepository: RawIngestionRepository,
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val workScheduler: WorkScheduler,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -121,6 +126,15 @@ public class MeetingImportRepository @Inject constructor(
                 )
                 val inserted = rawIngestionRepository.insertLocal(rawEvent)
                 if (inserted is BecalmResult.Failure) return@withContext inserted
+                speakerReviewContext?.let { review ->
+                    selfIdentityAnchorDao.upsert(
+                        review.toSelfSpeakerAnchor(
+                            userId = userId,
+                            rawEventId = rawEvent.id,
+                            now = occurredAt,
+                        ),
+                    )
+                }
 
                 if (rawEvent.syncStatus == "pending") {
                     workScheduler.enqueueVoiceUpload(
@@ -162,6 +176,38 @@ public class MeetingImportRepository @Inject constructor(
             syncStatus = syncStatus,
         )
     }
+
+    private fun MeetingSpeakerReviewContext.toSelfSpeakerAnchor(
+        userId: String,
+        rawEventId: String,
+        now: Instant,
+    ): SelfIdentityAnchorEntity {
+        val normalized = normalizeSpeakerLabel(selfSpeakerId)
+        return SelfIdentityAnchorEntity(
+            id = UUID.nameUUIDFromBytes(
+                "self-anchor:$userId:${PersonIdentityTypes.SPEAKER_LABEL}:$normalized:$rawEventId"
+                    .toByteArray(Charsets.UTF_8),
+            ).toString(),
+            userId = userId,
+            anchorType = PersonIdentityTypes.SPEAKER_LABEL,
+            normalizedValue = normalized,
+            displayValue = selfSpeakerId,
+            source = "meeting_review",
+            scope = "source_event",
+            sourceConnectionId = null,
+            sourceEventId = rawEventId,
+            trust = "user_confirmed",
+            status = "active",
+            createdAt = now,
+            updatedAt = now,
+        )
+    }
+
+    private fun normalizeSpeakerLabel(value: String): String =
+        value
+            .lowercase(Locale.ROOT)
+            .replace(Regex("\\s+"), " ")
+            .trim()
 
     private fun copyIntoMeetingsFolder(
         resolver: ContentResolver,

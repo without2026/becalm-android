@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
+import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
 import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
@@ -48,6 +49,9 @@ public interface PersonIndexDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertDirtySources(rows: List<PersonIndexDirtySourceEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public suspend fun upsertPendingSourceParticipantMirrors(rows: List<PendingSourceParticipantMirrorEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertSemanticIndexes(rows: List<PersonMemorySemanticIndexEntity>)
@@ -173,6 +177,15 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        DELETE FROM pending_source_participant_mirrors
+        WHERE user_id = :userId
+          AND participant_id IN (:participantIds)
+        """,
+    )
+    public suspend fun deletePendingSourceParticipantMirrors(userId: String, participantIds: List<String>): Int
+
+    @Query(
+        """
         SELECT * FROM source_event_participants
         WHERE user_id = :userId
         """,
@@ -251,6 +264,34 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        UPDATE source_event_participants
+        SET relation_to_user = 'self',
+            person_id = NULL,
+            resolution_status = 'self_resolved',
+            confidence = CASE
+                WHEN confidence < :confidence THEN :confidence
+                ELSE confidence
+            END
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND resolution_status = 'unresolved'
+          AND (
+                source_ref = :sourceRef
+             OR source_event_id = :sourceEventId
+             OR ('raw:' || source_event_id) = :sourceRef
+          )
+        """,
+    )
+    public suspend fun resolveUnmatchedSourceEventParticipantsAsSelf(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceEventId: String,
+        confidence: Double,
+    ): Int
+
+    @Query(
+        """
         SELECT * FROM commitment_participants
         WHERE user_id = :userId
         """,
@@ -281,6 +322,36 @@ public interface PersonIndexDao {
         userId: String,
         limit: Int,
     ): List<PersonIndexDirtySourceEntity>
+
+    @Query(
+        """
+        SELECT * FROM pending_source_participant_mirrors
+        WHERE user_id = :userId
+        ORDER BY updated_at ASC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findPendingSourceParticipantMirrors(
+        userId: String,
+        limit: Int,
+    ): List<PendingSourceParticipantMirrorEntity>
+
+    @Query(
+        """
+        UPDATE pending_source_participant_mirrors
+        SET retry_count = retry_count + 1,
+            last_error = :lastError,
+            updated_at = :updatedAt
+        WHERE user_id = :userId
+          AND participant_id = :participantId
+        """,
+    )
+    public suspend fun markPendingSourceParticipantMirrorFailed(
+        userId: String,
+        participantId: String,
+        lastError: String,
+        updatedAt: Instant,
+    ): Int
 
     @Query(
         """

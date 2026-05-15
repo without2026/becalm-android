@@ -30,6 +30,17 @@ public object ProductAnalyticsEvents {
     public const val SEARCH_PERFORMED: String = "search_performed"
     public const val EVIDENCE_IMPORT_COMPLETED: String = "evidence_import_completed"
     public const val PMF_SURVEY_SUBMITTED: String = "pmf_survey_submitted"
+    public const val SOURCE_OAUTH_STARTED: String = "source_oauth_started"
+    public const val SOURCE_OAUTH_BROWSER_OPENED: String = "source_oauth_browser_opened"
+    public const val SOURCE_OAUTH_STATUS_CHECKED: String = "source_oauth_status_checked"
+    public const val SOURCE_STATUS_REFRESHED: String = "source_status_refreshed"
+    public const val SOURCE_STATUS_REFRESH_FAILED: String = "source_status_refresh_failed"
+    public const val SOURCE_SYNC_STARTED: String = "source_sync_started"
+    public const val SOURCE_SYNC_COMPLETED: String = "source_sync_completed"
+    public const val SOURCE_SYNC_FAILED: String = "source_sync_failed"
+    public const val EXTRACTION_STARTED: String = "extraction_started"
+    public const val EXTRACTION_COMPLETED: String = "extraction_completed"
+    public const val EXTRACTION_FAILED: String = "extraction_failed"
 
     public val Allowed: Set<String> = setOf(
         SESSION_STARTED,
@@ -45,5 +56,16 @@ public object ProductAnalyticsEvents {
         SEARCH_PERFORMED,
         EVIDENCE_IMPORT_COMPLETED,
         PMF_SURVEY_SUBMITTED,
+        SOURCE_OAUTH_STARTED,
+        SOURCE_OAUTH_BROWSER_OPENED,
+        SOURCE_OAUTH_STATUS_CHECKED,
+        SOURCE_STATUS_REFRESHED,
+        SOURCE_STATUS_REFRESH_FAILED,
+        SOURCE_SYNC_STARTED,
+        SOURCE_SYNC_COMPLETED,
+        SOURCE_SYNC_FAILED,
+        EXTRACTION_STARTED,
+        EXTRACTION_COMPLETED,
+        EXTRACTION_FAILED,
     )
 }

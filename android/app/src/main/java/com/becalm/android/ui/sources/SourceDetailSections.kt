@@ -1,5 +1,6 @@
 package com.becalm.android.ui.sources
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,6 +75,77 @@ internal fun SourceStatusSummarySection(
                 onMeetingAudioAdd = onMeetingAudioAdd,
             )
         }
+    }
+}
+
+@Composable
+internal fun SourceProcessingFlowSection(state: SourceDetailUiState) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.source_detail_flow_section),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        QuietPanel(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SourceProcessingFlowRow(
+                    title = stringResource(R.string.source_detail_flow_connected),
+                    body = if (state.status == SourceSyncStatus.Disconnected || state.status == SourceSyncStatus.Unknown) {
+                        stringResource(R.string.source_detail_flow_connected_needed)
+                    } else {
+                        stringResource(R.string.source_detail_flow_connected_done)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                SourceProcessingFlowRow(
+                    title = stringResource(R.string.source_detail_flow_checking),
+                    body = when {
+                        state.status == SourceSyncStatus.Syncing -> stringResource(R.string.source_detail_flow_checking_active)
+                        state.hasError || state.status == SourceSyncStatus.Error -> stringResource(R.string.source_detail_flow_checking_blocked)
+                        else -> stringResource(R.string.source_detail_flow_checking_done)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                SourceProcessingFlowRow(
+                    title = stringResource(R.string.source_detail_flow_memory),
+                    body = if (state.eventsSyncedCount != null && state.eventsSyncedCount > 0) {
+                        stringResource(R.string.source_detail_flow_memory_done)
+                    } else {
+                        stringResource(R.string.source_detail_flow_memory_waiting)
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceProcessingFlowRow(
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = body,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

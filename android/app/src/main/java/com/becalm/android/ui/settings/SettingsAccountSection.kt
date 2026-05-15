@@ -24,6 +24,7 @@ import com.becalm.android.ui.components.QuietPanel
 @Composable
 internal fun SettingsAccountSection(
     userEmail: String?,
+    onIdentityClick: () -> Unit,
     onSignOutClick: () -> Unit,
 ) {
     SettingsSectionLabel(stringResource(R.string.settings_account_section))
@@ -40,6 +41,13 @@ internal fun SettingsAccountSection(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
+        SettingsActionRow(
+            title = stringResource(R.string.settings_identity_row_title),
+            subtitle = stringResource(R.string.settings_identity_row_subtitle),
+            onClick = onIdentityClick,
+            rowTestTag = "settings-identity-row",
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         BecalmButton(
             text = stringResource(R.string.action_sign_out),
             onClick = onSignOutClick,

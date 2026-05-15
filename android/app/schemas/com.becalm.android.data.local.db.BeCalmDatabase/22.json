@@ -1,0 +1,2083 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 22,
+    "identityHash": "01d274f1f022630aa4c17d1887910809",
+    "entities": [
+      {
+        "tableName": "raw_ingestion_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `client_event_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT, `counterparty_ref` TEXT, `event_title` TEXT, `event_snippet` TEXT, `duration_seconds` INTEGER, `location` TEXT, `folder` TEXT, `commitments_extracted_count` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `sync_status` TEXT NOT NULL, `retry_count` INTEGER NOT NULL, `last_attempt_at` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clientEventId",
+            "columnName": "client_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "counterpartyRef",
+            "columnName": "counterparty_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTitle",
+            "columnName": "event_title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventSnippet",
+            "columnName": "event_snippet",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "durationSeconds",
+            "columnName": "duration_seconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "folder",
+            "columnName": "folder",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "commitmentsExtractedCount",
+            "columnName": "commitments_extracted_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "sync_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retryCount",
+            "columnName": "retry_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "last_attempt_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_raw_events_user_sync",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "sync_status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_raw_events_user_sync` ON `${TABLE_NAME}` (`user_id`, `sync_status`)"
+          },
+          {
+            "name": "idx_raw_events_user_time",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_raw_events_user_time` ON `${TABLE_NAME}` (`user_id`, `timestamp`)"
+          },
+          {
+            "name": "idx_raw_events_user_counterparty_time",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "counterparty_ref",
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_raw_events_user_counterparty_time` ON `${TABLE_NAME}` (`user_id`, `counterparty_ref`, `timestamp`)"
+          },
+          {
+            "name": "ux_raw_events_user_client_event",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "client_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_raw_events_user_client_event` ON `${TABLE_NAME}` (`user_id`, `client_event_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "commitments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `item_type` TEXT NOT NULL DEFAULT 'action', `direction` TEXT, `schedule_status` TEXT, `decision_status` TEXT, `counterparty_raw` TEXT, `counterparty_ref` TEXT, `title` TEXT NOT NULL, `description` TEXT, `quote` TEXT NOT NULL, `source_event_title` TEXT, `source_event_occurred_at` INTEGER NOT NULL, `due_at` INTEGER, `due_hint` TEXT, `due_is_approximate` INTEGER NOT NULL DEFAULT 0, `action_state` TEXT NOT NULL DEFAULT 'pending', `source_type` TEXT NOT NULL, `source_ref` TEXT, `confidence` REAL NOT NULL DEFAULT 0.0, `commitment_state` TEXT NOT NULL DEFAULT 'DRAFT', `sync_status` TEXT NOT NULL DEFAULT 'pending', `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_edited_by` TEXT, `last_edited_at` INTEGER, `quote_disputed` INTEGER NOT NULL DEFAULT 0, `quote_disputed_at` INTEGER, `deleted_at` INTEGER, `supersedes_commitment_id` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemType",
+            "columnName": "item_type",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'action'"
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "scheduleStatus",
+            "columnName": "schedule_status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "decisionStatus",
+            "columnName": "decision_status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "counterpartyRaw",
+            "columnName": "counterparty_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "counterpartyRef",
+            "columnName": "counterparty_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "quote",
+            "columnName": "quote",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceEventTitle",
+            "columnName": "source_event_title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceEventOccurredAt",
+            "columnName": "source_event_occurred_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dueAt",
+            "columnName": "due_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dueHint",
+            "columnName": "due_hint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "dueIsApproximate",
+            "columnName": "due_is_approximate",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "actionState",
+            "columnName": "action_state",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'pending'"
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true,
+            "defaultValue": "0.0"
+          },
+          {
+            "fieldPath": "commitmentState",
+            "columnName": "commitment_state",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'DRAFT'"
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "sync_status",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'pending'"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastEditedBy",
+            "columnName": "last_edited_by",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastEditedAt",
+            "columnName": "last_edited_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "quoteDisputed",
+            "columnName": "quote_disputed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "quoteDisputedAt",
+            "columnName": "quote_disputed_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "deletedAt",
+            "columnName": "deleted_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "supersedesCommitmentId",
+            "columnName": "supersedes_commitment_id",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_commitments_user_action_due",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "item_type",
+              "action_state",
+              "due_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_commitments_user_action_due` ON `${TABLE_NAME}` (`user_id`, `item_type`, `action_state`, `due_at`)"
+          },
+          {
+            "name": "index_commitments_user_id_sync_status",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "sync_status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_commitments_user_id_sync_status` ON `${TABLE_NAME}` (`user_id`, `sync_status`)"
+          },
+          {
+            "name": "idx_commitments_user_counterparty_due",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "counterparty_ref",
+              "due_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_commitments_user_counterparty_due` ON `${TABLE_NAME}` (`user_id`, `counterparty_ref`, `due_at`)"
+          },
+          {
+            "name": "idx_commitments_user_deleted",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "deleted_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_commitments_user_deleted` ON `${TABLE_NAME}` (`user_id`, `deleted_at`)"
+          },
+          {
+            "name": "idx_commitments_supersedes",
+            "unique": false,
+            "columnNames": [
+              "supersedes_commitment_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_commitments_supersedes` ON `${TABLE_NAME}` (`supersedes_commitment_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "calendar_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT, `title` TEXT NOT NULL, `start_at` INTEGER NOT NULL, `end_at` INTEGER NOT NULL, `attendees_raw` TEXT, `sync_status` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startAt",
+            "columnName": "start_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endAt",
+            "columnName": "end_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attendeesRaw",
+            "columnName": "attendees_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "sync_status",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_calendar_events_user_id_start_at",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "start_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calendar_events_user_id_start_at` ON `${TABLE_NAME}` (`user_id`, `start_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "persons",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `display_name` TEXT NOT NULL, `kind` TEXT NOT NULL, `primary_email` TEXT, `primary_phone` TEXT, `confidence` REAL NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `archived_at` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "primaryEmail",
+            "columnName": "primary_email",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "primaryPhone",
+            "columnName": "primary_phone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archivedAt",
+            "columnName": "archived_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_persons_user_updated",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_persons_user_updated` ON `${TABLE_NAME}` (`user_id`, `updated_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "persons_enrichment",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`person_ref` TEXT NOT NULL, `display_name` TEXT, `nickname` TEXT, `company` TEXT, `title` TEXT, `source_contact_id` TEXT, `last_synced_at` INTEGER NOT NULL, PRIMARY KEY(`person_ref`))",
+        "fields": [
+          {
+            "fieldPath": "personRef",
+            "columnName": "person_ref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nickname",
+            "columnName": "nickname",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "company",
+            "columnName": "company",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceContactId",
+            "columnName": "source_contact_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSyncedAt",
+            "columnName": "last_synced_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "person_ref"
+          ]
+        }
+      },
+      {
+        "tableName": "person_identities",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `person_id` TEXT NOT NULL, `identity_key` TEXT NOT NULL, `identity_type` TEXT NOT NULL, `raw_value` TEXT NOT NULL, `display_name_hint` TEXT, `identity_value` TEXT NOT NULL DEFAULT '', `normalized_value` TEXT NOT NULL DEFAULT '', `display_name` TEXT, `source_type` TEXT NOT NULL, `source_ref` TEXT, `confidence` REAL NOT NULL, `is_primary` INTEGER NOT NULL DEFAULT 0, `verified` INTEGER NOT NULL, `last_seen_at` INTEGER NOT NULL, `created_at` INTEGER NOT NULL DEFAULT 0, `updated_at` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personId",
+            "columnName": "person_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityKey",
+            "columnName": "identity_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityType",
+            "columnName": "identity_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawValue",
+            "columnName": "raw_value",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayNameHint",
+            "columnName": "display_name_hint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "identityValue",
+            "columnName": "identity_value",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "normalizedValue",
+            "columnName": "normalized_value",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPrimary",
+            "columnName": "is_primary",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "verified",
+            "columnName": "verified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "last_seen_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_person_identities_user_identity_key",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "identity_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_identities_user_identity_key` ON `${TABLE_NAME}` (`user_id`, `identity_key`)"
+          },
+          {
+            "name": "ux_person_identities_user_identity",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "identity_type",
+              "normalized_value"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_identities_user_identity` ON `${TABLE_NAME}` (`user_id`, `identity_type`, `normalized_value`)"
+          },
+          {
+            "name": "idx_person_identities_user_person",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "person_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_identities_user_person` ON `${TABLE_NAME}` (`user_id`, `person_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "source_event_participants",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `source_event_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT, `person_id` TEXT, `role` TEXT NOT NULL, `relation_to_user` TEXT NOT NULL, `identity_type` TEXT, `normalized_value` TEXT, `display_name_raw` TEXT, `email_raw` TEXT, `phone_raw` TEXT, `organization_raw` TEXT, `title_raw` TEXT, `evidence` TEXT, `confidence` REAL NOT NULL, `resolution_status` TEXT NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceEventId",
+            "columnName": "source_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "personId",
+            "columnName": "person_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relationToUser",
+            "columnName": "relation_to_user",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityType",
+            "columnName": "identity_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "normalizedValue",
+            "columnName": "normalized_value",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayNameRaw",
+            "columnName": "display_name_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "emailRaw",
+            "columnName": "email_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "phoneRaw",
+            "columnName": "phone_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "organizationRaw",
+            "columnName": "organization_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "titleRaw",
+            "columnName": "title_raw",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "evidence",
+            "columnName": "evidence",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolutionStatus",
+            "columnName": "resolution_status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_source_event_participants_user_event",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "source_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_user_event` ON `${TABLE_NAME}` (`user_id`, `source_event_id`)"
+          },
+          {
+            "name": "idx_source_event_participants_user_person",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "person_id",
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_user_person` ON `${TABLE_NAME}` (`user_id`, `person_id`, `created_at`)"
+          },
+          {
+            "name": "idx_source_event_participants_unresolved",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "resolution_status",
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_event_participants_unresolved` ON `${TABLE_NAME}` (`user_id`, `resolution_status`, `created_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "commitment_participants",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `commitment_id` TEXT NOT NULL, `person_id` TEXT NOT NULL, `role` TEXT NOT NULL, `evidence` TEXT, `confidence` REAL NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commitmentId",
+            "columnName": "commitment_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personId",
+            "columnName": "person_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "evidence",
+            "columnName": "evidence",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_commitment_participants_user_commitment_person_role",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "commitment_id",
+              "person_id",
+              "role"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_commitment_participants_user_commitment_person_role` ON `${TABLE_NAME}` (`user_id`, `commitment_id`, `person_id`, `role`)"
+          },
+          {
+            "name": "idx_commitment_participants_user_person",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "person_id",
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_commitment_participants_user_person` ON `${TABLE_NAME}` (`user_id`, `person_id`, `created_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "person_interactions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `person_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT NOT NULL, `interaction_kind` TEXT NOT NULL, `source_event_id` TEXT, `commitment_id` TEXT, `interaction_key` TEXT NOT NULL DEFAULT '', `interaction_type` TEXT NOT NULL DEFAULT '', `role` TEXT NOT NULL, `direction` TEXT, `status` TEXT, `occurred_at` INTEGER NOT NULL, `title` TEXT, `snippet` TEXT, `confidence` REAL NOT NULL, `created_at` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personId",
+            "columnName": "person_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "interactionKind",
+            "columnName": "interaction_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceEventId",
+            "columnName": "source_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "commitmentId",
+            "columnName": "commitment_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "interactionKey",
+            "columnName": "interaction_key",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "interactionType",
+            "columnName": "interaction_type",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "occurredAt",
+            "columnName": "occurred_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "snippet",
+            "columnName": "snippet",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_person_interactions_user_source_person",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "source_type",
+              "source_ref",
+              "person_id",
+              "interaction_kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_interactions_user_source_person` ON `${TABLE_NAME}` (`user_id`, `source_type`, `source_ref`, `person_id`, `interaction_kind`)"
+          },
+          {
+            "name": "ux_person_interactions_user_key",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "interaction_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_interactions_user_key` ON `${TABLE_NAME}` (`user_id`, `interaction_key`)"
+          },
+          {
+            "name": "idx_person_interactions_user_person_time",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "person_id",
+              "occurred_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_person_time` ON `${TABLE_NAME}` (`user_id`, `person_id`, `occurred_at`)"
+          },
+          {
+            "name": "idx_person_interactions_user_person_occurred",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "person_id",
+              "occurred_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_person_occurred` ON `${TABLE_NAME}` (`user_id`, `person_id`, `occurred_at`)"
+          },
+          {
+            "name": "idx_person_interactions_user_time",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "occurred_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_interactions_user_time` ON `${TABLE_NAME}` (`user_id`, `occurred_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "unmatched_person_interactions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT NOT NULL, `interaction_kind` TEXT NOT NULL, `title` TEXT, `snippet` TEXT, `suggested_label` TEXT, `occurred_at` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "interactionKind",
+            "columnName": "interaction_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "snippet",
+            "columnName": "snippet",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "suggestedLabel",
+            "columnName": "suggested_label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "occurredAt",
+            "columnName": "occurred_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_unmatched_person_interactions_user_source",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "source_type",
+              "source_ref",
+              "interaction_kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_unmatched_person_interactions_user_source` ON `${TABLE_NAME}` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)"
+          },
+          {
+            "name": "idx_unmatched_person_interactions_user_time",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "occurred_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_unmatched_person_interactions_user_time` ON `${TABLE_NAME}` (`user_id`, `occurred_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "person_index_dirty_sources",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `source_type` TEXT NOT NULL, `source_ref` TEXT NOT NULL, `interaction_kind` TEXT NOT NULL, `reason` TEXT, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "interactionKind",
+            "columnName": "interaction_kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_person_index_dirty_sources_user_source",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "source_type",
+              "source_ref",
+              "interaction_kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_person_index_dirty_sources_user_source` ON `${TABLE_NAME}` (`user_id`, `source_type`, `source_ref`, `interaction_kind`)"
+          },
+          {
+            "name": "idx_person_index_dirty_sources_user_updated",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_index_dirty_sources_user_updated` ON `${TABLE_NAME}` (`user_id`, `updated_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "person_memory_semantic_index",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`person_id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `display_name_terms_json` TEXT NOT NULL, `aliases_json` TEXT NOT NULL, `organizations_json` TEXT NOT NULL, `titles_json` TEXT NOT NULL, `work_terms_json` TEXT NOT NULL, `decision_terms_json` TEXT NOT NULL, `open_commitment_terms_json` TEXT NOT NULL, `confirmed_patterns_json` TEXT NOT NULL, `rejected_patterns_json` TEXT NOT NULL, `recent_source_types_json` TEXT NOT NULL, `content_hash` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`person_id`))",
+        "fields": [
+          {
+            "fieldPath": "personId",
+            "columnName": "person_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayNameTermsJson",
+            "columnName": "display_name_terms_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasesJson",
+            "columnName": "aliases_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "organizationsJson",
+            "columnName": "organizations_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "titlesJson",
+            "columnName": "titles_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workTermsJson",
+            "columnName": "work_terms_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decisionTermsJson",
+            "columnName": "decision_terms_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openCommitmentTermsJson",
+            "columnName": "open_commitment_terms_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confirmedPatternsJson",
+            "columnName": "confirmed_patterns_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rejectedPatternsJson",
+            "columnName": "rejected_patterns_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recentSourceTypesJson",
+            "columnName": "recent_source_types_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "content_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "person_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_person_memory_semantic_index_user_updated",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_person_memory_semantic_index_user_updated` ON `${TABLE_NAME}` (`user_id`, `updated_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "source_artifacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `raw_event_id` TEXT, `source_type` TEXT NOT NULL, `source_ref` TEXT, `artifact_type` TEXT NOT NULL, `local_path` TEXT NOT NULL, `sha256` TEXT NOT NULL, `byte_size` INTEGER NOT NULL, `occurred_at` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawEventId",
+            "columnName": "raw_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "artifactType",
+            "columnName": "artifact_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localPath",
+            "columnName": "local_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sha256",
+            "columnName": "sha256",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "byteSize",
+            "columnName": "byte_size",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "occurredAt",
+            "columnName": "occurred_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "ux_source_artifacts_user_source_type",
+            "unique": true,
+            "columnNames": [
+              "user_id",
+              "source_type",
+              "source_ref",
+              "artifact_type"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `ux_source_artifacts_user_source_type` ON `${TABLE_NAME}` (`user_id`, `source_type`, `source_ref`, `artifact_type`)"
+          },
+          {
+            "name": "idx_source_artifacts_user_occurred",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "occurred_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_artifacts_user_occurred` ON `${TABLE_NAME}` (`user_id`, `occurred_at`)"
+          },
+          {
+            "name": "idx_source_artifacts_raw_event",
+            "unique": false,
+            "columnNames": [
+              "raw_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_artifacts_raw_event` ON `${TABLE_NAME}` (`raw_event_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "email_body",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `raw_event_id` TEXT NOT NULL, `provider_message_id` TEXT NOT NULL, `folder` TEXT NOT NULL, `subject` TEXT, `from_address` TEXT, `to_addresses` TEXT, `body_plain` TEXT, `body_html` TEXT, `attachments_meta` TEXT, `raw_headers` TEXT, `parse_failed` INTEGER NOT NULL DEFAULT 0, `group_email` INTEGER NOT NULL DEFAULT 0, `received_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`raw_event_id`) REFERENCES `raw_ingestion_events`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawEventId",
+            "columnName": "raw_event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerMessageId",
+            "columnName": "provider_message_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folder",
+            "columnName": "folder",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subject",
+            "columnName": "subject",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fromAddress",
+            "columnName": "from_address",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "toAddresses",
+            "columnName": "to_addresses",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bodyPlain",
+            "columnName": "body_plain",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bodyHtml",
+            "columnName": "body_html",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attachmentsMeta",
+            "columnName": "attachments_meta",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawHeaders",
+            "columnName": "raw_headers",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parseFailed",
+            "columnName": "parse_failed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "groupEmail",
+            "columnName": "group_email",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "received_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_email_body_raw_event_id",
+            "unique": true,
+            "columnNames": [
+              "raw_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_email_body_raw_event_id` ON `${TABLE_NAME}` (`raw_event_id`)"
+          },
+          {
+            "name": "index_email_body_provider_message_id",
+            "unique": false,
+            "columnNames": [
+              "provider_message_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_email_body_provider_message_id` ON `${TABLE_NAME}` (`provider_message_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "raw_ingestion_events",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "raw_event_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "user_profile",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`user_id` TEXT NOT NULL, `display_name_override` TEXT, `phone_e164_self` TEXT, `timezone` TEXT NOT NULL, `preferred_locale` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`user_id`))",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayNameOverride",
+            "columnName": "display_name_override",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "phoneE164Self",
+            "columnName": "phone_e164_self",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "preferredLocale",
+            "columnName": "preferred_locale",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "user_id"
+          ]
+        }
+      },
+      {
+        "tableName": "schedule_event_links",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `calendar_event_id` TEXT, `calendar_source_type` TEXT, `calendar_source_ref` TEXT, `source_type` TEXT NOT NULL, `source_ref` TEXT, `raw_event_id` TEXT, `commitment_id` TEXT, `relation_type` TEXT NOT NULL, `status` TEXT NOT NULL, `confidence` REAL NOT NULL, `proposed_start_at` INTEGER, `proposed_end_at` INTEGER, `proposed_title` TEXT, `evidence` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calendarEventId",
+            "columnName": "calendar_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "calendarSourceType",
+            "columnName": "calendar_source_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "calendarSourceRef",
+            "columnName": "calendar_source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "source_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rawEventId",
+            "columnName": "raw_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "commitmentId",
+            "columnName": "commitment_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relationType",
+            "columnName": "relation_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "proposedStartAt",
+            "columnName": "proposed_start_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "proposedEndAt",
+            "columnName": "proposed_end_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "proposedTitle",
+            "columnName": "proposed_title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "evidence",
+            "columnName": "evidence",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_schedule_event_links_user_calendar",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "calendar_event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_calendar` ON `${TABLE_NAME}` (`user_id`, `calendar_event_id`)"
+          },
+          {
+            "name": "idx_schedule_event_links_user_status_updated",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "status",
+              "updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_status_updated` ON `${TABLE_NAME}` (`user_id`, `status`, `updated_at`)"
+          },
+          {
+            "name": "idx_schedule_event_links_user_source",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "source_type",
+              "source_ref"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_schedule_event_links_user_source` ON `${TABLE_NAME}` (`user_id`, `source_type`, `source_ref`)"
+          }
+        ]
+      },
+      {
+        "tableName": "self_identity_anchors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `anchor_type` TEXT NOT NULL, `normalized_value` TEXT NOT NULL, `display_value` TEXT, `source` TEXT NOT NULL, `scope` TEXT NOT NULL, `source_connection_id` TEXT, `source_event_id` TEXT, `trust` TEXT NOT NULL, `status` TEXT NOT NULL, `created_at` INTEGER, `updated_at` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorType",
+            "columnName": "anchor_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedValue",
+            "columnName": "normalized_value",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayValue",
+            "columnName": "display_value",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scope",
+            "columnName": "scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceConnectionId",
+            "columnName": "source_connection_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceEventId",
+            "columnName": "source_event_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "trust",
+            "columnName": "trust",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_self_identity_anchors_user_status_value",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "status",
+              "anchor_type",
+              "normalized_value"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_self_identity_anchors_user_status_value` ON `${TABLE_NAME}` (`user_id`, `status`, `anchor_type`, `normalized_value`)"
+          },
+          {
+            "name": "idx_self_identity_anchors_user_source_connection",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "source_connection_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_self_identity_anchors_user_source_connection` ON `${TABLE_NAME}` (`user_id`, `source_connection_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "source_connections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `provider` TEXT NOT NULL, `capability` TEXT NOT NULL, `account_identifier` TEXT, `account_display_name` TEXT, `ownership` TEXT NOT NULL, `status` TEXT NOT NULL, `linked_self_anchor_id` TEXT, `last_sync_at` INTEGER, `last_error` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provider",
+            "columnName": "provider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capability",
+            "columnName": "capability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountIdentifier",
+            "columnName": "account_identifier",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "accountDisplayName",
+            "columnName": "account_display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "ownership",
+            "columnName": "ownership",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedSelfAnchorId",
+            "columnName": "linked_self_anchor_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSyncAt",
+            "columnName": "last_sync_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "last_error",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_source_connections_user_provider_account",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "provider",
+              "capability",
+              "account_identifier"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_connections_user_provider_account` ON `${TABLE_NAME}` (`user_id`, `provider`, `capability`, `account_identifier`)"
+          },
+          {
+            "name": "idx_source_connections_user_ownership_status",
+            "unique": false,
+            "columnNames": [
+              "user_id",
+              "ownership",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_source_connections_user_ownership_status` ON `${TABLE_NAME}` (`user_id`, `ownership`, `status`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '01d274f1f022630aa4c17d1887910809')"
+    ]
+  }
+}

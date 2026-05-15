@@ -65,6 +65,9 @@ public interface WorkScheduler {
      */
     public fun enqueuePersonInteractionIndex(initialDelaySeconds: Long = PERSON_INDEX_DEBOUNCE_SECONDS)
 
+    /** Retries backend mirrors for source participant manual/self match decisions. */
+    public fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long = 0L)
+
     /**
      * Regenerates and mirrors the compact markdown memory for [personId].
      *

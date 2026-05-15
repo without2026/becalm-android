@@ -7,18 +7,28 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.SourceEventParticipantDto
+import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
+import com.becalm.android.data.remote.dto.SourceEventParticipantResponse
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepositoryImpl
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.integration.local.LocalIntegrationSupport
 import com.becalm.android.worker.PersonInteractionIndexWorker
+import com.becalm.android.worker.SourceParticipantMirrorWorker
 import com.becalm.android.worker.WorkScheduler
+import java.io.IOException
 import javax.inject.Provider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import io.mockk.slot
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -26,6 +36,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -102,9 +113,18 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         newWorker().doWork()
         assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
 
+        val api = mockk<RailwayApi>()
+        val patchSlot = slot<SourceEventParticipantPatchRequestDto>()
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-unresolved-1",
+                request = capture(patchSlot),
+            )
+        } returns Response.success(sourceParticipantResponse("participant-unresolved-1"))
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
             workScheduler = scheduler,
+            apiProvider = Provider { api },
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -124,6 +144,16 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
         assertEquals(listOf("raw:raw-relation-1"), interactions.map { it.sourceRef })
         assertEquals(1, scheduler.personIndexEnqueueCount)
+        coVerify(exactly = 1) {
+            api.patchSourceEventParticipant(
+                participantId = "participant-unresolved-1",
+                request = patchSlot.captured,
+            )
+        }
+        assertEquals(personId, patchSlot.captured.personId)
+        assertEquals("email", patchSlot.captured.identityType)
+        assertEquals(CUSTOMER_EMAIL, patchSlot.captured.normalizedValue)
+        assertEquals("resolved", patchSlot.captured.resolutionStatus)
     }
 
     @Test
@@ -203,6 +233,139 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals(1, scheduler.personIndexEnqueueCount)
     }
 
+    @Test
+    fun `self match resolves participant without creating a person projection`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-self-1", snippet = "제가 금요일까지 보내겠습니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-self-1",
+                    sourceEventId = "raw-self-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-self",
+                    displayName = "me@example.com",
+                ).copy(
+                    relationToUser = "participant",
+                    identityType = "email",
+                    normalizedValue = "me@example.com",
+                    emailRaw = "me@example.com",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+
+        val api = mockk<RailwayApi>()
+        val selfPatchSlot = slot<SourceEventParticipantPatchRequestDto>()
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-self-1",
+                request = capture(selfPatchSlot),
+            )
+        } returns Response.success(sourceParticipantResponse("participant-self-1"))
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            apiProvider = Provider { api },
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteractionAsSelf(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-self-1",
+            interactionKind = "email",
+        )
+        assertTrue(result is BecalmResult.Success)
+
+        val participant = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-self-1"),
+        ).single()
+        assertEquals("self", participant.relationToUser)
+        assertEquals("self_resolved", participant.resolutionStatus)
+        assertEquals(null, participant.personId)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        assertEquals(1, scheduler.personIndexEnqueueCount)
+
+        newWorker().doWork()
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
+        coVerify(exactly = 1) {
+            api.patchSourceEventParticipant(
+                participantId = "participant-self-1",
+                request = selfPatchSlot.captured,
+            )
+        }
+        assertEquals("email", selfPatchSlot.captured.identityType)
+        assertEquals("me@example.com", selfPatchSlot.captured.normalizedValue)
+        assertEquals("me@example.com", selfPatchSlot.captured.emailRaw)
+        assertEquals("self", selfPatchSlot.captured.relationToUser)
+        assertEquals("self_resolved", selfPatchSlot.captured.resolutionStatus)
+    }
+
+    @Test
+    fun `manual match queues remote mirror after transient failure and worker retries`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-retry-1", snippet = "Steve 검토 필요"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-retry-1",
+                    sourceEventId = "raw-retry-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-retry",
+                    displayName = "Steve",
+                ),
+            ),
+        )
+        newWorker().doWork()
+
+        val api = mockk<RailwayApi>()
+        val retryPatchSlot = slot<SourceEventParticipantPatchRequestDto>()
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-retry-1",
+                request = capture(retryPatchSlot),
+            )
+        } throws IOException("offline")
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            apiProvider = Provider { api },
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-retry-1",
+            interactionKind = "email",
+            personAnchor = CUSTOMER_EMAIL,
+            nickname = "Customer",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(1, scheduler.sourceParticipantMirrorEnqueueCount)
+        val pending = db.personIndexDao().findPendingSourceParticipantMirrors(USER_ID, limit = 10).single()
+        assertEquals("participant-retry-1", pending.participantId)
+        assertEquals("resolved", pending.resolutionStatus)
+        assertEquals(CUSTOMER_EMAIL, pending.normalizedValue)
+
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-retry-1",
+                request = retryPatchSlot.captured,
+            )
+        } returns Response.success(sourceParticipantResponse("participant-retry-1"))
+
+        newSourceParticipantMirrorWorker(api).doWork()
+
+        assertTrue(db.personIndexDao().findPendingSourceParticipantMirrors(USER_ID, limit = 10).isEmpty())
+    }
+
     private fun newWorker(): PersonInteractionIndexWorker =
         PersonInteractionIndexWorker(
             appContext = LocalIntegrationSupport.appContext(),
@@ -213,6 +376,17 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             personIndexDaoProvider = Provider { db.personIndexDao() },
             userPrefsStore = userPrefsStore,
             workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+
+    private fun newSourceParticipantMirrorWorker(api: RailwayApi): SourceParticipantMirrorWorker =
+        SourceParticipantMirrorWorker(
+            appContext = LocalIntegrationSupport.appContext(),
+            workerParams = LocalIntegrationSupport.workerParams(),
+            userPrefsStore = userPrefsStore,
+            personIndexDao = db.personIndexDao(),
+            api = api,
             logger = logger,
             ioDispatcher = dispatcher,
         )
@@ -297,12 +471,38 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             createdAt = Instant.parse("2026-04-29T00:00:00Z"),
         )
 
+    private fun sourceParticipantResponse(participantId: String): SourceEventParticipantResponse =
+        SourceEventParticipantResponse(
+            data = SourceEventParticipantDto(
+                id = participantId,
+                sourceEventId = "raw-relation-1",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "gmail-message-1",
+                personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId,
+                role = "mentioned",
+                relationToUser = "referenced",
+                identityType = "email",
+                normalizedValue = CUSTOMER_EMAIL,
+                displayNameRaw = "Customer",
+                emailRaw = CUSTOMER_EMAIL,
+                confidence = 0.95,
+                resolutionStatus = "resolved",
+                createdAt = Instant.parse("2026-04-29T00:00:00Z"),
+            ),
+        )
+
     private class RecordingWorkScheduler : WorkScheduler {
         var personIndexEnqueueCount: Int = 0
+            private set
+        var sourceParticipantMirrorEnqueueCount: Int = 0
             private set
 
         override fun enqueuePersonInteractionIndex(initialDelaySeconds: Long) {
             personIndexEnqueueCount += 1
+        }
+
+        override fun enqueueSourceParticipantMirrorRetry(initialDelaySeconds: Long) {
+            sourceParticipantMirrorEnqueueCount += 1
         }
 
         override fun enqueueProfileMemory(personId: String, initialDelaySeconds: Long) = Unit

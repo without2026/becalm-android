@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.CredentialManager
@@ -122,13 +123,14 @@ public fun rememberGoogleSignInLauncher(
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val serverClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
+    val latestOnResult = rememberUpdatedState(onResult)
     return remember(context, scope, credentialManager, serverClientId) {
         GoogleSignInHandle(
             scope = scope,
             context = context,
             credentialManager = credentialManager,
             serverClientId = serverClientId,
-            onResult = onResult,
+            onResult = { result -> latestOnResult.value(result) },
         )
     }
 }
