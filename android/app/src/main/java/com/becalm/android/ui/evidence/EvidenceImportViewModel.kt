@@ -4,13 +4,19 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
 import com.becalm.android.data.repository.MeetingSpeakerReviewContext
 import com.becalm.android.data.repository.SourceImportRepository
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.UUID
 import javax.inject.Inject
+import kotlinx.datetime.Clock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +48,7 @@ private data class EvidenceImportTransientState(
 public class EvidenceImportViewModel @Inject constructor(
     private val sourceImportRepository: SourceImportRepository,
     statusProjectionPort: EvidenceImportStatusProjectionPort,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) : ViewModel() {
     private val transientState = MutableStateFlow(EvidenceImportTransientState())
     public val state: StateFlow<EvidenceImportUiState> =
@@ -62,9 +69,12 @@ public class EvidenceImportViewModel @Inject constructor(
         if (uri == null) return
         viewModelScope.launch {
             transientState.value = when (sourceImportRepository.importMessageScreenshot(uri)) {
-                is BecalmResult.Success -> EvidenceImportUiState(
-                    message = UiMessage.resource(R.string.evidence_import_success),
-                ).toTransient()
+                is BecalmResult.Success -> {
+                    trackImportCompleted("message_screenshot")
+                    EvidenceImportUiState(
+                        message = UiMessage.resource(R.string.evidence_import_success),
+                    ).toTransient()
+                }
                 is BecalmResult.Failure -> EvidenceImportTransientState(
                     message = UiMessage.resource(R.string.evidence_import_error_message_screenshot),
                 )
@@ -117,9 +127,12 @@ public class EvidenceImportViewModel @Inject constructor(
                 speakerPreviewId = review.speakerPreviewId,
             )
             transientState.value = when (sourceImportRepository.importMeetingAudio(review.audioUri, context)) {
-                is BecalmResult.Success -> EvidenceImportTransientState(
-                    message = UiMessage.resource(R.string.evidence_import_success),
-                )
+                is BecalmResult.Success -> {
+                    trackImportCompleted("meeting")
+                    EvidenceImportTransientState(
+                        message = UiMessage.resource(R.string.evidence_import_success),
+                    )
+                }
                 is BecalmResult.Failure -> EvidenceImportTransientState(
                     message = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed),
                 )
@@ -146,4 +159,15 @@ public class EvidenceImportViewModel @Inject constructor(
             loadingMessage = loadingMessage,
             meetingReview = meetingReview,
         )
+
+    private fun trackImportCompleted(sourceType: String) {
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.EVIDENCE_IMPORT_COMPLETED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf("source_type" to sourceType),
+            ),
+        )
+    }
 }

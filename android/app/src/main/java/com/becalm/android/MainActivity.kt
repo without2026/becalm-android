@@ -11,9 +11,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.ui.navigation.AppDeepLinks
 import com.becalm.android.ui.theme.BecalmTheme
 import dagger.hilt.android.AndroidEntryPoint
+import java.util.UUID
+import javax.inject.Inject
+import kotlinx.datetime.Clock
 
 /**
  * Single-activity entry point for the BeCalm Android app.
@@ -25,6 +31,9 @@ import dagger.hilt.android.AndroidEntryPoint
  */
 @AndroidEntryPoint
 public class MainActivity : ComponentActivity() {
+
+    @Inject
+    public lateinit var productAnalytics: ProductAnalyticsClient
 
     /**
      * Holds the most recent incoming deep-link route so the Compose root can
@@ -43,7 +52,7 @@ public class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
 
-        pendingDeepLinkRoute.value = intent?.let(AppDeepLinks::routeFrom)
+        pendingDeepLinkRoute.value = intent?.let(::routeAndTrackDeepLink)
 
         setContent {
             BecalmTheme {
@@ -51,6 +60,7 @@ public class MainActivity : ComponentActivity() {
                 BecalmApp(
                     pendingDeepLinkRoute = deepLinkRoute,
                     onDeepLinkConsumed = { deepLinkRoute = null },
+                    productAnalytics = productAnalytics,
                 )
             }
         }
@@ -59,6 +69,21 @@ public class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        AppDeepLinks.routeFrom(intent)?.let { pendingDeepLinkRoute.value = it }
+        routeAndTrackDeepLink(intent)?.let { pendingDeepLinkRoute.value = it }
+    }
+
+    private fun routeAndTrackDeepLink(intent: Intent): String? {
+        val route = AppDeepLinks.routeFrom(intent) ?: return null
+        if (route.startsWith("commitments/")) {
+            productAnalytics.track(
+                ProductAnalyticsEvent(
+                    eventId = UUID.randomUUID().toString(),
+                    eventName = ProductAnalyticsEvents.COMMITMENT_NOTIFICATION_OPENED,
+                    occurredAt = Clock.System.now(),
+                    properties = mapOf("route" to route),
+                ),
+            )
+        }
+        return route
     }
 }

@@ -77,7 +77,10 @@ jobs:
 
       - name: Android Lint (security + a11y)
         working-directory: ${{ steps.config.outputs.root }}/android
-        run: ./gradlew lint
+        # AGP 8.7.3 + Kotlin 2.1.x can crash while linting debug test sources
+        # through FIR/UAST. Release lint still covers the beta-distributed APK
+        # surface and remains paired with unit/instrumentation test jobs.
+        run: ./gradlew lintRelease
 
       - name: APK size check
         working-directory: ${{ steps.config.outputs.root }}/android

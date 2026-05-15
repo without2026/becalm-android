@@ -2,6 +2,7 @@ package com.becalm.android.ui.onboarding
 
 import android.app.Activity
 import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -108,7 +109,7 @@ public fun OnboardingEmailPipaConsentScreen(
         )
     }
     val navigate = onNavigate ?: { route: String -> navController.navigateAfterSourceReconnectOr(route) }
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

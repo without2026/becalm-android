@@ -6,6 +6,7 @@
 /.idea/
 /captures/
 /app/release/
+/app/google-services.json
 *.apk
 *.aab
 # Room schema snapshots are kept in git — they form part of the migration contract.

@@ -3,12 +3,17 @@ package com.becalm.android.ui.persons
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.repository.PersonManualMatchRepository
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +24,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 // ─── UI models ────────────────────────────────────────────────────────────────
@@ -145,6 +151,7 @@ public class PersonsViewModel @Inject constructor(
     projectionPort: PersonsScreenProjectionPort,
     private val refreshCoordinator: PersonsRefreshCoordinator,
     private val manualMatchRepository: PersonManualMatchRepository,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val stateSource = PersonsScreenStateSource(
@@ -214,8 +221,23 @@ public class PersonsViewModel @Inject constructor(
                 personAnchor = personAnchor,
                 nickname = nickname,
             )
-            if (result is BecalmResult.Failure) {
-                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+            when (result) {
+                is BecalmResult.Success -> {
+                    productAnalytics.track(
+                        ProductAnalyticsEvent(
+                            eventId = UUID.randomUUID().toString(),
+                            eventName = ProductAnalyticsEvents.PERSON_MATCH_COMPLETED,
+                            occurredAt = Clock.System.now(),
+                            properties = mapOf(
+                                "source_type" to event.sourceType,
+                                "interaction_kind" to event.interactionKind.toString(),
+                            ),
+                        ),
+                    )
+                }
+                is BecalmResult.Failure -> {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+                }
             }
         }
     }

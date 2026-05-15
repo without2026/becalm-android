@@ -3,6 +3,10 @@ package com.becalm.android.ui.commitments
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
@@ -23,6 +27,7 @@ import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -253,6 +258,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     private val reminderScheduler: ReminderScheduler,
     private val userPrefsStore: UserPrefsStore,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     private val clock: Clock = SystemClock,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
@@ -644,6 +650,7 @@ public class CommitmentManagementViewModel @Inject constructor(
                 is BecalmResult.Success -> {
                     logger.d(TAG, "$name succeeded id=${hashId(id)}")
                     _uiState.update { it.copy(error = null) }
+                    trackActionSelected(name, id)
                     effect?.invoke()
                 }
                 is BecalmResult.Failure -> {
@@ -662,4 +669,25 @@ public class CommitmentManagementViewModel @Inject constructor(
      */
     // spec: CMT-002, CMT-003, CMT-004, CMT-010
     // spec: CMT-005..010 — post-Round-1 state model alignment verified
+
+    private fun trackActionSelected(name: String, id: String) {
+        val action = when (name) {
+            "onRemind" -> "remind"
+            "onFollowUp" -> "follow_up"
+            "onComplete" -> "complete"
+            "onCancel" -> "cancel"
+            else -> name
+        }
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_ACTION_SELECTED,
+                occurredAt = clock.nowInstant(),
+                properties = mapOf(
+                    "commitment_id" to id,
+                    "action" to action,
+                ),
+            ),
+        )
+    }
 }

@@ -193,6 +193,12 @@ public interface UserPrefsStore {
      */
     public suspend fun setNotificationsEnabled(enabled: Boolean)
 
+    /** Emits whether diagnostic crash and product analytics collection is enabled. */
+    public fun observeTelemetryEnabled(): Flow<Boolean>
+
+    /** Persists the diagnostic crash and product analytics collection opt-in flag. */
+    public suspend fun setTelemetryEnabled(enabled: Boolean)
+
     /**
      * Emits `true` when the user has granted PIPA 제3자 제공 + 국외 이전 동의
      * (third-party provision and international transfer consent) required for the voice
@@ -444,6 +450,7 @@ public data class PipaActionLogEntry(
  * | Locale tag                       | String   | `locale_tag`                     | null       |
  * | Doze prompt dismissed at         | Long     | `doze_whitelist_prompt_dismissed`| null       |
  * | Notifications enabled            | Boolean  | `notifications_enabled`          | true       |
+ * | Telemetry enabled                | Boolean  | `telemetry_enabled`              | true       |
  * | Terms accepted                   | Boolean  | `terms_accepted`                 | false      |
  * | IMAP store migrated (v1)         | Boolean  | `imap_credential_store_migrated_v1` | false   |
  *
@@ -476,6 +483,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     private val localeTagKey = stringPreferencesKey("locale_tag")
     private val dozePromptDismissedAtKey = longPreferencesKey("doze_whitelist_prompt_dismissed")
     private val notificationsEnabledKey = booleanPreferencesKey("notifications_enabled")
+    private val telemetryEnabledKey = booleanPreferencesKey("telemetry_enabled")
     private val termsAcceptedKey = booleanPreferencesKey("terms_accepted")
     private val imapCredentialStoreMigratedKey = booleanPreferencesKey("imap_credential_store_migrated_v1")
 
@@ -642,6 +650,13 @@ public class UserPrefsStoreImpl @Inject constructor(
 
     override suspend fun setNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[notificationsEnabledKey] = enabled }
+    }
+
+    override fun observeTelemetryEnabled(): Flow<Boolean> =
+        dataStore.data.map { it[telemetryEnabledKey] ?: true }
+
+    override suspend fun setTelemetryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[telemetryEnabledKey] = enabled }
     }
 
     override fun observeThirdPartyProvisionConsent(): Flow<Boolean> =

@@ -5,12 +5,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.ui.components.BecalmBottomNavigation
 import com.becalm.android.ui.navigation.BecalmNavHost
 import com.becalm.android.ui.navigation.BecalmRoute
+import java.util.UUID
+import kotlinx.datetime.Clock
 
 /** Routes where the bottom navigation bar is visible. */
 private val TAB_ROUTES = setOf(
@@ -34,10 +41,12 @@ private val TAB_ROUTES = setOf(
 public fun BecalmApp(
     pendingDeepLinkRoute: String? = null,
     onDeepLinkConsumed: () -> Unit = {},
+    productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+    TrackScreenTelemetry(currentRoute, productAnalytics)
 
     LaunchedEffect(pendingDeepLinkRoute) {
         if (!pendingDeepLinkRoute.isNullOrBlank()) {
@@ -63,3 +72,29 @@ public fun BecalmApp(
         )
     }
 }
+
+@Composable
+private fun TrackScreenTelemetry(
+    currentRoute: String?,
+    productAnalytics: ProductAnalyticsClient,
+) {
+    val previousRoute = androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentRoute) {
+        val prior = previousRoute.value
+        if (prior != null && prior != currentRoute) {
+            productAnalytics.track(screenEvent(ProductAnalyticsEvents.SCREEN_EXITED, prior))
+        }
+        if (currentRoute != null && currentRoute != prior) {
+            productAnalytics.track(screenEvent(ProductAnalyticsEvents.SCREEN_VIEWED, currentRoute))
+        }
+        previousRoute.value = currentRoute
+    }
+}
+
+private fun screenEvent(eventName: String, route: String): ProductAnalyticsEvent =
+    ProductAnalyticsEvent(
+        eventId = UUID.randomUUID().toString(),
+        eventName = eventName,
+        occurredAt = Clock.System.now(),
+        properties = mapOf("route" to route),
+    )

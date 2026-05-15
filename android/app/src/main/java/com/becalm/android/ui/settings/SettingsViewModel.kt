@@ -46,6 +46,7 @@ public data class SettingsUiState(
     val userEmail: String? = null,
     val language: String = "",
     val notificationsEnabled: Boolean = true,
+    val telemetryEnabled: Boolean = true,
     val pipaConsentEnabled: Boolean = false,
     val callLogMatchingConsentEnabled: Boolean = false,
     val processingPaused: Boolean = false,
@@ -145,6 +146,12 @@ public class SettingsViewModel @Inject constructor(
                 ) {
                     userPrefsStore.observeThirdPartyProvisionConsent().first()
                 }
+                val telemetryEnabled = readPrefOrDefault(
+                    op = "observeTelemetryEnabled",
+                    defaultValue = true,
+                ) {
+                    userPrefsStore.observeTelemetryEnabled().first()
+                }
                 val callLogMatchingConsentEnabled = readPrefOrDefault(
                     op = "observeCallLogMatchingConsent",
                     defaultValue = false,
@@ -162,6 +169,7 @@ public class SettingsViewModel @Inject constructor(
                         userEmail = session?.email,
                         language = localeTag,
                         notificationsEnabled = notificationsEnabled,
+                        telemetryEnabled = telemetryEnabled,
                         pipaConsentEnabled = pipaConsentEnabled,
                         callLogMatchingConsentEnabled = callLogMatchingConsentEnabled,
                         processingPaused = processingPaused,
@@ -228,6 +236,16 @@ public class SettingsViewModel @Inject constructor(
             failureMessage = UiMessage.resource(R.string.settings_error_notifications_toggle_failed),
             write = { userPrefsStore.setNotificationsEnabled(enabled) },
             onSuccess = { state -> state.copy(notificationsEnabled = enabled, error = null) },
+        )
+    }
+
+    public fun onToggleTelemetry(enabled: Boolean) {
+        persistPref(
+            opTag = "onToggleTelemetry",
+            successLog = "telemetry toggled to $enabled",
+            failureMessage = UiMessage.resource(R.string.settings_error_telemetry_toggle_failed),
+            write = { userPrefsStore.setTelemetryEnabled(enabled) },
+            onSuccess = { state -> state.copy(telemetryEnabled = enabled, error = null) },
         )
     }
 
