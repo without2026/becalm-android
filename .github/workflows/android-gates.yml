@@ -55,6 +55,17 @@ jobs:
             echo "[WARN] Baseline created"
           fi
 
+      - name: Restore google-services.json
+        working-directory: ${{ steps.config.outputs.root }}/android
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
+          else
+            echo "[WARN] GOOGLE_SERVICES_JSON_B64 is not configured; Firebase plugins remain disabled."
+          fi
+
       - name: Cache OWASP Dependency-Check data
         uses: actions/cache@v5
         with:
