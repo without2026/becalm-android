@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -225,6 +226,69 @@ class PersonDetailSupplementUiTest {
         composeRule.onNodeWithTag("unassigned-match-anchor-event-suggested-self").assertIsDisplayed()
         composeRule.runOnIdle {
             assertEquals("event-suggested-self", notSelfEventId)
+        }
+    }
+
+    @Test
+    fun `unassigned events source suggested self routes to contact matching without person confirm`() {
+        var notSelfEventId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    matchChoices = listOf(
+                        PersonMatchChoiceRow(
+                            anchor = "minji@corp.com",
+                            displayName = "김민지",
+                            detail = "minji@corp.com",
+                            hasInteractions = true,
+                        ),
+                    ),
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-source-suggested-self",
+                            sourceType = SourceType.GMAIL,
+                            title = "Jake가 보낸 메일",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "Jake",
+                                    displayName = "Jake",
+                                    detail = null,
+                                    role = "sender",
+                                    evidence = "Jake가 정리하겠습니다.",
+                                    confidence = 0.72,
+                                    isSelfSuggestion = true,
+                                ),
+                            ),
+                        ),
+                    ),
+                    onNotSelfMatch = { event ->
+                        notSelfEventId = event.id
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-source-suggested-self")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unassigned-match-confirm-event-source-suggested-self")
+            .assertCountEquals(0)
+        composeRule.onAllNodesWithTag("unassigned-match-other-event-source-suggested-self")
+            .assertCountEquals(0)
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-source-suggested-self")
+            .performClick()
+
+        composeRule.onNodeWithTag("unassigned-match-choice-event-source-suggested-self-minji@corp.com")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unassigned-match-choice-event-source-suggested-self-Jake")
+            .assertCountEquals(0)
+        composeRule.runOnIdle {
+            assertEquals("event-source-suggested-self", notSelfEventId)
         }
     }
 

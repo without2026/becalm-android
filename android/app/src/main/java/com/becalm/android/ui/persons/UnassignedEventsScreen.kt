@@ -318,6 +318,7 @@ private fun PersonMatchReviewCard(
     var personAnchor by remember(event.id) { mutableStateOf(candidate?.anchor.orEmpty()) }
     var selectedNickname by remember(event.id) { mutableStateOf(candidate?.displayName.orEmpty()) }
     var nickname by remember(event.id) { mutableStateOf("") }
+    val isSelfSuggestion = candidate?.isSelfSuggestion == true || candidate?.role == "suggested"
 
     EvidenceCard(
         modifier = Modifier
@@ -357,10 +358,12 @@ private fun PersonMatchReviewCard(
                 },
             )
             Spacer(modifier = Modifier.height(12.dp))
-            if (candidate.role == "suggested") {
+            if (isSelfSuggestion) {
                 BecalmButton(
                     text = stringResource(R.string.person_match_not_self_action),
                     onClick = {
+                        personAnchor = ""
+                        selectedNickname = ""
                         onNotSelf()
                         manualOpen = true
                     },
@@ -387,27 +390,29 @@ private fun PersonMatchReviewCard(
                 TextButton(onClick = onLater) {
                     Text(text = stringResource(R.string.person_match_later_action))
                 }
-                OutlinedButton(
-                    onClick = {
-                        personAnchor = ""
-                        selectedNickname = ""
-                        manualOpen = true
-                    },
-                    modifier = Modifier.testTag("unassigned-match-other-${event.id}"),
-                ) {
-                    Text(text = stringResource(R.string.person_match_other_person_action))
+                if (!isSelfSuggestion) {
+                    OutlinedButton(
+                        onClick = {
+                            personAnchor = ""
+                            selectedNickname = ""
+                            manualOpen = true
+                        },
+                        modifier = Modifier.testTag("unassigned-match-other-${event.id}"),
+                    ) {
+                        Text(text = stringResource(R.string.person_match_other_person_action))
+                    }
+                    BecalmButton(
+                        text = stringResource(R.string.person_match_confirm_action),
+                        modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
+                        onClick = {
+                            onConfirm(
+                                candidate.anchor,
+                                selectedNickname.ifBlank { candidate.displayName },
+                            )
+                        },
+                        variant = BecalmButtonVariant.Primary,
+                    )
                 }
-                BecalmButton(
-                    text = stringResource(R.string.person_match_confirm_action),
-                    modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
-                    onClick = {
-                        onConfirm(
-                            candidate.anchor,
-                            selectedNickname.ifBlank { candidate.displayName },
-                        )
-                    },
-                    variant = BecalmButtonVariant.Primary,
-                )
             }
         } else {
             ManualMatchPanel(
@@ -502,15 +507,17 @@ private fun ManualMatchPanel(
     onConfirm: () -> Unit,
 ) {
     val normalizedQuery = personAnchor.trim()
-    val candidateChoices = eventCandidates.map { candidate ->
-        PersonMatchChoiceRow(
-            anchor = candidate.anchor,
-            displayName = candidate.displayName,
-            detail = candidate.detail ?: candidate.evidence,
-            hasInteractions = true,
-            kind = PersonMatchChoiceKind.CANDIDATE,
-        )
-    }
+    val candidateChoices = eventCandidates
+        .filterNot { it.isSelfSuggestion }
+        .map { candidate ->
+            PersonMatchChoiceRow(
+                anchor = candidate.anchor,
+                displayName = candidate.displayName,
+                detail = candidate.detail ?: candidate.evidence,
+                hasInteractions = true,
+                kind = PersonMatchChoiceKind.CANDIDATE,
+            )
+        }
     val visibleChoices = (candidateChoices + matchChoices)
         .distinctBy(PersonMatchChoiceRow::anchor)
         .filter { choice ->

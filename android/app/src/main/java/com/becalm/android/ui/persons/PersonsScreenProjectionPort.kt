@@ -4,12 +4,15 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexAggregateRow
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
@@ -53,6 +56,7 @@ public data class PersonMatchCandidateSummary(
     val confidence: Double,
     val recommended: Boolean = false,
     val reasons: List<String> = emptyList(),
+    val isSelfSuggestion: Boolean = false,
 )
 
 /** Unassigned bucket item surfaced on the persons screen. */
@@ -117,6 +121,7 @@ public interface PersonsRefreshCoordinator {
 public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private val personEnrichmentRepository: PersonEnrichmentRepository,
     private val personIndexDao: PersonIndexDao,
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val sourceStatusRepository: SourceStatusRepository,
     private val userPrefsStore: UserPrefsStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -126,15 +131,20 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         combine(
             personEnrichmentRepository.observeAll(),
             personIndexDao.observeAggregates(userId, PAGE_SIZE + 1),
+            selfIdentityAnchorDao.observeActive(userId),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { enrichmentRows, indexAggregateRows, blockedPersonRefs ->
+        ) { enrichmentRows, indexAggregateRows, selfAnchors, blockedPersonRefs ->
+            val selfMatcher = SelfIdentityAnchorMatcher(selfAnchors)
             val filteredIndexRows = indexAggregateRows.filterNot { row ->
                 PersonIdentityResolver.isBlocked(row.primaryIdentityKey, blockedPersonRefs) ||
                     PersonIdentityResolver.isLikelyAutomated(row.primaryIdentityKey) ||
-                    PersonIdentityResolver.isLikelyAutomated(row.displayNameHint)
+                    PersonIdentityResolver.isLikelyAutomated(row.displayNameHint) ||
+                    selfMatcher.matches(row.primaryIdentityKey, row.displayNameHint)
             }
             buildProjectionPage(
-                enrichmentRows = enrichmentRows,
+                enrichmentRows = enrichmentRows.filterNot { row ->
+                    selfMatcher.matches(row.personRef, row.displayName, row.nickname)
+                },
                 aggregateRows = filteredIndexRows,
             )
         }
@@ -144,18 +154,20 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     override fun observeSearchableContacts(userId: String): Flow<List<PersonListProjection>> =
         combine(
             personEnrichmentRepository.observeAll(),
+            selfIdentityAnchorDao.observeActive(userId),
             userPrefsStore.observeBlockedPersonRefs(),
-        ) { enrichmentRows, blockedPersonRefs ->
+        ) { enrichmentRows, selfAnchors, blockedPersonRefs ->
+            val selfMatcher = SelfIdentityAnchorMatcher(selfAnchors)
             enrichmentRows
                 .filterNot { row ->
                     PersonIdentityResolver.isBlocked(row.personRef, blockedPersonRefs) ||
                         PersonIdentityResolver.isLikelyAutomated(row.personRef) ||
-                        PersonIdentityResolver.isLikelyAutomated(row.displayName)
+                        PersonIdentityResolver.isLikelyAutomated(row.displayName) ||
+                        selfMatcher.matches(row.personRef, row.displayName, row.nickname)
                 }
                 .map { enrichment ->
                     PersonListProjection(
-                        personId = PersonIdentityResolver.resolve(userId, enrichment.personRef)?.personId
-                            ?: enrichment.personRef,
+                        personId = enrichment.personRef,
                         displayName = enrichment.displayName,
                         nickname = enrichment.nickname,
                         companyName = enrichment.company,
@@ -177,13 +189,24 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             personIndexDao.observeAggregates(userId, MATCH_CANDIDATE_LIMIT),
             personIndexDao.observeIdentitiesForUser(userId),
             personIndexDao.observeSemanticIndexesForUser(userId),
-            userPrefsStore.observeBlockedPersonRefs(),
-        ) { enrichmentRows, aggregateRows, identityRows, semanticIndexRows, blockedPersonRefs ->
+            combine(
+                selfIdentityAnchorDao.observeActive(userId),
+                userPrefsStore.observeBlockedPersonRefs(),
+            ) { selfAnchors, blockedPersonRefs -> selfAnchors to blockedPersonRefs },
+        ) { enrichmentRows, aggregateRows, identityRows, semanticIndexRows, selfPolicy ->
+            val (selfAnchors, blockedPersonRefs) = selfPolicy
+            val selfMatcher = SelfIdentityAnchorMatcher(selfAnchors)
             buildMatchingContext(
                 userId = userId,
-                enrichmentRows = enrichmentRows,
-                aggregateRows = aggregateRows,
-                identityRows = identityRows,
+                enrichmentRows = enrichmentRows.filterNot { row ->
+                    selfMatcher.matches(row.personRef, row.displayName, row.nickname)
+                },
+                aggregateRows = aggregateRows.filterNot { row ->
+                    selfMatcher.matches(row.primaryIdentityKey, row.displayNameHint)
+                },
+                identityRows = identityRows.filterNot { row ->
+                    selfMatcher.matches(row.identityKey, row.rawValue, row.displayName, row.displayNameHint)
+                },
                 semanticIndexRows = semanticIndexRows,
                 blockedPersonRefs = blockedPersonRefs,
             )
@@ -299,8 +322,8 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     ): PersonMatchCandidateSummary? {
         val anchor = emailRaw
             ?: phoneRaw
-            ?: normalizedValue
             ?: displayNameRaw
+            ?: normalizedValue
             ?: organizationRaw
             ?: return null
         if (
@@ -322,6 +345,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             role = role,
             evidence = evidence,
             confidence = confidence,
+            isSelfSuggestion = resolutionStatus == "suggested_self",
         )
     }
 
@@ -351,6 +375,32 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
             SourceType.CALL_RECORDING,
         )
         val SPEAKER_LABEL_REGEX: Regex = Regex("""(?i)^SPEAKER[_\s-]?\d+$""")
+    }
+}
+
+private class SelfIdentityAnchorMatcher(
+    anchors: List<SelfIdentityAnchorEntity>,
+) {
+    private val normalizedValues: Set<String> = anchors
+        .filter { it.status == "active" }
+        .flatMap { anchor ->
+            when (anchor.anchorType) {
+                "alias",
+                "name",
+                PersonIdentityTypes.SPEAKER_LABEL,
+                -> listOf(anchor.normalizedValue, anchor.displayValue)
+
+                else -> listOf(anchor.normalizedValue)
+            }
+        }
+        .mapNotNull(PersonIdentityResolver::normalizeBlockKey)
+        .toSet()
+
+    fun matches(vararg values: String?): Boolean {
+        if (normalizedValues.isEmpty()) return false
+        return values.any { value ->
+            PersonIdentityResolver.normalizeBlockKey(value) in normalizedValues
+        }
     }
 }
 

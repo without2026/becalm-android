@@ -12,6 +12,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -60,6 +61,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     private val projectionPort = EnrichmentBackedPersonsScreenProjectionPort(
         personEnrichmentRepository = enrichmentRepository,
         personIndexDao = db.personIndexDao(),
+        selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
         sourceStatusRepository = sourceStatusRepository,
         userPrefsStore = userPrefsStore,
     )
@@ -260,6 +262,58 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             assertTrue(state.hasMorePages)
             assertFalse(state.nextCursor.isNullOrBlank())
             assertEquals("person-21@corp.com", state.people.first().displayLabel)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `contact match choices exclude active self identity anchors`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val syncedAt = Instant.parse("2026-04-23T00:00:00Z")
+
+        db.selfIdentityAnchorDao().insertAll(
+            listOf(
+                selfAnchor(
+                    id = "self-email",
+                    anchorType = "email",
+                    normalizedValue = "me@corp.com",
+                    displayValue = "Me",
+                    now = syncedAt,
+                ),
+            ),
+        )
+        db.personEnrichmentDao().upsert(
+            PersonEnrichmentEntity(
+                personRef = "me@corp.com",
+                displayName = "Me",
+                nickname = "Jake",
+                company = "Becalm",
+                title = "Owner",
+                lastSyncedAt = syncedAt,
+            ),
+        )
+        db.personEnrichmentDao().upsert(
+            PersonEnrichmentEntity(
+                personRef = "minji@corp.com",
+                displayName = "김민지",
+                nickname = "민지",
+                company = "Acme",
+                title = "PM",
+                lastSyncedAt = syncedAt,
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.matchChoices.isEmpty()) {
+                state = awaitItem()
+            }
+
+            assertEquals(listOf("minji@corp.com"), state.matchChoices.map { it.anchor })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -531,6 +585,81 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `suggested self participant is surfaced as self review instead of person recommendation`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+
+        upsertIdentityAndInteraction(
+            anchor = "Jake",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-known-jake",
+            kind = "email",
+            role = "counterparty",
+            occurredAt = occurredAt,
+            title = "Known Jake",
+            snippet = "이전 대화",
+        )
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-suggested-self",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-mail",
+                    interactionKind = "email",
+                    title = "내 별칭이 포함된 메일",
+                    snippet = "Jake가 정리하겠습니다.",
+                    suggestedLabel = "Jake",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-suggested-self",
+                    userId = USER_ID,
+                    sourceEventId = "raw-mail",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-source",
+                    personId = null,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "jake",
+                    displayNameRaw = "Jake",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "Jake가 정리하겠습니다.",
+                    confidence = 0.72,
+                    resolutionStatus = "suggested_self",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.unassignedEvents.firstOrNull()?.candidates?.isEmpty() != false) {
+                state = awaitItem()
+            }
+
+            val candidate = state.unassignedEvents.single().candidates.single()
+            assertEquals("Jake", candidate.anchor)
+            assertFalse(candidate.recommended)
+            assertTrue(candidate.isSelfSuggestion)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun rawEvent(
         id: String,
         counterpartyRef: String?,
@@ -634,6 +763,28 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             ),
         )
     }
+
+    private fun selfAnchor(
+        id: String,
+        anchorType: String,
+        normalizedValue: String,
+        displayValue: String?,
+        now: Instant,
+    ): SelfIdentityAnchorEntity = SelfIdentityAnchorEntity(
+        id = id,
+        userId = USER_ID,
+        anchorType = anchorType,
+        normalizedValue = normalizedValue,
+        displayValue = displayValue,
+        source = "test",
+        scope = "global",
+        sourceConnectionId = null,
+        sourceEventId = null,
+        trust = "user_confirmed",
+        status = "active",
+        createdAt = now,
+        updatedAt = now,
+    )
 
     private companion object {
         const val USER_ID: String = "user-1"

@@ -162,6 +162,7 @@ internal fun SourceEventParticipantEntity.toRecommendedCandidateSummaries(
     event: UnmatchedPersonInteractionEntity,
     matchingContext: MatchingProjectionContext,
 ): List<PersonMatchCandidateSummary> {
+    if (resolutionStatus == "suggested_self") return emptyList()
     if (matchingContext.candidates.isEmpty()) return emptyList()
     val participant = PersonMatchParticipant(
         displayName = displayNameRaw ?: normalizedValue,
@@ -204,6 +205,7 @@ internal fun SourceEventParticipantEntity.toRecommendedCandidateSummaries(
             confidence = candidate.confidence,
             recommended = true,
             reasons = candidate.reasons.map(::localizedReason).distinct(),
+            isSelfSuggestion = false,
         )
     }
 }
