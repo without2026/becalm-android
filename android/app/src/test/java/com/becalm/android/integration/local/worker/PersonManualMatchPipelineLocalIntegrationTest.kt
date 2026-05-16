@@ -306,6 +306,56 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
+    fun `suggested self participant remains reviewable and can be confirmed as self`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-suggested-self-1", snippet = "Jake가 금요일까지 보내겠습니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-suggested-self-1",
+                    sourceEventId = "raw-suggested-self-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-suggested-self",
+                    displayName = "Jake",
+                ).copy(
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "jake",
+                    resolutionStatus = "suggested_self",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+        val unmatched = db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10)
+        assertEquals(1, unmatched.size)
+        assertEquals("Jake", unmatched.single().suggestedLabel)
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        val result = repository.matchInteractionAsSelf(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-suggested-self-1",
+            interactionKind = "email",
+        )
+        assertTrue(result is BecalmResult.Success)
+
+        val participant = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-suggested-self-1"),
+        ).single()
+        assertEquals(null, participant.personId)
+        assertEquals("self", participant.relationToUser)
+        assertEquals("self_resolved", participant.resolutionStatus)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+    }
+
+    @Test
     fun `manual match queues remote mirror after transient failure and worker retries`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(rawEvent(id = "raw-retry-1", snippet = "Steve 검토 필요"))

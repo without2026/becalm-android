@@ -197,6 +197,36 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
+    fun `self alias anchor stays suggested for user confirmation without creating person`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "sender",
+            relationToUser = "counterparty",
+            identityType = "name",
+            normalizedValue = "jake",
+            displayName = "Jake",
+            confidence = 0.78,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message",
+            index = 0,
+            now = NOW,
+            selfIdentityAnchors = listOf(
+                selfAnchor(
+                    id = "anchor-alias",
+                    anchorType = "alias",
+                    normalizedValue = "jake",
+                ),
+            ),
+        )
+
+        assertEquals(null, participant.personId)
+        assertEquals("counterparty", participant.relationToUser)
+        assertEquals("suggested_self", participant.resolutionStatus)
+    }
+
+    @Test
     fun `self identity email anchor prevents commitment counterparty participant creation`() {
         val commitment = SourceExtractedItemDto(
             type = SourceExtractedItemType.ACTION,

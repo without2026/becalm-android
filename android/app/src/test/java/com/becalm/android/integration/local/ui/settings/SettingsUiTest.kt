@@ -185,6 +185,9 @@ class SettingsUiTest {
         composeRule.onAllNodesWithText("SPEAKER_01").assertCountEquals(0)
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasText("Gmail"))
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_shared)).assertExists()
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_delegated)).assertExists()
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_unknown)).assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_self)).performClick()
 
         composeRule.runOnIdle {

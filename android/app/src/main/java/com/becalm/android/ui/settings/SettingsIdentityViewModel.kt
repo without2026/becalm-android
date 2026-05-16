@@ -229,7 +229,7 @@ public class SettingsIdentityViewModel @Inject constructor(
 
     public fun onSetConnectionOwnership(connectionId: String, ownership: String) {
         val userId = _uiState.value.userId ?: return
-        if (ownership !in setOf("self", "other")) return
+        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
         viewModelScope.launch {
             _uiState.update { it.copy(updatingConnectionId = connectionId, error = null) }
             when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
@@ -290,3 +290,5 @@ private fun sourceConnectionTitle(provider: String, capability: String): String 
         provider == SourceType.DAUM_IMAP -> "Daum Mail"
         else -> "$provider · $capability"
     }
+
+private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")

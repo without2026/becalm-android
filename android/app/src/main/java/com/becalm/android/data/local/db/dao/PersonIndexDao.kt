@@ -241,7 +241,7 @@ public interface PersonIndexDao {
             END
         WHERE user_id = :userId
           AND source_type = :sourceType
-          AND resolution_status = 'unresolved'
+          AND resolution_status IN ('unresolved', 'suggested_self')
           AND (
                 source_ref = :sourceRef
              OR source_event_id = :sourceEventId
@@ -274,7 +274,7 @@ public interface PersonIndexDao {
             END
         WHERE user_id = :userId
           AND source_type = :sourceType
-          AND resolution_status = 'unresolved'
+          AND resolution_status IN ('unresolved', 'suggested_self')
           AND (
                 source_ref = :sourceRef
              OR source_event_id = :sourceEventId
@@ -378,7 +378,7 @@ public interface PersonIndexDao {
         """
         SELECT COUNT(*) FROM source_event_participants
         WHERE user_id = :userId
-          AND resolution_status = 'unresolved'
+          AND resolution_status IN ('unresolved', 'suggested_self')
         """,
     )
     public fun observeUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>

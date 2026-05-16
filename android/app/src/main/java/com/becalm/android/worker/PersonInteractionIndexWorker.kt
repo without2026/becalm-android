@@ -308,7 +308,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             if (shouldSuppress(anchor)) return
             val occurredAt = raw?.timestamp ?: participant.createdAt
             if (participant.personId.isNullOrBlank()) {
-                if (participant.resolutionStatus == "unresolved") {
+                if (participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES) {
                     upsertUnmatched(
                         sourceType = participant.sourceType,
                         sourceRef = sourceRef,
@@ -573,5 +573,6 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private companion object {
         private const val TAG = "PersonIndexWorker"
         private const val DIRTY_LIMIT = 500
+        private val REVIEWABLE_PARTICIPANT_STATUSES = setOf("unresolved", "suggested_self")
     }
 }

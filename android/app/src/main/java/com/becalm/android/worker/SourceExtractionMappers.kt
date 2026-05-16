@@ -67,8 +67,9 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): SourceEventParticipantEntity {
     val anchor = email ?: phone
-    val selfMatch = matchesSelfIdentityAnchor(selfIdentityAnchors)
-    val resolved = if (selfMatch) null else PersonIdentityResolver.resolve(userId, anchor)
+    val selfMatch = matchSelfIdentityAnchor(selfIdentityAnchors)
+    val selfResolved = selfMatch?.resolutionStatus == RESOLUTION_SELF_RESOLVED
+    val resolved = if (selfMatch != null) null else PersonIdentityResolver.resolve(userId, anchor)
     val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
     val participantAnchor = anchor ?: normalizedValue ?: displayName ?: organization ?: rawValue
     val participantId = UUID.nameUUIDFromBytes(
@@ -82,7 +83,7 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         sourceRef = sourceRef,
         personId = resolved?.personId,
         role = role,
-        relationToUser = if (selfMatch) {
+        relationToUser = if (selfResolved) {
             "self"
         } else {
             relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role)
@@ -97,7 +98,7 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         evidence = evidence,
         confidence = confidence.coerceIn(0.0, 1.0),
         resolutionStatus = when {
-            selfMatch -> "self_resolved"
+            selfMatch != null -> selfMatch.resolutionStatus
             resolved == null -> "unresolved"
             else -> "resolved"
         },
@@ -112,7 +113,7 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
     now: Instant,
     selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): CommitmentParticipantEntity? {
-    if (counterpartyRef.matchesSelfIdentityAnchor(selfIdentityAnchors)) return null
+    if (counterpartyRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) return null
     val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef)
     val personId = resolved?.personId ?: fallbackPersonId ?: return null
     val participantId = UUID.nameUUIDFromBytes(
@@ -149,8 +150,14 @@ internal fun List<SourceEventParticipantEntity>.singleSourceCounterpartyPersonId
     return counterpartyPersonIds.singleOrNull()
 }
 
+private const val RESOLUTION_SELF_RESOLVED = "self_resolved"
+private const val RESOLUTION_SUGGESTED_SELF = "suggested_self"
 private val RELATION_TO_USER_VALUES = setOf("self", "counterparty", "participant", "referenced", "unknown")
 private val STRONG_SELF_EMAIL_TYPES = setOf("auth_email", "provider_email", "email")
+
+private data class LocalSelfIdentityMatch(
+    val resolutionStatus: String,
+)
 
 private fun relationToUserForRole(role: String): String =
     when (role.lowercase()) {
@@ -160,32 +167,32 @@ private fun relationToUserForRole(role: String): String =
         else -> "referenced"
     }
 
-private fun SourceExtractedParticipantDto.matchesSelfIdentityAnchor(
+private fun SourceExtractedParticipantDto.matchSelfIdentityAnchor(
     anchors: List<SelfIdentityAnchorEntity>,
-): Boolean =
-    anchors.any { anchor ->
+): LocalSelfIdentityMatch? =
+    anchors.firstNotNullOfOrNull { anchor ->
         when (anchor.anchorType) {
             in STRONG_SELF_EMAIL_TYPES ->
-                participantEmails().any { value ->
+                participantEmails().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "phone" ->
-                participantPhones().any { value ->
+                participantPhones().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "alias" ->
-                participantAliases().any { value ->
+                participantAliases().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SUGGESTED_SELF) }
 
             PersonIdentityTypes.SPEAKER_LABEL ->
-                participantSpeakerLabels().any { value ->
+                participantSpeakerLabels().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
-            else -> false
+            else -> null
         }
     }
 
@@ -205,22 +212,30 @@ private fun SourceExtractedParticipantDto.participantSpeakerLabels(): List<Strin
         displayName.takeIf { identityType == PersonIdentityTypes.SPEAKER_LABEL || role.equals("speaker", ignoreCase = true) },
     )
 
-private fun String?.matchesSelfIdentityAnchor(anchors: List<SelfIdentityAnchorEntity>): Boolean =
-    anchors.any { anchor ->
+private fun String?.matchSelfIdentityAnchor(anchors: List<SelfIdentityAnchorEntity>): LocalSelfIdentityMatch? =
+    anchors.firstNotNullOfOrNull { anchor ->
         when (anchor.anchorType) {
             in STRONG_SELF_EMAIL_TYPES ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "phone" ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "alias" ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SUGGESTED_SELF) }
 
             PersonIdentityTypes.SPEAKER_LABEL ->
                 normalizedEquals(this, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
-            else -> false
+            else -> null
         }
     }
 
