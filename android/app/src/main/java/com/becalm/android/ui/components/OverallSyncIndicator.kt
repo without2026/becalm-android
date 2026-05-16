@@ -30,7 +30,7 @@ import kotlinx.datetime.toLocalDateTime
  * - [OverallSyncState.Idle]            → empty / quiet copy.
  * - [OverallSyncState.Syncing]         → "동기화 중 N/6".
  * - [OverallSyncState.Synced]          → "동기화됨 HH:mm" (today) or "동기화됨 MM/dd HH:mm" (older).
- * - [OverallSyncState.PartialFailure]  → amber-toned "일부 소스 실패 — 설정에서 확인".
+ * - [OverallSyncState.PartialFailure]  → amber-toned "일부 출처 실패, 설정에서 확인".
  *
  * `derivedStateOf` is intentionally NOT used here — the incoming [state] changes at most a few
  * times per minute so caching adds no benefit (rubric D5: avoid `derivedStateOf` unless it

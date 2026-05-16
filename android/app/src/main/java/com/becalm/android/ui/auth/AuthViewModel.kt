@@ -206,7 +206,7 @@ public class AuthViewModel @Inject constructor(
      * and person-enrichment state while guaranteeing that a different account on the
      * same device cannot observe the prior user's data (a separate file is opened).
      *
-     * The "로컬 데이터 전체 삭제" UX (full PIPA wipe via [AuthRepository.signOut]) is
+     * The "기기 내부 데이터 전체 삭제" UX (full PIPA wipe via [AuthRepository.signOut]) is
      * reached from Settings → Privacy and is intentionally not this method's concern.
      *
      * On success the sign-out state is driven solely by [onObserveSession] collecting

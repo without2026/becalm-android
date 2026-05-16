@@ -52,7 +52,7 @@ import kotlinx.datetime.Clock
  * **Canonical onboarding flow**:
  *
  * ```
- * 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 소스) → Today
+ * 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 출처) → Today
  * ```
  *
  * Completion is signalled by [UserPrefsStore.setOnboardingCompleted] `true` from
