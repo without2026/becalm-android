@@ -31,7 +31,16 @@ internal class StructuredExtractionPersister(
         body: SourceExtractionResponse,
         now: Instant,
     ): StructuredExtractionPersistStats {
-        val commitmentEntities = body.items.mapIndexed { index, dto ->
+        val selfIdentityAnchors = selfIdentityAnchorDao.findActiveForMatching(
+            userId = userId,
+            sourceEventId = entity.id,
+        )
+        val relevantItems = body.items.filterUserRelevantItems(
+            rawCounterpartyRef = entity.counterpartyRef,
+            participants = body.sourceEventParticipants,
+            selfIdentityAnchors = selfIdentityAnchors,
+        )
+        val commitmentEntities = relevantItems.mapIndexed { index, dto ->
             dto.toTrackableCommitmentEntity(
                 rawEventId = entity.id,
                 index = index,
@@ -47,10 +56,6 @@ internal class StructuredExtractionPersister(
             commitmentDao.insertAll(commitmentEntities)
         }
 
-        val selfIdentityAnchors = selfIdentityAnchorDao.findActiveForMatching(
-            userId = userId,
-            sourceEventId = entity.id,
-        )
         val sourceParticipants = body.sourceEventParticipants.mapIndexed { index, dto ->
             dto.toSourceEventParticipantEntity(
                 userId = userId,
@@ -101,19 +106,19 @@ internal class StructuredExtractionPersister(
 
         rawIngestionEventDao.update(
             entity.copy(
-                commitmentsExtractedCount = body.items.size,
-                eventSnippet = body.items.firstOrNull()?.quote?.take(SNIPPET_MAX_CHARS),
+                commitmentsExtractedCount = relevantItems.size,
+                eventSnippet = relevantItems.firstOrNull()?.quote?.take(SNIPPET_MAX_CHARS),
                 lastAttemptAt = now,
                 syncStatus = STATUS_PENDING,
             ),
         )
 
         sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
-        processingStatusRepository.recordSynced(entity.sourceType, body.items.size)
+        processingStatusRepository.recordSynced(entity.sourceType, relevantItems.size)
         SourceGraphChangedNotifier(workScheduler).notifyChanged()
-        logger.d(TAG, "extraction persisted id=${redact(entity.id)} items=${body.items.size}")
+        logger.d(TAG, "extraction persisted id=${redact(entity.id)} items=${relevantItems.size}")
         return StructuredExtractionPersistStats(
-            itemCount = body.items.size,
+            itemCount = relevantItems.size,
             sourceParticipantCount = sourceParticipants.size,
             commitmentParticipantCount = commitmentParticipants.size,
         )

@@ -19,6 +19,38 @@ import java.util.UUID
 // 동작 변경 없음 — 기존과 동일하게 "pending" 리터럴을 사용한다.
 internal const val STATUS_PENDING: String = "pending"
 
+internal fun List<SourceExtractedItemDto>.filterUserRelevantItems(
+    rawCounterpartyRef: String?,
+    participants: List<SourceExtractedParticipantDto>,
+    selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
+): List<SourceExtractedItemDto> {
+    val allowedRefs = buildSet {
+        addAll(rawCounterpartyRef.normalizedPersonRefValues())
+        participants
+            .filter { it.relationToUser.equals("counterparty", ignoreCase = true) }
+            .forEach { participant ->
+                addAll(participant.email.normalizedPersonRefValues())
+                addAll(participant.phone.normalizedPersonRefValues())
+                addAll(participant.normalizedValue.normalizedPersonRefValues())
+                addAll(participant.rawValue.normalizedPersonRefValues())
+                addAll(participant.displayName.normalizedPersonRefValues())
+                addAll(participant.organization.normalizedPersonRefValues())
+            }
+    }
+    val cleaned = map { item ->
+        if (item.counterpartyRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) {
+            item.copy(counterpartyRef = null)
+        } else {
+            item
+        }
+    }
+    if (allowedRefs.isEmpty()) return cleaned
+    return cleaned.filter { item ->
+        val ref = item.counterpartyRef
+        ref.isNullOrBlank() || ref.normalizedPersonRefValues().any { it in allowedRefs }
+    }
+}
+
 internal fun SourceExtractedItemDto.toTrackableCommitmentEntity(
     rawEventId: String,
     index: Int,
@@ -247,6 +279,16 @@ private fun normalizedEquals(
     val normalizedLeft = normalize(left)
     val normalizedRight = normalize(right)
     return normalizedLeft != null && normalizedRight != null && normalizedLeft == normalizedRight
+}
+
+private fun String?.normalizedPersonRefValues(): Set<String> {
+    val raw = this?.trim()?.takeIf { it.isNotEmpty() } ?: return emptySet()
+    return buildSet {
+        PersonIdentityResolver.normalizeEmailAnchor(raw)?.let(::add)
+        PersonIdentityResolver.normalizePhoneAnchor(raw)?.let(::add)
+        PersonIdentityResolver.normalizeAlias(raw)?.let(::add)
+        add(raw.lowercase(Locale.ROOT))
+    }
 }
 
 private fun normalizeSourceLocalIdentity(value: String?): String? =

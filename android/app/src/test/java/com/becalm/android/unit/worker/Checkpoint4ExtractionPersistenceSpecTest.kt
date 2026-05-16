@@ -265,6 +265,91 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
+    fun `third party item person refs are filtered before local persistence`() {
+        val items = listOf(
+            SourceExtractedItemDto(
+                type = SourceExtractedItemType.ACTION,
+                text = "Bob이 Carol에게 계약서를 보낸다",
+                quote = "Bob will send Carol the contract by tomorrow.",
+                counterpartyRef = "bob@example.com",
+                dueAt = null,
+                confidence = 0.9f,
+                direction = "take",
+            ),
+            SourceExtractedItemDto(
+                type = SourceExtractedItemType.ACTION,
+                text = "고객이 자료를 보낸다",
+                quote = "자료는 오후에 보내드릴게요.",
+                counterpartyRef = "customer@example.com",
+                dueAt = null,
+                confidence = 0.9f,
+                direction = "take",
+            ),
+        )
+        val participants = listOf(
+            SourceExtractedParticipantDto(
+                role = "sender",
+                relationToUser = "counterparty",
+                identityType = "email",
+                normalizedValue = "customer@example.com",
+                email = "customer@example.com",
+                confidence = 0.96,
+            ),
+            SourceExtractedParticipantDto(
+                role = "mentioned",
+                relationToUser = "referenced",
+                identityType = "email",
+                normalizedValue = "bob@example.com",
+                email = "bob@example.com",
+                confidence = 0.9,
+            ),
+        )
+
+        val relevant = items.filterUserRelevantItems(
+            rawCounterpartyRef = "customer@example.com",
+            participants = participants,
+        )
+
+        assertEquals(listOf("customer@example.com"), relevant.map { it.counterpartyRef })
+    }
+
+    @Test
+    fun `self item person refs are cleared before local persistence`() {
+        val item = SourceExtractedItemDto(
+            type = SourceExtractedItemType.ACTION,
+            text = "내가 자료를 보낸다",
+            quote = "제가 자료를 보내겠습니다.",
+            counterpartyRef = "me@example.com",
+            dueAt = null,
+            confidence = 0.9f,
+            direction = "give",
+        )
+
+        val relevant = listOf(item).filterUserRelevantItems(
+            rawCounterpartyRef = "customer@example.com",
+            participants = listOf(
+                SourceExtractedParticipantDto(
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = "customer@example.com",
+                    email = "customer@example.com",
+                    confidence = 0.96,
+                ),
+            ),
+            selfIdentityAnchors = listOf(
+                selfAnchor(
+                    id = "anchor-email",
+                    anchorType = "provider_email",
+                    normalizedValue = "me@example.com",
+                ),
+            ),
+        )
+
+        assertEquals(listOf(null), relevant.map { it.counterpartyRef })
+    }
+
+    @Test
     fun `E2E-051 decisions are retained as context items but excluded from primary UI feed loops`() {
         val decision = SourceExtractedItemDto(
             type = SourceExtractedItemType.DECISION,
