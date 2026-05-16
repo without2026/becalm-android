@@ -35,7 +35,7 @@ public data class MeetingSpeakerReviewUiState(
     val audioUri: Uri,
     val speakerPreviewId: String,
     val speakers: List<MeetingSpeakerPreviewDto>,
-    val selectedSelfSpeakerId: String? = speakers.firstOrNull()?.speakerId,
+    val selectedSelfSpeakerId: String? = null,
 )
 
 private data class EvidenceImportTransientState(

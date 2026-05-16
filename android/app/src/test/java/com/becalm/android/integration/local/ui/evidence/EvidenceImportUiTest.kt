@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -103,6 +104,7 @@ class EvidenceImportUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_confirm)).assertIsNotEnabled()
         composeRule.onNodeWithTag("meeting-speaker-SPEAKER_02")
             .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_confirm))

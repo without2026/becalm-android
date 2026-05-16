@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -67,6 +68,37 @@ class EvidenceImportViewModelTest {
             UiMessage.resource(R.string.evidence_import_status_processing),
             restored.awaitStatusMessage(),
         )
+    }
+
+    @Test
+    // spec: RUX-009
+    fun `meeting speaker review requires explicit self speaker selection`() = runTest {
+        val uri = mockk<Uri>(relaxed = true)
+        coEvery { sourceImportRepository.previewMeetingAudioSpeakers(uri) } returns BecalmResult.Success(
+            MeetingSpeakerPreviewResult(
+                rawEventId = "raw-preview",
+                speakerPreviewId = "preview-1",
+                speakers = listOf(
+                    MeetingSpeakerPreviewDto(speakerId = "SPEAKER_01"),
+                    MeetingSpeakerPreviewDto(speakerId = "SPEAKER_02"),
+                ),
+                billableSeconds = 60,
+            ),
+        )
+
+        val viewModel = EvidenceImportViewModel(
+            sourceImportRepository,
+            FakeStatusProjectionPort(EvidenceImportPersistentStatus.NONE),
+        )
+
+        viewModel.onMeetingAudioSelected(uri)
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.meetingReview?.selectedSelfSpeakerId)
+
+        viewModel.onMeetingSpeakerReviewConfirmed()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { sourceImportRepository.importMeetingAudio(any(), any()) }
     }
 
     @Test
