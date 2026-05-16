@@ -142,8 +142,8 @@ private const val QUERY_DEBOUNCE_MS = 300L
  * Observes the persons-screen projection seams and maps them into a single
  * [PersonsUiState] snapshot.
  *
- * Search filtering is debounced at [QUERY_DEBOUNCE_MS] ms to avoid re-rendering
- * on every keystroke.
+ * Search text is reflected immediately so the keyboard can compose normally.
+ * Filtering is debounced at [QUERY_DEBOUNCE_MS] ms to avoid re-querying on every keystroke.
  */
 @HiltViewModel
 public class PersonsViewModel @Inject constructor(
@@ -197,6 +197,7 @@ public class PersonsViewModel @Inject constructor(
         } else if (normalized.isEmpty()) {
             lastTrackedSearchLength = 0
         }
+        _uiState.update { it.copy(query = q) }
         _query.value = q
     }
 
@@ -364,7 +365,7 @@ public class PersonsViewModel @Inject constructor(
             ).catch {
                 _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.persons_error_load_failed)) }
             }.collect { state ->
-                _uiState.value = state
+                _uiState.value = state.copy(query = _query.value)
             }
         }
     }

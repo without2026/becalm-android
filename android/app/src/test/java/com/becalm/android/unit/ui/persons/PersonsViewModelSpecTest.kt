@@ -142,13 +142,19 @@ class PersonsViewModelSpecTest {
         assertEquals(2, viewModel.uiState.value.people.size)
 
         viewModel.onQueryChange("lee")
+        assertEquals("lee", viewModel.uiState.value.query)
+        assertEquals(2, viewModel.uiState.value.people.size)
         advanceTimeBy(300)
         advanceUntilIdle()
+        assertEquals("lee", viewModel.uiState.value.query)
         assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("1234")
+        assertEquals("1234", viewModel.uiState.value.query)
+        assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
         advanceTimeBy(300)
         advanceUntilIdle()
+        assertEquals("1234", viewModel.uiState.value.query)
         assertEquals(listOf("+821012345678"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("")
