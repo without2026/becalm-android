@@ -112,6 +112,54 @@ class EvidenceImportStatusProjectionPortTest {
         assertEquals(EvidenceImportPersistentStatus.REVIEW_REQUIRED, projection().observeStatus().first())
     }
 
+    @Test
+    fun `non evidence import matching backlog does not project evidence review status`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-gmail-1",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-gmail-1",
+                    interactionKind = "email",
+                    title = "메일",
+                    snippet = "확인 필요",
+                    suggestedLabel = "minji@example.com",
+                    occurredAt = NOW,
+                    createdAt = NOW,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-gmail-unresolved-1",
+                    userId = USER_ID,
+                    sourceEventId = "raw-gmail-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-1",
+                    personId = null,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = "minji@example.com",
+                    displayNameRaw = "Minji",
+                    emailRaw = "minji@example.com",
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "확인 필요",
+                    confidence = 0.0,
+                    resolutionStatus = "unresolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.NONE, projection().observeStatus().first())
+    }
+
     private fun projection(): RoomEvidenceImportStatusProjectionPort =
         RoomEvidenceImportStatusProjectionPort(
             userPrefsStore = userPrefsStore,

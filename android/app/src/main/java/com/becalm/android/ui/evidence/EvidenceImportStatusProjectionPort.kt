@@ -45,8 +45,8 @@ public class RoomEvidenceImportStatusProjectionPort @Inject constructor(
                 } else {
                     combine(
                         rawIngestionEventDao.observeEvidenceImportProcessingCount(userId),
-                        personIndexDao.observeUnmatchedInteractionCount(userId),
-                        personIndexDao.observeUnresolvedSourceEventParticipantCount(userId),
+                        personIndexDao.observeEvidenceImportUnmatchedInteractionCount(userId),
+                        personIndexDao.observeEvidenceImportUnresolvedSourceEventParticipantCount(userId),
                     ) { processingCount, unmatchedCount, unresolvedParticipantCount ->
                         when {
                             unmatchedCount + unresolvedParticipantCount > 0 ->

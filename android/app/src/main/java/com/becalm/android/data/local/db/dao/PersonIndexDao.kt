@@ -405,12 +405,31 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT COUNT(*) FROM unmatched_person_interactions
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+        """,
+    )
+    public fun observeEvidenceImportUnmatchedInteractionCount(userId: String): Flow<Int>
+
+    @Query(
+        """
         SELECT COUNT(*) FROM source_event_participants
         WHERE user_id = :userId
           AND resolution_status IN ('unresolved', 'suggested_self')
         """,
     )
     public fun observeUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM source_event_participants
+        WHERE user_id = :userId
+          AND source_type IN ('meeting', 'message_screenshot')
+          AND resolution_status IN ('unresolved', 'suggested_self')
+        """,
+    )
+    public fun observeEvidenceImportUnresolvedSourceEventParticipantCount(userId: String): Flow<Int>
 
     @Query(
         """
