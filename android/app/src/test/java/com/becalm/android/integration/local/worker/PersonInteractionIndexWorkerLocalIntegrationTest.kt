@@ -287,6 +287,41 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `program application support emails do not create person matching review rows`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-asan-doers",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+                eventTitle = "아산 두어스 지원 접수 안내",
+                eventSnippet = "아산 두어스 프로그램 지원서가 정상 접수되었습니다. 선발 결과는 추후 안내됩니다.",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-asan-doers",
+                    sourceEventId = "raw-asan-doers",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-asan-doers",
+                    personId = null,
+                    email = null,
+                    displayName = "아산 두어스",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "unresolved",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+    }
+
+    @Test
     fun `blocked relation participants are removed on next index rebuild`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId

@@ -692,6 +692,38 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `program application unmatched rows are hidden from person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-asan-doers",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-asan-doers",
+                    interactionKind = "email",
+                    title = "아산 두어스 지원 접수 안내",
+                    snippet = "아산 두어스 프로그램 지원서가 정상 접수되었습니다. 선발 결과는 추후 안내됩니다.",
+                    suggestedLabel = "아산 두어스",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun rawEvent(
         id: String,
         counterpartyRef: String?,

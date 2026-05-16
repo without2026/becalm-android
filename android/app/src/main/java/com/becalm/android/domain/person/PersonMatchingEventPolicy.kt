@@ -16,7 +16,10 @@ public object PersonMatchingEventPolicy {
         val hasServiceContext = SERVICE_CONTEXT_MARKERS.any { it in text }
         val hasAccountAction = ACCOUNT_ACTION_MARKERS.any { it in text }
         val hasVerificationPhrase = VERIFICATION_MARKERS.any { it in text }
-        return hasServiceContext && (hasAccountAction || hasVerificationPhrase)
+        val hasProgramApplicationContext = PROGRAM_APPLICATION_CONTEXT_MARKERS.any { it in text }
+        val hasProgramApplicationNotice = PROGRAM_APPLICATION_NOTICE_MARKERS.any { it in text }
+        return (hasServiceContext && (hasAccountAction || hasVerificationPhrase)) ||
+            (hasProgramApplicationContext && hasProgramApplicationNotice)
     }
 
     private val SERVICE_CONTEXT_MARKERS = setOf(
@@ -33,6 +36,46 @@ public object PersonMatchingEventPolicy {
         "계정",
         "service",
         "서비스",
+    )
+
+    private val PROGRAM_APPLICATION_CONTEXT_MARKERS = setOf(
+        "asan",
+        "아산",
+        "doers",
+        "두어스",
+        "program",
+        "프로그램",
+        "공모",
+        "모집",
+        "창업",
+        "재단",
+        "지원사업",
+        "신청서",
+        "지원서",
+        "application",
+    )
+
+    private val PROGRAM_APPLICATION_NOTICE_MARKERS = setOf(
+        "apply",
+        "application",
+        "submitted",
+        "received",
+        "accepted",
+        "rejected",
+        "selected",
+        "selection",
+        "deadline",
+        "지원",
+        "신청",
+        "접수",
+        "제출",
+        "선발",
+        "선정",
+        "합격",
+        "불합격",
+        "마감",
+        "결과",
+        "안내",
     )
 
     private val ACCOUNT_ACTION_MARKERS = setOf(
