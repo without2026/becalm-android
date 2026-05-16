@@ -29,8 +29,12 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 
@@ -70,27 +74,31 @@ internal class TodayScreenStateSource @Inject constructor(
         userIdFlow: StateFlow<String?>,
         refreshingFlow: Flow<Boolean>,
     ): Flow<TodayUiState> {
-        val commitmentFlow = userIdFlow.flatMapLatest { userId ->
+        val userDayFlow = combine(userIdFlow, todayFlow()) { userId, today -> userId to today }
+            .distinctUntilChanged()
+
+        val commitmentFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
+            val (dayStart, dayEnd) = todayRange(today)
             commitmentRepository.observeTimelineForToday(
                 userId = userId,
-                endOfTodayEpochMs = endOfTodayEpochMs(),
-                startOfTodayEpochMs = startOfTodayEpochMs(),
+                endOfTodayEpochMs = dayEnd.toEpochMilliseconds() - 1L,
+                startOfTodayEpochMs = dayStart.toEpochMilliseconds(),
             )
         }
 
-        val calendarFlow = userIdFlow.flatMapLatest { userId ->
+        val calendarFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
-            val (dayStart, dayEnd) = todayRange()
+            val (dayStart, dayEnd) = todayRange(today)
             calendarEventRepository.observeForUser(userId, dayStart, dayEnd)
         }
 
-        val scheduleLinkFlow = userIdFlow.flatMapLatest { userId ->
+        val scheduleLinkFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null || scheduleEventLinkRepository == null) return@flatMapLatest flowOf(emptyList())
             combine(commitmentFlow, calendarFlow) { commitments, calendarEvents ->
                 commitments to calendarEvents
             }.flatMapLatest { (commitments, calendarEvents) ->
-                val (dayStart, dayEnd) = todayRange()
+                val (dayStart, dayEnd) = todayRange(today)
                 scheduleEventLinkRepository.observeForTodayRange(
                     userId = userId,
                     rangeStart = dayStart,
@@ -153,12 +161,24 @@ internal class TodayScreenStateSource @Inject constructor(
      */
     fun todayRange(): Pair<Instant, Instant> {
         val today = clock.today(KST)
+        return todayRange(today)
+    }
+
+    private fun todayRange(today: LocalDate): Pair<Instant, Instant> {
         val start = today.atStartOfDayIn(KST)
         val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
         return start to end
     }
 
+    private fun todayFlow(): Flow<LocalDate> = flow {
+        while (currentCoroutineContext().isActive) {
+            emit(clock.today(KST))
+            delay(TODAY_POLL_INTERVAL_MS)
+        }
+    }.distinctUntilChanged()
+
     private companion object {
         private const val TAG = "TodayViewModel"
+        private const val TODAY_POLL_INTERVAL_MS = 60_000L
     }
 }

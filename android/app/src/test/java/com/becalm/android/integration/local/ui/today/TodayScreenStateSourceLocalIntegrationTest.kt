@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
@@ -219,6 +220,52 @@ class TodayScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `today timeline rolls over to the actual KST date while app stays open`() = runTest {
+        clock.nowInstant = Instant.parse("2026-04-23T14:59:30Z")
+        val stateSource = TodayScreenStateSource(
+            commitmentRepository = commitmentRepository,
+            calendarEventRepository = calendarRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            authRepository = authRepository,
+            userPrefsStore = userPrefsStore,
+            clock = clock,
+            logger = logger,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        val refreshing = MutableStateFlow(false)
+        val userIdFlow = stateSource.userIdFlow(this.backgroundScope)
+        db.commitmentDao().insert(
+            commitment(
+                id = "after-midnight-kst",
+                userId = userId,
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                counterpartyRef = "+821012345678",
+                counterpartyRaw = "01012345678",
+                title = "자정 이후 일정",
+                dueAt = Instant.parse("2026-04-23T15:30:00Z"),
+                sourceEventOccurredAt = Instant.parse("2026-04-23T14:00:00Z"),
+            ),
+        )
+
+        stateSource.observeUiState(userIdFlow, refreshing).test {
+            val beforeMidnight = awaitItem()
+            assertTrue(beforeMidnight.timeline.isEmpty())
+
+            clock.nowInstant = Instant.parse("2026-04-23T15:00:30Z")
+            advanceTimeBy(60_000L)
+
+            var afterMidnight = awaitItem()
+            while (afterMidnight.timeline.isEmpty()) {
+                afterMidnight = awaitItem()
+            }
+            assertEquals(listOf("자정 이후 일정"), afterMidnight.timeline.map { it.title })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun commitment(
         id: String,
         userId: String,
@@ -230,6 +277,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
         title: String,
         dueAt: Instant?,
         sourceEventOccurredAt: Instant,
+        sourceEventTitle: String = "source-$id",
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = userId,
@@ -241,7 +289,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
         title = title,
         description = null,
         quote = "quote-$id",
-        sourceEventTitle = "source-$id",
+        sourceEventTitle = sourceEventTitle,
         sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
         dueHint = null,

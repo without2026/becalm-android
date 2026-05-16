@@ -382,6 +382,42 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `non person lifecycle actions are hidden from today but schedules remain visible`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "slack-action",
+                    occurredAt = Instant.parse("2026-04-18T04:00:00Z"),
+                    counterpartyRef = "slack",
+                    sourceEventTitle = "Slack에서 이메일 주소를 확인하세요.",
+                    dueAt = null,
+                ),
+                commitment(
+                    id = "asan-schedule",
+                    occurredAt = Instant.parse("2026-04-18T05:00:00Z"),
+                    counterpartyRef = "startup@asan-nanum.org",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    sourceEventTitle = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+                    dueAt = Instant.parse("2026-04-18T05:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.timeline.isEmpty()) emission = awaitItem()
+
+            assertEquals(listOf("asan-schedule"), emission.timeline.map { (it as TimelineItem.Commitment).id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `TDY unauthenticated state surfaces explicit error and empty timeline`() = runTest {
         coEvery { authRepository.currentSession() } returns null
         every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
@@ -687,6 +723,7 @@ class TodayViewModelSpecTest {
         scheduleStatus: String? = null,
         sourceType: String = "voice",
         sourceRef: String? = null,
+        sourceEventTitle: String? = null,
         dueAt: Instant? = occurredAt,
         dueIsApproximate: Boolean = false,
     ): CommitmentEntity = CommitmentEntity(
@@ -700,7 +737,7 @@ class TodayViewModelSpecTest {
         title = "title-$id",
         description = null,
         quote = "quote",
-        sourceEventTitle = null,
+        sourceEventTitle = sourceEventTitle,
         sourceEventOccurredAt = occurredAt,
         dueAt = dueAt,
         dueHint = null,
@@ -731,6 +768,7 @@ class TodayViewModelSpecTest {
                 } ?: commitment.counterpartyRaw?.take(30),
                 sourceType = commitment.sourceType,
                 sourceRef = commitment.sourceRef,
+                sourceTitle = commitment.sourceEventTitle,
                 dueAt = commitment.dueAt,
                 dueIsApproximate = commitment.dueIsApproximate,
                 dueHint = commitment.dueHint,

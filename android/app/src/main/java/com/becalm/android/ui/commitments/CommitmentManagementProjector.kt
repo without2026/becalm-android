@@ -55,13 +55,22 @@ internal object CommitmentManagementProjector {
                     it.status in setOf(ScheduleEventLinkStatus.AUTO_LINKED, ScheduleEventLinkStatus.APPROVED)
             }
             .mapNotNullTo(mutableSetOf()) { it.commitmentId }
-        val rowsWithState = rows.map { row ->
-            ProjectableCommitmentRow(
-                row = row,
-                state = CommitmentState.fromWire(row.actionState),
-                deEmphasized = row.id in linkedConfirmCommitmentIds,
-            )
-        }
+        val rowsWithState = rows
+            .filterNot { row ->
+                CommitmentDisplayPolicy.shouldHideNonPersonLifecycleItem(
+                    itemType = row.itemType,
+                    title = row.title,
+                    sourceTitle = row.sourceTitle,
+                    counterpartyDisplayName = row.counterpartyDisplayName,
+                )
+            }
+            .map { row ->
+                ProjectableCommitmentRow(
+                    row = row,
+                    state = CommitmentState.fromWire(row.actionState),
+                    deEmphasized = row.id in linkedConfirmCommitmentIds,
+                )
+            }
         val filtered = when (filter) {
             CommitmentFilter.ALL -> rowsWithState.filter {
                 CommitmentDisplayPolicy.isPrimaryFeedItem(it.row.itemType)

@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.components.isCalendarSource
 import com.becalm.android.ui.main.buildSourceStatusUiMap
@@ -38,7 +39,15 @@ internal object TodayTimelineProjector {
         val sourceTypesByCalendarId = confirmedLinks
             .groupBy { it.calendarEventId.orEmpty() }
             .mapValues { (_, rows) -> rows.map { it.sourceType }.distinct() }
-        val visibleCommitments = commitments.filterNot { row -> row.id in confirmedCommitmentIds }
+        val visibleCommitments = commitments.filterNot { row ->
+            row.id in confirmedCommitmentIds ||
+                CommitmentDisplayPolicy.shouldHideNonPersonLifecycleItem(
+                    itemType = row.itemType,
+                    title = row.title,
+                    sourceTitle = row.sourceTitle,
+                    counterpartyDisplayName = row.counterpartyDisplayName,
+                )
+        }
         val visibleCalendarEvents = calendarEvents.filterNot { event ->
             event.sourceRef != null && (event.sourceType to event.sourceRef) in scheduleCommitmentKeys
         }
