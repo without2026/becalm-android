@@ -87,6 +87,11 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 
 - `memory.md` 입력 collector가 self-resolved/suggested-self rows를 제외한다.
 - 기존 self-person memory를 탐지하고 재생성 또는 삭제할 수 있는 repair path를 둔다.
+- 완료 기준:
+  - Android `PersonMemoryInputCollector`는 `relationToUser=self`, `self_resolved`, `suggested_self` source participant를 memory 입력에서 제외한다.
+  - 제외된 self source에서 파생된 interaction/commitment도 memory 입력에서 제외한다.
+  - 제외 후 counterparty evidence가 없으면 `ProfileMemoryWorker`가 기존 로컬 `memory.md`를 삭제하고 skip 처리한다.
+  - Backend mirror upload는 self-resolved/suggested-self evidence가 아직 붙은 person memory를 거부한다.
 
 ### Slice 7. Conflict review, merge/split/undo
 

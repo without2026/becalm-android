@@ -134,6 +134,24 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `deletes stale local memory when person only has self evidence`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        seedSelfOnlyPersonGraph()
+        PersonMemoryStore(LocalIntegrationSupport.appContext()).write(
+            userId = USER_ID,
+            personId = PERSON_ID,
+            markdown = "stale self memory",
+        )
+        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
+
+        val result = newWorker(PERSON_ID).doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(ProfileMemoryWorker.STATUS_SKIPPED_NO_EVIDENCE, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
+        assertFalse(memoryFile(USER_ID, PERSON_ID).exists())
+    }
+
+    @Test
     fun `fails when person id input is missing`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
 
@@ -175,6 +193,50 @@ class ProfileMemoryWorkerLocalIntegrationTest {
             logger = logger,
             ioDispatcher = dispatcher,
         )
+
+    private suspend fun seedSelfOnlyPersonGraph() {
+        db.personIndexDao().upsertPersons(
+            listOf(
+                PersonEntity(
+                    id = PERSON_ID,
+                    userId = USER_ID,
+                    displayName = "김민홍",
+                    kind = "person",
+                    primaryEmail = "me@example.com",
+                    primaryPhone = null,
+                    confidence = 0.95,
+                    createdAt = NOW,
+                    updatedAt = NOW,
+                    archivedAt = null,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-self",
+                    userId = USER_ID,
+                    sourceEventId = "raw-self",
+                    sourceType = "gmail",
+                    sourceRef = "gmail-self",
+                    personId = PERSON_ID,
+                    role = "sender",
+                    relationToUser = "self",
+                    identityType = "email",
+                    normalizedValue = "me@example.com",
+                    displayNameRaw = "김민홍",
+                    emailRaw = "me@example.com",
+                    phoneRaw = null,
+                    organizationRaw = "BeCalm",
+                    titleRaw = null,
+                    evidence = "김민홍 <me@example.com>",
+                    confidence = 0.95,
+                    resolutionStatus = "self_resolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+    }
 
     private suspend fun seedPersonGraph() {
         db.personIndexDao().upsertPersons(

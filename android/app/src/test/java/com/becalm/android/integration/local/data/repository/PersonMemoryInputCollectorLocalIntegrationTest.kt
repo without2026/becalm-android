@@ -167,6 +167,113 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
     }
 
     @Test
+    fun `collect excludes self resolved and suggested self rows from counterparty memory`() = runTest {
+        db.personIndexDao().upsertPersons(listOf(person(id = PERSON_ID, displayName = "Jane Kim")))
+        db.personIndexDao().upsertIdentities(
+            listOf(identity(id = "identity-email", personId = PERSON_ID, type = "email", rawValue = "jane@acme.com")),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-counterparty",
+                    sourceEventId = "raw-counterparty",
+                    personId = PERSON_ID,
+                    displayName = "Jane Kim",
+                    organization = "Acme",
+                ),
+                sourceParticipant(
+                    id = "participant-self",
+                    sourceEventId = "raw-self",
+                    personId = PERSON_ID,
+                    displayName = "김민홍",
+                    organization = "BeCalm",
+                    email = "me@example.com",
+                    relationToUser = "self",
+                    resolutionStatus = "self_resolved",
+                ),
+                sourceParticipant(
+                    id = "participant-suggested-self",
+                    sourceEventId = "raw-suggested",
+                    personId = PERSON_ID,
+                    displayName = "민홍",
+                    organization = "BeCalm",
+                    email = null,
+                    relationToUser = "counterparty",
+                    resolutionStatus = "suggested_self",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertInteractions(
+            listOf(
+                interaction(id = "interaction-counterparty", personId = PERSON_ID, sourceRef = "raw:raw-counterparty", kind = "email"),
+                interaction(id = "interaction-self", personId = PERSON_ID, sourceRef = "raw:raw-self", kind = "email", title = "Self mail"),
+                interaction(
+                    id = "interaction-self-commitment",
+                    personId = PERSON_ID,
+                    sourceRef = "commitment:commitment-self",
+                    kind = "commitment",
+                    title = "Self task",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                commitmentParticipant(id = "commitment-participant-self", commitmentId = "commitment-self", personId = PERSON_ID),
+            ),
+        )
+        db.commitmentDao().insert(
+            commitment(id = "commitment-self", title = "Self task", deletedAt = null).copy(
+                sourceRef = "raw:raw-self",
+                counterpartyRaw = "me@example.com",
+                counterpartyRef = "me@example.com",
+            ),
+        )
+
+        val input = requireNotNull(
+            collector().collect(
+                userId = USER_ID,
+                personId = PERSON_ID,
+                generatedAt = GENERATED_AT,
+            ),
+        )
+
+        assertEquals(setOf("raw:raw-counterparty"), input.participants.map { it.sourceRef }.toSet())
+        assertEquals(setOf("raw:raw-counterparty"), input.interactions.map { it.sourceRef }.toSet())
+        assertTrue(input.commitments.none { it.commitmentId == "commitment-self" })
+        val markdown = PersonMemoryMarkdownBuilder.build(input)
+        assertTrue(markdown.contains("Works with Acme as CEO."))
+        assertTrue(!markdown.contains("BeCalm"))
+        assertTrue(!markdown.contains("Self task"))
+    }
+
+    @Test
+    fun `collect returns null when stale person only has self memory rows`() = runTest {
+        db.personIndexDao().upsertPersons(listOf(person(id = PERSON_ID, displayName = "김민홍")))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-self",
+                    sourceEventId = "raw-self",
+                    personId = PERSON_ID,
+                    displayName = "김민홍",
+                    organization = "BeCalm",
+                    email = "me@example.com",
+                    relationToUser = "self",
+                    resolutionStatus = "self_resolved",
+                ),
+            ),
+        )
+
+        assertNull(
+            collector().collect(
+                userId = USER_ID,
+                personId = PERSON_ID,
+                generatedAt = GENERATED_AT,
+            ),
+        )
+    }
+
+    @Test
     fun `collect returns null when person has no local evidence`() = runTest {
         assertNull(
             collector().collect(
@@ -266,6 +373,8 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
         email: String? = "jane@acme.com",
         title: String? = "CEO",
         evidence: String = "$displayName, $organization",
+        relationToUser: String = "counterparty",
+        resolutionStatus: String = "resolved",
     ): SourceEventParticipantEntity =
         SourceEventParticipantEntity(
             id = id,
@@ -275,7 +384,7 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
             sourceRef = "$sourceType-$sourceEventId",
             personId = personId,
             role = role,
-            relationToUser = "counterparty",
+            relationToUser = relationToUser,
             identityType = identityType,
             normalizedValue = normalizedValue,
             displayNameRaw = displayName,
@@ -285,7 +394,7 @@ class PersonMemoryInputCollectorLocalIntegrationTest {
             titleRaw = title,
             evidence = evidence,
             confidence = 0.9,
-            resolutionStatus = "resolved",
+            resolutionStatus = resolutionStatus,
             createdAt = GENERATED_AT,
         )
 

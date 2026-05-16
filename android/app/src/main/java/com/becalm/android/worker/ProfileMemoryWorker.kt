@@ -79,12 +79,16 @@ public class ProfileMemoryWorker @AssistedInject constructor(
             userId = userId,
             personId = personId,
             generatedAt = Clock.System.now(),
-        ) ?: return@withContext Result.success(
-            workDataOf(
-                KEY_STATUS to STATUS_SKIPPED_NO_EVIDENCE,
-                KEY_PERSON_ID to personId,
-            ),
         )
+        if (input == null) {
+            memoryStoreProvider.get().delete(userId, personId)
+            return@withContext Result.success(
+                workDataOf(
+                    KEY_STATUS to STATUS_SKIPPED_NO_EVIDENCE,
+                    KEY_PERSON_ID to personId,
+                ),
+            )
+        }
 
         val markdown = PersonMemoryMarkdownBuilder.build(input)
         val validation = PersonMemoryMarkdownValidator.validate(
