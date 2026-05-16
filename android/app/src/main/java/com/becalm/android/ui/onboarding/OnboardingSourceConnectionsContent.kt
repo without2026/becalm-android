@@ -33,6 +33,10 @@ internal fun SourceConnectionsContent(
     body: String = stringResource(R.string.onb_sources_body),
     skipLabel: String = stringResource(R.string.action_skip),
     setupItems: List<OnboardingSetupItemUi> = emptyList(),
+    selfIdentity: OnboardingSelfIdentityUi? = null,
+    onSelfDisplayNameChange: (String) -> Unit = {},
+    onSelfPhoneChange: (String) -> Unit = {},
+    onSaveSelfIdentity: () -> Unit = {},
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
 ) {
@@ -43,7 +47,9 @@ internal fun SourceConnectionsContent(
     val calendarSection = stringResource(R.string.onb_sources_calendar_section)
     val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
     val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
-    val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty()
+    val selfIdentityGateOpen = selfIdentity?.confirmed != false
+    val showRequiredSetup = setupItems.isNotEmpty() || selfIdentity != null
+    val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
     LazyColumn(
         modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
@@ -63,7 +69,7 @@ internal fun SourceConnectionsContent(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
-        if (setupItems.isNotEmpty()) {
+        if (showRequiredSetup) {
             item(key = "required-setup-title") {
                 Text(
                     text = requiredSection,
@@ -75,6 +81,18 @@ internal fun SourceConnectionsContent(
             item(key = "required-setup-summary") {
                 RequiredSetupSummary()
             }
+            if (selfIdentity != null) {
+                item(key = "required-self-identity") {
+                    SelfIdentitySetupPanel(
+                        state = selfIdentity,
+                        onDisplayNameChange = onSelfDisplayNameChange,
+                        onPhoneChange = onSelfPhoneChange,
+                        onSave = onSaveSelfIdentity,
+                    )
+                }
+            }
+        }
+        if (setupItems.isNotEmpty()) {
             item(key = "recommended-setup-title") {
                 Text(
                     text = recommendedSection,
@@ -109,7 +127,7 @@ internal fun SourceConnectionsContent(
                 )
             }
         }
-        if (mailItems.isNotEmpty()) {
+        if (selfIdentityGateOpen && mailItems.isNotEmpty()) {
             sourceSection(
                 title = mailSection,
                 items = mailItems,
@@ -118,7 +136,7 @@ internal fun SourceConnectionsContent(
                 skipLabel = skipLabel,
             )
         }
-        if (!showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
+        if (selfIdentityGateOpen && !showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
             sourceSection(
                 title = calendarSection,
                 items = calendarItems,
@@ -132,6 +150,7 @@ internal fun SourceConnectionsContent(
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
+                enabled = selfIdentityGateOpen,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("source-connections-continue"),

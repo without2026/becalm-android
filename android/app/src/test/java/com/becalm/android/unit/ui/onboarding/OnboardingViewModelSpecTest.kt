@@ -9,9 +9,11 @@ import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.onboarding.ContactsPermissionEffect
 import com.becalm.android.ui.onboarding.CalendarConnectEvent
 import com.becalm.android.ui.onboarding.CalendarOAuthConnector
@@ -40,6 +42,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,6 +64,7 @@ class OnboardingViewModelSpecTest {
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
     private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
+    private val userProfileRepository: UserProfileRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -74,6 +78,7 @@ class OnboardingViewModelSpecTest {
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         coEvery { sourceConnectionRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
         coEvery { selfIdentityRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
+        coEvery { userProfileRepository.find("user-123") } returns null
     }
 
     @After
@@ -742,6 +747,12 @@ class OnboardingViewModelSpecTest {
         viewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
         viewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
         viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, StepStatus.GRANTED)
+        viewModel.onSelfDisplayNameChange("민홍")
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "")
+        } returns BecalmResult.Success(userProfile(displayName = "민홍"))
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
 
         viewModel.onCompleteSetup()
         advanceUntilIdle()
@@ -752,6 +763,39 @@ class OnboardingViewModelSpecTest {
         assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.RECORDING_FOLDER))
         assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.BATTERY_OPT))
         assertEquals(StepStatus.COMPLETE, viewModel.uiState.value.stepStates.getValue(OnboardingStep.COLD_SYNC))
+    }
+
+    @Test
+    fun `setup completion is blocked until self identity is confirmed`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(R.string.onb_error_self_identity_required, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `saving self identity updates profile refreshes anchors and opens setup gate`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        } returns BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+
+        viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfPhoneChange("+821012345678")
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        }
+        coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
+        assertEquals("민홍", viewModel.uiState.value.selfDisplayName)
+        assertEquals("+821012345678", viewModel.uiState.value.selfPhone)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
+        assertFalse(viewModel.uiState.value.isSavingSelfIdentity)
     }
 
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
@@ -765,5 +809,20 @@ class OnboardingViewModelSpecTest {
         sourceStatusRepository = sourceStatusRepository,
         sourceConnectionRepository = sourceConnectionRepository,
         selfIdentityRepository = selfIdentityRepository,
+        userProfileRepository = userProfileRepository,
     )
+
+    private fun userProfile(
+        displayName: String,
+        phone: String? = null,
+    ): UserProfileEntity =
+        UserProfileEntity(
+            userId = "user-123",
+            displayNameOverride = displayName,
+            phoneE164Self = phone,
+            timezone = "Asia/Seoul",
+            preferredLocale = "ko",
+            createdAt = Instant.parse("2026-05-16T00:00:00Z"),
+            updatedAt = Instant.parse("2026-05-16T00:00:00Z"),
+        )
 }

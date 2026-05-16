@@ -18,12 +18,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
 import com.becalm.android.ui.components.BecalmButtonVariant
+import com.becalm.android.ui.components.BecalmTextField
 import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.components.StatusPill
+
+internal data class OnboardingSelfIdentityUi(
+    val displayName: String,
+    val phone: String,
+    val confirmed: Boolean,
+    val saving: Boolean,
+)
 
 @Composable
 internal fun RequiredSetupSummary() {
@@ -45,6 +54,70 @@ internal fun RequiredSetupSummary() {
                 text = stringResource(R.string.onb_setup_required_privacy),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun SelfIdentitySetupPanel(
+    state: OnboardingSelfIdentityUi,
+    onDisplayNameChange: (String) -> Unit,
+    onPhoneChange: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.onb_setup_identity_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.onb_setup_identity_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.confirmed) {
+                    StatusPill(
+                        label = stringResource(R.string.onb_setup_identity_confirmed),
+                        tone = com.becalm.android.ui.components.StatusTone.Success,
+                    )
+                }
+            }
+            BecalmTextField(
+                value = state.displayName,
+                onValueChange = onDisplayNameChange,
+                label = stringResource(R.string.onb_setup_identity_display_name_label),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding-self-display-name"),
+            )
+            BecalmTextField(
+                value = state.phone,
+                onValueChange = onPhoneChange,
+                label = stringResource(R.string.onb_setup_identity_phone_label),
+                placeholder = "+82 10 0000 0000",
+                keyboardType = KeyboardType.Phone,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding-self-phone"),
+            )
+            BecalmButton(
+                text = stringResource(R.string.onb_setup_identity_save),
+                onClick = onSave,
+                loading = state.saving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding-self-save"),
             )
         }
     }

@@ -9,11 +9,14 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
@@ -26,11 +29,15 @@ import com.becalm.android.ui.onboarding.GoogleCalendarOAuthContent
 import com.becalm.android.ui.onboarding.ImapForm
 import com.becalm.android.ui.onboarding.NotificationPermissionContent
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentContent
+import com.becalm.android.ui.onboarding.OnboardingSelfIdentityUi
 import com.becalm.android.ui.onboarding.OnboardingSetupItem
 import com.becalm.android.ui.onboarding.OnboardingSetupItemUi
+import com.becalm.android.ui.onboarding.OnboardingSourceProvider
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthContent
 import com.becalm.android.ui.onboarding.OutlookMailOAuthContent
 import com.becalm.android.ui.onboarding.RecordingFolderContent
+import com.becalm.android.ui.onboarding.SourceConnectionCategory
+import com.becalm.android.ui.onboarding.SourceConnectionItemUi
 import com.becalm.android.ui.onboarding.SourceConnectionState
 import com.becalm.android.ui.onboarding.SourceConnectionsContent
 import com.becalm.android.ui.theme.BecalmTheme
@@ -71,6 +78,12 @@ class OnboardingUiTest {
                             state = SourceConnectionState.Idle,
                         ),
                     ),
+                    selfIdentity = OnboardingSelfIdentityUi(
+                        displayName = "",
+                        phone = "",
+                        confirmed = false,
+                        saving = false,
+                    ),
                     onConnectSetupItem = { connectedSetupItem = it },
                     onSkipSetupItem = { skippedSetupItem = it },
                     onContinue = {},
@@ -79,8 +92,16 @@ class OnboardingUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.onb_setup_required_section)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_setup_recommended_section)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.onb_setup_required_privacy)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasText(string(R.string.onb_setup_recommended_section)))
+        composeRule.onNodeWithText(string(R.string.onb_setup_recommended_section)).assertIsDisplayed()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connections-continue"))
+        composeRule.onNodeWithTag("source-connections-continue").assertIsNotEnabled()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connection-primary"))
         composeRule.onNodeWithText(string(R.string.onb_setup_contacts_title)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.action_connect)).performClick()
         composeRule.onNodeWithText(string(R.string.action_skip)).performClick()
@@ -88,6 +109,57 @@ class OnboardingUiTest {
         composeRule.runOnIdle {
             assertEquals(OnboardingSetupItem.Contacts, connectedSetupItem)
             assertEquals(OnboardingSetupItem.Contacts, skippedSetupItem)
+        }
+    }
+
+    @Test
+    fun `compact setup hides source rows until self identity is confirmed`() {
+        var saveClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GMAIL,
+                            category = SourceConnectionCategory.Mail,
+                            title = "Gmail",
+                            description = "Mail copy",
+                            consentCopy = null,
+                            state = SourceConnectionState.Idle,
+                        ),
+                    ),
+                    headline = string(R.string.onb_setup_headline),
+                    body = string(R.string.onb_setup_body),
+                    continueLabel = string(R.string.onb_setup_start),
+                    onConnect = {},
+                    onSkip = {},
+                    setupItems = emptyList(),
+                    selfIdentity = OnboardingSelfIdentityUi(
+                        displayName = "",
+                        phone = "",
+                        confirmed = false,
+                        saving = false,
+                    ),
+                    onSelfDisplayNameChange = {},
+                    onSelfPhoneChange = {},
+                    onSaveSelfIdentity = { saveClicks += 1 },
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithText("Gmail").assertCountEquals(0)
+        composeRule.onNodeWithTag("onboarding-self-display-name").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("onboarding-self-save"))
+        composeRule.onNodeWithTag("onboarding-self-save").performClick()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connections-continue"))
+        composeRule.onNodeWithTag("source-connections-continue").assertIsNotEnabled()
+
+        composeRule.runOnIdle {
+            assertEquals(1, saveClicks)
         }
     }
 

@@ -115,6 +115,15 @@ public fun OnboardingSetupScreen(
         onCompleteSetup = onCompleteSetup,
         onNavigateComplete = onNavigateToday,
         onLaunchPendingIntent = onLaunchPendingIntent,
+        selfIdentity = OnboardingSelfIdentityUi(
+            displayName = state.selfDisplayName,
+            phone = state.selfPhone,
+            confirmed = state.selfIdentityConfirmed,
+            saving = state.isSavingSelfIdentity,
+        ),
+        onSelfDisplayNameChange = { value -> requireNotNull(resolvedViewModel).onSelfDisplayNameChange(value) },
+        onSelfPhoneChange = { value -> requireNotNull(resolvedViewModel).onSelfPhoneChange(value) },
+        onSaveSelfIdentity = { requireNotNull(resolvedViewModel).onSaveSelfIdentity() },
         setupItems = setupItems(state.stepStates),
         onConnectSetupItem = { item ->
             val vm = requireNotNull(resolvedViewModel)

@@ -104,6 +104,10 @@ internal fun SourceConnectionsScreen(
     onNavigateComplete: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
     setupItems: List<OnboardingSetupItemUi> = emptyList(),
+    selfIdentity: OnboardingSelfIdentityUi? = null,
+    onSelfDisplayNameChange: (String) -> Unit = {},
+    onSelfPhoneChange: (String) -> Unit = {},
+    onSaveSelfIdentity: () -> Unit = {},
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
 ) {
@@ -272,6 +276,10 @@ internal fun SourceConnectionsScreen(
                 skipSource(provider)
             },
             setupItems = setupItems,
+            selfIdentity = selfIdentity,
+            onSelfDisplayNameChange = onSelfDisplayNameChange,
+            onSelfPhoneChange = onSelfPhoneChange,
+            onSaveSelfIdentity = onSaveSelfIdentity,
             onConnectSetupItem = onConnectSetupItem ?: {},
             onSkipSetupItem = onSkipSetupItem ?: {},
             onContinue = {

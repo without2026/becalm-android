@@ -15,6 +15,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -183,6 +184,10 @@ public sealed interface ContactsPermissionEffect {
 public data class OnboardingUiState(
     val currentStepIndex: Int = 0,
     val stepStates: Map<OnboardingStep, StepStatus> = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED },
+    val selfDisplayName: String = "",
+    val selfPhone: String = "",
+    val selfIdentityConfirmed: Boolean = false,
+    val isSavingSelfIdentity: Boolean = false,
     val isCompleting: Boolean = false,
     val error: UiMessage? = null,
 )
@@ -210,6 +215,7 @@ public class OnboardingViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val sourceConnectionRepository: SourceConnectionRepository,
     private val selfIdentityRepository: SelfIdentityRepository,
+    private val userProfileRepository: UserProfileRepository,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
@@ -274,6 +280,7 @@ public class OnboardingViewModel @Inject constructor(
 
     init {
         hydrateDurableProgress()
+        hydrateSelfIdentity()
     }
 
     // ─── Navigation actions ───────────────────────────────────────────────────
@@ -344,6 +351,56 @@ public class OnboardingViewModel @Inject constructor(
             OnboardingStateReducer.markStepStatus(state, step, status)
         }
         persistStepStatus(step, status)
+    }
+
+    public fun onSelfDisplayNameChange(value: String) {
+        _uiState.update { it.copy(selfDisplayName = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSelfPhoneChange(value: String) {
+        _uiState.update { it.copy(selfPhone = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSaveSelfIdentity() {
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                return@launch
+            }
+            val state = _uiState.value
+            if (state.selfDisplayName.isBlank() && state.selfPhone.isBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_self_identity_required)) }
+                return@launch
+            }
+            _uiState.update { it.copy(isSavingSelfIdentity = true, error = null) }
+            when (
+                val result = userProfileRepository.updateRemote(
+                    userId = userId,
+                    displayName = state.selfDisplayName,
+                    phoneE164Self = state.selfPhone,
+                )
+            ) {
+                is BecalmResult.Success -> {
+                    selfIdentityRepository.refresh(userId)
+                    _uiState.update {
+                        it.copy(
+                            selfDisplayName = result.value.displayNameOverride.orEmpty(),
+                            selfPhone = result.value.phoneE164Self.orEmpty(),
+                            selfIdentityConfirmed = true,
+                            isSavingSelfIdentity = false,
+                            error = null,
+                        )
+                    }
+                }
+                is BecalmResult.Failure -> _uiState.update {
+                    it.copy(
+                        isSavingSelfIdentity = false,
+                        error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -904,6 +961,15 @@ public class OnboardingViewModel @Inject constructor(
     public fun onCompleteSetup() {
         viewModelScope.launch {
             _uiState.update { it.copy(isCompleting = true, error = null) }
+            if (!_uiState.value.selfIdentityConfirmed) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        error = UiMessage.resource(R.string.onb_error_self_identity_required),
+                    )
+                }
+                return@launch
+            }
             val current = _uiState.value.stepStates
             val terminal = setOf(
                 StepStatus.GRANTED,
@@ -970,6 +1036,23 @@ public class OnboardingViewModel @Inject constructor(
                         steps.indexOf(firstIncomplete).coerceAtLeast(0)
                     },
                     stepStates = merged,
+                )
+            }
+        }
+    }
+
+    private fun hydrateSelfIdentity() {
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) return@launch
+            val profile = userProfileRepository.find(userId) ?: return@launch
+            val displayName = profile.displayNameOverride.orEmpty()
+            val phone = profile.phoneE164Self.orEmpty()
+            _uiState.update {
+                it.copy(
+                    selfDisplayName = displayName,
+                    selfPhone = phone,
+                    selfIdentityConfirmed = displayName.isNotBlank() || phone.isNotBlank(),
                 )
             }
         }
