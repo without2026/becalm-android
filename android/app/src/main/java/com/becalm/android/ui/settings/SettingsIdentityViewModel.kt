@@ -129,7 +129,7 @@ public class SettingsIdentityViewModel @Inject constructor(
     }
 
     public fun onNewAnchorTypeChange(value: String) {
-        if (value !in setOf("email", "phone")) return
+        if (value !in SELF_ANCHOR_TYPES) return
         _uiState.update { it.copy(newAnchorType = value) }
     }
 
@@ -281,3 +281,4 @@ private fun SourceConnectionEntity.toUi(): SourceConnectionOwnershipUi =
     )
 
 private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
+private val SELF_ANCHOR_TYPES = setOf("email", "phone", "alias")

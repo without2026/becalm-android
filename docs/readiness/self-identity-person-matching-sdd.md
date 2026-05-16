@@ -44,6 +44,11 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 - 로그인 직후 source 연결 전에 사용자가 기본 self profile을 확인한다.
 - Display name, email, phone, alias 입력/수정이 가능하다.
 - 저장 결과는 backend self identity anchors와 Android local mirror에 반영된다.
+- Android 완료 기준:
+  - Onboarding setup에서 display name, email, phone, alias를 입력할 수 있다.
+  - Profile 저장은 `user_profile` mirror를 갱신하고 email/alias는 self identity anchor로 생성한다.
+  - Settings에서도 email, phone, alias anchor를 추가할 수 있다.
+  - 저장 후 source 연결 gate가 열린다.
 
 ### Slice 3. Source connection ownership onboarding
 

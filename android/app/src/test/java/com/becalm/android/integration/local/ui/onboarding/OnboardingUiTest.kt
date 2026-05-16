@@ -81,7 +81,9 @@ class OnboardingUiTest {
                     ),
                     selfIdentity = OnboardingSelfIdentityUi(
                         displayName = "",
+                        email = "",
                         phone = "",
+                        alias = "",
                         confirmed = false,
                         saving = false,
                     ),
@@ -138,12 +140,16 @@ class OnboardingUiTest {
                     setupItems = emptyList(),
                     selfIdentity = OnboardingSelfIdentityUi(
                         displayName = "",
+                        email = "",
                         phone = "",
+                        alias = "",
                         confirmed = false,
                         saving = false,
                     ),
                     onSelfDisplayNameChange = {},
+                    onSelfEmailChange = {},
                     onSelfPhoneChange = {},
+                    onSelfAliasChange = {},
                     onSaveSelfIdentity = { saveClicks += 1 },
                     onContinue = {},
                 )
@@ -152,6 +158,12 @@ class OnboardingUiTest {
 
         composeRule.onAllNodesWithText("Gmail").assertCountEquals(0)
         composeRule.onNodeWithTag("onboarding-self-display-name").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("onboarding-self-email"))
+        composeRule.onNodeWithTag("onboarding-self-email").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("onboarding-self-alias"))
+        composeRule.onNodeWithTag("onboarding-self-alias").assertIsDisplayed()
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("onboarding-self-save"))
         composeRule.onNodeWithTag("onboarding-self-save").performClick()
@@ -179,7 +191,9 @@ class OnboardingUiTest {
                     onSkip = {},
                     selfIdentity = OnboardingSelfIdentityUi(
                         displayName = "민홍",
+                        email = "me@example.com",
                         phone = "",
+                        alias = "MH",
                         confirmed = true,
                         saving = false,
                     ),

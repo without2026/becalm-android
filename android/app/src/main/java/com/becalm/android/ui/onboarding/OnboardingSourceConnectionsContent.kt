@@ -35,7 +35,9 @@ internal fun SourceConnectionsContent(
     setupItems: List<OnboardingSetupItemUi> = emptyList(),
     selfIdentity: OnboardingSelfIdentityUi? = null,
     onSelfDisplayNameChange: (String) -> Unit = {},
+    onSelfEmailChange: (String) -> Unit = {},
     onSelfPhoneChange: (String) -> Unit = {},
+    onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
     updatingSourceOwnershipId: String? = null,
@@ -89,7 +91,9 @@ internal fun SourceConnectionsContent(
                     SelfIdentitySetupPanel(
                         state = selfIdentity,
                         onDisplayNameChange = onSelfDisplayNameChange,
+                        onEmailChange = onSelfEmailChange,
                         onPhoneChange = onSelfPhoneChange,
+                        onAliasChange = onSelfAliasChange,
                         onSave = onSaveSelfIdentity,
                     )
                 }

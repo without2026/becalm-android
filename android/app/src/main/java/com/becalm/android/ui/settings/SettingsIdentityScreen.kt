@@ -235,12 +235,16 @@ private fun SettingsIdentityAnchorPanel(
             )
             Spacer(modifier = Modifier.height(12.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                listOf("email" to R.string.settings_identity_anchor_email, "phone" to R.string.settings_identity_anchor_phone)
+                listOf(
+                    "email" to R.string.settings_identity_anchor_email,
+                    "phone" to R.string.settings_identity_anchor_phone,
+                    "alias" to R.string.settings_identity_anchor_alias,
+                )
                     .forEachIndexed { index, option ->
                         SegmentedButton(
                             selected = state.newAnchorType == option.first,
                             onClick = { onAnchorTypeChange(option.first) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
                         ) {
                             Text(stringResource(option.second))
                         }
@@ -252,7 +256,11 @@ private fun SettingsIdentityAnchorPanel(
                 onValueChange = onAnchorValueChange,
                 label = stringResource(R.string.settings_identity_anchor_value_label),
                 modifier = Modifier.fillMaxWidth(),
-                keyboardType = if (state.newAnchorType == "phone") KeyboardType.Phone else KeyboardType.Email,
+                keyboardType = when (state.newAnchorType) {
+                    "phone" -> KeyboardType.Phone
+                    "email" -> KeyboardType.Email
+                    else -> KeyboardType.Text
+                },
             )
             Spacer(modifier = Modifier.height(12.dp))
             BecalmButton(

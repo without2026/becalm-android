@@ -105,7 +105,9 @@
     <string name="onb_setup_identity_title">내 기준 정보</string>
     <string name="onb_setup_identity_body">메일과 일정에서 사용자를 구분할 때 쓰는 이름과 전화번호입니다. 여러 이메일은 연결 후 내 계정으로 추가할 수 있습니다.</string>
     <string name="onb_setup_identity_display_name_label">표시 이름</string>
+    <string name="onb_setup_identity_email_label">내 이메일</string>
     <string name="onb_setup_identity_phone_label">전화번호</string>
+    <string name="onb_setup_identity_alias_label">별칭</string>
     <string name="onb_setup_identity_save">내 정보 확인</string>
     <string name="onb_setup_identity_confirmed">확인됨</string>
     <string name="onb_setup_recommended_section">추천</string>
@@ -414,7 +416,8 @@
     <string name="settings_identity_anchors_body">업무용, 개인용 이메일이나 전화번호를 추가해 본인으로 인식하게 할 수 있습니다.</string>
     <string name="settings_identity_anchor_email">이메일</string>
     <string name="settings_identity_anchor_phone">전화번호</string>
-    <string name="settings_identity_anchor_value_label">이메일 또는 전화번호</string>
+    <string name="settings_identity_anchor_alias">별칭</string>
+    <string name="settings_identity_anchor_value_label">이메일, 전화번호 또는 별칭</string>
     <string name="settings_identity_anchor_add">식별값 추가</string>
     <string name="settings_identity_anchor_archive">비활성화</string>
     <string name="settings_identity_connections_section">연결 계정 소유자</string>

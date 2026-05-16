@@ -178,6 +178,7 @@ class SettingsUiTest {
         composeRule.onNodeWithTag("settings-identity-save").performClick()
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasTestTag("settings-identity-anchor-add"))
+        composeRule.onNodeWithText(string(R.string.settings_identity_anchor_alias)).assertExists()
         composeRule.onNodeWithTag("settings-identity-anchor-add").performClick()
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasTestTag("settings-identity-anchor-archive"))

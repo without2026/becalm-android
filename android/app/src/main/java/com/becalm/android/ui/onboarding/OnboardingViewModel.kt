@@ -188,7 +188,9 @@ public data class OnboardingUiState(
     val currentStepIndex: Int = 0,
     val stepStates: Map<OnboardingStep, StepStatus> = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED },
     val selfDisplayName: String = "",
+    val selfEmail: String = "",
     val selfPhone: String = "",
+    val selfAlias: String = "",
     val selfIdentityConfirmed: Boolean = false,
     val isSavingSelfIdentity: Boolean = false,
     val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
@@ -363,8 +365,16 @@ public class OnboardingViewModel @Inject constructor(
         _uiState.update { it.copy(selfDisplayName = value, selfIdentityConfirmed = false) }
     }
 
+    public fun onSelfEmailChange(value: String) {
+        _uiState.update { it.copy(selfEmail = value, selfIdentityConfirmed = false) }
+    }
+
     public fun onSelfPhoneChange(value: String) {
         _uiState.update { it.copy(selfPhone = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSelfAliasChange(value: String) {
+        _uiState.update { it.copy(selfAlias = value, selfIdentityConfirmed = false) }
     }
 
     public fun onSaveSelfIdentity() {
@@ -375,7 +385,12 @@ public class OnboardingViewModel @Inject constructor(
                 return@launch
             }
             val state = _uiState.value
-            if (state.selfDisplayName.isBlank() && state.selfPhone.isBlank()) {
+            if (
+                state.selfDisplayName.isBlank() &&
+                state.selfEmail.isBlank() &&
+                state.selfPhone.isBlank() &&
+                state.selfAlias.isBlank()
+            ) {
                 _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_self_identity_required)) }
                 return@launch
             }
@@ -388,11 +403,31 @@ public class OnboardingViewModel @Inject constructor(
                 )
             ) {
                 is BecalmResult.Success -> {
+                    if (!createOptionalSelfAnchor(userId, anchorType = "email", value = state.selfEmail)) {
+                        _uiState.update {
+                            it.copy(
+                                isSavingSelfIdentity = false,
+                                error = UiMessage.resource(R.string.settings_identity_error_add_anchor),
+                            )
+                        }
+                        return@launch
+                    }
+                    if (!createOptionalSelfAnchor(userId, anchorType = "alias", value = state.selfAlias)) {
+                        _uiState.update {
+                            it.copy(
+                                isSavingSelfIdentity = false,
+                                error = UiMessage.resource(R.string.settings_identity_error_add_anchor),
+                            )
+                        }
+                        return@launch
+                    }
                     selfIdentityRepository.refresh(userId)
                     _uiState.update {
                         it.copy(
                             selfDisplayName = result.value.displayNameOverride.orEmpty(),
+                            selfEmail = state.selfEmail.trim(),
                             selfPhone = result.value.phoneE164Self.orEmpty(),
+                            selfAlias = state.selfAlias.trim(),
                             selfIdentityConfirmed = true,
                             isSavingSelfIdentity = false,
                             error = null,
@@ -406,6 +441,27 @@ public class OnboardingViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    private suspend fun createOptionalSelfAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+    ): Boolean {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return true
+        return when (
+            selfIdentityRepository.createAnchor(
+                userId = userId,
+                anchorType = anchorType,
+                value = trimmed,
+                displayValue = trimmed,
+                source = "user_profile",
+            )
+        ) {
+            is BecalmResult.Success -> true
+            is BecalmResult.Failure -> false
         }
     }
 
@@ -1081,13 +1137,18 @@ public class OnboardingViewModel @Inject constructor(
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) return@launch
             val profile = userProfileRepository.find(userId) ?: return@launch
+            val anchors = selfIdentityRepository.observeAll(userId).first()
             val displayName = profile.displayNameOverride.orEmpty()
             val phone = profile.phoneE164Self.orEmpty()
+            val email = anchors.firstActiveValue("email")
+            val alias = anchors.firstActiveValue("alias")
             _uiState.update {
                 it.copy(
                     selfDisplayName = displayName,
+                    selfEmail = email,
                     selfPhone = phone,
-                    selfIdentityConfirmed = displayName.isNotBlank() || phone.isNotBlank(),
+                    selfAlias = alias,
+                    selfIdentityConfirmed = listOf(displayName, email, phone, alias).any(String::isNotBlank),
                 )
             }
         }
@@ -1128,3 +1189,6 @@ private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOw
     )
 
 private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
+
+private fun List<com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity>.firstActiveValue(type: String): String =
+    firstOrNull { it.anchorType == type && it.status == "active" }?.let { it.displayValue ?: it.normalizedValue }.orEmpty()

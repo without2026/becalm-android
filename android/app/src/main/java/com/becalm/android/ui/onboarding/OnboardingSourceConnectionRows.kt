@@ -33,7 +33,9 @@ import com.becalm.android.ui.components.StatusPill
 
 internal data class OnboardingSelfIdentityUi(
     val displayName: String,
+    val email: String,
     val phone: String,
+    val alias: String,
     val confirmed: Boolean,
     val saving: Boolean,
 )
@@ -67,7 +69,9 @@ internal fun RequiredSetupSummary() {
 internal fun SelfIdentitySetupPanel(
     state: OnboardingSelfIdentityUi,
     onDisplayNameChange: (String) -> Unit,
+    onEmailChange: (String) -> Unit,
     onPhoneChange: (String) -> Unit,
+    onAliasChange: (String) -> Unit,
     onSave: () -> Unit,
 ) {
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
@@ -106,6 +110,15 @@ internal fun SelfIdentitySetupPanel(
                     .testTag("onboarding-self-display-name"),
             )
             BecalmTextField(
+                value = state.email,
+                onValueChange = onEmailChange,
+                label = stringResource(R.string.onb_setup_identity_email_label),
+                keyboardType = KeyboardType.Email,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding-self-email"),
+            )
+            BecalmTextField(
                 value = state.phone,
                 onValueChange = onPhoneChange,
                 label = stringResource(R.string.onb_setup_identity_phone_label),
@@ -114,6 +127,14 @@ internal fun SelfIdentitySetupPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-phone"),
+            )
+            BecalmTextField(
+                value = state.alias,
+                onValueChange = onAliasChange,
+                label = stringResource(R.string.onb_setup_identity_alias_label),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding-self-alias"),
             )
             BecalmButton(
                 text = stringResource(R.string.onb_setup_identity_save),

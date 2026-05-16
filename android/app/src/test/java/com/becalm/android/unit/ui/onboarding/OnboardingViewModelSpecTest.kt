@@ -7,6 +7,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
@@ -79,6 +80,7 @@ class OnboardingViewModelSpecTest {
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         coEvery { sourceConnectionRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
         every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(emptyList())
+        every { selfIdentityRepository.observeAll("user-123") } returns flowOf(emptyList())
         coEvery { selfIdentityRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
         coEvery { userProfileRepository.find("user-123") } returns null
     }
@@ -779,25 +781,71 @@ class OnboardingViewModelSpecTest {
     }
 
     @Test
-    fun `saving self identity updates profile refreshes anchors and opens setup gate`() = runTest {
+    fun `saving self identity updates profile creates anchors refreshes mirror and opens setup gate`() = runTest {
         val viewModel = buildViewModel()
         coEvery {
             userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
         } returns BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "email",
+                value = "me@example.com",
+                displayValue = "me@example.com",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-email", type = "email", value = "me@example.com"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "alias",
+                value = "민홍",
+                displayValue = "민홍",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-alias", type = "alias", value = "민홍"))
 
         viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfEmailChange("me@example.com")
         viewModel.onSelfPhoneChange("+821012345678")
+        viewModel.onSelfAliasChange("민홍")
         viewModel.onSaveSelfIdentity()
         advanceUntilIdle()
 
         coVerify(exactly = 1) {
             userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
         }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "email", "me@example.com", "me@example.com", "user_profile")
+        }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "alias", "민홍", "민홍", "user_profile")
+        }
         coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
         assertEquals("민홍", viewModel.uiState.value.selfDisplayName)
+        assertEquals("me@example.com", viewModel.uiState.value.selfEmail)
         assertEquals("+821012345678", viewModel.uiState.value.selfPhone)
+        assertEquals("민홍", viewModel.uiState.value.selfAlias)
         assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
         assertFalse(viewModel.uiState.value.isSavingSelfIdentity)
+    }
+
+    @Test
+    fun `onboarding hydrates self email and alias anchors from local mirror`() = runTest {
+        coEvery { userProfileRepository.find("user-123") } returns userProfile(displayName = "민홍")
+        every { selfIdentityRepository.observeAll("user-123") } returns flowOf(
+            listOf(
+                selfAnchor(id = "anchor-email", type = "email", value = "me@example.com"),
+                selfAnchor(id = "anchor-alias", type = "alias", value = "MH"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals("me@example.com", viewModel.uiState.value.selfEmail)
+        assertEquals("MH", viewModel.uiState.value.selfAlias)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
     }
 
     @Test
@@ -891,5 +939,27 @@ class OnboardingViewModelSpecTest {
             linkedSelfAnchorId = null,
             lastSyncAt = null,
             lastError = null,
+        )
+
+    private fun selfAnchor(
+        id: String,
+        type: String,
+        value: String,
+        status: String = "active",
+    ): SelfIdentityAnchorEntity =
+        SelfIdentityAnchorEntity(
+            id = id,
+            userId = "user-123",
+            anchorType = type,
+            normalizedValue = value,
+            displayValue = value,
+            source = "user_profile",
+            scope = "global",
+            sourceConnectionId = null,
+            sourceEventId = null,
+            trust = "user_confirmed",
+            status = status,
+            createdAt = Instant.parse("2026-05-16T00:00:00Z"),
+            updatedAt = Instant.parse("2026-05-16T00:00:00Z"),
         )
 }
