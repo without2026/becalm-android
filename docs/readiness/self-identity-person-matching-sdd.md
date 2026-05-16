@@ -66,6 +66,11 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 - Backend extraction/classification input에 active self identity set을 전달한다.
 - `relation_to_user`, `person_ref`, `direction`은 self context로 post-verify한다.
 - Wrong self/counterparty, wrong give/take severe fixture를 유지한다.
+- 완료 기준:
+  - Classifier에서 non-work/marketing/no-op으로 걸러진 email은 self anchor DB read를 하지 않는다.
+  - Extractor prompt에는 active self identity context만 축약해 포함한다.
+  - Model이 self identity를 `person_ref` 또는 counterparty participant로 잘못 반환해도 backend post-verify가 정정한다.
+  - Sent mail에서 counterparty가 call/contact/time/link를 제공해야 하는 요청은 model이 `give`로 반환해도 `take`로 보정한다.
 
 ### Slice 5. Reindex cascade
 
