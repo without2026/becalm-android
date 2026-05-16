@@ -25,6 +25,7 @@ import com.becalm.android.data.repository.toPersonEntityOrNull
 import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonIdentityTypes
+import com.becalm.android.domain.person.PersonMatchingEventPolicy
 import com.becalm.android.domain.person.SourceInteractionKind
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -309,17 +310,18 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             val occurredAt = raw?.timestamp ?: participant.createdAt
             if (participant.personId.isNullOrBlank()) {
                 if (participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES) {
+                    val suggestedLabel = participant.displayNameRaw
+                        ?: participant.emailRaw
+                        ?: participant.phoneRaw
+                        ?: participant.organizationRaw
+                        ?: participant.normalizedValue
                     upsertUnmatched(
                         sourceType = participant.sourceType,
                         sourceRef = sourceRef,
                         kind = kind,
                         title = raw?.eventTitle,
                         snippet = raw?.eventSnippet ?: participant.evidence,
-                        suggestedLabel = participant.displayNameRaw
-                            ?: participant.emailRaw
-                            ?: participant.phoneRaw
-                            ?: participant.organizationRaw
-                            ?: participant.normalizedValue,
+                        suggestedLabel = suggestedLabel,
                         occurredAt = occurredAt,
                     )
                 }
@@ -459,6 +461,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         ) {
             val hasUserVisibleContent = listOf(title, snippet, suggestedLabel).any { !it.isNullOrBlank() }
             if (!hasUserVisibleContent) return
+            if (PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return
             val id = UUID.nameUUIDFromBytes(
                 "unmatched:$userId:$sourceType:$sourceRef:$kind".toByteArray(Charsets.UTF_8),
             ).toString()

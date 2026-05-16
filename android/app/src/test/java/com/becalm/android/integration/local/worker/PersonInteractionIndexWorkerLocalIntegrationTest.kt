@@ -252,6 +252,41 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `service account verification emails do not create person matching review rows`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-slack-verification",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+                eventTitle = "Slack에서 이메일 주소를 확인하세요.",
+                eventSnippet = "Slack을 시작하려면 이메일 주소를 확인하세요. 워크스페이스를 찾거나 새 워크스페이스를 생성할 수 있습니다.",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-slack-self",
+                    sourceEventId = "raw-slack-verification",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-slack",
+                    personId = null,
+                    email = "me@example.com",
+                    displayName = "me@example.com",
+                    role = "mentioned",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "suggested_self",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+    }
+
+    @Test
     fun `blocked relation participants are removed on next index rebuild`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
@@ -476,6 +511,8 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         id: String,
         sourceType: String,
         counterpartyRef: String?,
+        eventTitle: String = "event-$id",
+        eventSnippet: String = "snippet-$id",
     ): RawIngestionEventEntity =
         RawIngestionEventEntity(
             id = id,
@@ -484,8 +521,8 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             sourceType = sourceType,
             sourceRef = "$sourceType-ref-$id",
             counterpartyRef = counterpartyRef,
-            eventTitle = "event-$id",
-            eventSnippet = "snippet-$id",
+            eventTitle = eventTitle,
+            eventSnippet = eventSnippet,
             folder = "INBOX",
             timestamp = Instant.parse("2026-04-29T04:00:00Z"),
         )

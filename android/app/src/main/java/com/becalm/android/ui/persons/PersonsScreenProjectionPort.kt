@@ -14,6 +14,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonMatchingEventPolicy
 import com.becalm.android.worker.ForegroundCatchUpScheduler
 import com.becalm.android.worker.WorkScheduler
 import dagger.Binds
@@ -359,6 +360,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private fun UnmatchedPersonInteractionEntity.shouldHideFromManualMatching(
         blockedPersonRefs: Set<String>,
     ): Boolean {
+        if (PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return true
         if (PersonIdentityResolver.isBlocked(suggestedLabel, blockedPersonRefs)) return true
         if (sourceType in AUDIO_MANUAL_MATCH_SOURCE_TYPES && suggestedLabel?.matches(SPEAKER_LABEL_REGEX) == true) {
             return false

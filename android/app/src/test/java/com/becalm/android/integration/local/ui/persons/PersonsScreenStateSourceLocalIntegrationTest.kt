@@ -660,6 +660,38 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `service account verification unmatched rows are hidden from person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-slack-verification",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-slack-verification",
+                    interactionKind = "email",
+                    title = "Slack에서 이메일 주소를 확인하세요.",
+                    snippet = "Slack을 시작하려면 이메일 주소를 확인하세요. 워크스페이스를 찾거나 새 워크스페이스를 생성할 수 있습니다.",
+                    suggestedLabel = "me@example.com",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun rawEvent(
         id: String,
         counterpartyRef: String?,
