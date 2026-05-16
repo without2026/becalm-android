@@ -18,8 +18,9 @@ public object PersonMatchingEventPolicy {
         val hasVerificationPhrase = VERIFICATION_MARKERS.any { it in text }
         val hasProgramApplicationContext = PROGRAM_APPLICATION_CONTEXT_MARKERS.any { it in text }
         val hasProgramApplicationNotice = PROGRAM_APPLICATION_NOTICE_MARKERS.any { it in text }
+        val hasPersonToPersonSignal = PERSON_TO_PERSON_SIGNAL_MARKERS.any { it in text }
         return (hasServiceContext && (hasAccountAction || hasVerificationPhrase)) ||
-            (hasProgramApplicationContext && hasProgramApplicationNotice)
+            (hasProgramApplicationContext && hasProgramApplicationNotice && !hasPersonToPersonSignal)
     }
 
     private val SERVICE_CONTEXT_MARKERS = setOf(
@@ -115,5 +116,17 @@ public object PersonMatchingEventPolicy {
         "이메일 주소를 확인",
         "이메일 주소 확인",
         "인증 코드",
+    )
+
+    private val PERSON_TO_PERSON_SIGNAL_MARKERS = setOf(
+        "reply",
+        "please send",
+        "please review",
+        "could you",
+        "can you",
+        "회신",
+        "답장",
+        "보내주세요",
+        "검토해",
     )
 }

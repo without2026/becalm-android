@@ -322,6 +322,43 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     }
 
     @Test
+    fun `program application senders do not become people even when backend resolved them`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, "startup@asan-nanum.org")).personId
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-asan-doers-resolved",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+                eventTitle = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+                eventSnippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-asan-staff-startup",
+                    sourceEventId = "raw-asan-doers-resolved",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-asan-doers",
+                    personId = personId,
+                    email = "startup@asan-nanum.org",
+                    displayName = "Staff Startup",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "person_resolved",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 20).first().isEmpty())
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+    }
+
+    @Test
     fun `blocked relation participants are removed on next index rebuild`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId

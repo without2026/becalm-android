@@ -724,6 +724,32 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
     }
 
+    @Test
+    fun `program application service senders are hidden from people list`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-asan-doers",
+            kind = "email",
+            role = "sender",
+            occurredAt = occurredAt,
+            title = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+            snippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.people.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun rawEvent(
         id: String,
         counterpartyRef: String?,

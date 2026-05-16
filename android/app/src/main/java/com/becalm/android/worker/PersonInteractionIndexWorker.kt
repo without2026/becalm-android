@@ -307,6 +307,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 ?: participant.displayNameRaw
                 ?: participant.organizationRaw
             if (shouldSuppress(anchor)) return
+            if (shouldSuppressServiceLifecyclePersonProjection(participant, raw, anchor)) return
             val occurredAt = raw?.timestamp ?: participant.createdAt
             if (participant.personId.isNullOrBlank()) {
                 if (participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES) {
@@ -416,6 +417,20 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         private fun shouldSuppress(raw: String?): Boolean =
             PersonIdentityResolver.isLikelyAutomated(raw) ||
                 PersonIdentityResolver.isBlocked(raw, blockedPersonRefs)
+
+        private fun shouldSuppressServiceLifecyclePersonProjection(
+            participant: SourceEventParticipantEntity,
+            raw: RawIngestionEventEntity?,
+            anchor: String?,
+        ): Boolean =
+            PersonMatchingEventPolicy.isLikelyServiceAccountNotification(
+                title = raw?.eventTitle,
+                snippet = raw?.eventSnippet ?: participant.evidence,
+                suggestedLabel = participant.displayNameRaw
+                    ?: participant.organizationRaw
+                    ?: participant.emailRaw
+                    ?: anchor,
+            )
 
         private fun upsertInteraction(
             personId: String,

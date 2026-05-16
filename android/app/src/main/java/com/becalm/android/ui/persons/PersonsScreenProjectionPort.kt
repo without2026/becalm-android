@@ -140,6 +140,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
                 PersonIdentityResolver.isBlocked(row.primaryIdentityKey, blockedPersonRefs) ||
                     PersonIdentityResolver.isLikelyAutomated(row.primaryIdentityKey) ||
                     PersonIdentityResolver.isLikelyAutomated(row.displayNameHint) ||
+                    row.shouldHideFromPeopleList() ||
                     selfMatcher.matches(row.primaryIdentityKey, row.displayNameHint)
             }
             buildProjectionPage(
@@ -367,6 +368,13 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
         }
         return PersonIdentityResolver.isLikelyAutomated(suggestedLabel)
     }
+
+    private fun PersonIndexAggregateRow.shouldHideFromPeopleList(): Boolean =
+        PersonMatchingEventPolicy.isLikelyServiceAccountNotification(
+            title = displayNameHint,
+            snippet = lastInteractionSnippet,
+            suggestedLabel = primaryIdentityKey,
+        )
 
     private companion object {
         const val PAGE_SIZE: Int = 20
