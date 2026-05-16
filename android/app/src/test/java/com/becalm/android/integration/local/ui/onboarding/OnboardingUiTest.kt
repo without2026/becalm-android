@@ -30,6 +30,7 @@ import com.becalm.android.ui.onboarding.ImapForm
 import com.becalm.android.ui.onboarding.NotificationPermissionContent
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentContent
 import com.becalm.android.ui.onboarding.OnboardingSelfIdentityUi
+import com.becalm.android.ui.onboarding.OnboardingSourceOwnershipUi
 import com.becalm.android.ui.onboarding.OnboardingSetupItem
 import com.becalm.android.ui.onboarding.OnboardingSetupItemUi
 import com.becalm.android.ui.onboarding.OnboardingSourceProvider
@@ -160,6 +161,51 @@ class OnboardingUiTest {
 
         composeRule.runOnIdle {
             assertEquals(1, saveClicks)
+        }
+    }
+
+    @Test
+    fun `compact setup shows source ownership controls after self identity is confirmed`() {
+        var ownershipUpdate: Pair<String, String>? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = emptyList(),
+                    headline = string(R.string.onb_setup_headline),
+                    body = string(R.string.onb_setup_body),
+                    continueLabel = string(R.string.onb_setup_start),
+                    onConnect = {},
+                    onSkip = {},
+                    selfIdentity = OnboardingSelfIdentityUi(
+                        displayName = "민홍",
+                        phone = "",
+                        confirmed = true,
+                        saving = false,
+                    ),
+                    sourceOwnerships = listOf(
+                        OnboardingSourceOwnershipUi(
+                            id = "conn-gmail",
+                            title = "Gmail",
+                            accountLabel = "work@example.com",
+                            ownership = "unknown",
+                            status = "connected",
+                        ),
+                    ),
+                    onSourceOwnership = { id, ownership -> ownershipUpdate = id to ownership },
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-ownership-conn-gmail-self"))
+        composeRule.onNodeWithText("Gmail").assertIsDisplayed()
+        composeRule.onNodeWithText("work@example.com").assertIsDisplayed()
+        composeRule.onNodeWithTag("source-ownership-conn-gmail-self").performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("conn-gmail" to "self", ownershipUpdate)
         }
     }
 

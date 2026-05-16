@@ -7,6 +7,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.local.db.entity.UserProfileEntity
@@ -77,6 +78,7 @@ class OnboardingViewModelSpecTest {
         }
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         coEvery { sourceConnectionRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(emptyList())
         coEvery { selfIdentityRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
         coEvery { userProfileRepository.find("user-123") } returns null
     }
@@ -798,6 +800,48 @@ class OnboardingViewModelSpecTest {
         assertFalse(viewModel.uiState.value.isSavingSelfIdentity)
     }
 
+    @Test
+    fun `onboarding hydrates connected source ownership rows from local mirror`() = runTest {
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(
+            listOf(
+                sourceConnection(
+                    id = "conn-gmail",
+                    provider = "google",
+                    capability = "mail",
+                    accountIdentifier = "work@example.com",
+                    accountDisplayName = "Work",
+                    ownership = "unknown",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(1, viewModel.uiState.value.sourceOwnerships.size)
+        assertEquals("Gmail", viewModel.uiState.value.sourceOwnerships.single().title)
+        assertEquals("Work", viewModel.uiState.value.sourceOwnerships.single().accountLabel)
+        assertEquals("unknown", viewModel.uiState.value.sourceOwnerships.single().ownership)
+    }
+
+    @Test
+    fun `onboarding source ownership update writes repository and refreshes self anchors`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
+        } returns BecalmResult.Success(sourceConnection(id = "conn-gmail", ownership = "self"))
+
+        viewModel.onSetSourceConnectionOwnership("conn-gmail", "self")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
+        }
+        coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
+        assertEquals(null, viewModel.uiState.value.updatingSourceOwnershipId)
+        assertEquals(null, viewModel.uiState.value.error)
+    }
+
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
         userPrefsStore = userPrefsStore,
         logger = logger,
@@ -824,5 +868,28 @@ class OnboardingViewModelSpecTest {
             preferredLocale = "ko",
             createdAt = Instant.parse("2026-05-16T00:00:00Z"),
             updatedAt = Instant.parse("2026-05-16T00:00:00Z"),
+        )
+
+    private fun sourceConnection(
+        id: String,
+        provider: String = "google",
+        capability: String = "mail",
+        accountIdentifier: String? = "me@example.com",
+        accountDisplayName: String? = null,
+        ownership: String = "unknown",
+        status: String = "connected",
+    ): SourceConnectionEntity =
+        SourceConnectionEntity(
+            id = id,
+            userId = "user-123",
+            provider = provider,
+            capability = capability,
+            accountIdentifier = accountIdentifier,
+            accountDisplayName = accountDisplayName,
+            ownership = ownership,
+            status = status,
+            linkedSelfAnchorId = null,
+            lastSyncAt = null,
+            lastError = null,
         )
 }

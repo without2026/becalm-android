@@ -108,6 +108,9 @@ internal fun SourceConnectionsScreen(
     onSelfDisplayNameChange: (String) -> Unit = {},
     onSelfPhoneChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
+    sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    updatingSourceOwnershipId: String? = null,
+    onSourceOwnership: (String, String) -> Unit = { _, _ -> },
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
 ) {
@@ -280,6 +283,9 @@ internal fun SourceConnectionsScreen(
             onSelfDisplayNameChange = onSelfDisplayNameChange,
             onSelfPhoneChange = onSelfPhoneChange,
             onSaveSelfIdentity = onSaveSelfIdentity,
+            sourceOwnerships = sourceOwnerships,
+            updatingSourceOwnershipId = updatingSourceOwnershipId,
+            onSourceOwnership = onSourceOwnership,
             onConnectSetupItem = onConnectSetupItem ?: {},
             onSkipSetupItem = onSkipSetupItem ?: {},
             onContinue = {

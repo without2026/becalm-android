@@ -10,7 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -170,6 +174,47 @@ internal fun SetupConnectionRow(
                     onSkip = onSkip,
                     skipLabel = skipLabel,
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SourceOwnershipSetupRow(
+    item: OnboardingSourceOwnershipUi,
+    updating: Boolean,
+    onOwnership: (String) -> Unit,
+) {
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = item.accountLabel,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            listOf(
+                "self" to R.string.settings_identity_connection_self,
+                "shared" to R.string.settings_identity_connection_shared,
+                "delegated" to R.string.settings_identity_connection_delegated,
+                "unknown" to R.string.settings_identity_connection_unknown,
+            ).forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = item.ownership == option.first,
+                    enabled = !updating,
+                    onClick = { onOwnership(option.first) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
+                    modifier = Modifier.testTag("source-ownership-${item.id}-${option.first}"),
+                ) {
+                    Text(stringResource(option.second))
+                }
             }
         }
     }

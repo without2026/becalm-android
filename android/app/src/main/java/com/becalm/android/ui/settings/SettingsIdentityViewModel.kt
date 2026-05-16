@@ -8,11 +8,11 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.sources.sourceConnectionTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -279,16 +279,5 @@ private fun SourceConnectionEntity.toUi(): SourceConnectionOwnershipUi =
         ownership = ownership,
         status = status,
     )
-
-private fun sourceConnectionTitle(provider: String, capability: String): String =
-    when {
-        provider == "google" && capability == "mail" -> "Gmail"
-        provider == "google" && capability == "calendar" -> "Google Calendar"
-        provider == "outlook" && capability == "mail" -> "Outlook Mail"
-        provider == "outlook" && capability == "calendar" -> "Outlook Calendar"
-        provider == SourceType.NAVER_IMAP -> "Naver Mail"
-        provider == SourceType.DAUM_IMAP -> "Daum Mail"
-        else -> "$provider · $capability"
-    }
 
 private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")

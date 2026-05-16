@@ -37,6 +37,9 @@ internal fun SourceConnectionsContent(
     onSelfDisplayNameChange: (String) -> Unit = {},
     onSelfPhoneChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
+    sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    updatingSourceOwnershipId: String? = null,
+    onSourceOwnership: (String, String) -> Unit = { _, _ -> },
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
 ) {
@@ -144,6 +147,23 @@ internal fun SourceConnectionsContent(
                 onSkip = onSkip,
                 skipLabel = skipLabel,
             )
+        }
+        if (selfIdentityGateOpen && sourceOwnerships.isNotEmpty()) {
+            item(key = "source-ownership-title") {
+                Text(
+                    text = stringResource(R.string.settings_identity_connections_section),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            items(sourceOwnerships, key = { item -> item.id }) { item ->
+                SourceOwnershipSetupRow(
+                    item = item,
+                    updating = updatingSourceOwnershipId == item.id,
+                    onOwnership = { ownership -> onSourceOwnership(item.id, ownership) },
+                )
+            }
         }
         item {
             Spacer(modifier = Modifier.height(8.dp))

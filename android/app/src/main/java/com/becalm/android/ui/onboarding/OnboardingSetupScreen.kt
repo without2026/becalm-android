@@ -124,6 +124,11 @@ public fun OnboardingSetupScreen(
         onSelfDisplayNameChange = { value -> requireNotNull(resolvedViewModel).onSelfDisplayNameChange(value) },
         onSelfPhoneChange = { value -> requireNotNull(resolvedViewModel).onSelfPhoneChange(value) },
         onSaveSelfIdentity = { requireNotNull(resolvedViewModel).onSaveSelfIdentity() },
+        sourceOwnerships = state.sourceOwnerships,
+        updatingSourceOwnershipId = state.updatingSourceOwnershipId,
+        onSourceOwnership = { id, ownership ->
+            requireNotNull(resolvedViewModel).onSetSourceConnectionOwnership(id, ownership)
+        },
         setupItems = setupItems(state.stepStates),
         onConnectSetupItem = { item ->
             val vm = requireNotNull(resolvedViewModel)

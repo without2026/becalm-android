@@ -68,6 +68,14 @@ public data class SourceConnectionItemUi(
     val state: SourceConnectionState,
 )
 
+public data class OnboardingSourceOwnershipUi(
+    val id: String,
+    val title: String,
+    val accountLabel: String,
+    val ownership: String,
+    val status: String,
+)
+
 internal enum class SourceConnectionsEntryPoint {
     Setup,
     Onboarding,

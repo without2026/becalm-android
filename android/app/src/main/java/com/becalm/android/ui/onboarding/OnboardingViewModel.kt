@@ -9,6 +9,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
@@ -17,6 +18,7 @@ import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.sources.sourceConnectionTitle
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -188,6 +191,8 @@ public data class OnboardingUiState(
     val selfPhone: String = "",
     val selfIdentityConfirmed: Boolean = false,
     val isSavingSelfIdentity: Boolean = false,
+    val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    val updatingSourceOwnershipId: String? = null,
     val isCompleting: Boolean = false,
     val error: UiMessage? = null,
 )
@@ -281,6 +286,7 @@ public class OnboardingViewModel @Inject constructor(
     init {
         hydrateDurableProgress()
         hydrateSelfIdentity()
+        hydrateSourceOwnerships()
     }
 
     // ─── Navigation actions ───────────────────────────────────────────────────
@@ -397,6 +403,35 @@ public class OnboardingViewModel @Inject constructor(
                     it.copy(
                         isSavingSelfIdentity = false,
                         error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                    )
+                }
+            }
+        }
+    }
+
+    public fun onSetSourceConnectionOwnership(connectionId: String, ownership: String) {
+        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                return@launch
+            }
+            _uiState.update { it.copy(updatingSourceOwnershipId = connectionId, error = null) }
+            when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
+                is BecalmResult.Success -> {
+                    selfIdentityRepository.refresh(userId)
+                    _uiState.update {
+                        it.copy(
+                            updatingSourceOwnershipId = null,
+                            error = null,
+                        )
+                    }
+                }
+                is BecalmResult.Failure -> _uiState.update {
+                    it.copy(
+                        updatingSourceOwnershipId = null,
+                        error = UiMessage.resource(R.string.settings_identity_error_update_connection),
                     )
                 }
             }
@@ -1058,6 +1093,18 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    private fun hydrateSourceOwnerships() {
+        viewModelScope.launch {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) return@launch
+            sourceConnectionRepository.observeAll(userId).collect { connections ->
+                _uiState.update { state ->
+                    state.copy(sourceOwnerships = connections.map(SourceConnectionEntity::toOnboardingOwnershipUi))
+                }
+            }
+        }
+    }
+
     private fun persistStepStatus(step: OnboardingStep, status: StepStatus) {
         persistStepStatuses(mapOf(step to status))
     }
@@ -1070,3 +1117,14 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 }
+
+private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOwnershipUi =
+    OnboardingSourceOwnershipUi(
+        id = id,
+        title = sourceConnectionTitle(provider = provider, capability = capability),
+        accountLabel = accountDisplayName ?: accountIdentifier ?: provider,
+        ownership = ownership,
+        status = status,
+    )
+
+private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
