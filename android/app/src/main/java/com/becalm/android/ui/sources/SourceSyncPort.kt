@@ -1,6 +1,10 @@
 package com.becalm.android.ui.sources
 
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.analytics.NoopProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -24,6 +28,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -59,6 +64,7 @@ public class DefaultSourceSyncPort @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
+    private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SourceSyncPort {
 
@@ -66,7 +72,12 @@ public class DefaultSourceSyncPort @Inject constructor(
         get() = apiProvider.get()
 
     override suspend fun requestManualSync(sourceType: String): BecalmResult<Unit> = withContext(ioDispatcher) {
-        when (sourceType) {
+        trackSourceSync(
+            eventName = ProductAnalyticsEvents.SOURCE_SYNC_STARTED,
+            sourceType = sourceType,
+            result = "started",
+        )
+        val result = when (sourceType) {
             SourceType.GMAIL,
             SourceType.OUTLOOK_MAIL,
             -> syncBackendManagedMail(sourceType)
@@ -89,6 +100,20 @@ public class DefaultSourceSyncPort @Inject constructor(
                 BecalmResult.Success(Unit)
             }
         }
+        when (result) {
+            is BecalmResult.Success -> trackSourceSync(
+                eventName = ProductAnalyticsEvents.SOURCE_SYNC_COMPLETED,
+                sourceType = sourceType,
+                result = if (sourceType.syncOwner() == "local") "enqueued" else "success",
+            )
+            is BecalmResult.Failure -> trackSourceSync(
+                eventName = ProductAnalyticsEvents.SOURCE_SYNC_FAILED,
+                sourceType = sourceType,
+                result = result.error.analyticsReason(),
+                retryable = result.error.isRetryableForSync(),
+            )
+        }
+        result
     }
 
     private suspend fun syncBackendManagedMail(sourceType: String): BecalmResult<Unit> {
@@ -213,6 +238,88 @@ public class DefaultSourceSyncPort @Inject constructor(
         in 500..599 -> BecalmError.ServerError(code(), errorBody()?.string())
         else -> BecalmError.Network(code(), message())
     }
+
+    private fun trackSourceSync(
+        eventName: String,
+        sourceType: String,
+        result: String,
+        retryable: Boolean? = null,
+    ) {
+        val properties = buildMap<String, Any> {
+            put("source_type", sourceType)
+            put("owner", sourceType.syncOwner())
+            put("provider_family", sourceType.providerFamily())
+            put("result", result)
+            retryable?.let { put("retryable", it) }
+        }
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = eventName,
+                occurredAt = Clock.System.now(),
+                properties = properties,
+            ),
+        )
+    }
+
+    private fun String.syncOwner(): String =
+        when (this) {
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+            -> "backend"
+            else -> "local"
+        }
+
+    private fun String.providerFamily(): String =
+        when (this) {
+            SourceType.GMAIL,
+            SourceType.OUTLOOK_MAIL,
+            SourceType.NAVER_IMAP,
+            SourceType.DAUM_IMAP,
+            -> "mail"
+            SourceType.GOOGLE_CALENDAR,
+            SourceType.OUTLOOK_CALENDAR,
+            -> "calendar"
+            SourceType.VOICE,
+            SourceType.MEETING,
+            SourceType.CALL_RECORDING,
+            -> "audio"
+            else -> "other"
+        }
+
+    private fun BecalmError.analyticsReason(): String =
+        when (this) {
+            is BecalmError.Unauthorized -> "unauthorized"
+            is BecalmError.RateLimited -> "rate_limited"
+            is BecalmError.Validation -> "validation"
+            is BecalmError.NotFound -> "not_found"
+            is BecalmError.ServerError -> "server_error"
+            is BecalmError.Network -> "network_error"
+            is BecalmError.Io -> "io_error"
+            is BecalmError.Permission -> "permission_denied"
+            is BecalmError.Cancelled -> "cancelled"
+            is BecalmError.ExtractorUnavailable -> "extractor_unavailable"
+            is BecalmError.Unknown -> "unknown"
+        }
+
+    private fun BecalmError.isRetryableForSync(): Boolean =
+        when (this) {
+            is BecalmError.RateLimited,
+            is BecalmError.ServerError,
+            is BecalmError.Network,
+            is BecalmError.Io,
+            is BecalmError.ExtractorUnavailable,
+            is BecalmError.Unknown,
+            -> true
+            is BecalmError.Unauthorized,
+            is BecalmError.Validation,
+            is BecalmError.NotFound,
+            is BecalmError.Permission,
+            is BecalmError.Cancelled,
+            -> false
+        }
 
     private companion object {
         private const val TAG = "SourceSyncPort"

@@ -14,17 +14,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Singleton
-public class CompositeProductAnalyticsClient @Inject constructor(
+public class CompositeProductAnalyticsClient(
     private val amplitude: AmplitudeProductAnalyticsClient,
     private val backendMirror: BackendProductEventsMirrorClient,
     private val observability: ObservabilityClient,
     private val analyticsContext: ProductAnalyticsContext,
-    @ApplicationScope applicationScope: CoroutineScope,
+    applicationScope: CoroutineScope,
+    private val telemetryEnabled: Boolean,
 ) : ProductAnalyticsClient {
 
     private val events = Channel<ProductAnalyticsEvent>(
         capacity = CHANNEL_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    @Inject
+    public constructor(
+        amplitude: AmplitudeProductAnalyticsClient,
+        backendMirror: BackendProductEventsMirrorClient,
+        observability: ObservabilityClient,
+        analyticsContext: ProductAnalyticsContext,
+        @ApplicationScope applicationScope: CoroutineScope,
+    ) : this(
+        amplitude = amplitude,
+        backendMirror = backendMirror,
+        observability = observability,
+        analyticsContext = analyticsContext,
+        applicationScope = applicationScope,
+        telemetryEnabled = BuildConfig.TELEMETRY_ENABLED,
     )
 
     init {
@@ -34,7 +51,7 @@ public class CompositeProductAnalyticsClient @Inject constructor(
     }
 
     override fun track(event: ProductAnalyticsEvent) {
-        if (!BuildConfig.TELEMETRY_ENABLED) return
+        if (!telemetryEnabled) return
         val enriched = analyticsContext.enrich(event)
         if (!ProductAnalyticsValidation.isValid(enriched)) {
             observability.addBreadcrumb("analytics", "product_event_dropped", mapOf("event_name" to enriched.eventName))
