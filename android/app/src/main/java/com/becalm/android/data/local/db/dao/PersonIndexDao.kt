@@ -292,6 +292,34 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        UPDATE source_event_participants
+        SET relation_to_user = 'counterparty',
+            person_id = NULL,
+            resolution_status = 'unresolved',
+            confidence = CASE
+                WHEN confidence < :confidence THEN :confidence
+                ELSE confidence
+            END
+        WHERE user_id = :userId
+          AND source_type = :sourceType
+          AND resolution_status IN ('suggested_self', 'self_resolved')
+          AND (
+                source_ref = :sourceRef
+             OR source_event_id = :sourceEventId
+             OR ('raw:' || source_event_id) = :sourceRef
+          )
+        """,
+    )
+    public suspend fun rejectSelfSourceEventParticipants(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceEventId: String,
+        confidence: Double,
+    ): Int
+
+    @Query(
+        """
         SELECT * FROM commitment_participants
         WHERE user_id = :userId
         """,

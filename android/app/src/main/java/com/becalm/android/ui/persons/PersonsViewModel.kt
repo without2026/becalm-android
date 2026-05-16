@@ -317,6 +317,42 @@ public class PersonsViewModel @Inject constructor(
         }
     }
 
+    public fun onNotSelfMatch(event: UnassignedEventSummary) {
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().first()
+            if (userId.isNullOrBlank()) {
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_sign_in_required)) }
+                return@launch
+            }
+            when (
+                val result = manualMatchRepository.rejectInteractionAsSelf(
+                    userId = userId,
+                    sourceType = event.sourceType,
+                    sourceRef = event.sourceRef,
+                    interactionKind = event.interactionKind,
+                )
+            ) {
+                is BecalmResult.Success -> {
+                    productAnalytics.track(
+                        ProductAnalyticsEvent(
+                            eventId = UUID.randomUUID().toString(),
+                            eventName = ProductAnalyticsEvents.PERSON_MATCH_COMPLETED,
+                            occurredAt = Clock.System.now(),
+                            properties = mapOf(
+                                "source_type" to event.sourceType,
+                                "interaction_kind" to event.interactionKind.toString(),
+                                "match_target" to "not_self",
+                            ),
+                        ),
+                    )
+                }
+                is BecalmResult.Failure -> {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+                }
+            }
+        }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     private fun observePeople() {

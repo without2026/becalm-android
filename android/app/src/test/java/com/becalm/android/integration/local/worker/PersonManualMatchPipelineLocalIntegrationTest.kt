@@ -356,6 +356,70 @@ class PersonManualMatchPipelineLocalIntegrationTest {
     }
 
     @Test
+    fun `suggested self participant can be rejected as not self and mirrored`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-not-self-1", snippet = "Jake가 금요일까지 보내겠습니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-not-self-1",
+                    sourceEventId = "raw-not-self-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-not-self",
+                    displayName = "Jake",
+                ).copy(
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "jake",
+                    resolutionStatus = "suggested_self",
+                ),
+            ),
+        )
+        newWorker().doWork()
+
+        val api = mockk<RailwayApi>()
+        val patchSlot = slot<SourceEventParticipantPatchRequestDto>()
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-not-self-1",
+                request = capture(patchSlot),
+            )
+        } returns Response.success(sourceParticipantResponse("participant-not-self-1"))
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            workScheduler = scheduler,
+            apiProvider = Provider { api },
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+
+        val result = repository.rejectInteractionAsSelf(
+            userId = USER_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-not-self-1",
+            interactionKind = "email",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        val participant = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-not-self-1"),
+        ).single()
+        assertEquals("counterparty", participant.relationToUser)
+        assertEquals("unresolved", participant.resolutionStatus)
+        assertEquals(null, participant.personId)
+        assertEquals(1, scheduler.personIndexEnqueueCount)
+        coVerify(exactly = 1) {
+            api.patchSourceEventParticipant(
+                participantId = "participant-not-self-1",
+                request = patchSlot.captured,
+            )
+        }
+        assertEquals("counterparty", patchSlot.captured.relationToUser)
+        assertEquals("unresolved", patchSlot.captured.resolutionStatus)
+    }
+
+    @Test
     fun `manual match queues remote mirror after transient failure and worker retries`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         db.rawIngestionEventDao().insert(rawEvent(id = "raw-retry-1", snippet = "Steve 검토 필요"))

@@ -43,6 +43,16 @@ public interface PersonManualMatchRepository {
         sourceRef: String,
         interactionKind: String,
     ): BecalmResult<Unit>
+
+    /**
+     * Reopens a weak self suggestion as a counterparty review item.
+     */
+    public suspend fun rejectInteractionAsSelf(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        interactionKind: String,
+    ): BecalmResult<Unit>
 }
 
 public class PersonManualMatchRepositoryImpl @Inject constructor(
@@ -183,6 +193,51 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun rejectInteractionAsSelf(
+        userId: String,
+        sourceType: String,
+        sourceRef: String,
+        interactionKind: String,
+    ): BecalmResult<Unit> = withContext(ioDispatcher) {
+        try {
+            val sourceEventId = sourceRef.removePrefix("raw:")
+            val updated = personIndexDao.rejectSelfSourceEventParticipants(
+                userId = userId,
+                sourceType = sourceType,
+                sourceRef = sourceRef,
+                sourceEventId = sourceEventId,
+                confidence = NOT_SELF_CONFIDENCE,
+            )
+            if (updated == 0) {
+                logger.w(TAG, "not-self review found no suggested self participant source=$sourceType ref=$sourceRef")
+            } else {
+                personIndexDao.upsertDirtySources(
+                    listOf(
+                        PersonIndexDirtySources.rawEvent(
+                            userId = userId,
+                            sourceType = sourceType,
+                            sourceEventId = sourceEventId,
+                            reason = "not_self",
+                            now = Clock.System.now(),
+                        ),
+                    ),
+                )
+                mirrorNotSelf(
+                    userId = userId,
+                    sourceType = sourceType,
+                    sourceEventId = sourceEventId,
+                )
+            }
+            workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
+            logger.d(TAG, "not-self review saved source=$sourceType/$interactionKind ref=$sourceRef")
+            BecalmResult.Success(Unit)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            logger.e(TAG, "not-self review write failed", t)
+            BecalmResult.Failure(BecalmError.Unknown(t))
+        }
+    }
+
     private suspend fun mirrorManualMatch(
         userId: String,
         sourceType: String,
@@ -280,6 +335,48 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         }
     }
 
+    private suspend fun mirrorNotSelf(
+        userId: String,
+        sourceType: String,
+        sourceEventId: String,
+    ) {
+        val remoteApi = api ?: return
+        val participants = personIndexDao.findSourceEventParticipantsForUserAndEventIds(
+            userId = userId,
+            sourceEventIds = listOf(sourceEventId),
+        ).filter {
+            it.sourceType == sourceType &&
+                it.resolutionStatus == "unresolved" &&
+                it.relationToUser == "counterparty"
+        }
+        participants.forEach { participant ->
+            val request = participant.toNotSelfPatchRequest()
+            val response = try {
+                remoteApi.patchSourceEventParticipant(
+                    participantId = participant.id,
+                    request = request,
+                )
+            } catch (e: IOException) {
+                queueMirrorRetry(userId, participant.id, request, e.message ?: "network error")
+                logger.w(TAG, "not-self remote mirror network failed participant=${participant.id}: ${e.message}")
+                return@forEach
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                queueMirrorRetry(userId, participant.id, request, t.message ?: t::class.java.simpleName)
+                logger.w(TAG, "not-self remote mirror failed participant=${participant.id}: ${t.message}")
+                return@forEach
+            }
+            if (!response.isSuccessful) {
+                logger.w(TAG, "not-self remote mirror HTTP ${response.code()} participant=${participant.id}")
+                if (response.code().isRetryableMirrorStatus()) {
+                    queueMirrorRetry(userId, participant.id, request, "HTTP ${response.code()}")
+                }
+            } else {
+                personIndexDao.deletePendingSourceParticipantMirrors(userId, listOf(participant.id))
+            }
+        }
+    }
+
     private suspend fun queueMirrorRetry(
         userId: String,
         participantId: String,
@@ -325,6 +422,20 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             confidence = confidence.coerceAtLeast(SELF_MATCH_CONFIDENCE),
             relationToUser = "self",
             resolutionStatus = "self_resolved",
+        )
+
+    private fun SourceEventParticipantEntity.toNotSelfPatchRequest(): SourceEventParticipantPatchRequestDto =
+        SourceEventParticipantPatchRequestDto(
+            identityType = identityType,
+            normalizedValue = normalizedValue,
+            displayNameRaw = displayNameRaw,
+            emailRaw = emailRaw,
+            phoneRaw = phoneRaw,
+            organizationRaw = organizationRaw,
+            titleRaw = titleRaw,
+            confidence = confidence.coerceAtLeast(NOT_SELF_CONFIDENCE),
+            relationToUser = "counterparty",
+            resolutionStatus = "unresolved",
         )
 
     private fun Int.isRetryableMirrorStatus(): Boolean =
@@ -418,6 +529,7 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         private const val TAG = "PersonManualMatchRepo"
         private const val EXISTING_PERSON_CONFIDENCE = 0.95
         private const val SELF_MATCH_CONFIDENCE = 0.98
+        private const val NOT_SELF_CONFIDENCE = 1.0
         private val MATCHABLE_IDENTITY_TYPES = setOf("email", "phone", "alias", "name")
     }
 }

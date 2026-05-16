@@ -98,6 +98,12 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 - Weak self match, competing person, wrong person correction을 review queue로 노출한다.
 - 사용자 확인 결과를 backend feedback/audit trail로 저장한다.
 - Merge, split, self-confirm, not-self, undo를 지원한다.
+- 완료 기준:
+  - Suggested-self review item은 Android review queue에서 `self-confirm`과 `not-self`를 모두 선택할 수 있다.
+  - `not-self`는 local participant를 `unresolved/counterparty`로 되돌리고 manual match를 이어갈 수 있게 한다.
+  - Backend participant patch는 `person_resolved`, `self_resolved`, `unresolved`, `suggested_self`, `ignored` 상태 전환을 지원한다.
+  - Backend는 review action을 `person_match_review_submitted` product event로 남겨 최소 audit trail을 제공한다.
+  - Wrong self/person correction 후 stale person projection은 reindex cascade로 복구된다.
 
 ## TDD 기준
 

@@ -115,6 +115,7 @@ public fun UnassignedEventsScreen(
             matchChoices = state.matchChoices,
             onManualMatch = viewModel::onManualMatch,
             onSelfMatch = viewModel::onSelfMatch,
+            onNotSelfMatch = viewModel::onNotSelfMatch,
             modifier = Modifier.padding(padding),
         )
     }
@@ -128,6 +129,7 @@ internal fun UnassignedEventsContent(
     matchChoices: List<PersonMatchChoiceRow> = emptyList(),
     onManualMatch: (UnassignedEventSummary, String, String) -> Unit = { _, _, _ -> },
     onSelfMatch: (UnassignedEventSummary) -> Unit = {},
+    onNotSelfMatch: (UnassignedEventSummary) -> Unit = {},
 ) {
     var filter by remember { mutableStateOf(MatchQueueFilter.RECOMMENDED) }
     var completedIds by remember { mutableStateOf(setOf<String>()) }
@@ -205,6 +207,9 @@ internal fun UnassignedEventsContent(
                             onSelfMatch(event)
                             completedIds = completedIds + event.id
                             laterIds = laterIds - event.id
+                        },
+                        onNotSelf = {
+                            onNotSelfMatch(event)
                         },
                     )
                 }
@@ -306,6 +311,7 @@ private fun PersonMatchReviewCard(
     onConfirm: (String, String) -> Unit,
     onLater: () -> Unit,
     onSelf: () -> Unit,
+    onNotSelf: () -> Unit,
 ) {
     val candidate = event.bestCandidate()
     var manualOpen by remember(event.id) { mutableStateOf(candidate == null) }
@@ -351,6 +357,20 @@ private fun PersonMatchReviewCard(
                 },
             )
             Spacer(modifier = Modifier.height(12.dp))
+            if (candidate.role == "suggested") {
+                BecalmButton(
+                    text = stringResource(R.string.person_match_not_self_action),
+                    onClick = {
+                        onNotSelf()
+                        manualOpen = true
+                    },
+                    variant = BecalmButtonVariant.Secondary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("unassigned-match-not-self-${event.id}"),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             BecalmButton(
                 text = stringResource(R.string.person_match_self_action),
                 onClick = onSelf,

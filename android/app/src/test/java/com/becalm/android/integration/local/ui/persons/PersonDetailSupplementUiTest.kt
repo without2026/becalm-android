@@ -195,6 +195,40 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
+    fun `unassigned events suggested self can be rejected and opens manual match`() {
+        var notSelfEventId: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-suggested-self",
+                            sourceType = SourceType.GMAIL,
+                            title = "Jake가 보낸 메일",
+                            suggestedLabel = "Jake",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    onNotSelfMatch = { event ->
+                        notSelfEventId = event.id
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-suggested-self")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.onNodeWithTag("unassigned-match-anchor-event-suggested-self").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("event-suggested-self", notSelfEventId)
+        }
+    }
+
+    @Test
     fun `unassigned events other person renders existing people and matches selected row`() {
         var matchedAnchor: String? = null
         var matchedNickname: String? = null

@@ -657,6 +657,7 @@
     <string name="person_match_confirm_action">확인</string>
     <string name="person_match_other_person_action">다른 사람</string>
     <string name="person_match_self_action">이건 내 기록입니다</string>
+    <string name="person_match_not_self_action">내 기록이 아닙니다</string>
     <string name="person_match_later_action">나중에</string>
     <string name="commitment_state_pending">미확인</string>
     <string name="commitment_state_reminded">알림 보냄</string>
