@@ -25,6 +25,7 @@ public data class PersonIndexAggregateRow(
     val channelSources: String?,
     val lastInteractionAt: Instant?,
     val lastInteractionSnippet: String?,
+    val interactionText: String?,
 )
 
 @Dao
@@ -455,7 +456,8 @@ public interface PersonIndexDao {
                     WHEN i.occurred_at = latest.latest_at THEN COALESCE(i.snippet, i.title)
                     ELSE NULL
                 END
-            ) AS lastInteractionSnippet
+            ) AS lastInteractionSnippet,
+            GROUP_CONCAT(COALESCE(i.title, '') || ' ' || COALESCE(i.snippet, ''), ' ') AS interactionText
         FROM person_interactions i
         JOIN (
             SELECT user_id, person_id, MAX(occurred_at) AS latest_at

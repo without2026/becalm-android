@@ -742,6 +742,16 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             title = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
             snippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
         )
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "commitment:asan-contact",
+            kind = "commitment",
+            role = "action",
+            occurredAt = Instant.parse("2026-04-23T05:00:00Z"),
+            title = "추가 문의",
+            snippet = "모집 페이지 하단의 채널톡으로 문의",
+        )
 
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             val state = awaitItem()

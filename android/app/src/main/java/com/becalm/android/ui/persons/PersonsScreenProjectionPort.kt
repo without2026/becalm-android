@@ -372,7 +372,7 @@ public class EnrichmentBackedPersonsScreenProjectionPort @Inject constructor(
     private fun PersonIndexAggregateRow.shouldHideFromPeopleList(): Boolean =
         PersonMatchingEventPolicy.isLikelyServiceAccountNotification(
             title = displayNameHint,
-            snippet = lastInteractionSnippet,
+            snippet = listOfNotNull(lastInteractionSnippet, interactionText).joinToString(" ").ifBlank { null },
             suggestedLabel = primaryIdentityKey,
         )
 
