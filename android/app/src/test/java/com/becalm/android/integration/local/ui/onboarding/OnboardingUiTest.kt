@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -216,6 +217,13 @@ class OnboardingUiTest {
             .performScrollToNode(hasTestTag("source-ownership-conn-gmail-self"))
         composeRule.onNodeWithText("Gmail").assertIsDisplayed()
         composeRule.onNodeWithText("work@example.com").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_source_ownership_required)).assertIsDisplayed()
+        composeRule.onAllNodesWithTag("source-ownership-conn-gmail-unknown").assertCountEquals(0)
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connections-continue"))
+        composeRule.onNodeWithTag("source-connections-continue").assertIsNotEnabled()
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-ownership-conn-gmail-self"))
         composeRule.onNodeWithTag("source-ownership-conn-gmail-self").performClick()
 
         composeRule.runOnIdle {

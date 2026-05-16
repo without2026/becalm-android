@@ -55,6 +55,11 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 - Gmail/Calendar/IMAP/Outlook 연결 완료 후 "이 계정은 내 계정인가"를 확인한다.
 - 업무용/개인용처럼 여러 self source를 추가할 수 있다.
 - Shared/delegated source는 self matching anchor로 쓰지 않는다.
+- Android 완료 기준:
+  - Onboarding setup에서 연결된 source connection의 ownership을 확인한다.
+  - 연결 계정이 `unknown`이면 setup 완료를 막고 사용자에게 선택을 요구한다.
+  - Onboarding에서는 `self`, `shared`, `delegated` 중 하나를 명시적으로 선택해야 한다.
+  - Settings에서는 복구/보류 목적의 `unknown` 값을 계속 지원한다.
 
 ### Slice 4. Extractor input self context
 

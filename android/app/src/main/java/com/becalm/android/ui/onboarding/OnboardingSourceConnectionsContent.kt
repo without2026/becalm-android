@@ -53,6 +53,7 @@ internal fun SourceConnectionsContent(
     val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
     val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
     val selfIdentityGateOpen = selfIdentity?.confirmed != false
+    val sourceOwnershipGateOpen = sourceOwnerships.none { it.ownership == "unknown" }
     val showRequiredSetup = setupItems.isNotEmpty() || selfIdentity != null
     val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
     LazyColumn(
@@ -161,6 +162,15 @@ internal fun SourceConnectionsContent(
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
+            if (!sourceOwnershipGateOpen) {
+                item(key = "source-ownership-required") {
+                    Text(
+                        text = stringResource(R.string.onb_setup_source_ownership_required),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             items(sourceOwnerships, key = { item -> item.id }) { item ->
                 SourceOwnershipSetupRow(
                     item = item,
@@ -174,7 +184,7 @@ internal fun SourceConnectionsContent(
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
-                enabled = selfIdentityGateOpen,
+                enabled = selfIdentityGateOpen && sourceOwnershipGateOpen,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("source-connections-continue"),

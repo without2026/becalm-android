@@ -1061,6 +1061,15 @@ public class OnboardingViewModel @Inject constructor(
                 }
                 return@launch
             }
+            if (_uiState.value.sourceOwnerships.any { it.ownership == "unknown" }) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
+                    )
+                }
+                return@launch
+            }
             val current = _uiState.value.stepStates
             val terminal = setOf(
                 StepStatus.GRANTED,

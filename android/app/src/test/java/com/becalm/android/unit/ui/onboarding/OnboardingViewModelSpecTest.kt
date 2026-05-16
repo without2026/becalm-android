@@ -890,6 +890,23 @@ class OnboardingViewModelSpecTest {
         assertEquals(null, viewModel.uiState.value.error)
     }
 
+    @Test
+    fun `setup completion is blocked until connected source ownership is confirmed`() = runTest {
+        coEvery { userProfileRepository.find("user-123") } returns userProfile(displayName = "민홍")
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(
+            listOf(sourceConnection(id = "conn-gmail", ownership = "unknown")),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(R.string.onb_error_source_ownership_required, viewModel.uiState.value.error?.resId)
+    }
+
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
         userPrefsStore = userPrefsStore,
         logger = logger,

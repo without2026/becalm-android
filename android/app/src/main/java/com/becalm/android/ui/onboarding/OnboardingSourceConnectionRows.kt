@@ -225,13 +225,12 @@ internal fun SourceOwnershipSetupRow(
                 "self" to R.string.settings_identity_connection_self,
                 "shared" to R.string.settings_identity_connection_shared,
                 "delegated" to R.string.settings_identity_connection_delegated,
-                "unknown" to R.string.settings_identity_connection_unknown,
             ).forEachIndexed { index, option ->
                 SegmentedButton(
                     selected = item.ownership == option.first,
                     enabled = !updating,
                     onClick = { onOwnership(option.first) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
                     modifier = Modifier.testTag("source-ownership-${item.id}-${option.first}"),
                 ) {
                     Text(stringResource(option.second))
