@@ -675,6 +675,7 @@
     <string name="commitment_detail_manual_source_fmt">사용자 직접 추가 %1$s KST</string>
     <string name="commitment_detail_llm_source_fmt">%1$s · %2$s KST</string>
     <string name="commitment_detail_llm_source_original_fmt">원문 · %1$s KST</string>
+    <string name="commitment_detail_source_title_fmt">%1$s</string>
     <string name="commitment_detail_empty_error">삭제된 약속</string>
     <string name="commitment_detail_error_missing_id">약속 정보가 없습니다. 뒤로 가서 다시 시도해 주세요.</string>
     <string name="commitment_detail_error_load_failed">약속 상세를 불러오지 못했습니다.</string>

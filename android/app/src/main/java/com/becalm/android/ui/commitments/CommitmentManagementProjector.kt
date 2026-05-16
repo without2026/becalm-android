@@ -153,7 +153,7 @@ internal object CommitmentManagementProjector {
             counterpartyDisplayName = counterpartyDisplayName,
             sourceType = sourceType,
             sourceTitle = sourceTitle,
-            sourceOccurredAt = sourceOccurredAt,
+            sourceOccurredAt = sourceOccurredAt.takeUnless { sourceType == SourceType.MESSAGE_SCREENSHOT },
             dueHint = null,
             isManual = sourceType == SourceType.MANUAL,
             deEmphasized = deEmphasized,

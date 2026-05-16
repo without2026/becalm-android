@@ -148,6 +148,35 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `message screenshot management rows hide import timestamp from card source context`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(
+                    id = "screenshot-1",
+                    sourceType = "message_screenshot",
+                    sourceEventTitle = "카카오톡 캡처",
+                    sourceEventOccurredAt = Instant.parse("2026-05-17T06:00:00Z"),
+                    dueAt = Instant.parse("2026-05-20T05:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+            val row = settled.items.single()
+            assertEquals("message_screenshot", row.sourceType)
+            assertEquals("카카오톡 캡처", row.sourceTitle)
+            assertNull(row.sourceOccurredAt)
+            assertEquals(Instant.parse("2026-05-20T05:00:00Z"), row.dueAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-002 filter tabs isolate give take and action schedule commitments`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(

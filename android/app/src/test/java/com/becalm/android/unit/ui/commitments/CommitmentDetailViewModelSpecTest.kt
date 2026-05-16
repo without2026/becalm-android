@@ -177,6 +177,25 @@ class CommitmentDetailViewModelSpecTest {
     }
 
     @Test
+    fun `message screenshot source label does not expose import timestamp as promise date`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "screenshot-1") } returns flowOf(
+            entity(
+                id = "screenshot-1",
+                sourceType = "message_screenshot",
+                sourceEventTitle = "카카오톡 캡처",
+                sourceEventOccurredAt = Instant.parse("2026-05-17T06:00:00Z"),
+            ),
+        )
+
+        val viewModel = buildViewModel("screenshot-1")
+        advanceUntilIdle()
+
+        val sourceLabel = viewModel.uiState.value.source.sourceLabel
+        assertEquals(R.string.commitment_detail_source_title_fmt, sourceLabel?.resId)
+        assertEquals(listOf("카카오톡 캡처"), sourceLabel?.args)
+    }
+
+    @Test
     fun `non action detail state exposes read only trackable with no action buttons`() = runTest {
         every { commitmentRepository.observeByIdForUser("user-1", "schedule-1") } returns flowOf(
             entity(
