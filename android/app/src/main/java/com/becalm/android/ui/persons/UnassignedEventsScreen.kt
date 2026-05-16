@@ -352,6 +352,7 @@ private fun PersonMatchReviewCard(
         if (candidate != null && !manualOpen) {
             CandidateRecommendation(
                 candidate = candidate,
+                isSelfSuggestion = isSelfSuggestion,
                 onSelect = {
                     personAnchor = candidate.anchor
                     selectedNickname = candidate.displayName
@@ -439,6 +440,7 @@ private fun PersonMatchReviewCard(
 @Composable
 private fun CandidateRecommendation(
     candidate: PersonMatchCandidateSummary,
+    isSelfSuggestion: Boolean,
     onSelect: () -> Unit,
 ) {
     QuietPanel(
@@ -447,7 +449,13 @@ private fun CandidateRecommendation(
         contentPadding = PaddingValues(12.dp),
     ) {
         Text(
-            text = stringResource(R.string.person_match_recommendation_label),
+            text = stringResource(
+                if (isSelfSuggestion) {
+                    R.string.person_match_self_recommendation_label
+                } else {
+                    R.string.person_match_recommendation_label
+                },
+            ),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
