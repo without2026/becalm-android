@@ -77,6 +77,11 @@ Person matching의 중심은 counterparty 후보가 아니라 현재 사용자(s
 - Self identity anchor 또는 source ownership 변경 시 source participants,
   commitment participants, person interactions, unmatched review, memory projection을
   재계산한다.
+- 완료 기준:
+  - Active self anchors 기준으로 기존 source participant를 다시 self/person/unresolved로 판정한다.
+  - Reindex 전에 해당 source event/commitment의 stale `commitment_participants`, `person_interactions` projection을 삭제한다.
+  - Source ownership 변경은 해당 source connection 범위만 재계산한다.
+  - Self anchor 생성/수정 및 profile phone anchor 변경은 사용자 범위 reindex를 best-effort로 실행한다.
 
 ### Slice 6. Memory hardening
 
