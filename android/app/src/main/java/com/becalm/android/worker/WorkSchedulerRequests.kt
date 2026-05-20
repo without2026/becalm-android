@@ -29,6 +29,7 @@ internal object WorkSchedulerRequests {
     const val BACKOFF_DELAY_SECONDS: Long = 30L
     const val UPLOAD_DEBOUNCE_SECONDS: Long = 10L
     const val TAG_VOICE_UPLOAD: String = "voice_upload"
+    const val TAG_MEETING_SPEAKER_PREVIEW: String = "meeting_speaker_preview"
     const val TAG_MESSAGE_SCREENSHOT_UPLOAD: String = "message_screenshot_upload"
     const val TAG_PROFILE_MEMORY: String = "profile_memory"
     const val LEGACY_TAG_COMMITMENT_EXTRACTION: String = "commitment_extraction"
@@ -47,6 +48,11 @@ internal object WorkSchedulerRequests {
         .setRequiresBatteryNotLow(true)
         .build()
 
+    val processDoneConstraints: Constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+        .setRequiresBatteryNotLow(true)
+        .build()
+
     val coldSyncStage2Constraints: Constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.UNMETERED)
         .setRequiresBatteryNotLow(true)
@@ -55,6 +61,7 @@ internal object WorkSchedulerRequests {
     fun resolveSource(sourceKey: String): SourceWorkSpec? =
         when (sourceKey) {
             SourceType.VOICE -> SourceWorkSpec(MediaStoreWorker::class.java, UniqueWorkKeys.MEDIA_STORE)
+            SourceType.CALL_RECORDING -> SourceWorkSpec(MediaStoreWorker::class.java, UniqueWorkKeys.MEDIA_STORE)
             SourceType.MEETING -> SourceWorkSpec(MediaStoreWorker::class.java, UniqueWorkKeys.MEDIA_STORE)
             SourceType.NAVER_IMAP -> SourceWorkSpec(ImapNaverWorker::class.java, UniqueWorkKeys.NAVER_IMAP)
             SourceType.DAUM_IMAP -> SourceWorkSpec(ImapDaumWorker::class.java, UniqueWorkKeys.DAUM_IMAP)
@@ -109,6 +116,8 @@ internal object WorkSchedulerRequests {
         selfSpeakerId: String? = null,
         speakerMappingsJson: String? = null,
         speakerPreviewId: String? = null,
+        extractionJobId: String? = null,
+        extractionJobPollAttempt: Int = 0,
     ): OneTimeWorkRequest {
         val input = workDataOf(
             VoiceUploadWorker.KEY_RAW_EVENT_ID to rawEventId,
@@ -121,6 +130,10 @@ internal object WorkSchedulerRequests {
                     if (!selfSpeakerId.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SELF_SPEAKER_ID, selfSpeakerId)
                     if (!speakerMappingsJson.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SPEAKER_MAPPINGS_JSON, speakerMappingsJson)
                     if (!speakerPreviewId.isNullOrBlank()) putString(VoiceUploadWorker.KEY_SPEAKER_PREVIEW_ID, speakerPreviewId)
+                    if (!extractionJobId.isNullOrBlank()) putString(VoiceUploadWorker.KEY_EXTRACTION_JOB_ID, extractionJobId)
+                    if (extractionJobPollAttempt > 0) {
+                        putInt(VoiceUploadWorker.KEY_EXTRACTION_JOB_POLL_ATTEMPT, extractionJobPollAttempt)
+                    }
                 }
                 .build()
         }
@@ -128,7 +141,7 @@ internal object WorkSchedulerRequests {
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(
-                        if (speakerPreviewId.isNullOrBlank()) {
+                        if (speakerPreviewId.isNullOrBlank() && extractionJobId.isNullOrBlank()) {
                             NetworkType.UNMETERED
                         } else {
                             NetworkType.CONNECTED
@@ -159,6 +172,23 @@ internal object WorkSchedulerRequests {
             .addTag(TAG_MESSAGE_SCREENSHOT_UPLOAD)
             .build()
 
+    fun meetingSpeakerPreviewRequest(rawEventId: String, audioUri: String): OneTimeWorkRequest =
+        OneTimeWorkRequest.Builder(MeetingSpeakerPreviewWorker::class.java)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.UNMETERED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+            .setInputData(
+                workDataOf(
+                    MeetingSpeakerPreviewWorker.KEY_RAW_EVENT_ID to rawEventId,
+                    MeetingSpeakerPreviewWorker.KEY_AUDIO_URI to audioUri,
+                ),
+            )
+            .addTag(TAG_MEETING_SPEAKER_PREVIEW)
+            .build()
+
     fun allStaticKeys(): List<String> = listOf(
         UniqueWorkKeys.MEDIA_STORE,
         UniqueWorkKeys.NAVER_IMAP,
@@ -174,6 +204,8 @@ internal object WorkSchedulerRequests {
         UniqueWorkKeys.ENRICHMENT_PERIODIC,
         UniqueWorkKeys.RETENTION_SWEEP,
         UniqueWorkKeys.OVERDUE_SWEEP,
+        UniqueWorkKeys.PROCESS_DONE,
+        UniqueWorkKeys.PROCESS_DONE_PERIODIC,
         UniqueWorkKeys.COLD_SYNC_STAGE1_DEFERRED,
         UniqueWorkKeys.COLD_SYNC_STAGE2,
     )
@@ -332,6 +364,39 @@ internal object WorkSchedulerRequests {
                 )
                 .build(),
             logMessage = "scheduleOverdueSweep key=${UniqueWorkKeys.OVERDUE_SWEEP}",
+        )
+
+    fun processDoneRequest(initialDelaySeconds: Long): OneTimeWorkRequest {
+        val builder = OneTimeWorkRequest.Builder(ProcessDoneWorker::class.java)
+            .setConstraints(processDoneConstraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_SECONDS, TimeUnit.SECONDS)
+        if (initialDelaySeconds > 0L) {
+            builder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
+        }
+        return builder.build()
+    }
+
+    fun processDonePlan(initialDelaySeconds: Long): UniqueOneTimeWorkPlan =
+        UniqueOneTimeWorkPlan(
+            uniqueKey = UniqueWorkKeys.PROCESS_DONE,
+            policy = ExistingWorkPolicy.REPLACE,
+            request = processDoneRequest(initialDelaySeconds.coerceAtLeast(0L)),
+            logMessage = "enqueueProcessDone key=${UniqueWorkKeys.PROCESS_DONE} delaySec=$initialDelaySeconds",
+        )
+
+    fun processDoneSweepPlan(): UniquePeriodicWorkPlan =
+        UniquePeriodicWorkPlan(
+            uniqueKey = UniqueWorkKeys.PROCESS_DONE_PERIODIC,
+            policy = ExistingPeriodicWorkPolicy.KEEP,
+            request = PeriodicWorkRequest.Builder(ProcessDoneWorker::class.java, 6, TimeUnit.HOURS)
+                .setConstraints(processDoneConstraints)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    BACKOFF_DELAY_SECONDS,
+                    TimeUnit.SECONDS,
+                )
+                .build(),
+            logMessage = "scheduleProcessDoneSweep key=${UniqueWorkKeys.PROCESS_DONE_PERIODIC}",
         )
 
     fun deferredColdSyncStage1Plan(): UniqueOneTimeWorkPlan =

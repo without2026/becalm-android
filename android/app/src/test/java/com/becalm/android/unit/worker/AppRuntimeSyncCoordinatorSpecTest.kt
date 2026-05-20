@@ -3,6 +3,7 @@ package com.becalm.android.unit.worker
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.local.db.dao.PersonIndexStaleLinkedSourceRow
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
@@ -13,6 +14,7 @@ import com.becalm.android.worker.MediaAudioPermissionChecker
 import com.becalm.android.worker.RuntimeSyncSourceResolver
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -35,7 +37,11 @@ class AppRuntimeSyncCoordinatorSpecTest {
     private val logger: Logger = mockk(relaxed = true)
 
     init {
+        every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
         coEvery { personIndexDao.findPendingSourceParticipantMirrors(any(), any()) } returns emptyList()
+        coEvery { personIndexDao.findStaleLinkedSourceProjectionRows(any(), any()) } returns emptyList()
+        coEvery { personIndexDao.findStaleRawSourceProjectionRows(any(), any()) } returns emptyList()
     }
 
     @Test
@@ -44,6 +50,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf("content://tree/voice")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
         coEvery { runtimeSyncSourceResolver.periodicSources() } returns setOf(
@@ -79,6 +86,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf("content://tree/voice")
         every { contactsPermissionChecker.isGranted() } returns false
         every { mediaAudioPermissionChecker.isGranted() } returns false
         coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
@@ -103,6 +111,7 @@ class AppRuntimeSyncCoordinatorSpecTest {
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf("content://tree/voice")
         every { contactsPermissionChecker.isGranted() } returns true
         every { mediaAudioPermissionChecker.isGranted() } returns true
         coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
@@ -115,6 +124,29 @@ class AppRuntimeSyncCoordinatorSpecTest {
         verify(exactly = 1) { contentObserverBootstrap.stop() }
         verify(exactly = 0) { contentObserverBootstrap.start() }
         verify(exactly = 1) { workScheduler.scheduleEnrichmentSweep() }
+    }
+
+    @Test
+    fun `startup starts observer when only call recording source is enabled`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
+        every {
+            userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING)
+        } returns flowOf("content://tree/call")
+        every { contactsPermissionChecker.isGranted() } returns true
+        every { mediaAudioPermissionChecker.isGranted() } returns true
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        verify(exactly = 1) { contentObserverBootstrap.start() }
+        verify(exactly = 0) { contentObserverBootstrap.stop() }
     }
 
     @Test
@@ -243,6 +275,86 @@ class AppRuntimeSyncCoordinatorSpecTest {
         coordinator.start()
 
         verify(exactly = 0) { workScheduler.enqueueSourceParticipantMirrorRetry() }
+    }
+
+    @Test
+    fun `startup queues stale linked source projection repair and reindexes people`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery {
+            personIndexDao.findStaleLinkedSourceProjectionRows(userId = "user-1", limit = 500)
+        } returns listOf(
+            PersonIndexStaleLinkedSourceRow(sourceType = SourceType.NAVER_IMAP, sourceEventId = "raw-naver-1"),
+            PersonIndexStaleLinkedSourceRow(sourceType = SourceType.GMAIL, sourceEventId = "raw-gmail-1"),
+        )
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        coVerify(exactly = 1) {
+            personIndexDao.upsertDirtySources(
+                match { rows ->
+                    rows.size == 2 &&
+                        rows.any {
+                            it.userId == "user-1" &&
+                                it.sourceType == SourceType.NAVER_IMAP &&
+                                it.sourceRef == "raw:raw-naver-1" &&
+                                it.interactionKind == "email" &&
+                                it.reason == "stale_linked_source_projection_repair"
+                        } &&
+                        rows.any {
+                            it.userId == "user-1" &&
+                                it.sourceType == SourceType.GMAIL &&
+                                it.sourceRef == "raw:raw-gmail-1" &&
+                                it.interactionKind == "email" &&
+                                it.reason == "stale_linked_source_projection_repair"
+                        }
+                },
+            )
+        }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L) }
+    }
+
+    @Test
+    fun `startup queues stale raw source projection repair and reindexes people`() = runTest {
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(false)
+        every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { contactsPermissionChecker.isGranted() } returns false
+        every { mediaAudioPermissionChecker.isGranted() } returns false
+        coEvery { runtimeSyncSourceResolver.periodicSources() } returns emptySet()
+        coEvery { runtimeSyncSourceResolver.hasBackendMailSource() } returns false
+        coEvery {
+            personIndexDao.findStaleRawSourceProjectionRows(userId = "user-1", limit = 500)
+        } returns listOf(
+            PersonIndexStaleLinkedSourceRow(sourceType = SourceType.NAVER_IMAP, sourceEventId = "server-source-event-1"),
+        )
+
+        val coordinator = buildCoordinator()
+
+        coordinator.start()
+
+        coVerify(exactly = 1) {
+            personIndexDao.upsertDirtySources(
+                match { rows ->
+                    rows.size == 1 &&
+                        rows.single().userId == "user-1" &&
+                        rows.single().sourceType == SourceType.NAVER_IMAP &&
+                        rows.single().sourceRef == "raw:server-source-event-1" &&
+                        rows.single().interactionKind == "email" &&
+                        rows.single().reason == "stale_raw_source_projection_repair"
+                },
+            )
+        }
+        verify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L) }
     }
 
     private fun buildCoordinator(): AppRuntimeSyncCoordinator =

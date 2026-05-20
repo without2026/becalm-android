@@ -3,7 +3,9 @@ package com.becalm.android.integration.local.data.repository
 import app.cash.turbine.test
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.RecordingLogger
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.SyncCursorStoreImpl
+import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceStatusItemDto
 import com.becalm.android.data.remote.dto.SourceStatusResponseDto
@@ -36,24 +38,27 @@ class SourceStatusRepositoryLocalIntegrationTest {
     private val cursorStore = SyncCursorStoreImpl(
         LocalIntegrationSupport.prefsDataStore("source-status-cursors"),
     )
+    private val userPrefs = LocalIntegrationSupport.prefsDataStore("source-status-user-prefs")
+    private val userPrefsStore = UserPrefsStoreImpl(userPrefs)
     private val repository = SourceStatusRepositoryImpl(
         cursorStore = cursorStore,
-        userPrefs = LocalIntegrationSupport.prefsDataStore("source-status-user-prefs"),
+        userPrefs = userPrefs,
         api = api,
         ioDispatcher = UnconfinedTestDispatcher(),
         logger = logger,
     )
 
     @Test
-    fun `SMG-001 and TDY-003 observeAll emits product sources including imports and excluding call recording`() = runTest {
+    fun `SMG-001 and TDY-003 observeAll emits product sources including split recording folders`() = runTest {
         repository.observeAll().test {
             val initial = awaitItem()
 
             assertEquals(SourceType.PRODUCT_SOURCES, initial.map { it.sourceType }.toSet())
-            assertEquals(9, initial.size)
+            assertEquals(10, initial.size)
+            assertTrue(initial.any { it.sourceType == SourceType.VOICE })
+            assertTrue(initial.any { it.sourceType == SourceType.CALL_RECORDING })
             assertTrue(initial.any { it.sourceType == SourceType.MEETING })
             assertTrue(initial.any { it.sourceType == SourceType.MESSAGE_SCREENSHOT })
-            assertFalse(initial.any { it.sourceType == SourceType.CALL_RECORDING })
             assertTrue(initial.all { it.status == SourceConnectionStatus.NEVER_CONNECTED })
 
             cancelAndIgnoreRemainingEvents()
@@ -99,6 +104,123 @@ class SourceStatusRepositoryLocalIntegrationTest {
             assertEquals(gmailSyncedAt, snapshot[SourceType.GMAIL]?.lastSyncedAt)
             assertEquals(SourceConnectionStatus.ERROR, snapshot[SourceType.OUTLOOK_MAIL]?.status)
             assertEquals("token expired", snapshot[SourceType.OUTLOOK_MAIL]?.errorMessage)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `refreshFromServer clears stale sync timestamp when server reports idle without last sync`() = runTest {
+        val staleSyncedAt = Instant.parse("2026-04-23T01:20:00Z")
+        assertTrue(repository.recordSyncSuccess(SourceType.GMAIL, staleSyncedAt) is BecalmResult.Success)
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "idle",
+                        lastSyncAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeSources().test {
+            var snapshot = awaitItem()
+            while (snapshot[SourceType.GMAIL]?.status == SourceConnectionStatus.CONNECTED) {
+                snapshot = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.NEVER_CONNECTED, snapshot[SourceType.GMAIL]?.status)
+            assertEquals(null, snapshot[SourceType.GMAIL]?.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `refreshFromServer preserves idle source as connected when server includes last sync`() = runTest {
+        val syncedAt = Instant.parse("2026-04-23T01:20:00Z")
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "idle",
+                        lastSyncAt = syncedAt,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeSources().test {
+            var snapshot = awaitItem()
+            while (snapshot[SourceType.GMAIL]?.lastSyncedAt != syncedAt) {
+                snapshot = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.CONNECTED, snapshot[SourceType.GMAIL]?.status)
+            assertEquals(syncedAt, snapshot[SourceType.GMAIL]?.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onboarding connected source remains connected when server sync status is idle without last sync`() = runTest {
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, connected = true)
+        userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, managed = true)
+        coEvery { api.getSourceStatus() } returns Response.success(
+            SourceStatusResponseDto(
+                sources = listOf(
+                    SourceStatusItemDto(
+                        sourceType = SourceType.GMAIL,
+                        state = "idle",
+                        lastSyncAt = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(repository.refreshFromServer() is BecalmResult.Success)
+
+        repository.observeFor(SourceType.GMAIL).test {
+            var status = awaitItem()
+            while (status.status != SourceConnectionStatus.CONNECTED) {
+                status = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.CONNECTED, status.status)
+            assertEquals(null, status.lastSyncedAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `connected local flags overlay every connectable source family before first sync`() = runTest {
+        userPrefsStore.setCurrentUserId("user-1")
+        userPrefsStore.setSourceEnabled(SourceType.VOICE, enabled = true)
+        userPrefsStore.setSourceEnabled(SourceType.MEETING, enabled = true)
+        userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, connected = true)
+        userPrefsStore.setSourceEnabled(SourceType.GOOGLE_CALENDAR, enabled = true)
+
+        repository.observeSources().test {
+            var snapshot = awaitItem()
+            while (snapshot[SourceType.GOOGLE_CALENDAR]?.status != SourceConnectionStatus.CONNECTED) {
+                snapshot = awaitItem()
+            }
+
+            assertEquals(SourceConnectionStatus.CONNECTED, snapshot[SourceType.VOICE]?.status)
+            assertEquals(SourceConnectionStatus.CONNECTED, snapshot[SourceType.MEETING]?.status)
+            assertEquals(SourceConnectionStatus.CONNECTED, snapshot[SourceType.NAVER_IMAP]?.status)
+            assertEquals(SourceConnectionStatus.CONNECTED, snapshot[SourceType.GOOGLE_CALENDAR]?.status)
+            assertEquals(SourceConnectionStatus.NEVER_CONNECTED, snapshot[SourceType.OUTLOOK_CALENDAR]?.status)
 
             cancelAndIgnoreRemainingEvents()
         }

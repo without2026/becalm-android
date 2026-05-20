@@ -28,7 +28,7 @@
 - 운영 필수 관측: crashes, OAuth failures, source sync failures, extraction
   failures/filtered counts, unresolved participants, PMF responses.
 
-현재 점수: **7.68 / 10, conditional go with self-anchoring blocker**.
+현재 점수: **7.73 / 10, conditional go with live self-anchoring proof required**.
 
 조건:
 
@@ -37,9 +37,12 @@
 2. 실제 기기에서 필수 OAuth source의 provider round trip, 앱 복귀, status
    refresh, sync enqueue, restart 후 connected 상태 유지 확인.
 3. source connection/extraction funnel analytics 추가.
-4. extraction/person matching golden eval 기준 확정. 특히 현재 사용자 self anchor
-   없는 상태에서 wrong person, wrong self/counterparty, wrong give/take가
-   발생하는 fixture를 blocker class로 포함.
+4. extraction/person matching golden eval 기준 1차 반영. Backend deterministic
+   severe fixture와 beta eval gate runner가 wrong person, wrong
+   self/counterparty, wrong give/take, invented due date, privacy leakage,
+   noisy automation blocker class를 포함한다. 2026-05-16 KST 기준 Gmail/Naver
+   mixed private live eval 500건은 `500 / 500 pass`다. 남은 조건은 이 결과를
+   fresh no-user-data E2E와 self identity/person matching proof에 연결하는 것이다.
 5. beta 운영 runbook과 dashboard view 적용 확인.
 
 아직 완료되지 않은 부분:
@@ -55,6 +58,74 @@
 - Source connection/extraction funnel analytics와 beta dashboard/runbook. Android/backend
   analytics contract가 source OAuth, status refresh, sync, extraction event를 수집하도록
   확장되었고, Supabase dashboard view와 운영 runbook이 추가되었다.
+- Extraction golden eval 1차 live proof. Backend private Gmail/Naver mixed 500건
+  phase-aware live eval이 `500 / 500 pass`로 끝났다. Private report 원문은 PII 가능성이
+  있어 git에 올리지 않고 summary만 readiness evidence로 기록한다.
+- Samsung 실기기 source-state smoke. Windows Android SDK `adb.exe` 경로로
+  SM-F721N에 최신 APK를 설치/실행했고, Gmail과 Google Calendar가 connected/synced로
+  표시되며 force-stop 후 재실행해도 상태가 유지되는 것을 확인했다.
+- Fresh local reset smoke. 최신 debug APK로 `pm clear com.becalm.android` 후 Terms ->
+  Login 화면까지 fatal/ANR/OOM 없이 진입했다. Google button은 활성화되고
+  CredentialManager 호출까지 진행된다. 기기에서는 Google 계정 설정이 필요하다는
+  사용자-facing 메시지가 보였고, 같은 시도에서 Google Play Services가 `[28444] Developer
+  console is not set up correctly`를 반환해 Google sign-in 완료는 blocked다. 현재 debug
+  signing SHA-1은 `99:E0:79:3C:F2:E2:E5:C2:96:FE:A8:4E:45:75:29:DB:CA:AC:7F:5E`다.
+  추가 확인 결과 `google-services.json`의 Firebase project number는 `648339651268`이고
+  `oauth_client`가 비어 있지만, `local.properties`의 Web client ID는 다른 project number
+  prefix를 가진다. 2026-05-16 KST 재검증에서 Google Play Services는
+  `This android application is not registered to use OAuth2.0`를 반환했다. Google sign-in
+  E2E는 Google Cloud Console에서 Android OAuth client와 Web client를 같은 project로
+  정렬한 뒤 재검증해야 한다. 테스트 기기에 Google 계정을 추가한 뒤 재시도해도 동일한
+  OAuth2 등록 오류가 남아, 현재 blocker는 기기 계정 부재가 아니라 Console의 Android
+  OAuth client/package/SHA-1 등록 문제로 좁혀졌다. 이후 package/SHA-1을 GCP에 추가하고
+  재빌드하자 CredentialManager의 Google 계정 선택 UI는 열렸지만, 선택 후
+  `You must use a Web client as the server client ID`가 반환되었다. 현재 남은 blocker는
+  `google.web.client.id`에 Android client가 아니라 같은 project의 `Web application`
+  OAuth client ID를 넣는 것이다. 기존 Web application client ID로 교체한 뒤에는 Google
+  계정 선택과 앱 복귀가 통과했고, Supabase Auth가 400
+  `Provider (issuer "https://accounts.google.com") is not enabled`를 반환했다. 현재
+  남은 외부 설정 blocker는 Supabase Auth Providers에서 Google을 활성화하고 같은 Web
+  client ID/client secret을 등록하는 것이다. 앱 쪽은 이 provider-disabled setup failure를
+  네트워크 오류가 아니라 Google 로그인 설정 필요 메시지로 매핑하도록 보완했다. Supabase
+  Auth Google provider 활성화 후 fresh reset에서 Google CredentialManager account picker,
+  계정 선택, 앱 복귀, Supabase Google sign-in이 통과했고, 앱은 onboarding source selection
+  화면으로 진입했다.
+- Auth known follow-up. 2026-05-18 KST Samsung 실기기에서 이메일 로그인 시도 중
+  logcat에는 `email sign-in succeeded`와 `SignedIn(... onboardingResumeRoute=onboarding/setup)`가
+  찍혔고 `FATAL EXCEPTION`은 없었다. 사용자는 앱이 꺼진 것처럼 보였다고 보고했다.
+  같은 시점에 브라우저가 foreground였다가 앱이 다시 foreground로 복귀하는 WindowManager
+  전환 로그가 있어, crash가 아니라 auth 성공 직후 외부 activity/background 전환 또는
+  account-swap/restart 유사 UX일 가능성이 있다. 이번 slice의 blocker로 보지 않고 다음 auth
+  UX audit에서 재현/원인 확정 대상으로 남긴다.
+- Gmail OAuth 브라우저 동의 후 backend callback/status는 성공했다. Logcat 기준
+  `/v1/oauth/mail/gmail:status`가 callback 완료 전에는 `connected=false`를 반환했지만,
+  약 2초 뒤 `connected=true`, `LINK_GMAIL -> COMPLETE`, `source_connections` refresh,
+  `onboarding_email_connected` event로 수렴했다. 사용자가 본 `동의 필요` 재표시는 backend
+  연결 실패가 아니라 Setup entry 화면이 완료된 source step state를 무시하고 기본
+  `ConsentRequired`를 projected한 Android UI bug였다. Setup/Onboarding은 step state를
+  존중하고 Settings만 재연결을 위해 과거 step state를 무시하도록 수정했으며, 최신 APK를
+  같은 Samsung 기기에 재설치한 뒤 Gmail이 `연결됨`으로 표시되는 것을 확인했다.
+- 같은 Setup projection bug는 Google Calendar에도 영향을 줄 수 있다. Calendar callback/status가
+  완료되어 `LINK_GOOGLE_CALENDAR -> COMPLETE`가 되더라도 Setup entry가 step state를
+  무시하면 사용자는 다시 `준비됨` 상태를 볼 수 있었다. Google Calendar complete state가
+  Setup에서 `연결됨`으로 projected되는 단위 테스트를 추가했고, 첫 onboarding Setup 화면의
+  추천 섹션 아래에 Google Calendar를 노출하도록 바꿨다. Outlook Calendar는 Settings
+  source connection 경로에 남긴다.
+- Google Calendar OAuth는 사용자 실기기 확인과 logcat 기준으로 통과했다.
+  `/v1/oauth/calendar/google_calendar:status connected=true`, `LINK_GOOGLE_CALENDAR -> COMPLETE`,
+  `GoogleCalendarWorker SUCCESS`, `source_sync_completed` event를 확인했다. Calendar sync는
+  `synced=0`으로 끝나 현재 tester calendar에서는 empty/filtered 상태로 보인다.
+- Gmail first sync는 같은 Samsung 기기에서 manual sync 경로로 재검증했고 pass했다.
+  이전 blocker였던 `42P10`은 `source_events` upsert를 stable `id` 기준으로 바꿔 제거했다.
+  그 다음 실제 데이터에서 `source_event_participants` self-resolution constraint 위반이
+  드러나 `relation_to_user=self`이지만 active self anchor가 없는 participant를
+  counterparty person으로 만들지 않고 `suggested_self`로 저장하도록 backend relation
+  builder를 수정했다. 최종 logcat 기준 `POST /v1/mail_sources:sync?provider=gmail`는
+  200, raw 3건, source participant 13건, commitment 7건이 Android 로컬 DB에 반영되었다.
+  `SourceSyncPort`는 sync 성공 후 `source_connections`, `self_identity_anchors`,
+  `source_status`를 모두 refresh한다. 로컬 `source_connections` 최종 상태는
+  `google/mail synced`, `google/calendar connected`로 수렴했고 stale `failed`/fallback
+  duplicate row는 재현되지 않았다.
 
 ## 코드 기반 제품 목표
 
@@ -279,8 +350,12 @@ minification, signing config gate, runtime config field, protected release check
 
 ## Beta 기준별 fresh scoring
 
-이 점수는 코드 구조와 reviewed evidence 기준이다. 이 pass에서 fresh test는 실행하지
-않았다.
+이 점수는 코드 구조와 reviewed evidence 기준이다. 이 pass에서 focused verification은
+일부 실행했다. Backend private Gmail/Naver mixed live eval은 `500 / 500 pass`,
+Android focused auth/onboarding unit test는 pass, Samsung 실기기 connected-state
+smoke는 pass다. Fresh local reset은 Terms -> Login까지 pass했지만 Google Console
+OAuth 설정 mismatch로 Google login 완료가 blocked다. 앱/Backend 모두 사용자 데이터가
+없는 상태에서 시작하는 full fresh E2E는 아직 통과하지 않았다.
 
 | 영역 | 점수 | 근거 |
 |---|---:|---|
@@ -288,14 +363,14 @@ minification, signing config gate, runtime config field, protected release check
 | 비기능 요구사항 | 7.8 | WorkManager, bounded analytics queue, retry/backoff, prior smoke number는 강점이다. 다만 telemetry/source 변경 후 current-tree performance 재측정이 필요하다. |
 | 아키텍처 | 8.4 | UI/data/domain separation, repository, Room, Hilt, WorkManager, backend service split, analytics facade, observability port가 credible하다. |
 | 설계 패턴 | 8.5 | MVVM/state-holder/repository/DI/reactive pattern이 일관되고 backend service도 beta 수준에서는 충분히 modular하다. |
-| 테스트 | 7.0 | Unit/local/instrumentation/backend test가 많지만 이번 review에서는 실행하지 않았고 analytics/OAuth convergence/eval coverage가 약점이다. 현재 사용자를 self anchor로 고정한 person-matching fixture가 부족하다. |
+| 테스트 | 7.45 | Unit/local/instrumentation/backend test가 많고, backend에는 self anchor/person matching/extraction severe fixture gate와 beta threshold runner가 추가되었다. Gmail/Naver mixed 500건 live eval은 통과했다. 다만 analytics/OAuth convergence와 no-user-data fresh E2E proof는 아직 필요하다. |
 | 코드 품질 | 8.0 | 구조는 유지보수 가능하고 privacy-aware하다. 다만 worker orchestration과 source status propagation의 complexity가 높다. |
 | 보안 / 개인정보 | 8.1 | Token/credential storage, transient email body policy, PII filtering, consent control이 있다. Beta에는 live log/policy verification이 필요하다. |
 | 릴리스 엔지니어링 | 7.6 | SDK, signing gate, release config, CI docs, staging path가 있다. Fresh current-tree release proof와 rollback runbook이 필요하다. |
 | 관측성 | 8.1 | Crashlytics, Amplitude, backend event mirror, PMF endpoint, source status가 있다. Source/extraction funnel과 dashboard view는 보강되었고, 남은 리스크는 alert 자동화와 실제 운영 owner 지정이다. |
 | UX / 제품 준비도 | 7.7 | Main surface와 privacy/source management가 존재한다. Connected-state feedback, correction flow reliability, "나를 기준으로 정리됨"에 대한 신뢰성은 QA가 필요하다. |
 
-Controlled 10명 / 5일 beta readiness weighted score: **7.68 / 10**.
+Controlled 10명 / 5일 beta readiness weighted score: **7.78 / 10**.
 
 판정: controlled 10명 / 5일 beta는 fresh current-tree verification이 통과하고
 실제 기기에서 OAuth/source state convergence와 self-anchored person matching이
@@ -362,7 +437,7 @@ beta는 여전히 **no-go**다.
 | Beta promise | Approved work source 기반 relationship memory + commitments, user review/correction 포함. | 미정 | 이 문서의 product goal과 score 갱신. |
 | 필수 source 범위 | Gmail, Google Calendar, voice/meeting audio, manual/evidence import. | 미정 | Source QA matrix와 hardening order 갱신. |
 | 선택 source 범위 | Outlook Mail, Outlook Calendar, IMAP, screenshots. | 미정 | Optional/deferred/required 여부를 별도 QA gate와 함께 표시. |
-| Severe extraction error budget | Wrong person, wrong give/take, invented due date, privacy leakage를 blocker-class finding으로 취급. | 미정 | Extraction eval threshold와 beta triage policy 추가. |
+| Severe extraction error budget | Wrong person, wrong self/counterparty, wrong give/take, invented due date, privacy leakage, noisy automation을 blocker-class finding으로 취급. | 1차 확정: backend deterministic severe fixture, live eval constraint, beta threshold runner로 반영. 실제 mixed Gmail fixture에서 beta email eval set을 파생하는 스크립트가 추가됨. | Private/live eval fixture를 채우고 beta triage owner/response SLA 추가. |
 | Self identity / person matching policy | Auth/provider account email, `phone_e164_self`, 사용자가 확인한 display name/alias, meeting self speaker 선택을 verified self anchor로 묶고, self anchor와 충돌하는 participant는 counterparty person으로 만들지 않는다. | 사용자 QA에서 문제 확인됨: 현재 사용자 본인이 누구인지 충분히 몰라 관계/약속이 사용자 중심으로 정리되지 않는다. | SelfIdentitySet 설계, backend relation post-processing, Android pre-match self guard, golden fixture 추가. |
 | Correction feedback policy | Structured correction feedback을 backend eval data로 mirror하고, model/prompt 변경은 offline eval 뒤 적용. | 미정 | Backend feedback contract 추가 또는 명시적 defer. |
 | Day-one dashboard | Crashes, OAuth failures, source sync failures, extraction failures/filtered counts, unresolved participants, PMF. | 기본 dashboard/runbook 확정: Supabase product/source/person PMF view + Crashlytics/Play Console 외부 dashboard 병행. | `beta-operations-dashboard-runbook.md`, backend `202605160002_beta_dashboard_observability_contract.sql`. |
@@ -389,6 +464,32 @@ Required source에서 user flow는 성공했지만 observability가 잡히지 �
 conditional이어야 한다. 이 beta는 failure를 발견하기 위한 단계이므로 invisible failure는
 허용할 수 없다.
 
+### Fresh no-user-data E2E 계획
+
+Fresh user proof는 별도 runbook으로 분리했다:
+`docs/readiness/beta-fresh-no-user-data-test-plan.md`.
+
+핵심 원칙:
+
+- Android `pm clear com.becalm.android`는 local no-user-data만 보장한다.
+- 완전한 no-user-data test는 backend도 새 tester auth user이거나 user-scoped rows가
+  reset된 상태여야 한다.
+- 500개 live eval 통과 이후 prompt를 더 늘리는 것보다, fresh E2E에서 OAuth, sync,
+  extraction, self identity anchor, person/counterparty 방향이 실제 사용자 경로에서
+  수렴하는지 보는 것이 다음 slice다.
+
+실행 헬퍼:
+
+```bash
+qa/device/scripts/fresh_no_user_data_smoke.sh \
+  --adb /mnt/c/Users/jakek/AppData/Local/Android/Sdk/platform-tools/adb.exe \
+  --device R5CT83SMP4P \
+  --confirm-clear-data
+```
+
+이 스크립트는 실수로 데이터를 지우지 않도록 `--confirm-clear-data` 없이는 실행을
+거부한다.
+
 ## QA 이후 구현 백로그
 
 QA 답변이 합의된 뒤에는 아래 코드 위치를 기준으로 implementation scope를 잡는다.
@@ -401,7 +502,7 @@ Business logic, telemetry, source sync, privacy 변경을 명시적 이유 없�
 | Source connection funnel analytics | `core/analytics/ProductAnalyticsClient.kt`, `core/analytics/ProductAnalyticsValidation.kt`, `ui/onboarding/EmailOAuthConnector.kt`, `ui/onboarding/CalendarOAuthConnector.kt`, `ui/onboarding/OnboardingViewModel.kt`, `ui/sources/SourceSyncPort.kt` | `app/services/analytics_contract.py`, `app/api/v1.py`, `supabase/migrations/202605140002_beta_observability.sql`, `tests/test_v1_api.py` | Unit test가 PII를 reject하고 새 event name을 accept하며 source connect/sync event가 UI/business logic을 block하지 않음을 증명한다. |
 | Unified source state machine | `data/remote/dto/SourceStatusDto.kt`, `data/repository/SourceStatusRepository.kt`, `data/repository/internal/SourceStatusMerger.kt`, `ui/sources/*`, `worker/*` source workers | `app/services/source_persistence.py`, `app/services/mail_sync.py`, `app/services/calendar_sync.py`, `app/api/v1.py`, source-status migrations | Android/backend가 같은 state와 transition을 노출한다. 실제 기기 OAuth status가 restart 후 visible connected/synced state로 수렴한다. |
 | OAuth return/resume reliability | `ui/onboarding/EmailOAuthConnector.kt`, `ui/onboarding/CalendarOAuthConnector.kt`, `ui/onboarding/OnboardingSourceConnection*`, `ui/sources/SourceAdministrationPort.kt`, `data/repository/SourceStatusRepository.kt` | `app/services/mail_oauth.py`, `app/services/calendar_oauth.py`, `tests/test_v1_api.py`, new focused OAuth tests | Required provider별 provider callback, status endpoint, Android refresh, worker enqueue가 검증된다. |
-| Extraction golden evals | QA ID를 UI에 노출하지 않는 한 Android 변경은 필수 아님. Optional touch: `ui/commitments`, `ui/persons` correction screen | `app/services/commitment_extract.py`, `app/services/email_extract.py`, `tests/test_llm_contract_cases.py`, `tests/test_ai_person_pipeline.py`, `scripts/eval_email_cases_live.py`, new private fixture exporter/eval data | Eval report가 wrong person, wrong give/take, invented due date, privacy leakage에 대한 threshold를 가진다. |
+| Extraction golden evals | QA ID를 UI에 노출하지 않는 한 Android 변경은 필수 아님. Optional touch: `ui/commitments`, `ui/persons` correction screen | `app/services/commitment_extract.py`, `app/services/email_extract.py`, `app/services/llm_eval_expectations.py`, `tests/test_llm_contract_cases.py`, `tests/test_beta_severe_eval_cases.py`, `tests/test_beta_llm_eval_gate.py`, `tests/test_build_beta_email_eval_cases.py`, `tests/external/test_llm_live_eval.py`, `scripts/check_beta_llm_eval_gate.py`, `scripts/build_beta_email_eval_cases.py`, `scripts/eval_email_cases_live.py`, `tests/fixtures/beta_severe_extraction_person_matching_cases.json`, private fixture exporter/eval data | Deterministic gate가 wrong person, wrong self/counterparty, wrong give/take, invented due date, privacy leakage, noisy automation blocker class를 고정한다. Live eval은 forbidden person/candidate/due date constraint를 지원하고 beta runner가 zero-tolerance threshold를 적용한다. |
 | Correction feedback loop | `ui/commitments/CommitmentEditViewModel.kt`, person matching/correction screens, `data/remote/api/RailwayApi.kt`, `data/remote/dto` DTO | New feedback endpoint/table, `app/api/v1.py`, relation/person services, migration, tests | User correction이 structured feedback으로 저장된다. Live prompt는 offline eval 전까지 변경하지 않는다. |
 | Beta dashboard/runbook | Onboarding/source/extraction/commitment flow의 Android event call site | Supabase `product_events`, `pmf_survey_responses`, `source_connections`, `source_event_participants`, extraction failure path, dashboard SQL/runbook docs | Day-one dashboard가 crash-free users, OAuth failures, sync failures, extraction failures/filtered counts, unresolved participants, PMF responses를 보여준다. |
 
@@ -420,7 +521,9 @@ Implementation은 QA scope가 required provider를 확정한 뒤 analytics/sourc
    regression을 만든다.
 4. Source connection/extraction funnel analytics event와 test 추가.
 5. Beta-specific acceptance threshold가 포함된 extraction/person matching golden
-   eval 추가.
+   eval 추가. 1차 완료: backend severe fixture, live eval constraint, zero-tolerance
+   runner, Gmail/Naver mixed private live eval 500건 `500 / 500 pass`. 남은 작업:
+   beta triage owner/SLA 지정과 fresh user self-anchoring fixture 연결.
 6. Source state machine 문서화 및 Android/backend state name 정렬.
 7. Beta operations runbook 준비: dashboard query, crash triage, source reconnect
    support, privacy deletion/export support, rollback.
@@ -440,7 +543,7 @@ Implementation은 QA scope가 required provider를 확정한 뒤 analytics/sourc
 | Analytics/observability가 business logic과 분리되어 있는지 assessment에 반영한다. | Assessment는 analytics가 `ProductAnalyticsClient`, bounded `CompositeProductAnalyticsClient`, `AmplitudeProductAnalyticsClient`, `BackendProductEventsMirrorClient`, `ProductAnalyticsValidation`, `CrashlyticsObservabilityClient`, backend `/v1/analytics/events:batch`를 통해 구현되어 있고 extraction/domain engine 내부에 있지 않다고 기록한다. | 완료 |
 | 추가 구현 전 사용자 QA 질문을 포함한다. | `사용자와 진행할 QA 계획`, `QA 워크시트`, `QA 결정 기록`, `Source QA matrix`가 beta promise와 scope를 확정하기 위한 질문과 기록 표를 포함한다. | 완료 |
 | 사용자 QA에서 발견한 person matching/self anchor gap을 문서에 반영한다. | 사용자가 manual QA에서 확인한 "사용자 본인을 몰라 사용자 중심 정리가 안 됨" 문제를 `QA 요약`, `Relationship memory`, scoring, QA decision record, source matrix, backlog, hardening order에 반영했다. | 완료 |
-| 사용자와 QA를 실제로 수행하고 그 결과를 코드/문서에 반영한다. | Person matching/self anchor gap과 day-one dashboard/runbook은 반영했다. 다만 beta source scope, severe error budget, support, release/rollback 결정은 아직 남아 있다. | 진행 중 |
+| 사용자와 QA를 실제로 수행하고 그 결과를 코드/문서에 반영한다. | Person matching/self anchor gap, day-one dashboard/runbook, 500건 live eval pass, Samsung 실기기 connected-state smoke, fresh no-user-data runbook을 반영했다. 다만 beta source scope, support, release/rollback 결정과 full fresh E2E는 아직 남아 있다. | 진행 중 |
 
 Audit 시점의 repository 상태:
 
@@ -448,8 +551,10 @@ Audit 시점의 repository 상태:
   file `docs/readiness/current-codebase-product-goal-and-gap-qa.md`.
 - `becalm-backend`: branch `feature/backend-beta-observability`; 기존 dirty file
   `app/services/analytics_contract.py`는 이 review에서 수정하지 않았다.
-- 이 pass에서는 test를 실행하지 않았다. Scoring은 fresh current-tree verification을
-  완료 evidence가 아니라 남은 hardening item으로 취급한다.
+- 이 pass에서 focused verification은 실행했다. Backend private Gmail/Naver mixed live
+  eval은 `500 / 500 pass`, Android focused unit test는 pass, Samsung 실기기
+  connected-state smoke는 pass다. Scoring은 full fresh no-user-data E2E를 아직 남은
+  hardening item으로 취급한다.
 
 감사 판정: 문서는 사용자 QA에서 확인된 person matching/self anchor gap까지 반영했다.
 다만 전체 thread objective는 **아직 완료가 아니다**. 남은 beta scope, error budget,

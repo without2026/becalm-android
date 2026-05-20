@@ -31,13 +31,14 @@ class PeoplePipelineCheckpoint4E2eTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun e2e_042_calendar_event_renders_schedule_context_inside_person_timeline() {
+    fun e2e_042_calendar_event_renders_source_record_without_inline_schedule_context() {
         setPersonDetail(
             cards = listOf(
                 card(
                     sourceEventKey = "calendar-1",
                     sourceType = SourceType.GOOGLE_CALENDAR,
                     title = "파트너 미팅",
+                    commitmentsExtractedCount = 1,
                     schedules = listOf(
                         PersonDetailCommitmentSummary(
                             title = "오늘 오후 3시 미팅 확정",
@@ -50,8 +51,9 @@ class PeoplePipelineCheckpoint4E2eTest {
         )
 
         composeTestRule.onNodeWithText("파트너 미팅").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.commitment_item_type_schedule)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("오늘 오후 3시 미팅 확정").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 1)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.commitment_item_type_schedule)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("오늘 오후 3시 미팅 확정").assertCountEquals(0)
     }
 
     @Test
@@ -177,7 +179,7 @@ class PeoplePipelineCheckpoint4E2eTest {
     }
 
     @Test
-    fun e2e_050_person_detail_renders_source_timeline_plus_give_take_and_schedule_context() {
+    fun e2e_050_person_detail_renders_source_timeline_without_inline_extraction_context() {
         setPersonDetail(
             cards = listOf(
                 card(
@@ -185,6 +187,7 @@ class PeoplePipelineCheckpoint4E2eTest {
                     sourceType = SourceType.GMAIL,
                     title = "제안서 메일",
                     snippet = "내가 초안을 보내고 상대가 가격표를 확인",
+                    commitmentsExtractedCount = 3,
                     myActions = listOf(PersonDetailCommitmentSummary("제안서 초안 보내기", "action", "give")),
                     theirActions = listOf(PersonDetailCommitmentSummary("가격표 확인하기", "action", "take")),
                     schedules = listOf(PersonDetailCommitmentSummary("금요일 10시 리뷰", "schedule")),
@@ -193,11 +196,12 @@ class PeoplePipelineCheckpoint4E2eTest {
         )
 
         composeTestRule.onNodeWithText("제안서 메일").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_my_actions)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("제안서 초안 보내기").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_their_actions)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("가격표 확인하기").assertIsDisplayed()
-        composeTestRule.onNodeWithText("금요일 10시 리뷰").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 3)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.person_detail_bucket_my_actions)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("제안서 초안 보내기").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.person_detail_bucket_their_actions)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("가격표 확인하기").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("금요일 10시 리뷰").assertCountEquals(0)
     }
 
     @Test
@@ -308,6 +312,7 @@ class PeoplePipelineCheckpoint4E2eTest {
         rawEventId: String? = "raw-$sourceEventKey",
         title: String,
         snippet: String? = null,
+        commitmentsExtractedCount: Int = 0,
         myActions: List<PersonDetailCommitmentSummary> = emptyList(),
         theirActions: List<PersonDetailCommitmentSummary> = emptyList(),
         schedules: List<PersonDetailCommitmentSummary> = emptyList(),
@@ -319,6 +324,7 @@ class PeoplePipelineCheckpoint4E2eTest {
             occurredAt = NOW,
             title = title,
             snippet = snippet,
+            commitmentsExtractedCount = commitmentsExtractedCount,
             myActions = myActions,
             theirActions = theirActions,
             schedules = schedules,

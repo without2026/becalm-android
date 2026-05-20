@@ -9,12 +9,16 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
+import com.becalm.android.data.remote.dto.MeetingTranscriptSegmentDto
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.meeting.MeetingImportFilePolicy
 import com.becalm.android.worker.WorkScheduler
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.io.IOException
@@ -24,9 +28,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
@@ -39,9 +50,13 @@ public data class SourceImportResult(
 
 public data class MeetingSpeakerPreviewResult(
     val rawEventId: String,
+    val sourceRef: String? = null,
+    val sourceType: String = SourceType.MEETING,
     val speakerPreviewId: String,
     val speakers: List<MeetingSpeakerPreviewDto>,
+    val transcriptSegments: List<MeetingTranscriptSegmentDto> = emptyList(),
     val billableSeconds: Int,
+    val expiresAt: Instant? = null,
 )
 
 @Singleton
@@ -50,10 +65,40 @@ public class SourceImportRepository @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionRepository: RawIngestionRepository,
     private val meetingImportRepository: MeetingImportRepository,
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao,
     private val sourceExtractionApi: SourceExtractionApi,
     private val workScheduler: WorkScheduler,
+    private val moshi: Moshi,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
+    public fun observeLatestMeetingSpeakerReview(): Flow<MeetingSpeakerPreviewResult?> =
+        userPrefsStore.observeCurrentUserId()
+            .distinctUntilChanged()
+            .flatMapLatest { userId ->
+                if (userId.isNullOrBlank()) {
+                    flowOf(null)
+                } else {
+                    meetingSpeakerPreviewDao.observeLatestReviewRequired(userId).map { row ->
+                        row?.let {
+                            val preview = it.preview
+                            MeetingSpeakerPreviewResult(
+                                rawEventId = preview.rawEventId,
+                                sourceRef = preview.sourceRef,
+                                sourceType = it.sourceType,
+                                speakerPreviewId = preview.speakerPreviewId.orEmpty(),
+                                speakers = speakerListAdapter.fromJson(preview.speakersJson).orEmpty(),
+                                transcriptSegments = preview.transcriptSegmentsJson
+                                    ?.let(transcriptSegmentListAdapter::fromJson)
+                                    .orEmpty(),
+                                billableSeconds = preview.billableSeconds,
+                                expiresAt = preview.expiresAt,
+                            )
+                        }
+                    }
+                }
+            }
+            .flowOn(ioDispatcher)
+
     public suspend fun previewMeetingAudioSpeakers(uri: Uri): BecalmResult<MeetingSpeakerPreviewResult> =
         withContext(ioDispatcher) {
             try {
@@ -70,6 +115,7 @@ public class SourceImportRepository @Inject constructor(
                     audio = buildAudioPart(uri, meta.displayName, mimeType ?: "audio/m4a"),
                     rawEventId = rawEventId.toPlainRequestBody(),
                     durationSeconds = (readAudioDurationSeconds(uri) ?: 0).toString().toPlainRequestBody(),
+                    sourceType = SourceType.MEETING.toPlainRequestBody(),
                 )
                 if (!response.isSuccessful) {
                     return@withContext BecalmResult.Failure(BecalmError.Network(response.code(), "meeting speaker preview failed"))
@@ -79,8 +125,11 @@ public class SourceImportRepository @Inject constructor(
                 BecalmResult.Success(
                     MeetingSpeakerPreviewResult(
                         rawEventId = body.rawEventId,
+                        sourceRef = null,
+                        sourceType = SourceType.MEETING,
                         speakerPreviewId = body.speakerPreviewId,
                         speakers = body.speakers,
+                        transcriptSegments = body.transcriptSegments,
                         billableSeconds = body.billableSeconds,
                     ),
                 )
@@ -97,6 +146,15 @@ public class SourceImportRepository @Inject constructor(
         speakerReviewContext: MeetingSpeakerReviewContext? = null,
     ): BecalmResult<MeetingImportResult> =
         meetingImportRepository.importAudio(uri, speakerReviewContext)
+
+    public suspend fun stageMeetingAudioForSpeakerReview(uri: Uri): BecalmResult<MeetingImportResult> =
+        meetingImportRepository.stageAudioForSpeakerPreview(uri)
+
+    public suspend fun confirmMeetingSpeakerReview(
+        rawEventId: String,
+        speakerReviewContext: MeetingSpeakerReviewContext,
+    ): BecalmResult<MeetingImportResult> =
+        meetingImportRepository.confirmSpeakerReview(rawEventId, speakerReviewContext)
 
     public suspend fun importMessageScreenshot(uri: Uri): BecalmResult<SourceImportResult> =
         withContext(ioDispatcher) {
@@ -270,6 +328,18 @@ public class SourceImportRepository @Inject constructor(
         val file: File,
         val displayName: String,
     )
+
+    private val speakerListAdapter by lazy {
+        moshi.adapter<List<MeetingSpeakerPreviewDto>>(
+            Types.newParameterizedType(List::class.java, MeetingSpeakerPreviewDto::class.java),
+        )
+    }
+
+    private val transcriptSegmentListAdapter by lazy {
+        moshi.adapter<List<MeetingTranscriptSegmentDto>>(
+            Types.newParameterizedType(List::class.java, MeetingTranscriptSegmentDto::class.java),
+        )
+    }
 
     private companion object {
         private const val STATUS_PENDING = "pending"

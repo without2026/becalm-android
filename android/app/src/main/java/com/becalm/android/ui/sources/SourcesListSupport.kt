@@ -1,6 +1,7 @@
 package com.becalm.android.ui.sources
 
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
@@ -14,17 +15,19 @@ internal object SourcesListProjector {
         enrichmentSummary: PersonEnrichmentSummary,
         permissionGranted: Boolean,
     ): SourcesListUiState {
-        val mappedStatuses = statuses.map { status ->
-            val uiStatus = sourceSyncStatusFor(status.status)
-            SourceStatusRow(
-                sourceType = status.sourceType,
-                status = uiStatus,
-                lastSyncAt = status.lastSyncedAt,
-                hasError = status.errorMessage != null,
-                help = sourceStatusRecoveryCopyRes(uiStatus)?.let(UiMessage::resource),
-                recommendedActionLabelRes = sourceStatusRecommendedCtaRes(uiStatus),
-            )
-        }
+        val mappedStatuses = statuses
+            .filterNot { status -> status.sourceType == SourceType.MESSAGE_SCREENSHOT }
+            .map { status ->
+                val uiStatus = sourceSyncStatusFor(status.status)
+                SourceStatusRow(
+                    sourceType = status.sourceType,
+                    status = uiStatus,
+                    lastSyncAt = status.lastSyncedAt,
+                    hasError = status.errorMessage != null,
+                    help = sourceStatusRecoveryCopyRes(uiStatus)?.let(UiMessage::resource),
+                    recommendedActionLabelRes = sourceStatusRecommendedCtaRes(uiStatus),
+                )
+            }
         val contactsStatus = if (permissionGranted) {
             SourceSyncStatus.Connected
         } else {

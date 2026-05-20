@@ -12,6 +12,8 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -29,8 +31,12 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
 
@@ -40,7 +46,14 @@ internal data class TodaySnapshot(
     val calendarEvents: List<CalendarEventEntity>,
     val scheduleLinks: List<ScheduleEventLinkEntity>,
     val sourceStatuses: List<SourceStatus>,
+    val processingStates: List<ProcessingSourceState>,
     val processingPaused: Boolean,
+    val now: Instant,
+)
+
+private data class TodaySourceProcessingSnapshot(
+    val sourceStatuses: List<SourceStatus>,
+    val processingStates: List<ProcessingSourceState>,
 )
 
 internal class TodayScreenStateSource @Inject constructor(
@@ -48,6 +61,7 @@ internal class TodayScreenStateSource @Inject constructor(
     private val calendarEventRepository: CalendarEventRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository? = null,
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
     private val clock: Clock,
@@ -70,27 +84,31 @@ internal class TodayScreenStateSource @Inject constructor(
         userIdFlow: StateFlow<String?>,
         refreshingFlow: Flow<Boolean>,
     ): Flow<TodayUiState> {
-        val commitmentFlow = userIdFlow.flatMapLatest { userId ->
+        val userDayFlow = combine(userIdFlow, todayFlow()) { userId, today -> userId to today }
+            .distinctUntilChanged()
+
+        val commitmentFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
+            val (dayStart, dayEnd) = todayRange(today)
             commitmentRepository.observeTimelineForToday(
                 userId = userId,
-                endOfTodayEpochMs = endOfTodayEpochMs(),
-                startOfTodayEpochMs = startOfTodayEpochMs(),
+                endOfTodayEpochMs = dayEnd.toEpochMilliseconds() - 1L,
+                startOfTodayEpochMs = dayStart.toEpochMilliseconds(),
             )
         }
 
-        val calendarFlow = userIdFlow.flatMapLatest { userId ->
+        val calendarFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null) return@flatMapLatest flowOf(emptyList())
-            val (dayStart, dayEnd) = todayRange()
+            val (dayStart, dayEnd) = todayRange(today)
             calendarEventRepository.observeForUser(userId, dayStart, dayEnd)
         }
 
-        val scheduleLinkFlow = userIdFlow.flatMapLatest { userId ->
+        val scheduleLinkFlow = userDayFlow.flatMapLatest { (userId, today) ->
             if (userId == null || scheduleEventLinkRepository == null) return@flatMapLatest flowOf(emptyList())
             combine(commitmentFlow, calendarFlow) { commitments, calendarEvents ->
                 commitments to calendarEvents
             }.flatMapLatest { (commitments, calendarEvents) ->
-                val (dayStart, dayEnd) = todayRange()
+                val (dayStart, dayEnd) = todayRange(today)
                 scheduleEventLinkRepository.observeForTodayRange(
                     userId = userId,
                     rangeStart = dayStart,
@@ -101,20 +119,32 @@ internal class TodayScreenStateSource @Inject constructor(
             }
         }
 
+        val sourceProcessingFlow = combine(
+            sourceStatusRepository.observeAll(),
+            processingStatusRepository?.observeAll() ?: flowOf(emptyList<ProcessingSourceState>()),
+        ) { sourceStatuses, processingStates ->
+            TodaySourceProcessingSnapshot(
+                sourceStatuses = sourceStatuses,
+                processingStates = processingStates,
+            )
+        }
+
         val baseSnapshotFlow = combine(
             userIdFlow,
             commitmentFlow,
             calendarFlow,
             scheduleLinkFlow,
-            sourceStatusRepository.observeAll(),
-        ) { userId, commitments, calendarEvents, scheduleLinks, sourceStatuses ->
+            sourceProcessingFlow,
+        ) { userId, commitments, calendarEvents, scheduleLinks, sourceProcessing ->
             TodaySnapshot(
                 userId = userId,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
                 scheduleLinks = scheduleLinks,
-                sourceStatuses = sourceStatuses,
+                sourceStatuses = sourceProcessing.sourceStatuses,
+                processingStates = sourceProcessing.processingStates,
                 processingPaused = false,
+                now = clock.nowInstant(),
             )
         }
 
@@ -153,12 +183,24 @@ internal class TodayScreenStateSource @Inject constructor(
      */
     fun todayRange(): Pair<Instant, Instant> {
         val today = clock.today(KST)
+        return todayRange(today)
+    }
+
+    private fun todayRange(today: LocalDate): Pair<Instant, Instant> {
         val start = today.atStartOfDayIn(KST)
         val end = today.plus(DatePeriod(days = 1)).atStartOfDayIn(KST)
         return start to end
     }
 
+    private fun todayFlow(): Flow<LocalDate> = flow {
+        while (currentCoroutineContext().isActive) {
+            emit(clock.today(KST))
+            delay(TODAY_POLL_INTERVAL_MS)
+        }
+    }.distinctUntilChanged()
+
     private companion object {
         private const val TAG = "TodayViewModel"
+        private const val TODAY_POLL_INTERVAL_MS = 60_000L
     }
 }

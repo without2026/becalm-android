@@ -54,7 +54,7 @@ internal fun SourceStatusSummarySection(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = stringResource(R.string.source_detail_status_section),
+                    text = stringResource(R.string.source_detail_connection_status_label),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
@@ -188,9 +188,21 @@ private fun SourceStatusMeta(state: SourceDetailUiState) {
     state.eventsSyncedCount?.let { count ->
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = stringResource(R.string.source_detail_events_synced_fmt, count),
+            text = if (count > 0) {
+                stringResource(R.string.source_detail_events_synced_fmt, count)
+            } else {
+                stringResource(R.string.source_detail_events_empty_meta)
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    state.actionMessage?.let { actionMessage ->
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = uiMessageStringResource(actionMessage),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
     if (state.hasError) {
@@ -237,6 +249,7 @@ private fun SourceRecoveryActions(
             text = stringResource(R.string.action_sync_now),
             onClick = onManualSync,
             variant = BecalmButtonVariant.Secondary,
+            loading = state.manualSyncLoading,
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("source-detail-sync-now"),

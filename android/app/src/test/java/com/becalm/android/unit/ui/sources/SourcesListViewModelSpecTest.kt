@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.sources
 
 import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.dao.PersonEnrichmentSummary
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
@@ -18,6 +19,8 @@ import com.becalm.android.ui.sources.ContactsSourceDetailEffect
 import com.becalm.android.ui.sources.ContactsSourceDetailViewModel
 import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.sources.SourcesListViewModel
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -52,6 +55,7 @@ class SourcesListViewModelSpecTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { authRepository.observeAuthState() } returns flowOf(AuthState.Authenticated(session()))
+        coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
     }
 
     @After
@@ -70,6 +74,7 @@ class SourcesListViewModelSpecTest {
             SourceStatus(SourceType.DAUM_IMAP, SourceConnectionStatus.CONNECTED, now, null),
             SourceStatus(SourceType.GOOGLE_CALENDAR, SourceConnectionStatus.CONNECTED, now, null),
             SourceStatus(SourceType.OUTLOOK_CALENDAR, SourceConnectionStatus.NEVER_CONNECTED, now, null),
+            SourceStatus(SourceType.MESSAGE_SCREENSHOT, SourceConnectionStatus.NEVER_CONNECTED, now, null),
         )
         every { sourceStatusRepository.observeAll() } returns flowOf(seeded)
         every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
@@ -91,6 +96,7 @@ class SourcesListViewModelSpecTest {
             assertTrue(rowsByType.containsKey(SourceType.DAUM_IMAP))
             assertTrue(rowsByType.containsKey(SourceType.GOOGLE_CALENDAR))
             assertTrue(rowsByType.containsKey(SourceType.OUTLOOK_CALENDAR))
+            assertFalse(rowsByType.containsKey(SourceType.MESSAGE_SCREENSHOT))
             assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.VOICE).status)
             assertEquals(SourceSyncStatus.Connected, rowsByType.getValue(SourceType.GMAIL).status)
             assertEquals(SourceSyncStatus.Error, rowsByType.getValue(SourceType.OUTLOOK_MAIL).status)
@@ -203,6 +209,19 @@ class SourcesListViewModelSpecTest {
             )
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `sources list can refresh server status when screen resumes`() = runTest {
+        every { sourceStatusRepository.observeAll() } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeSummary() } returns flowOf(PersonEnrichmentSummary(0, null))
+
+        val viewModel = buildSourcesListViewModel()
+
+        viewModel.refreshStatuses()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
     }
 
     @Test

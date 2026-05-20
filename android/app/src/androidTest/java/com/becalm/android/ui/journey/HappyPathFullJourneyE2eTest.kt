@@ -86,7 +86,7 @@ class HappyPathFullJourneyE2eTest {
                         isLoading = false,
                         googleSignInEnabled = true,
                         onSignIn = { _, _ -> },
-                        onSignUp = { _, _ -> },
+                        onSignUp = {},
                         onGoogleSignIn = { step = FirstRunStep.Sources },
                     )
                     FirstRunStep.Sources -> SourceConnectionsContent(

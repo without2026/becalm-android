@@ -109,6 +109,10 @@ public class DefaultSourceAdministrationPort @Inject constructor(
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_VOICE, null)
                 true
             }
+            SourceType.CALL_RECORDING -> {
+                syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_CALL_RECORDING, null)
+                true
+            }
             SourceType.MEETING -> {
                 syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, null)
                 true
@@ -130,6 +134,8 @@ public class DefaultSourceAdministrationPort @Inject constructor(
     private suspend fun clearSourceConnectionState(sourceType: String) {
         when (sourceType) {
             SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+            SourceType.MEETING,
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
             -> userPrefsStore.setSourceEnabled(sourceType, false)

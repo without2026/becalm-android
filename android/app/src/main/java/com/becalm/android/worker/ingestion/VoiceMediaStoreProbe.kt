@@ -12,6 +12,7 @@ import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -44,8 +45,9 @@ import java.util.UUID
  * scan, [MediaStoreWorker.KIND_CALL_RECORDING] for the call scan. Using a single
  * shared watermark would silently skip older rows in the second-scanned subtree when
  * the first-scanned subtree advanced the cursor past them, which is an ING-001
- * data-loss hazard. Per-row uploads are enqueued via [WorkScheduler.enqueueVoiceUpload];
- * each branch's cursor is advanced only when every row in that branch's batch
+ * data-loss hazard. Generic voice rows enqueue [WorkScheduler.enqueueVoiceUpload],
+ * while call/meeting rows enqueue speaker preview before final extraction. Each branch's
+ * cursor is advanced only when every row in that branch's batch
  * succeeded so failed rows are re-discovered (the `>=` predicate combined with the
  * deterministic `clientEventId` dedup absorbs the one-second overlap).
  *
@@ -445,6 +447,7 @@ internal class VoiceMediaStoreProbe(
                     // call-recording files have a meaningful title (timestamp + number);
                     // null when the column is absent on older Android versions.
                     eventTitle = row.title,
+                    syncStatusWhenConsented = MeetingSpeakerPreviewStatus.PENDING,
                 )
                 when (insertResult) {
                     VoiceInsertResult.Failed -> {
@@ -457,7 +460,7 @@ internal class VoiceMediaStoreProbe(
                         if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
 
                         insertedCount++
-                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = true)) {
+                        if (pipaConsented && !enqueueSpeakerPreview(insertResult.id, row.audioUri, wasFresh = true)) {
                             hasInsertFailure = true
                         }
                     }
@@ -465,7 +468,7 @@ internal class VoiceMediaStoreProbe(
                         val rowMs = row.dateAddedSec * 1_000L
                         if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
 
-                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = false)) {
+                        if (!enqueueAudioReviewOrUpload(insertResult.id, row.audioUri, insertResult.syncStatus, wasFresh = false)) {
                             hasInsertFailure = true
                         }
                     }
@@ -578,6 +581,7 @@ internal class VoiceMediaStoreProbe(
                         pipaConsented = pipaConsented,
                         sourceType = SourceType.MEETING,
                         eventTitle = row.displayName,
+                        syncStatusWhenConsented = MeetingSpeakerPreviewStatus.PENDING,
                     )
                 ) {
                     VoiceInsertResult.Failed -> {
@@ -589,14 +593,14 @@ internal class VoiceMediaStoreProbe(
                         val rowMs = row.dateAddedSec * 1_000L
                         if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
                         insertedCount++
-                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = true)) {
+                        if (pipaConsented && !enqueueSpeakerPreview(insertResult.id, row.audioUri, wasFresh = true)) {
                             hasInsertFailure = true
                         }
                     }
                     is VoiceInsertResult.Dedup -> {
                         val rowMs = row.dateAddedSec * 1_000L
                         if (rowMs > maxDateAddedMs) maxDateAddedMs = rowMs
-                        if (!enqueueVoice(insertResult.id, row.audioUri, wasFresh = false)) {
+                        if (!enqueueAudioReviewOrUpload(insertResult.id, row.audioUri, insertResult.syncStatus, wasFresh = false)) {
                             hasInsertFailure = true
                         }
                     }
@@ -678,7 +682,7 @@ internal class VoiceMediaStoreProbe(
      */
     private sealed interface VoiceInsertResult {
         data class Fresh(val id: String) : VoiceInsertResult
-        data class Dedup(val id: String) : VoiceInsertResult
+        data class Dedup(val id: String, val syncStatus: String) : VoiceInsertResult
         data object DedupSkip : VoiceInsertResult
         data object Failed : VoiceInsertResult
     }
@@ -695,6 +699,8 @@ internal class VoiceMediaStoreProbe(
      *   두 prefix 는 서로 다른 Railway dedup key space 를 구성해 voice/call_recording
      *   rows 가 동일 mediaId 를 공유하지 않음을 보장한다 (현실적으로는 동일 MediaStore
      *   table 을 공유하므로 mediaId 는 고유하지만, prefix 를 분리해 방어한다).
+     * - meeting/call rows enter speaker preview first; generic voice rows still enqueue
+     *   direct audio extraction.
      */
     private fun readVoiceRow(
         cursor: Cursor,
@@ -736,7 +742,7 @@ internal class VoiceMediaStoreProbe(
      *
      * - insert 성공(rowId != -1L)  → [VoiceInsertResult.Fresh]
      * - UNIQUE 충돌(rowId == -1L) → 기존 row를 조회해 업로드 재개 가능 여부 판정
-     *     - 재개 가능 (pending & extracted=0) → [VoiceInsertResult.Dedup]
+     *     - 재개 가능 (pending/preview_pending & extracted=0) → [VoiceInsertResult.Dedup]
      *     - 재개 불가 (없거나 상태 불일치)     → [VoiceInsertResult.DedupSkip]
      * - 예외 (CancellationException 제외) → 로그 남기고 [VoiceInsertResult.Failed]
      *
@@ -757,6 +763,7 @@ internal class VoiceMediaStoreProbe(
         sourceType: String = SourceType.VOICE,
         counterpartyRef: String? = null,
         eventTitle: String? = null,
+        syncStatusWhenConsented: String = "pending",
     ): VoiceInsertResult {
         rawIngestionEventDao.findByClientEventId(userId, row.legacyClientEventId)?.let { legacy ->
             return classifyExistingVoiceRow(legacy)
@@ -772,7 +779,7 @@ internal class VoiceMediaStoreProbe(
             eventTitle = eventTitle,
             durationSeconds = row.durationSec,
             timestamp = Instant.fromEpochSeconds(row.dateAddedSec),
-            syncStatus = if (pipaConsented) "pending" else "awaiting_consent",
+            syncStatus = if (pipaConsented) syncStatusWhenConsented else "awaiting_consent",
         )
 
         val rowId = try {
@@ -793,13 +800,13 @@ internal class VoiceMediaStoreProbe(
 
     private fun classifyExistingVoiceRow(existing: RawIngestionEventEntity): VoiceInsertResult =
         if (
-            existing.syncStatus != "pending" ||
+            existing.syncStatus !in RESUMABLE_AUDIO_SYNC_STATUSES ||
             existing.commitmentsExtractedCount > 0 ||
             existing.lastAttemptAt != null
         ) {
             VoiceInsertResult.DedupSkip
         } else {
-            VoiceInsertResult.Dedup(existing.id)
+            VoiceInsertResult.Dedup(existing.id, existing.syncStatus)
         }
 
     /**
@@ -824,6 +831,30 @@ internal class VoiceMediaStoreProbe(
         }
     }
 
+    private fun enqueueAudioReviewOrUpload(
+        enqueueId: String,
+        audioUri: String,
+        syncStatus: String,
+        wasFresh: Boolean,
+    ): Boolean =
+        if (syncStatus == MeetingSpeakerPreviewStatus.PENDING) {
+            enqueueSpeakerPreview(enqueueId, audioUri, wasFresh)
+        } else {
+            enqueueVoice(enqueueId, audioUri, wasFresh)
+        }
+
+    private fun enqueueSpeakerPreview(enqueueId: String, audioUri: String, wasFresh: Boolean): Boolean {
+        return try {
+            workScheduler.enqueueMeetingSpeakerPreview(enqueueId, audioUri)
+            logger.d(TAG, "speaker preview enqueued id=${redact(enqueueId)} fresh=$wasFresh")
+            true
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            logger.e(TAG, "enqueueMeetingSpeakerPreview failed id=${redact(enqueueId)}", e)
+            false
+        }
+    }
+
     private companion object {
         private const val TAG = "MediaStoreWorker"
 
@@ -835,6 +866,7 @@ internal class VoiceMediaStoreProbe(
          */
         private const val CALL_RECORDING_CLIENT_EVENT_ID_PREFIX = "mediastore:call_recording:"
         private const val MEETING_AUDIO_CLIENT_EVENT_ID_PREFIX = "mediastore:meeting_audio:"
+        private val RESUMABLE_AUDIO_SYNC_STATUSES = setOf("pending", MeetingSpeakerPreviewStatus.PENDING)
     }
 }
 

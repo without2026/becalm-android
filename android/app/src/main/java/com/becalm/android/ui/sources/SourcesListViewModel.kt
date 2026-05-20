@@ -3,6 +3,7 @@ package com.becalm.android.ui.sources
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.AuthState
@@ -11,6 +12,7 @@ import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import javax.inject.Inject
 
@@ -51,8 +54,9 @@ public data class SourceStatusRow(
  * @param items List of [SourceStatusRow] in
  *   [com.becalm.android.data.remote.dto.SourceType.PRODUCT_SOURCES] order (prepended by
  *   the pseudo-`contacts` row). The schema-wide
- *   [com.becalm.android.data.remote.dto.SourceType.ALL] set is deliberately not used —
- *   wave-0 carves out `CALL_RECORDING` (no UI tile yet) and `VOICE` (captured locally).
+ *   [com.becalm.android.data.remote.dto.SourceType.ALL] set is deliberately not used.
+ *   `VOICE`, `CALL_RECORDING`, and `MEETING` are shown as separate local audio sources,
+ *   even when they share one Recordings folder grant.
  */
 public data class SourcesListUiState(
     val items: List<SourceStatusRow> = emptyList(),
@@ -97,6 +101,7 @@ public class SourcesListViewModel @Inject constructor(
 
     /** One-shot navigation stream for row taps. */
     public val navigation: SharedFlow<SourcesListNavigation> = _navigation.asSharedFlow()
+    private var refreshStatusesJob: Job? = null
 
     /**
      * Observable state consumed by the sources list composable.
@@ -144,6 +149,17 @@ public class SourcesListViewModel @Inject constructor(
             contactsPermissionGranted = contactsPermissionChecker.isGranted(),
         )
         _navigation.tryEmit(target)
+    }
+
+    /** Refreshes server-authoritative source state when the list becomes visible again. */
+    public fun refreshStatuses() {
+        if (refreshStatusesJob?.isActive == true) return
+        refreshStatusesJob = viewModelScope.launch {
+            when (sourceStatusRepository.refreshFromServer()) {
+                is BecalmResult.Success -> logger.d(TAG, "source statuses refreshed")
+                is BecalmResult.Failure -> logger.w(TAG, "source status refresh failed")
+            }
+        }
     }
 
 }

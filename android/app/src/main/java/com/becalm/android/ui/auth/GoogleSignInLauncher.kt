@@ -16,6 +16,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import com.becalm.android.BuildConfig
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -95,6 +96,8 @@ public class GoogleSignInHandle internal constructor(
                 GoogleSignInResult.UserCancelled
             } catch (_: NoCredentialException) {
                 GoogleSignInResult.NoCredentials
+            } catch (t: GoogleIdTokenParsingException) {
+                GoogleSignInResult.Error(t)
             } catch (t: GetCredentialException) {
                 GoogleSignInResult.Error(t)
             }

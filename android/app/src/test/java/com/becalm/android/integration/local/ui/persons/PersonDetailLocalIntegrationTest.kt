@@ -2,7 +2,6 @@ package com.becalm.android.integration.local.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
-import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
@@ -209,7 +208,6 @@ class PersonDetailLocalIntegrationTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
-            clock = FakeClock(Instant.parse("2026-04-23T03:00:00Z")),
         )
 
         viewModel.uiState.test {
@@ -360,13 +358,17 @@ class PersonDetailLocalIntegrationTest {
 
         viewModel.uiState.test {
             var state = awaitItem()
-            while (state.loading || state.commitmentQuotes.size < 2 || state.attendeesRaw == null) {
+            while (state.loading || state.commitmentQuotes.size < 2 || state.extractedCommitments.size < 2 || state.attendeesRaw == null) {
                 state = awaitItem()
             }
 
             assertEquals(
                 listOf("두 번째 약속 인용문", "첫 약속 인용문"),
                 state.commitmentQuotes,
+            )
+            assertEquals(
+                listOf("두 번째 약속", "첫 약속"),
+                state.extractedCommitments.map { it.title },
             )
             assertEquals("alice@example.com,bob@example.com", state.attendeesRaw)
             cancelAndIgnoreRemainingEvents()

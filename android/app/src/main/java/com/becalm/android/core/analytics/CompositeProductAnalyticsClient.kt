@@ -6,7 +6,6 @@ import com.becalm.android.core.observability.ObservabilityClient
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -14,17 +13,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 @Singleton
-public class CompositeProductAnalyticsClient @Inject constructor(
+public class CompositeProductAnalyticsClient(
     private val amplitude: AmplitudeProductAnalyticsClient,
     private val backendMirror: BackendProductEventsMirrorClient,
+    private val eventQueue: ProductAnalyticsEventQueue,
     private val observability: ObservabilityClient,
     private val analyticsContext: ProductAnalyticsContext,
-    @ApplicationScope applicationScope: CoroutineScope,
+    applicationScope: CoroutineScope,
+    private val telemetryEnabled: Boolean,
 ) : ProductAnalyticsClient {
 
-    private val events = Channel<ProductAnalyticsEvent>(
-        capacity = CHANNEL_CAPACITY,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    private val events = Channel<ProductAnalyticsEvent>(capacity = Channel.UNLIMITED)
+
+    @Inject
+    public constructor(
+        amplitude: AmplitudeProductAnalyticsClient,
+        backendMirror: BackendProductEventsMirrorClient,
+        eventQueue: ProductAnalyticsEventQueue,
+        observability: ObservabilityClient,
+        analyticsContext: ProductAnalyticsContext,
+        @ApplicationScope applicationScope: CoroutineScope,
+    ) : this(
+        amplitude = amplitude,
+        backendMirror = backendMirror,
+        eventQueue = eventQueue,
+        observability = observability,
+        analyticsContext = analyticsContext,
+        applicationScope = applicationScope,
+        telemetryEnabled = BuildConfig.TELEMETRY_ENABLED,
     )
 
     init {
@@ -34,13 +50,15 @@ public class CompositeProductAnalyticsClient @Inject constructor(
     }
 
     override fun track(event: ProductAnalyticsEvent) {
-        if (!BuildConfig.TELEMETRY_ENABLED) return
+        if (!telemetryEnabled) return
         val enriched = analyticsContext.enrich(event)
         if (!ProductAnalyticsValidation.isValid(enriched)) {
             observability.addBreadcrumb("analytics", "product_event_dropped", mapOf("event_name" to enriched.eventName))
             return
         }
-        events.trySend(enriched)
+        if (events.trySend(enriched).isFailure) {
+            observability.addBreadcrumb("analytics", "product_event_enqueue_failed", mapOf("event_name" to enriched.eventName))
+        }
     }
 
     override fun setUserScope(userId: String?) {
@@ -54,25 +72,64 @@ public class CompositeProductAnalyticsClient @Inject constructor(
     }
 
     private suspend fun drain() {
-        val pending = mutableListOf<ProductAnalyticsEvent>()
+        flushQueued()
         while (currentCoroutineContext().isActive) {
             val first = withTimeoutOrNull(FLUSH_INTERVAL_MILLIS) { events.receive() }
             if (first == null) {
-                flushPending(pending)
+                flushQueued()
                 continue
             }
-            sendToAmplitude(first)
-            pending += first
+            val pending = mutableListOf(first)
             while (pending.size < BACKEND_BATCH_SIZE) {
                 val next = events.tryReceive().getOrNull() ?: break
-                sendToAmplitude(next)
                 pending += next
             }
-            if (pending.size >= BACKEND_BATCH_SIZE) {
-                flushPending(pending)
-            }
+            pending.forEach(::sendToAmplitude)
+            enqueuePending(pending)
+            flushQueued()
         }
-        flushPending(pending)
+        flushQueued()
+    }
+
+    private suspend fun enqueuePending(pending: List<ProductAnalyticsEvent>) {
+        if (pending.isEmpty()) return
+        runCatching { eventQueue.enqueue(pending) }
+            .onFailure {
+                observability.addBreadcrumb("analytics", "product_event_queue_persist_failed", mapOf("batch_size" to pending.size.toString()))
+            }
+    }
+
+    private suspend fun flushQueued() {
+        while (currentCoroutineContext().isActive) {
+            val batch = runCatching { eventQueue.peek(BACKEND_BATCH_SIZE) }
+                .onFailure {
+                    observability.addBreadcrumb("analytics", "product_event_queue_read_failed", emptyMap())
+                }
+                .getOrDefault(emptyList())
+            if (batch.isEmpty()) return
+            val success = flushBatch(batch)
+            if (!success) return
+            runCatching { eventQueue.remove(batch.map { it.eventId }.toSet()) }
+                .onFailure {
+                    observability.addBreadcrumb("analytics", "product_event_queue_remove_failed", mapOf("batch_size" to batch.size.toString()))
+                    return
+                }
+            if (batch.size < BACKEND_BATCH_SIZE) return
+        }
+    }
+
+    private suspend fun flushBatch(batch: List<ProductAnalyticsEvent>): Boolean {
+        if (batch.isEmpty()) return true
+        return runCatching { backendMirror.flush(batch) }
+            .onFailure {
+                observability.addBreadcrumb("analytics", "backend_mirror_failed", mapOf("batch_size" to batch.size.toString()))
+            }
+            .onSuccess { success ->
+                if (!success) {
+                    observability.addBreadcrumb("analytics", "backend_mirror_rejected", mapOf("batch_size" to batch.size.toString()))
+                }
+            }
+            .getOrDefault(false)
     }
 
     private fun sendToAmplitude(event: ProductAnalyticsEvent) {
@@ -82,23 +139,7 @@ public class CompositeProductAnalyticsClient @Inject constructor(
             }
     }
 
-    private suspend fun flushPending(pending: MutableList<ProductAnalyticsEvent>) {
-        if (pending.isEmpty()) return
-        val batch = pending.toList()
-        pending.clear()
-        runCatching { backendMirror.flush(batch) }
-            .onFailure {
-                observability.addBreadcrumb("analytics", "backend_mirror_failed", mapOf("batch_size" to batch.size.toString()))
-            }
-            .onSuccess { success ->
-                if (!success) {
-                    observability.addBreadcrumb("analytics", "backend_mirror_rejected", mapOf("batch_size" to batch.size.toString()))
-                }
-            }
-    }
-
     private companion object {
-        private const val CHANNEL_CAPACITY = 200
         private const val BACKEND_BATCH_SIZE = 20
         private const val FLUSH_INTERVAL_MILLIS = 30_000L
     }

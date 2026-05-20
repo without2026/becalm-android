@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -88,7 +89,8 @@ class EvidenceImportUiTest {
                     onMeetingAudioImport = {},
                     state = EvidenceImportUiState(
                         meetingReview = MeetingSpeakerReviewUiState(
-                            audioUri = android.net.Uri.parse("content://meeting/audio"),
+                            rawEventId = "raw-meeting-1",
+                            sourceRef = "content://meeting/audio",
                             speakerPreviewId = "preview-1",
                             speakers = listOf(
                                 MeetingSpeakerPreviewDto("SPEAKER_01", listOf("제가 자료 보낼게요."), 0.0, 12.0),
@@ -103,6 +105,7 @@ class EvidenceImportUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_confirm)).assertIsNotEnabled()
         composeRule.onNodeWithTag("meeting-speaker-SPEAKER_02")
             .performSemanticsAction(SemanticsActions.OnClick)
         composeRule.onNodeWithText(string(R.string.evidence_import_meeting_review_confirm))

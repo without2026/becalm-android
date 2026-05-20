@@ -1,5 +1,7 @@
 package com.becalm.android.unit.ui.persons
 
+import com.becalm.android.core.result.BecalmError
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.PersonManualMatchRepository
@@ -14,6 +16,8 @@ import com.becalm.android.ui.persons.PersonsSortOrder
 import com.becalm.android.ui.persons.PersonsScreenProjectionPort
 import com.becalm.android.ui.persons.PersonsViewModel
 import com.becalm.android.ui.persons.UnassignedEventSummary
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -142,13 +146,19 @@ class PersonsViewModelSpecTest {
         assertEquals(2, viewModel.uiState.value.people.size)
 
         viewModel.onQueryChange("lee")
+        assertEquals("lee", viewModel.uiState.value.query)
+        assertEquals(2, viewModel.uiState.value.people.size)
         advanceTimeBy(300)
         advanceUntilIdle()
+        assertEquals("lee", viewModel.uiState.value.query)
         assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("1234")
+        assertEquals("1234", viewModel.uiState.value.query)
+        assertEquals(listOf("lee@corp.com"), viewModel.uiState.value.people.map { it.personId })
         advanceTimeBy(300)
         advanceUntilIdle()
+        assertEquals("1234", viewModel.uiState.value.query)
         assertEquals(listOf("+821012345678"), viewModel.uiState.value.people.map { it.personId })
 
         viewModel.onQueryChange("")
@@ -264,6 +274,21 @@ class PersonsViewModelSpecTest {
     }
 
     @Test
+    fun `SRC-006 onPullRefresh clears refreshing and reports error when coordinator fails`() = runTest {
+        refreshCoordinator.failure = RuntimeException("scheduler failed")
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.refreshing)
+        assertTrue(viewModel.uiState.value.error != null)
+        assertEquals(1, refreshCoordinator.refreshCount)
+    }
+
+    @Test
     // spec: ERR-001
     fun `SRC-007 offline badge state follows offline projection`() = runTest {
         val offlineAt = Instant.fromEpochMilliseconds(9_000)
@@ -280,6 +305,119 @@ class PersonsViewModelSpecTest {
 
         assertFalse(viewModel.uiState.value.showOfflineBadge)
         assertNull(viewModel.uiState.value.offlineLastSyncAt)
+    }
+
+    @Test
+    fun `manual match exposes saving state and hides item only after repository success`() = runTest {
+        val event = unassigned(id = "evt-match", sourceType = SourceType.GMAIL, title = "Email subject")
+        projectionPort.unassigned.value = listOf(event)
+        coEvery {
+            manualMatchRepository.matchInteraction(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "evt-match",
+                interactionKind = SourceType.GMAIL,
+                personAnchor = "minji@corp.com",
+                nickname = "Minji",
+            )
+        } returns BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onManualMatch(event, personAnchor = "minji@corp.com", nickname = "Minji")
+        assertEquals(setOf("evt-match"), viewModel.uiState.value.savingMatchEventIds)
+        assertTrue(viewModel.uiState.value.resolvedMatchEventIds.isEmpty())
+
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
+        assertEquals(setOf("evt-match"), viewModel.uiState.value.resolvedMatchEventIds)
+    }
+
+    @Test
+    fun `manual match failure keeps item retryable and reports error`() = runTest {
+        val event = unassigned(id = "evt-fail", sourceType = SourceType.GMAIL, title = "Email subject")
+        projectionPort.unassigned.value = listOf(event)
+        coEvery {
+            manualMatchRepository.matchInteraction(any(), any(), any(), any(), any(), any())
+        } returns BecalmResult.Failure(BecalmError.NotFound("source_event_participant"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onManualMatch(event, personAnchor = "minji@corp.com", nickname = "Minji")
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
+        assertTrue(viewModel.uiState.value.resolvedMatchEventIds.isEmpty())
+        assertTrue(viewModel.uiState.value.error != null)
+    }
+
+    @Test
+    fun `manual match ignores duplicate taps while save is in flight`() = runTest {
+        val event = unassigned(id = "evt-dup", sourceType = SourceType.GMAIL, title = "Email subject")
+        projectionPort.unassigned.value = listOf(event)
+        coEvery {
+            manualMatchRepository.matchInteraction(any(), any(), any(), any(), any(), any())
+        } returns BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onManualMatch(event, personAnchor = "minji@corp.com", nickname = "Minji")
+        viewModel.onManualMatch(event, personAnchor = "minji@corp.com", nickname = "Minji")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            manualMatchRepository.matchInteraction(any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `not self match only opens manual follow-up after repository success`() = runTest {
+        val event = unassigned(id = "evt-not-self", sourceType = SourceType.GMAIL, title = "Email subject")
+        projectionPort.unassigned.value = listOf(event)
+        coEvery {
+            manualMatchRepository.rejectInteractionAsSelf(
+                userId = "user-1",
+                sourceType = SourceType.GMAIL,
+                sourceRef = "evt-not-self",
+                interactionKind = SourceType.GMAIL,
+            )
+        } returns BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onNotSelfMatch(event)
+        assertTrue(viewModel.uiState.value.notSelfMatchEventIds.isEmpty())
+        assertEquals(setOf("evt-not-self"), viewModel.uiState.value.savingMatchEventIds)
+
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
+        assertEquals(setOf("evt-not-self"), viewModel.uiState.value.notSelfMatchEventIds)
+        assertTrue(viewModel.uiState.value.resolvedMatchEventIds.isEmpty())
+    }
+
+    @Test
+    fun `not self match failure keeps suggested self action retryable`() = runTest {
+        val event = unassigned(id = "evt-not-self-fail", sourceType = SourceType.GMAIL, title = "Email subject")
+        projectionPort.unassigned.value = listOf(event)
+        coEvery {
+            manualMatchRepository.rejectInteractionAsSelf(any(), any(), any(), any())
+        } returns BecalmResult.Failure(BecalmError.NotFound("source_event_participant"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onNotSelfMatch(event)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.savingMatchEventIds.isEmpty())
+        assertTrue(viewModel.uiState.value.notSelfMatchEventIds.isEmpty())
+        assertTrue(viewModel.uiState.value.error != null)
     }
 
     private fun buildViewModel(): PersonsViewModel = PersonsViewModel(
@@ -377,9 +515,11 @@ class PersonsViewModelSpecTest {
             catchUpTriggered = true,
             enrichmentTriggered = true,
         )
+        var failure: RuntimeException? = null
 
         override fun refresh(): PersonsRefreshSnapshot {
             refreshCount += 1
+            failure?.let { throw it }
             return snapshot
         }
     }

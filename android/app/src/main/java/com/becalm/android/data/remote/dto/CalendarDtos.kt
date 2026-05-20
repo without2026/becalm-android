@@ -42,6 +42,18 @@ public data class CalendarEventDto(
     /** Event end timestamp. */
     @field:Json(name = "end_at") val endAt: Instant,
 
+    /** Provider-local start value. All-day events use YYYY-MM-DD. */
+    @field:Json(name = "start_local") val startLocal: String? = null,
+
+    /** Provider-local end value. All-day events use YYYY-MM-DD. */
+    @field:Json(name = "end_local") val endLocal: String? = null,
+
+    /** Provider/calendar timezone used to interpret local values. */
+    @field:Json(name = "time_zone") val timeZone: String? = null,
+
+    /** True when the provider event is an all-day calendar event. */
+    @field:Json(name = "is_all_day") val isAllDay: Boolean = false,
+
     /**
      * Raw attendee list as stored by Railway.
      * Format is source-dependent (e.g. comma-separated email addresses).
@@ -49,6 +61,50 @@ public data class CalendarEventDto(
      */
     @field:Json(name = "attendees_raw") val attendeesRaw: String? = null,
 
+    /** Provider event status. */
+    @field:Json(name = "status") val status: String = "confirmed",
+
+    /** Provider free/busy availability. Distinct from event status. */
+    @field:Json(name = "availability") val availability: String? = null,
+
+    /** Provider location text, if present. */
+    @field:Json(name = "location") val location: String? = null,
+
+    /** Provider-side last modified timestamp. */
+    @field:Json(name = "provider_updated_at") val providerUpdatedAt: Instant? = null,
+
+    /** Structured attendee facts retained only for calendar-origin events. */
+    @field:Json(name = "attendees_json") val attendeesJson: List<CalendarAttendeeDto> = emptyList(),
+
+    /** Structured organizer fact retained only for calendar-origin events. */
+    @field:Json(name = "organizer_json") val organizerJson: CalendarOrganizerDto? = null,
+
+    /** Provider recurrence payload, serialized by the server when present. */
+    @field:Json(name = "recurrence") val recurrence: Any? = null,
+
+    /** Original recurring-instance start instant when exposed by the provider. */
+    @field:Json(name = "original_start_at") val originalStartAt: Instant? = null,
+
+    /** Hash of the provider payload used by reconciliation to detect reopen-worthy changes. */
+    @field:Json(name = "provider_payload_hash") val providerPayloadHash: String? = null,
+
+)
+
+@JsonClass(generateAdapter = true)
+public data class CalendarAttendeeDto(
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "name") val name: String? = null,
+    @field:Json(name = "response_status") val responseStatus: String? = null,
+    @field:Json(name = "role") val role: String? = null,
+    @field:Json(name = "optional") val optional: Boolean? = null,
+    @field:Json(name = "self") val self: Boolean? = null,
+)
+
+@JsonClass(generateAdapter = true)
+public data class CalendarOrganizerDto(
+    @field:Json(name = "email") val email: String? = null,
+    @field:Json(name = "name") val name: String? = null,
+    @field:Json(name = "self") val self: Boolean? = null,
 )
 
 /**

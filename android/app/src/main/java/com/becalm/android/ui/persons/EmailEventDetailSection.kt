@@ -29,11 +29,10 @@ import com.becalm.android.ui.components.IngestionTimestamp
 /**
  * Email-specific branch of [RawEventDetailSheet].
  *
- * Renders — in order — the source-provider badge, subject line, snippet preview,
- * expandable plain-text body, attachment count pill, "약속 추출 N건" badge, and
- * the KST-formatted ingestion timestamp. Each subcomponent renders itself or
- * collapses gracefully, so the section never produces empty rows when optional
- * fields (snippet / body / attachments / extracted commitments) are absent.
+ * Renders the legacy one-card layout for callers that still want the email
+ * summary, body, badges, and timestamp in one block. RawEventDetailContent uses
+ * the smaller [EmailEventSummarySection] and [EmailEventBodySection] pieces so
+ * extracted commitments can sit between the summary and long source body.
  *
  * HTML-only degrade — when `body_plain` is null but `body_html` is present
  * (EMAIL-007 graceful-degrade case), the section surfaces a localized notice.
@@ -51,8 +50,21 @@ internal fun EmailEventDetailSection(
     state: RawEventDetailUiState,
     modifier: Modifier = Modifier,
 ) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        EmailEventSummarySection(state = state)
+        EmailEventBodySection(state = state)
+    }
+}
+
+@Composable
+internal fun EmailEventSummarySection(
+    state: RawEventDetailUiState,
+    modifier: Modifier = Modifier,
+) {
     val sourceType = state.sourceType ?: return
-    val timestamp = state.timestamp ?: return
 
     Column(
         modifier = modifier,
@@ -63,11 +75,6 @@ internal fun EmailEventDetailSection(
         EventTitleText(title = state.eventTitle)
 
         EventSnippetText(snippet = state.snippet)
-
-        EmailBodyBlock(
-            archivedOriginal = state.archivedOriginal,
-            body = state.emailBody,
-        )
 
         if (state.attachmentCount > 0 || state.commitmentsExtractedCount > 0) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -80,8 +87,37 @@ internal fun EmailEventDetailSection(
             }
         }
 
-        IngestionTimestamp(timestamp = timestamp)
+        state.timestamp?.let { IngestionTimestamp(timestamp = it) }
     }
+}
+
+@Composable
+internal fun EmailEventBodySection(
+    state: RawEventDetailUiState,
+    modifier: Modifier = Modifier,
+) {
+    if (!state.hasEmailBodyDetail()) return
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SourceOriginalBodyBlock(
+            archivedOriginal = state.archivedOriginal,
+            body = state.emailBody,
+        )
+    }
+}
+
+internal fun RawEventDetailUiState.hasEmailBodyDetail(): Boolean {
+    if (hasArchivedOriginalDetail()) return true
+    val body = emailBody
+    return body?.bodyPlain != null || body?.bodyHtml != null
+}
+
+internal fun RawEventDetailUiState.hasArchivedOriginalDetail(): Boolean {
+    val archived = archivedOriginal
+    if (archived?.bodyText != null || archived?.deletedFromDevice == true) return true
+    return false
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────
@@ -106,7 +142,7 @@ private const val BODY_COLLAPSED_CHAR_LIMIT: Int = 500
  * - Both null → no row (the parent spacedBy gap collapses too).
  */
 @Composable
-private fun EmailBodyBlock(
+internal fun SourceOriginalBodyBlock(
     archivedOriginal: ArchivedOriginalUi?,
     body: EmailBodyUi?,
 ) {
@@ -171,6 +207,7 @@ private fun ExpandableBodyText(bodyPlain: String) {
             TextButton(
                 onClick = { expanded = !expanded },
                 contentPadding = PaddingValues(all = 0.dp),
+                modifier = Modifier.testTag("raw-event-body-toggle"),
             ) {
                 Text(
                     text = stringResource(

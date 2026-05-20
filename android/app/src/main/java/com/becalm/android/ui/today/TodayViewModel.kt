@@ -2,14 +2,19 @@ package com.becalm.android.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -31,6 +36,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
@@ -61,6 +67,7 @@ public sealed class TimelineItem {
         val itemType: String,
         override val title: String,
         val direction: String?,
+        val sourceType: String? = null,
         val scheduleStatus: String?,
         val rowTreatment: TodayCommitmentRowTreatment,
         val counterpartyDisplayName: String?,
@@ -81,9 +88,13 @@ public sealed class TimelineItem {
         val id: String,
         override val title: String,
         val relatedSourceTypes: List<String> = emptyList(),
+        val location: String? = null,
+        val status: String = "confirmed",
+        val availability: String? = null,
+        val isAllDay: Boolean = false,
         override val sortKey: Instant,
-        override val timelineAt: Instant = sortKey,
-        override val isTimed: Boolean = true,
+        override val timelineAt: Instant? = if (isAllDay) null else sortKey,
+        override val isTimed: Boolean = !isAllDay,
     ) : TimelineItem()
 
     /**
@@ -96,9 +107,13 @@ public sealed class TimelineItem {
         override val title: String,
         val attendeesRaw: String?,
         val relatedSourceTypes: List<String> = emptyList(),
+        val location: String? = null,
+        val status: String = "confirmed",
+        val availability: String? = null,
+        val isAllDay: Boolean = false,
         override val sortKey: Instant,
-        override val timelineAt: Instant = sortKey,
-        override val isTimed: Boolean = true,
+        override val timelineAt: Instant? = if (isAllDay) null else sortKey,
+        override val isTimed: Boolean = !isAllDay,
     ) : TimelineItem()
 }
 
@@ -112,11 +127,37 @@ public data class TodayPersonFocus(
     val commitmentCount: Int,
 )
 
+public data class TodayProcessingStatusUi(
+    val activeCount: Int = 0,
+    val actionCount: Int = 0,
+    val activeItemCount: Int = 0,
+    val latestPhase: ProcessingPhase? = null,
+    val latestUpdatedAt: Instant? = null,
+) {
+    val visible: Boolean
+        get() = activeCount > 0 || actionCount > 0 || latestPhase != null
+}
+
+public data class ScheduleConflictReviewItem(
+    val linkId: String,
+    val calendarTitle: String,
+    val calendarStartAt: Instant?,
+    val calendarStatus: String?,
+    val sourceTitle: String,
+    val sourceStartAt: Instant?,
+    val sourceStatus: String?,
+    val sourceType: String,
+    val evidence: String?,
+)
+
 public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPersonFocus> {
     val countsByName = linkedMapOf<String?, Int>()
     timeline.forEach { item ->
         if (item is TimelineItem.Commitment) {
             val name = item.counterpartyDisplayName?.takeIf { it.isNotBlank() }
+            if (name == null && item.itemType == CommitmentItemType.SCHEDULE) {
+                return@forEach
+            }
             countsByName[name] = countsByName.getOrDefault(name, 0) + 1
         }
     }
@@ -144,6 +185,7 @@ public fun buildTodayPersonFocus(timeline: List<TimelineItem>): List<TodayPerson
  *                       (top-bar spinner in [com.becalm.android.ui.today.TodayTimelineScreen]).
  * @param overall  Aggregate sync state driving the TDY-008 banner.
  * @param refreshing True while a user-initiated pull-to-refresh (TDY-006) is in flight.
+ * @param message One-shot user feedback for refresh completion/failure.
  * @param error Non-null when an unrecoverable error has occurred.
  */
 // spec: TDY-008 — aggregate sync status
@@ -154,8 +196,11 @@ public data class TodayUiState(
     val sourceStatus: Map<String, SourceStatusUi> = emptyMap(),
     val overallSyncing: Boolean = false,
     val overall: OverallSyncState = OverallSyncState.Idle,
+    val processingStatus: TodayProcessingStatusUi = TodayProcessingStatusUi(),
+    val scheduleConflictReviewItems: List<ScheduleConflictReviewItem> = emptyList(),
     val processingPaused: Boolean = false,
     val refreshing: Boolean = false,
+    val message: UiMessage? = null,
     val error: UiMessage? = null,
 )
 
@@ -196,6 +241,7 @@ public class TodayViewModel @Inject constructor(
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository,
     private val workScheduler: WorkScheduler,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository,
     private val authRepository: AuthRepository,
     userPrefsStore: UserPrefsStore,
     private val foregroundCatchUpScheduler: ForegroundCatchUpScheduler,
@@ -214,6 +260,7 @@ public class TodayViewModel @Inject constructor(
         calendarEventRepository = calendarEventRepository,
         scheduleEventLinkRepository = scheduleEventLinkRepository,
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
         clock = clock,
@@ -225,6 +272,7 @@ public class TodayViewModel @Inject constructor(
 
     /** Drives the [PullRefreshIndicator] while [onPullRefresh] is in flight (TDY-006). */
     private val refreshingFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    private val refreshMessageFlow: MutableStateFlow<UiMessage?> = MutableStateFlow(null)
 
     /**
      * Observable state consumed by the Today screen composable.
@@ -233,14 +281,23 @@ public class TodayViewModel @Inject constructor(
      * as all upstream flows produce their first values. When userId is null the
      * combined emission sets [TodayUiState.error].
      */
-    public val state: StateFlow<TodayUiState> = stateSource.observeUiState(
-        userIdFlow = userIdFlow,
-        refreshingFlow = refreshingFlow,
-    ).stateIn(
+    public val state: StateFlow<TodayUiState> = combine(
+        stateSource.observeUiState(
+            userIdFlow = userIdFlow,
+            refreshingFlow = refreshingFlow,
+        ),
+        refreshMessageFlow,
+    ) { state, message ->
+        state.copy(message = message)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = TodayUiState(loading = true),
     )
+
+    public fun onMessageShown() {
+        refreshMessageFlow.value = null
+    }
 
     init {
         logger.d(TAG, "init")
@@ -262,24 +319,45 @@ public class TodayViewModel @Inject constructor(
      * person-index rebuild that feeds People, Today, and Commitments cards.
      */
     public fun onPullRefresh() {
+        if (refreshingFlow.value) return
         // TDY-009: tap-driven catch-up on the strip is explicitly prohibited ("칩 탭
         // 인터랙션 없음") — this pull gesture is the single user-facing trigger.
         viewModelScope.launch(ioDispatcher) {
             foregroundCatchUpScheduler.triggerCatchUp()
             val userId = authRepository.currentSession()?.userId
             refreshingFlow.value = true
+            refreshMessageFlow.value = null
+            var failed = false
             try {
-                sourceStatusRepository.refreshFromServer()
+                when (val result = sourceStatusRepository.refreshFromServer()) {
+                    is BecalmResult.Success -> Unit
+                    is BecalmResult.Failure -> {
+                        failed = true
+                        logger.w(TAG, "source status refresh failed: ${result.error}")
+                    }
+                }
                 if (userId != null) {
-                    relationRefreshCoordinator().refresh(
+                    when (val result = relationRefreshCoordinator().refresh(
                         userId = userId,
                         plan = SourceRelationRefreshPlan(
                             sourceType = PULL_REFRESH_SOURCE,
                             calendarRefresh = CalendarRelationRefresh(),
                             sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
                         ),
-                    )
+                    )) {
+                        is BecalmResult.Success -> Unit
+                        is BecalmResult.Failure -> {
+                            failed = true
+                            logger.w(TAG, "relation refresh failed: ${result.error}")
+                        }
+                    }
                 }
+                refreshMessageFlow.value = UiMessage.resource(
+                    if (failed) R.string.today_refresh_failed else R.string.today_refresh_success,
+                )
+            } catch (t: Exception) {
+                logger.w(TAG, "pull refresh failed: ${t.message}")
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_refresh_failed)
             } finally {
                 refreshingFlow.value = false
             }
@@ -300,6 +378,25 @@ public class TodayViewModel @Inject constructor(
     /** TDY-007 settings entry from the top-right icon. */
     public fun onOpenSettings() {
         _effects.tryEmit(TodayEffect.NavigateToSettings)
+    }
+
+    public fun onResolveScheduleConflict(linkId: String, choice: String) {
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userIdFlow.value ?: authRepository.currentSession()?.userId
+            if (userId == null) {
+                refreshMessageFlow.value = UiMessage.resource(R.string.today_error_sign_in_required)
+                return@launch
+            }
+            when (val result = scheduleEventLinkRepository.resolve(userId = userId, id = linkId, choice = choice)) {
+                is BecalmResult.Success -> {
+                    refreshMessageFlow.value = UiMessage.resource(R.string.today_schedule_conflict_resolved)
+                }
+                is BecalmResult.Failure -> {
+                    logger.w(TAG, "schedule conflict resolve failed: ${result.error}")
+                    refreshMessageFlow.value = UiMessage.resource(R.string.today_schedule_conflict_resolve_failed)
+                }
+            }
+        }
     }
 
     private companion object {

@@ -98,7 +98,7 @@ class AuthCheckpoint1E2eTest {
                     isLoading = false,
                     googleSignInEnabled = true,
                     onSignIn = { _, _ -> },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = { launches += 1 },
                 )
             }
@@ -121,7 +121,6 @@ class AuthCheckpoint1E2eTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = { launches += 1 },
                     onGoogleIdToken = {},
@@ -155,7 +154,6 @@ class AuthCheckpoint1E2eTest {
                             UiMessage.resource(R.string.auth_error_session_restore_failed),
                         )
                     },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = false,
                     onGoogleSignInLaunch = {},
                     onGoogleIdToken = {},

@@ -1,24 +1,35 @@
 package com.becalm.android.integration.local.ui.persons
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.ui.persons.ArchivedOriginalUi
 import com.becalm.android.ui.persons.EmailBodyUi
-import com.becalm.android.ui.persons.RawEventDetailContent
-import com.becalm.android.ui.persons.RawEventDetailUiState
 import com.becalm.android.ui.persons.PersonMatchChoiceRow
 import com.becalm.android.ui.persons.PersonMatchCandidateSummary
+import com.becalm.android.ui.persons.RawEventCommitmentSummary
+import com.becalm.android.ui.persons.RawEventDetailContent
+import com.becalm.android.ui.persons.RawEventDetailUiState
 import com.becalm.android.ui.persons.UnassignedEventSummary
 import com.becalm.android.ui.persons.UnassignedEventsContent
 import com.becalm.android.ui.theme.BecalmTheme
@@ -121,6 +132,88 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
+    fun `unassigned events remain visible until match result is resolved`() {
+        var matchedAnchor: String? = null
+        val resolvedIds = mutableStateOf(emptySet<String>())
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-candidate",
+                            sourceType = SourceType.VOICE,
+                            title = "통화 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "+821012345678",
+                                    displayName = "김지훈",
+                                    detail = "+821012345678",
+                                    role = "counterparty",
+                                    evidence = "통화기록 번호와 파일명이 일치",
+                                    confidence = 0.91,
+                                ),
+                            ),
+                        ),
+                    ),
+                    resolvedMatchEventIds = resolvedIds.value,
+                    onManualMatch = { _, anchor, _ -> matchedAnchor = anchor },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-confirm-event-candidate")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.runOnIdle {
+            assertEquals("+821012345678", matchedAnchor)
+        }
+        composeRule.onNodeWithText("통화 녹음").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            resolvedIds.value = setOf("event-candidate")
+        }
+        composeRule.onNodeWithText(string(R.string.persons_unassigned_empty_title)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `unassigned events disable match actions while saving`() {
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-saving",
+                            sourceType = SourceType.VOICE,
+                            title = "통화 녹음",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "+821012345678",
+                                    displayName = "김지훈",
+                                    detail = "+821012345678",
+                                    role = "counterparty",
+                                    evidence = "통화기록 번호와 파일명이 일치",
+                                    confidence = 0.91,
+                                ),
+                            ),
+                        ),
+                    ),
+                    savingMatchEventIds = setOf("event-saving"),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-confirm-event-saving")
+            .performScrollTo()
+            .assertIsNotEnabled()
+    }
+
+    @Test
     fun `unassigned events manual match inputs route anchor and nickname`() {
         var matchedEventId: String? = null
         var matchedAnchor: String? = null
@@ -191,6 +284,113 @@ class PersonDetailSupplementUiTest {
 
         composeRule.runOnIdle {
             assertEquals("event-self", selfMatchedEventId)
+        }
+    }
+
+    @Test
+    fun `unassigned events suggested self can be rejected and opens manual match`() {
+        var notSelfEventId: String? = null
+        val notSelfIds = mutableStateOf(setOf<String>())
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-suggested-self",
+                            sourceType = SourceType.GMAIL,
+                            title = "Jake가 보낸 메일",
+                            suggestedLabel = "Jake",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        ),
+                    ),
+                    notSelfMatchEventIds = notSelfIds.value,
+                    onNotSelfMatch = { event ->
+                        notSelfEventId = event.id
+                        notSelfIds.value = notSelfIds.value + event.id
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-suggested-self")
+            .performScrollTo()
+            .performClick()
+
+        composeRule.onNodeWithTag("unassigned-match-anchor-event-suggested-self").assertIsDisplayed()
+        composeRule.onNodeWithTag("unassigned-match-not-self-followup-event-suggested-self").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unassigned-match-self-event-suggested-self").assertCountEquals(0)
+        composeRule.runOnIdle {
+            assertEquals("event-suggested-self", notSelfEventId)
+        }
+    }
+
+    @Test
+    fun `unassigned events source suggested self routes to contact matching without person confirm`() {
+        var notSelfEventId: String? = null
+        val notSelfIds = mutableStateOf(setOf<String>())
+
+        composeRule.setContent {
+            BecalmTheme {
+                UnassignedEventsContent(
+                    loading = false,
+                    matchChoices = listOf(
+                        PersonMatchChoiceRow(
+                            anchor = "minji@corp.com",
+                            displayName = "김민지",
+                            detail = "minji@corp.com",
+                            hasInteractions = true,
+                        ),
+                    ),
+                    notSelfMatchEventIds = notSelfIds.value,
+                    unassignedEvents = listOf(
+                        UnassignedEventSummary(
+                            id = "event-source-suggested-self",
+                            sourceType = SourceType.GMAIL,
+                            title = "Jake가 보낸 메일",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            candidates = listOf(
+                                PersonMatchCandidateSummary(
+                                    anchor = "Jake",
+                                    displayName = "Jake",
+                                    detail = null,
+                                    role = "sender",
+                                    evidence = "Jake가 정리하겠습니다.",
+                                    confidence = 0.72,
+                                    isSelfSuggestion = true,
+                                ),
+                            ),
+                        ),
+                    ),
+                    onNotSelfMatch = { event ->
+                        notSelfEventId = event.id
+                        notSelfIds.value = notSelfIds.value + event.id
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-source-suggested-self")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unassigned-match-confirm-event-source-suggested-self")
+            .assertCountEquals(0)
+        composeRule.onAllNodesWithTag("unassigned-match-other-event-source-suggested-self")
+            .assertCountEquals(0)
+
+        composeRule.onNodeWithTag("unassigned-match-not-self-event-source-suggested-self")
+            .performClick()
+
+        composeRule.onNodeWithTag("unassigned-match-choice-event-source-suggested-self-minji@corp.com")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("unassigned-match-not-self-followup-event-source-suggested-self").assertIsDisplayed()
+        composeRule.onAllNodesWithTag("unassigned-match-self-event-source-suggested-self").assertCountEquals(0)
+        composeRule.onAllNodesWithTag("unassigned-match-choice-event-source-suggested-self-Jake")
+            .assertCountEquals(0)
+        composeRule.runOnIdle {
+            assertEquals("event-source-suggested-self", notSelfEventId)
         }
     }
 
@@ -341,6 +541,68 @@ class PersonDetailSupplementUiTest {
     }
 
     @Test
+    fun `raw event detail content shows extracted commitments before long body and keeps body toggle reachable`() {
+        val longBody = buildString {
+            append("A".repeat(900))
+            append("TAIL")
+        }
+
+        composeRule.setContent {
+            BecalmTheme {
+                Box(modifier = Modifier.height(280.dp)) {
+                    RawEventDetailContent(
+                        state = RawEventDetailUiState(
+                            eventId = "event-1",
+                            sourceType = SourceType.GMAIL,
+                            eventTitle = "제안서",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            snippet = "요약",
+                            emailBody = EmailBodyUi(
+                                bodyPlain = longBody,
+                                bodyHtml = null,
+                            ),
+                            extractedCommitments = listOf(
+                                RawEventCommitmentSummary(
+                                    id = "commitment-1",
+                                    title = "하단 약속",
+                                    itemType = "action",
+                                    direction = "give",
+                                    status = "pending",
+                                    quote = "하단까지 스크롤되어야 합니다.",
+                                ),
+                            ),
+                            loading = false,
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("raw-event-detail-list").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title))
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-extracted-commitments").assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-body-toggle"))
+    }
+
+    @Test
+    fun `raw event detail content shows meeting transcript from archived original`() {
+        assertRawEventTranscript(
+            sourceType = SourceType.MEETING,
+            title = "Carbon Black 회의",
+        )
+    }
+
+    @Test
+    fun `raw event detail content shows call transcript from archived original`() {
+        assertRawEventTranscript(
+            sourceType = SourceType.CALL_RECORDING,
+            title = "HS0007 통화",
+        )
+    }
+
+    @Test
     fun `raw event detail content shows html only degrade notice without fake action`() {
         composeRule.setContent {
             BecalmTheme {
@@ -361,6 +623,35 @@ class PersonDetailSupplementUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.raw_event_body_html_only_notice)).assertIsDisplayed()
+    }
+
+    private fun assertRawEventTranscript(
+        sourceType: String,
+        title: String,
+    ) {
+        composeRule.setContent {
+            BecalmTheme {
+                RawEventDetailContent(
+                    state = RawEventDetailUiState(
+                        eventId = "event-transcript",
+                        sourceType = sourceType,
+                        eventTitle = title,
+                        timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                        archivedOriginal = ArchivedOriginalUi(
+                            bodyText = "[00:00-00:05] SPEAKER_01: 다음 주 수요일에 다시 이야기해요.",
+                            deletedFromDevice = false,
+                            truncated = false,
+                        ),
+                        loading = false,
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(title).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.raw_event_transcript_title)).assertIsDisplayed()
+        composeRule.onNodeWithTag("raw-event-body").assertTextContains("SPEAKER_01", substring = true)
+        composeRule.onNodeWithTag("raw-event-body").assertTextContains("다음 주 수요일", substring = true)
     }
 
     private fun string(resId: Int, vararg args: Any): String =

@@ -60,11 +60,24 @@ public sealed class AuthUiState {
     ) : AuthUiState()
 
     /**
+     * Account creation succeeded but Supabase requires email confirmation before issuing a session.
+     */
+    public data class SignUpEmailConfirmationRequired(val email: String) : AuthUiState()
+
+    /**
      * An error occurred during a sign-in or sign-out operation.
      *
      * @param message Resource-backed description of the error.
      */
     public data class Error(val message: UiMessage) : AuthUiState()
+
+    /**
+     * Startup auth restoration failed, but the app can recover by returning to the auth shell.
+     */
+    public data class RecoveryRequired(
+        val message: UiMessage,
+        val termsAccepted: Boolean,
+    ) : AuthUiState()
 }
 
 /** One-shot effects emitted by [AuthViewModel]. */
@@ -144,7 +157,7 @@ public class AuthViewModel @Inject constructor(
      *
      * If Supabase returns a session immediately, the returned session drives the
      * transition to [AuthUiState.SignedIn]. If email confirmation is required, the
-     * screen stays on Login and shows a stable confirmation-required message.
+     * screen shows a confirmation-waiting state instead of treating it as failure.
      */
     public fun onEmailSignUp(email: String, password: String) {
         viewModelScope.launch {
@@ -156,16 +169,25 @@ public class AuthViewModel @Inject constructor(
                 }
                 is BecalmResult.Failure -> {
                     logger.w(TAG, "email sign-up failed")
-                    val message = when (val error = result.error) {
-                        is BecalmError.Validation ->
-                            if (error.message == "email_confirmation_required") {
-                                UiMessage.resource(R.string.auth_error_email_confirmation_required)
-                            } else {
-                                UiMessage.resource(R.string.auth_error_sign_up_failed)
+                    when (val error = result.error) {
+                        is BecalmError.Validation -> {
+                            _uiState.value = when (error.message) {
+                                "email_confirmation_required" ->
+                                    AuthUiState.SignUpEmailConfirmationRequired(email = email.trim())
+                                "email_already_registered" ->
+                                    AuthUiState.Error(UiMessage.resource(R.string.auth_error_email_already_registered))
+                                "weak_password" ->
+                                    AuthUiState.Error(UiMessage.resource(R.string.auth_error_weak_password))
+                                "signup_disabled" ->
+                                    AuthUiState.Error(UiMessage.resource(R.string.auth_error_signup_disabled))
+                                else ->
+                                    AuthUiState.Error(UiMessage.resource(R.string.auth_error_sign_up_failed))
                             }
-                        else -> error.toAuthMessage()
+                        }
+                        else -> {
+                            _uiState.value = AuthUiState.Error(error.toAuthMessage())
+                        }
                     }
-                    _uiState.value = AuthUiState.Error(message)
                 }
             }
         }
@@ -206,7 +228,7 @@ public class AuthViewModel @Inject constructor(
      * and person-enrichment state while guaranteeing that a different account on the
      * same device cannot observe the prior user's data (a separate file is opened).
      *
-     * The "로컬 데이터 전체 삭제" UX (full PIPA wipe via [AuthRepository.signOut]) is
+     * The "기기 내부 데이터 전체 삭제" UX (full PIPA wipe via [AuthRepository.signOut]) is
      * reached from Settings → Privacy and is intentionally not this method's concern.
      *
      * On success the sign-out state is driven solely by [onObserveSession] collecting
@@ -250,10 +272,12 @@ public class AuthViewModel @Inject constructor(
      */
     public fun onAcceptTermsAndContinue() {
         viewModelScope.launch {
+            _uiState.value = AuthUiState.Loading
             try {
                 userPrefsStore.setTermsAccepted(true)
                 _effects.emit(AuthEffect.NavigateToLogin)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logger.e(TAG, "failed to persist terms acceptance", e)
                 _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_terms_acceptance_failed))
             }
@@ -275,8 +299,9 @@ public class AuthViewModel @Inject constructor(
                 setUiState(bootstrapUiState())
                 logger.d(TAG, "startup auth bootstrap resolved to ${uiState.value}")
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 logger.w(TAG, "startup auth bootstrap failed")
-                _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))
+                _uiState.value = sessionRecoveryState()
             }
 
             try {
@@ -285,7 +310,7 @@ public class AuthViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                _uiState.value = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))
+                _uiState.value = sessionRecoveryState()
             }
         }
     }
@@ -295,7 +320,9 @@ public class AuthViewModel @Inject constructor(
      * and return to the sign-in screen.
      */
     public fun onErrorDismissed() {
-        _uiState.value = AuthUiState.SignedOut()
+        viewModelScope.launch {
+            _uiState.value = signedOutState()
+        }
     }
 
     private fun setUiState(state: AuthUiState) {
@@ -303,6 +330,8 @@ public class AuthViewModel @Inject constructor(
         when (state) {
             is AuthUiState.SignedIn -> startRuntimeBootstrap(state.userId)
             is AuthUiState.SignedOut -> runtimeBootstrapUserId = null
+            is AuthUiState.SignUpEmailConfirmationRequired -> Unit
+            is AuthUiState.RecoveryRequired -> runtimeBootstrapUserId = null
             AuthUiState.Loading,
             is AuthUiState.Error -> Unit
         }
@@ -342,10 +371,17 @@ public class AuthViewModel @Inject constructor(
                 },
             )
         } else {
-            AuthUiState.SignedOut(
-                termsAccepted = userPrefsStore.observeTermsAccepted().first(),
-            )
+            signedOutState()
         }
+
+    private suspend fun signedOutState(): AuthUiState.SignedOut =
+        AuthUiState.SignedOut(termsAccepted = userPrefsStore.observeTermsAccepted().first())
+
+    private suspend fun sessionRecoveryState(): AuthUiState.RecoveryRequired =
+        AuthUiState.RecoveryRequired(
+            message = UiMessage.resource(R.string.auth_error_session_restore_failed),
+            termsAccepted = runCatching { userPrefsStore.observeTermsAccepted().first() }.getOrDefault(false),
+        )
 
     private suspend fun onboardingResumeRoute(): String {
         val stepStates = OnboardingProgressResolver.hydrateStepStates(
@@ -364,7 +400,11 @@ private fun BecalmError.toAuthMessage(): UiMessage = when (this) {
     is BecalmError.Unauthorized -> UiMessage.resource(R.string.auth_error_invalid_credentials)
     is BecalmError.RateLimited -> UiMessage.resource(R.string.auth_error_rate_limited)
     is BecalmError.ServerError -> UiMessage.resource(R.string.auth_error_server)
-    is BecalmError.Validation -> UiMessage.resource(R.string.auth_error_validation)
+    is BecalmError.Validation -> when (message) {
+        "google_provider_disabled" -> UiMessage.resource(R.string.login_google_setup_required)
+        "email_not_confirmed" -> UiMessage.resource(R.string.auth_error_email_not_confirmed)
+        else -> UiMessage.resource(R.string.auth_error_validation)
+    }
     is BecalmError.Io -> UiMessage.resource(R.string.auth_error_local_io)
     is BecalmError.Permission -> UiMessage.resource(R.string.auth_error_permission)
     is BecalmError.NotFound -> UiMessage.resource(R.string.auth_error_not_found)

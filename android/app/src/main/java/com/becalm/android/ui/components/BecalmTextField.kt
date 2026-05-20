@@ -1,40 +1,49 @@
 /**
  * SP-47: Glass-styled text input field for BeCalm Android.
  *
- * Wraps Material3 [OutlinedTextField] with the glass-panel visual recipe and
+ * Wraps Material3 [OutlinedTextField] with a warm glass field surface and
  * semantic color tokens routed through [MaterialTheme.becalmColors].
  */
 package com.becalm.android.ui.components
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.dp
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.theme.becalmColors
-import com.becalm.android.ui.theme.glassPanel
 
 // ─── BecalmTextField ──────────────────────────────────────────────────────────
 
 /**
- * Single glass-styled text input that wraps [OutlinedTextField] with BeCalm's
- * frosted glass-panel surface and semantic token colors.
+ * Single glass-styled text input that wraps [BasicTextField] with BeCalm's
+ * single-outline field surface and semantic token colors.
  *
  * @param value               Current text value.
  * @param onValueChange       Callback invoked on each text change.
@@ -58,6 +67,7 @@ import com.becalm.android.ui.theme.glassPanel
  *                            Activity per PIPA Article 29.
  */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 public fun BecalmTextField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -76,71 +86,92 @@ public fun BecalmTextField(
 ) {
     val becalmColors = MaterialTheme.becalmColors
     val colorScheme = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    val fieldShape = MaterialTheme.shapes.small
+    val borderColor = when {
+        isError -> colorScheme.error
+        focused -> colorScheme.primary
+        else -> becalmColors.glassBorder
+    }
+    val textColor = if (enabled) colorScheme.onSurface else colorScheme.onSurfaceVariant
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+        disabledContainerColor = Color.Transparent,
+        errorContainerColor = Color.Transparent,
+        focusedBorderColor = Color.Transparent,
+        unfocusedBorderColor = Color.Transparent,
+        errorBorderColor = Color.Transparent,
+        disabledBorderColor = Color.Transparent,
+        focusedLabelColor = colorScheme.primary,
+        unfocusedLabelColor = colorScheme.onSurfaceVariant,
+        errorLabelColor = colorScheme.error,
+        disabledLabelColor = colorScheme.onSurfaceVariant,
+        focusedPlaceholderColor = colorScheme.onSurfaceVariant,
+        unfocusedPlaceholderColor = colorScheme.onSurfaceVariant,
+        focusedTextColor = colorScheme.onSurface,
+        unfocusedTextColor = colorScheme.onSurface,
+        cursorColor = colorScheme.primary,
+        errorCursorColor = colorScheme.error,
+        focusedLeadingIconColor = colorScheme.onSurfaceVariant,
+        unfocusedLeadingIconColor = colorScheme.onSurfaceVariant,
+        errorLeadingIconColor = colorScheme.error,
+        focusedTrailingIconColor = colorScheme.onSurfaceVariant,
+        unfocusedTrailingIconColor = colorScheme.onSurfaceVariant,
+        errorTrailingIconColor = colorScheme.error,
+        focusedSupportingTextColor = colorScheme.onSurfaceVariant,
+        unfocusedSupportingTextColor = colorScheme.onSurfaceVariant,
+        errorSupportingTextColor = colorScheme.error,
+    )
 
-    OutlinedTextField(
+    BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier
-            .glassPanel(MaterialTheme.shapes.small),
-        label = label?.let { { Text(it) } },
-        placeholder = placeholder?.let { { Text(it) } },
-        leadingIcon = leadingIcon?.let {
-            { Icon(imageVector = it, contentDescription = null) }
-        },
-        trailingIcon = trailingIcon,
-        isError = isError,
-        supportingText = supportingText?.let {
-            {
-                Text(
-                    text = it,
-                    color = if (isError) colorScheme.error else colorScheme.onSurfaceVariant,
-                )
-            }
-        },
+        modifier = modifier.heightIn(min = 56.dp),
+        enabled = enabled,
+        singleLine = singleLine,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = textColor),
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
             imeAction = imeAction,
         ),
-        singleLine = singleLine,
-        enabled = enabled,
         visualTransformation = visualTransformation,
-        shape = MaterialTheme.shapes.small,
-        colors = OutlinedTextFieldDefaults.colors(
-            // Container transparent — glass background comes from glassPanel modifier
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent,
-            disabledContainerColor = Color.Transparent,
-            errorContainerColor = Color.Transparent,
-            // Indicator (outline) colors
-            focusedBorderColor = colorScheme.primary,
-            unfocusedBorderColor = becalmColors.glassBorder,
-            errorBorderColor = colorScheme.error,
-            disabledBorderColor = becalmColors.glassBorder,
-            // Label colors
-            focusedLabelColor = colorScheme.primary,
-            unfocusedLabelColor = colorScheme.onSurfaceVariant,
-            errorLabelColor = colorScheme.error,
-            disabledLabelColor = colorScheme.onSurfaceVariant,
-            // Placeholder
-            focusedPlaceholderColor = colorScheme.onSurfaceVariant,
-            unfocusedPlaceholderColor = colorScheme.onSurfaceVariant,
-            // Text and cursor
-            focusedTextColor = colorScheme.onSurface,
-            unfocusedTextColor = colorScheme.onSurface,
-            cursorColor = colorScheme.primary,
-            errorCursorColor = colorScheme.error,
-            // Leading / trailing icons
-            focusedLeadingIconColor = colorScheme.onSurfaceVariant,
-            unfocusedLeadingIconColor = colorScheme.onSurfaceVariant,
-            errorLeadingIconColor = colorScheme.error,
-            focusedTrailingIconColor = colorScheme.onSurfaceVariant,
-            unfocusedTrailingIconColor = colorScheme.onSurfaceVariant,
-            errorTrailingIconColor = colorScheme.error,
-            // Supporting text color handled inline above
-            focusedSupportingTextColor = colorScheme.onSurfaceVariant,
-            unfocusedSupportingTextColor = colorScheme.onSurfaceVariant,
-            errorSupportingTextColor = colorScheme.error,
-        ),
+        interactionSource = interactionSource,
+        cursorBrush = SolidColor(if (isError) colorScheme.error else colorScheme.primary),
+        decorationBox = { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = innerTextField,
+                enabled = enabled,
+                singleLine = singleLine,
+                visualTransformation = visualTransformation,
+                interactionSource = interactionSource,
+                isError = isError,
+                label = label?.let { { Text(it) } },
+                placeholder = placeholder?.let { { Text(it) } },
+                leadingIcon = leadingIcon?.let {
+                    { Icon(imageVector = it, contentDescription = null) }
+                },
+                trailingIcon = trailingIcon,
+                supportingText = supportingText?.let {
+                    {
+                        Text(
+                            text = it,
+                            color = if (isError) colorScheme.error else colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                colors = fieldColors,
+                container = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .border(1.dp, borderColor, fieldShape),
+                    )
+                },
+            )
+        },
     )
 }
 

@@ -501,6 +501,52 @@ class MigrationTest {
         assertIndexIsUnique(migrated, "ux_raw_events_user_client_event")
     }
 
+    @Test
+    fun migrate26To27_createsDurableMeetingSpeakerPreviewTable() {
+        helper.createDatabase(TEST_DB, 26).close()
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 27, true, migration(26, 27))
+        val columns = queryTableColumns(migrated, "meeting_speaker_previews")
+
+        assertEquals("TEXT", columns.getValue("id").type)
+        assertEquals(1, columns.getValue("id").notNull)
+        assertEquals("TEXT", columns.getValue("raw_event_id").type)
+        assertEquals(1, columns.getValue("raw_event_id").notNull)
+        assertEquals("TEXT", columns.getValue("source_ref").type)
+        assertEquals(1, columns.getValue("source_ref").notNull)
+        assertEquals("TEXT", columns.getValue("speakers_json").type)
+        assertEquals(1, columns.getValue("speakers_json").notNull)
+        assertEquals("TEXT", columns.getValue("transcript_segments_json").type)
+        assertEquals(0, columns.getValue("transcript_segments_json").notNull)
+        assertEquals("INTEGER", columns.getValue("billable_seconds").type)
+        assertEquals(1, columns.getValue("billable_seconds").notNull)
+        assertIndexPresent(migrated, "ux_meeting_speaker_previews_raw_event")
+        assertIndexIsUnique(migrated, "ux_meeting_speaker_previews_raw_event")
+        assertIndexPresent(migrated, "idx_meeting_speaker_previews_user_status")
+        assertIndexPresent(migrated, "idx_meeting_speaker_previews_preview_id")
+    }
+
+    @Test
+    fun migrate27To28_createsMeetingSpeakerAliasTable() {
+        helper.createDatabase(TEST_DB, 27).close()
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 28, true, migration(27, 28))
+        val columns = queryTableColumns(migrated, "meeting_speaker_aliases")
+
+        assertEquals("TEXT", columns.getValue("user_id").type)
+        assertEquals(1, columns.getValue("user_id").notNull)
+        assertEquals("TEXT", columns.getValue("raw_event_id").type)
+        assertEquals(1, columns.getValue("raw_event_id").notNull)
+        assertEquals("TEXT", columns.getValue("speaker_id").type)
+        assertEquals(1, columns.getValue("speaker_id").notNull)
+        assertEquals("TEXT", columns.getValue("display_name").type)
+        assertEquals(1, columns.getValue("display_name").notNull)
+        assertEquals("INTEGER", columns.getValue("updated_at").type)
+        assertEquals(1, columns.getValue("updated_at").notNull)
+        assertIndexPresent(migrated, "idx_meeting_speaker_aliases_user_raw_event")
+        assertIndexIsNotUnique(migrated, "idx_meeting_speaker_aliases_user_raw_event")
+    }
+
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private fun insertV8RawIngestionEvent(
@@ -788,6 +834,9 @@ class MigrationTest {
             )
         }
     }
+
+    private fun migration(startVersion: Int, endVersion: Int) =
+        MIGRATIONS.first { it.startVersion == startVersion && it.endVersion == endVersion }
 
     /**
      * Snapshot of a row returned by `PRAGMA table_info(<table>)`.

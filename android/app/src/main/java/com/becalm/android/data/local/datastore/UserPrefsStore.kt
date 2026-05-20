@@ -133,6 +133,12 @@ public interface UserPrefsStore {
     /** Persists or clears the Recordings SAF tree URI grant. */
     public suspend fun setRecordingFolderTreeUri(uri: String?)
 
+    /** Emits the persistable SAF tree URI granted for a single recording source. */
+    public fun observeRecordingFolderTreeUri(sourceType: String): Flow<String?>
+
+    /** Persists or clears the SAF tree URI grant for a single recording source. */
+    public suspend fun setRecordingFolderTreeUri(sourceType: String, uri: String?)
+
     /**
      * Emits the current theme mode preference.
      *
@@ -281,7 +287,7 @@ public interface UserPrefsStore {
     /**
      * Emits whether the non-email [sourceType] is enabled for ingestion.
      *
-     * Supported values: `voice`, `meeting`, `google_calendar`, `outlook_calendar`.
+     * Supported values: `voice`, `call_recording`, `meeting`, `google_calendar`, `outlook_calendar`.
      * Email sources continue to use [observeEmailSourceConnected].
      */
     public fun observeSourceEnabled(sourceType: String): Flow<Boolean>
@@ -289,7 +295,7 @@ public interface UserPrefsStore {
     /**
      * Persists whether the non-email [sourceType] is enabled for ingestion.
      *
-     * Supported values: `voice`, `meeting`, `google_calendar`, `outlook_calendar`.
+     * Supported values: `voice`, `call_recording`, `meeting`, `google_calendar`, `outlook_calendar`.
      * Email sources continue to use [setEmailSourceConnected].
      */
     public suspend fun setSourceEnabled(sourceType: String, enabled: Boolean)
@@ -626,6 +632,28 @@ public class UserPrefsStoreImpl @Inject constructor(
         }
     }
 
+    override fun observeRecordingFolderTreeUri(sourceType: String): Flow<String?> {
+        require(sourceType in SUPPORTED_RECORDING_FOLDER_SOURCES) {
+            "recording folder URI only supports $SUPPORTED_RECORDING_FOLDER_SOURCES, got '$sourceType'"
+        }
+        return dataStore.data.map { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@map null
+            val keys = userScoped(userId)
+            prefs[keys.recordingFolderTreeUriKey(sourceType)] ?: prefs[keys.recordingFolderTreeUriKey]
+        }
+    }
+
+    override suspend fun setRecordingFolderTreeUri(sourceType: String, uri: String?) {
+        require(sourceType in SUPPORTED_RECORDING_FOLDER_SOURCES) {
+            "recording folder URI only supports $SUPPORTED_RECORDING_FOLDER_SOURCES, got '$sourceType'"
+        }
+        dataStore.edit { prefs ->
+            val userId = prefs[currentUserIdKey] ?: return@edit
+            val key = userScoped(userId).recordingFolderTreeUriKey(sourceType)
+            if (uri == null) prefs.remove(key) else prefs[key] = uri
+        }
+    }
+
     override fun observeThemeMode(): Flow<String> =
         dataStore.data.map { it[themeModeKey] ?: "system" }
 
@@ -721,6 +749,7 @@ public class UserPrefsStoreImpl @Inject constructor(
     override fun observeEnabledSources(): Flow<Set<String>> =
         combine(
             observeSourceEnabled(SourceType.VOICE),
+            observeSourceEnabled(SourceType.CALL_RECORDING),
             observeSourceEnabled(SourceType.MEETING),
             observeEmailSourceConnected(EmailPipaProvider.GMAIL),
             observeEmailSourceManagedByBackend(EmailPipaProvider.GMAIL),
@@ -735,13 +764,14 @@ public class UserPrefsStoreImpl @Inject constructor(
         ) { values ->
             buildSet {
                 if (values[0]) add(SourceType.VOICE)
-                if (values[1]) add(SourceType.MEETING)
-                if (values[2] && !values[3]) add(SourceType.GMAIL)
-                if (values[4] && !values[5]) add(SourceType.OUTLOOK_MAIL)
-                if (values[6] && !values[7]) add(SourceType.NAVER_IMAP)
-                if (values[8] && !values[9]) add(SourceType.DAUM_IMAP)
-                if (values[10]) add(SourceType.GOOGLE_CALENDAR)
-                if (values[11]) add(SourceType.OUTLOOK_CALENDAR)
+                if (values[1]) add(SourceType.CALL_RECORDING)
+                if (values[2]) add(SourceType.MEETING)
+                if (values[3] && !values[4]) add(SourceType.GMAIL)
+                if (values[5] && !values[6]) add(SourceType.OUTLOOK_MAIL)
+                if (values[7] && !values[8]) add(SourceType.NAVER_IMAP)
+                if (values[9] && !values[10]) add(SourceType.DAUM_IMAP)
+                if (values[11]) add(SourceType.GOOGLE_CALENDAR)
+                if (values[12]) add(SourceType.OUTLOOK_CALENDAR)
             }
         }
 
@@ -876,6 +906,9 @@ public class UserPrefsStoreImpl @Inject constructor(
 
         fun sourceEnabledKey(sourceType: String): Preferences.Key<Boolean> =
             booleanKey("${sourceType}_enabled")
+
+        fun recordingFolderTreeUriKey(sourceType: String): Preferences.Key<String> =
+            stringPreferencesKey(namespaced(scopedUserId, "${sourceType}_recording_folder_tree_uri"))
     }
 
     private fun encodePipaActionLog(entries: List<PipaActionLogEntry>): String =
@@ -963,9 +996,15 @@ public class UserPrefsStoreImpl @Inject constructor(
     private companion object {
         val SUPPORTED_NON_EMAIL_SOURCES: Set<String> = setOf(
             SourceType.VOICE,
+            SourceType.CALL_RECORDING,
             SourceType.MEETING,
             SourceType.GOOGLE_CALENDAR,
             SourceType.OUTLOOK_CALENDAR,
+        )
+        val SUPPORTED_RECORDING_FOLDER_SOURCES: Set<String> = setOf(
+            SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+            SourceType.MEETING,
         )
     }
 }

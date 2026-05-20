@@ -5,15 +5,37 @@ import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 
 internal object SourceConnectionProjector {
+    fun respectStepStatesFor(entryPoint: SourceConnectionsEntryPoint): Boolean =
+        entryPoint != SourceConnectionsEntryPoint.Settings
+
+    fun sourceProvidersFor(entryPoint: SourceConnectionsEntryPoint): Set<OnboardingSourceProvider> =
+        when (entryPoint) {
+            SourceConnectionsEntryPoint.Setup -> setOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+                OnboardingSourceProvider.GOOGLE_CALENDAR,
+            )
+            SourceConnectionsEntryPoint.Onboarding -> setOf(
+                OnboardingSourceProvider.GMAIL,
+                OnboardingSourceProvider.OUTLOOK_MAIL,
+            )
+            SourceConnectionsEntryPoint.Settings -> OnboardingSourceProvider.entries.toSet()
+        }
+
     fun sourceConnectionItems(
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean = true,
+        respectConnectedStepStates: Boolean = respectStepStates,
         includeCalendarSources: Boolean = true,
+        includedProviders: Set<OnboardingSourceProvider>? = null,
         stringFor: (Int) -> String,
     ): List<SourceConnectionItemUi> =
         sourceSpecs
-            .filter { spec -> includeCalendarSources || spec.category != SourceConnectionCategory.Calendar }
+            .filter { spec ->
+                includedProviders?.contains(spec.provider)
+                    ?: (includeCalendarSources || spec.category != SourceConnectionCategory.Calendar)
+            }
             .map { spec ->
                 SourceConnectionItemUi(
                     provider = spec.provider,
@@ -26,6 +48,7 @@ internal object SourceConnectionProjector {
                         stepStates = stepStates,
                         transientStates = transientStates,
                         respectStepStates = respectStepStates,
+                        respectConnectedStepStates = respectConnectedStepStates,
                         defaultState = spec.defaultState,
                     ),
                 )
@@ -36,10 +59,15 @@ internal object SourceConnectionProjector {
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean,
+        respectConnectedStepStates: Boolean = respectStepStates,
         defaultState: SourceConnectionState = SourceConnectionState.Idle,
     ): SourceConnectionState {
+        val stepStatus = stepStates[provider.step] ?: StepStatus.NOT_STARTED
+        if (respectConnectedStepStates && stepStatus in setOf(StepStatus.GRANTED, StepStatus.COMPLETE)) {
+            return SourceConnectionState.Connected
+        }
         if (!respectStepStates) return transientStates[provider] ?: defaultState
-        return when (stepStates[provider.step] ?: StepStatus.NOT_STARTED) {
+        return when (stepStatus) {
             StepStatus.GRANTED,
             StepStatus.COMPLETE,
             -> SourceConnectionState.Connected

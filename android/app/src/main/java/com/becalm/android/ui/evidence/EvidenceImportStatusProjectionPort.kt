@@ -2,6 +2,7 @@ package com.becalm.android.ui.evidence
 
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import dagger.Binds
@@ -32,6 +33,7 @@ public interface EvidenceImportStatusProjectionPort {
 public class RoomEvidenceImportStatusProjectionPort @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     private val rawIngestionEventDao: RawIngestionEventDao,
+    private val meetingSpeakerPreviewDao: MeetingSpeakerPreviewDao,
     private val personIndexDao: PersonIndexDao,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : EvidenceImportStatusProjectionPort {
@@ -45,11 +47,17 @@ public class RoomEvidenceImportStatusProjectionPort @Inject constructor(
                 } else {
                     combine(
                         rawIngestionEventDao.observeEvidenceImportProcessingCount(userId),
-                        personIndexDao.observeUnmatchedInteractionCount(userId),
-                        personIndexDao.observeUnresolvedSourceEventParticipantCount(userId),
-                    ) { processingCount, unmatchedCount, unresolvedParticipantCount ->
+                        meetingSpeakerPreviewDao.observeProcessingCount(userId),
+                        meetingSpeakerPreviewDao.observeReviewRequiredCount(userId),
+                        personIndexDao.observeEvidenceImportUnmatchedInteractionCount(userId),
+                        personIndexDao.observeEvidenceImportUnresolvedSourceEventParticipantCount(userId),
+                    ) { values ->
+                        val processingCount = values[0] + values[1]
+                        val meetingReviewCount = values[2]
+                        val unmatchedCount = values[3]
+                        val unresolvedParticipantCount = values[4]
                         when {
-                            unmatchedCount + unresolvedParticipantCount > 0 ->
+                            meetingReviewCount + unmatchedCount + unresolvedParticipantCount > 0 ->
                                 EvidenceImportPersistentStatus.REVIEW_REQUIRED
                             processingCount > 0 -> EvidenceImportPersistentStatus.PROCESSING
                             else -> EvidenceImportPersistentStatus.NONE

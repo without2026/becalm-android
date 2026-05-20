@@ -70,16 +70,20 @@ class CommitmentManagementUiTest {
         composeRule.setContent {
             BecalmTheme {
                 val pullState = rememberPullRefreshState(refreshing = false, onRefresh = {})
+                val active = activeRow("active-1", "활성 약속")
+                val schedule = scheduleRow("schedule-1", "일정 변경")
                 CommitmentManagementScreenContent(
                     state = CommitmentUiState(
                         loading = false,
-                        items = listOf(
-                            activeRow("active-1", "활성 약속"),
-                            scheduleRow("schedule-1", "일정 변경"),
-                        ),
-                        activeItems = listOf(
-                            activeRow("active-1", "활성 약속"),
-                            scheduleRow("schedule-1", "일정 변경"),
+                        items = listOf(active, schedule),
+                        activeItems = listOf(active, schedule),
+                        confirmedSection = CommitmentSectionUiState(
+                            expanded = true,
+                            count = 2,
+                            items = listOf(
+                                active,
+                                schedule,
+                            ),
                         ),
                         completedSection = CommitmentSectionUiState(
                             expanded = false,

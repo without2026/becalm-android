@@ -15,4 +15,11 @@ class SourceTypeContractTest {
         assertFalse("manual_text" in SourceType.ALL)
         assertFalse("manual_text" in SourceType.PRODUCT_SOURCES)
     }
+
+    @Test
+    fun `recording folder sources are separate product rows`() {
+        assertTrue(SourceType.VOICE in SourceType.PRODUCT_SOURCES)
+        assertTrue(SourceType.CALL_RECORDING in SourceType.PRODUCT_SOURCES)
+        assertTrue(SourceType.MEETING in SourceType.PRODUCT_SOURCES)
+    }
 }

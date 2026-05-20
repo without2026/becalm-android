@@ -8,6 +8,7 @@ import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantDto
+import com.becalm.android.domain.person.PersonIdentityResolver
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
@@ -94,13 +95,37 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
                     BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
                 )
             val participants = body.data.map { it.toEntity(userId) }
-            if (participants.isNotEmpty()) {
-                personIndexDao.upsertPersons(participants.mapNotNull { it.toPersonEntityOrNull() })
-                personIndexDao.upsertIdentities(participants.mapNotNull { it.toPersonIdentityEntityOrNull() })
-                personIndexDao.upsertSourceEventParticipants(participants)
+            val mergedParticipants = if (participants.isEmpty()) {
+                emptyList()
+            } else {
+                val existing = personIndexDao.findSourceEventParticipantsForUserAndEventIds(
+                    userId = userId,
+                    sourceEventIds = participants.map { it.sourceEventId }.distinct(),
+                )
+                participants.mergeWithLocalUserDecisions(existing)
+            }.coalesceSourceEventParticipantPersons()
+            if (mergedParticipants.isNotEmpty()) {
+                val incomingPersons = mergedParticipants.mapNotNull { it.toPersonEntityOrNull() }
+                val existingPersons = incomingPersons
+                    .map { it.id }
+                    .distinct()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { personIndexDao.findPersonsByIds(userId = userId, personIds = it) }
+                    .orEmpty()
+                personIndexDao.upsertPersons((existingPersons + incomingPersons).preferStrongestPersonRows())
+
+                val incomingIdentities = mergedParticipants.flatMap { it.toPersonIdentityEntities() }
+                val existingIdentities = incomingIdentities
+                    .map { it.id }
+                    .distinct()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { personIndexDao.findIdentitiesByIds(userId = userId, identityIds = it) }
+                    .orEmpty()
+                personIndexDao.upsertIdentities((existingIdentities + incomingIdentities).preferStrongestIdentityRows())
+                personIndexDao.upsertSourceEventParticipants(mergedParticipants)
                 personIndexDao.upsertDirtySources(
                     PersonIndexDirtySources.forSourceParticipants(
-                        participants = participants,
+                        participants = mergedParticipants,
                         reason = "source_participant_refresh",
                         now = Clock.System.now(),
                     ),
@@ -108,7 +133,7 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             }
 
             totalFetched += body.data.size
-            totalUpserted += participants.size
+            totalUpserted += mergedParticipants.size
             lastHasMore = body.hasMore
             lastCursor = body.cursor
             cursor = body.cursor
@@ -150,6 +175,102 @@ public class SourceEventParticipantRepositoryImpl @Inject constructor(
             resolutionStatus = resolutionStatus,
             createdAt = createdAt,
         )
+
+    private fun List<SourceEventParticipantEntity>.mergeWithLocalUserDecisions(
+        existing: List<SourceEventParticipantEntity>,
+    ): List<SourceEventParticipantEntity> {
+        if (existing.isEmpty()) return this
+        val terminalById = existing
+            .filter { it.resolutionStatus.isUserDecisionStatus() }
+            .associateBy { it.id }
+        val terminalByIdentity = existing
+            .filter { it.resolutionStatus.isUserDecisionStatus() }
+            .flatMap { local ->
+                local.identityDecisionKeys().map { key -> key to local }
+            }
+            .toMap()
+        return map { incoming ->
+            val exact = terminalById[incoming.id]
+            when {
+                exact != null && incoming.resolutionStatus.isReviewableStatus() -> exact
+                incoming.resolutionStatus.isReviewableStatus() -> {
+                    incoming.identityDecisionKeys()
+                        .firstNotNullOfOrNull { terminalByIdentity[it] }
+                        ?.let { incoming.copyUserDecisionFrom(it) }
+                        ?: incoming
+                }
+                else -> incoming
+            }
+        }
+    }
+
+    private fun SourceEventParticipantEntity.copyUserDecisionFrom(
+        local: SourceEventParticipantEntity,
+    ): SourceEventParticipantEntity =
+        when (local.resolutionStatus) {
+            "self_resolved" -> copy(
+                personId = null,
+                relationToUser = "self",
+                resolutionStatus = "self_resolved",
+                confidence = maxOf(confidence, local.confidence),
+            )
+            "resolved",
+            "person_resolved",
+            -> copy(
+                personId = local.personId,
+                relationToUser = local.relationToUser,
+                identityType = identityType ?: local.identityType,
+                normalizedValue = normalizedValue ?: local.normalizedValue,
+                displayNameRaw = displayNameRaw ?: local.displayNameRaw,
+                emailRaw = emailRaw ?: local.emailRaw,
+                phoneRaw = phoneRaw ?: local.phoneRaw,
+                organizationRaw = organizationRaw ?: local.organizationRaw,
+                titleRaw = titleRaw ?: local.titleRaw,
+                resolutionStatus = local.resolutionStatus,
+                confidence = maxOf(confidence, local.confidence),
+            )
+            "ignored" -> copy(
+                personId = null,
+                relationToUser = local.relationToUser,
+                resolutionStatus = "ignored",
+                confidence = maxOf(confidence, local.confidence),
+            )
+            else -> this
+        }
+
+    private fun SourceEventParticipantEntity.identityDecisionKeys(): Set<String> =
+        buildSet {
+            val scope = "$userId|$sourceType|$sourceEventId"
+            identityTokens().forEach { token -> add("$scope|$token") }
+        }
+
+    private fun SourceEventParticipantEntity.identityTokens(): Set<String> =
+        buildSet {
+            PersonIdentityResolver.normalizeRelationEmailAnchor(emailRaw)?.let { add("email:$it") }
+            normalizedValue
+                .takeIf { identityType == "email" }
+                ?.let(PersonIdentityResolver::normalizeRelationEmailAnchor)
+                ?.let { add("email:$it") }
+            PersonIdentityResolver.normalizePhoneAnchor(phoneRaw)?.let { add("phone:$it") }
+            normalizedValue
+                .takeIf { identityType == "phone" }
+                ?.let(PersonIdentityResolver::normalizePhoneAnchor)
+                ?.let { add("phone:$it") }
+            listOf(displayNameRaw, normalizedValue.takeIf { identityType in setOf("name", "alias") })
+                .forEach { value ->
+                    PersonIdentityResolver.normalizeAlias(value)?.let { add("alias:$it") }
+                }
+            listOf(organizationRaw, normalizedValue.takeIf { identityType == "organization" })
+                .forEach { value ->
+                    PersonIdentityResolver.normalizeAlias(value)?.let { add("organization:$it") }
+                }
+        }
+
+    private fun String.isReviewableStatus(): Boolean =
+        this == "unresolved" || this == "suggested_self"
+
+    private fun String.isUserDecisionStatus(): Boolean =
+        this == "self_resolved" || this == "resolved" || this == "person_resolved" || this == "ignored"
 
     private fun <T> Response<T>.toRefreshError(): BecalmError = when (code()) {
         401 -> BecalmError.Unauthorized

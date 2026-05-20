@@ -22,6 +22,12 @@ internal object CommitmentEditProjector {
                 entity.sourceEventOccurredAt
             },
             isManual = entity.sourceType == SourceType.MANUAL,
+            originalTitle = entity.title,
+            originalDueAtMillis = entity.dueAt?.toEpochMilliseconds(),
+            originalDueIsApproximate = entity.dueIsApproximate,
+            originalDueHint = entity.dueHint.orEmpty(),
+            originalCounterpartyRef = entity.counterpartyRef.orEmpty(),
+            originalDirection = requireNotNull(entity.direction) { "Action commitment edit requires direction" },
         ),
         title = entity.title,
         dueAtMillis = entity.dueAt?.toEpochMilliseconds(),

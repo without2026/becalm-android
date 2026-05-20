@@ -77,11 +77,11 @@ class ColdSyncLocalIntegrationTest {
         assertEquals(1, workScheduler.stage2EnqueueCount)
         db.rawIngestionEventDao().insertAll(
             listOf(
-                rawEvent("gmail-1", SourceType.GMAIL, "2026-04-20T01:00:00Z"),
-                rawEvent("gmail-2", SourceType.GMAIL, "2026-04-21T01:00:00Z"),
-                rawEvent("outlook-1", SourceType.OUTLOOK_MAIL, "2026-04-22T01:00:00Z"),
-                rawEvent("voice-1", SourceType.VOICE, "2026-04-23T01:00:00Z"),
-                rawEvent("call-1", SourceType.CALL_RECORDING, "2026-04-23T02:00:00Z"),
+                rawEvent("gmail-1", SourceType.GMAIL, recentTimestamp(daysAgo = 5)),
+                rawEvent("gmail-2", SourceType.GMAIL, recentTimestamp(daysAgo = 4)),
+                rawEvent("outlook-1", SourceType.OUTLOOK_MAIL, recentTimestamp(daysAgo = 3)),
+                rawEvent("voice-1", SourceType.VOICE, recentTimestamp(daysAgo = 2)),
+                rawEvent("call-1", SourceType.CALL_RECORDING, recentTimestamp(daysAgo = 1)),
             ),
         )
         sourceStatusRepository.emit(
@@ -196,6 +196,7 @@ class ColdSyncLocalIntegrationTest {
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
+        override fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -204,10 +205,14 @@ class ColdSyncLocalIntegrationTest {
             selfSpeakerId: String?,
             speakerMappingsJson: String?,
             speakerPreviewId: String?,
+            extractionJobId: String?,
+            extractionJobPollAttempt: Int,
         ) = Unit
 
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit
+        override fun enqueueProcessDone(initialDelaySeconds: Long) = Unit
+        override fun scheduleProcessDoneSweep() = Unit
 
         override fun enqueueDeferredColdSyncStage1() {
             deferredStage1EnqueueCount += 1
@@ -242,4 +247,9 @@ class ColdSyncLocalIntegrationTest {
         timestamp = Instant.parse(timestamp),
         syncStatus = "pending",
     )
+
+    private fun recentTimestamp(daysAgo: Long): String =
+        Instant.fromEpochMilliseconds(
+            kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - daysAgo * 86_400_000L,
+        ).toString()
 }

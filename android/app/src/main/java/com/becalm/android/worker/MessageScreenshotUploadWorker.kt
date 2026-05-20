@@ -12,6 +12,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -38,6 +39,7 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
+    private val commitmentProgressEventDaoProvider: Provider<CommitmentProgressEventDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
     private val selfIdentityAnchorDaoProvider: Provider<SelfIdentityAnchorDao>,
     private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
@@ -58,6 +60,7 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
         workerParams: WorkerParameters,
         rawIngestionEventDao: RawIngestionEventDao,
         commitmentDao: CommitmentDao,
+        commitmentProgressEventDao: CommitmentProgressEventDao,
         personIndexDao: PersonIndexDao,
         sourceExtractionApi: SourceExtractionApi,
         rawIngestionRepository: RawIngestionRepository,
@@ -76,6 +79,7 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
         workerParams = workerParams,
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
+        commitmentProgressEventDaoProvider = Provider { commitmentProgressEventDao },
         personIndexDaoProvider = Provider { personIndexDao },
         selfIdentityAnchorDaoProvider = Provider { selfIdentityAnchorDao },
         sourceExtractionApiProvider = Provider { sourceExtractionApi },
@@ -96,6 +100,9 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
 
     private val commitmentDao: CommitmentDao
         get() = commitmentDaoProvider.get()
+
+    private val commitmentProgressEventDao: CommitmentProgressEventDao
+        get() = commitmentProgressEventDaoProvider.get()
 
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
@@ -208,6 +215,7 @@ public class MessageScreenshotUploadWorker @AssistedInject constructor(
         LocalSourceExtractionDelegate(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
+            commitmentProgressEventDao = commitmentProgressEventDao,
             personIndexDao = personIndexDao,
             selfIdentityAnchorDao = selfIdentityAnchorDao,
             sourceExtractionApi = sourceExtractionApi,

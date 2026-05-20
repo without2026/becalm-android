@@ -5,10 +5,12 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkRelationType
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkStatus
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.domain.commitment.CommitmentState
+import com.becalm.android.ui.components.formatDayBadgeLabel
 import com.becalm.android.ui.components.isGiveDirection
 import com.becalm.android.ui.components.isTakeDirection
 import kotlinx.datetime.Instant
@@ -25,10 +27,48 @@ internal object CommitmentManagementProjector {
         now: Instant,
     ): CommitmentUiState {
         val projectedRows = applyFilter(rows, scheduleLinks, filter, now)
+        val activeRows = projectedRows.filterNot(::isTerminalRow)
+        val schedulePastRows = if (filter == CommitmentFilter.SCHEDULE) {
+            projectedRows.filter { it.isPastSchedule(now) }
+        } else {
+            emptyList()
+        }
         return current.copy(
             filter = filter,
             items = projectedRows,
-            activeItems = projectedRows.filterNot(::isTerminalRow),
+            activeItems = activeRows,
+            scheduleUpcomingItems = if (filter == CommitmentFilter.SCHEDULE) {
+                projectedRows.filterNot { it.isPastSchedule(now) }
+            } else {
+                emptyList()
+            },
+            schedulePastSection = CommitmentSectionUiState(
+                count = schedulePastRows.size,
+                items = schedulePastRows,
+                expanded = current.schedulePastSection.expanded,
+                dimmed = true,
+            ),
+            confirmedSection = buildDueSectionState(
+                rows = activeRows,
+                bucket = CommitmentDueBucket.CONFIRMED,
+                now = now,
+                expanded = current.confirmedSection.expanded,
+                dimmed = false,
+            ),
+            reviewSection = buildDueSectionState(
+                rows = activeRows,
+                bucket = CommitmentDueBucket.NEEDS_REVIEW,
+                now = now,
+                expanded = current.reviewSection.expanded,
+                dimmed = false,
+            ),
+            pastSection = buildDueSectionState(
+                rows = activeRows,
+                bucket = CommitmentDueBucket.PAST,
+                now = now,
+                expanded = current.pastSection.expanded,
+                dimmed = true,
+            ),
             completedSection = buildSectionState(
                 rows = projectedRows,
                 targetState = CommitmentState.COMPLETED,
@@ -43,6 +83,13 @@ internal object CommitmentManagementProjector {
         )
     }
 
+    private fun CommitmentRow.isPastSchedule(now: Instant): Boolean {
+        val due = dueAt ?: return false
+        val today = now.toLocalDateTime(KST).date
+        val dueDate = due.toLocalDateTime(KST).date
+        return today.daysUntil(dueDate) < 0
+    }
+
     fun applyFilter(
         rows: List<CommitmentManagementRow>,
         scheduleLinks: List<ScheduleEventLinkEntity> = emptyList(),
@@ -50,18 +97,24 @@ internal object CommitmentManagementProjector {
         now: Instant,
     ): List<CommitmentRow> {
         val linkedConfirmCommitmentIds = scheduleLinks
-            .filter {
-                it.relationType == ScheduleEventLinkRelationType.CONFIRMS &&
-                    it.status in setOf(ScheduleEventLinkStatus.AUTO_LINKED, ScheduleEventLinkStatus.APPROVED)
-            }
+            .filter { it.isAbsorbedScheduleLink() }
             .mapNotNullTo(mutableSetOf()) { it.commitmentId }
-        val rowsWithState = rows.map { row ->
-            ProjectableCommitmentRow(
-                row = row,
-                state = CommitmentState.fromWire(row.actionState),
-                deEmphasized = row.id in linkedConfirmCommitmentIds,
-            )
-        }
+        val rowsWithState = rows
+            .filterNot { row ->
+                CommitmentDisplayPolicy.shouldHideNonPersonLifecycleItem(
+                    itemType = row.itemType,
+                    title = row.title,
+                    sourceTitle = row.sourceTitle,
+                    counterpartyDisplayName = row.counterpartyDisplayName,
+                )
+            }
+            .map { row ->
+                ProjectableCommitmentRow(
+                    row = row,
+                    state = CommitmentState.fromWire(row.actionState),
+                    deEmphasized = row.id in linkedConfirmCommitmentIds,
+                )
+            }
         val filtered = when (filter) {
             CommitmentFilter.ALL -> rowsWithState.filter {
                 CommitmentDisplayPolicy.isPrimaryFeedItem(it.row.itemType)
@@ -83,7 +136,20 @@ internal object CommitmentManagementProjector {
         }
         return filtered
             .sortedForDisplay(now)
-            .map { row -> row.toUiRow() }
+            .map { row -> row.toUiRow(now) }
+    }
+
+    private fun ScheduleEventLinkEntity.isAbsorbedScheduleLink(): Boolean {
+        if (commitmentId == null || calendarEventId == null) return false
+        if (status == ScheduleEventLinkStatus.AUTO_LINKED) {
+            return relationType in setOf(ScheduleEventLinkRelationType.CONFIRMS, ScheduleEventLinkRelationType.ENRICHES)
+        }
+        return status == ScheduleEventLinkStatus.APPROVED &&
+            resolutionChoice in setOf(
+                ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
+                ScheduleEventLinkResolutionChoice.CALENDAR,
+                ScheduleEventLinkResolutionChoice.SOURCE,
+            )
     }
 
     private data class ProjectableCommitmentRow(
@@ -120,15 +186,14 @@ internal object CommitmentManagementProjector {
         return today.daysUntil(dueDate)
     }
 
-    private fun ProjectableCommitmentRow.toUiRow(): CommitmentRow {
-        val exactDueAt = row.dueAt?.takeUnless { row.dueIsApproximate }
-        return row.toUiRow(state, exactDueAt, deEmphasized)
+    private fun ProjectableCommitmentRow.toUiRow(now: Instant): CommitmentRow {
+        return row.toUiRow(state, deEmphasized, now)
     }
 
     private fun CommitmentManagementRow.toUiRow(
         state: CommitmentState,
-        exactDueAt: Instant?,
         deEmphasized: Boolean,
+        now: Instant,
     ): CommitmentRow {
         return CommitmentRow(
             id = id,
@@ -139,16 +204,79 @@ internal object CommitmentManagementProjector {
             decisionStatus = decisionStatus,
             derivedStatus = direction?.let { state.name },
             actionState = state,
-            dueAt = exactDueAt,
-            dueIsApproximate = false,
+            dueAt = dueAt,
+            dueIsApproximate = dueIsApproximate,
             counterpartyDisplayName = counterpartyDisplayName,
             sourceType = sourceType,
             sourceTitle = sourceTitle,
-            sourceOccurredAt = sourceOccurredAt,
-            dueHint = null,
+            sourceOccurredAt = sourceOccurredAt.takeUnless { sourceType == SourceType.MESSAGE_SCREENSHOT },
+            dueHint = dueHint.takeIf { dueIsApproximate || dueAt == null },
             isManual = sourceType == SourceType.MANUAL,
             deEmphasized = deEmphasized,
+            scheduleTimelineTiming = if (itemType == CommitmentItemType.SCHEDULE) {
+                buildScheduleTimelineTiming(
+                    dueAt = dueAt,
+                    dueIsApproximate = dueIsApproximate,
+                    now = now,
+                )
+            } else {
+                null
+            },
         )
+    }
+
+    private fun buildScheduleTimelineTiming(
+        dueAt: Instant?,
+        dueIsApproximate: Boolean,
+        now: Instant,
+    ): ScheduleTimelineTiming {
+        val due = dueAt ?: return ScheduleTimelineTiming(
+            dayLabel = null,
+            timeLabel = null,
+            isUntimed = true,
+        )
+        val today = now.toLocalDateTime(KST).date
+        val dueDateTime = due.toLocalDateTime(KST)
+        val dayDelta = today.daysUntil(dueDateTime.date)
+        return ScheduleTimelineTiming(
+            dayLabel = formatDayBadgeLabel(days = dayDelta, approximate = dueIsApproximate),
+            timeLabel = if (dueIsApproximate) null else formatKstHourMinute(due),
+            isUntimed = false,
+        )
+    }
+
+    private fun formatKstHourMinute(instant: Instant): String {
+        val ldt = instant.toLocalDateTime(KST)
+        val hour = ldt.hour.toString().padStart(2, '0')
+        val minute = ldt.minute.toString().padStart(2, '0')
+        return "$hour:$minute"
+    }
+
+    fun buildDueSectionState(
+        rows: List<CommitmentRow>,
+        bucket: CommitmentDueBucket,
+        now: Instant,
+        expanded: Boolean,
+        dimmed: Boolean,
+    ): CommitmentSectionUiState {
+        val sectionRows = rows.filter { it.dueBucket(now) == bucket }
+        return CommitmentSectionUiState(
+            count = sectionRows.size,
+            items = sectionRows,
+            expanded = expanded,
+            dimmed = dimmed,
+        )
+    }
+
+    private fun CommitmentRow.dueBucket(now: Instant): CommitmentDueBucket {
+        if (dueIsApproximate || dueAt == null) return CommitmentDueBucket.NEEDS_REVIEW
+        val today = now.toLocalDateTime(KST).date
+        val dueDate = dueAt.toLocalDateTime(KST).date
+        return if (today.daysUntil(dueDate) < -1) {
+            CommitmentDueBucket.PAST
+        } else {
+            CommitmentDueBucket.CONFIRMED
+        }
     }
 
     fun buildSectionState(
@@ -171,4 +299,10 @@ internal object CommitmentManagementProjector {
 
     private fun CommitmentState.isClosed(): Boolean =
         this == CommitmentState.COMPLETED || this == CommitmentState.CANCELLED
+}
+
+internal enum class CommitmentDueBucket {
+    CONFIRMED,
+    NEEDS_REVIEW,
+    PAST,
 }

@@ -2,6 +2,9 @@ package com.becalm.android.unit.ui.commitments
 
 import app.cash.turbine.test
 import com.becalm.android.R
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
@@ -11,6 +14,7 @@ import com.becalm.android.data.local.db.dao.CommitmentManagementRow
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
@@ -20,6 +24,7 @@ import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.ui.commitments.CommitmentFilter
 import com.becalm.android.ui.commitments.CommitmentManagementViewModel
+import com.becalm.android.ui.commitments.CommitmentPersonGroupType
 import com.becalm.android.ui.commitments.CommitmentUndoSnapshot
 import com.becalm.android.worker.WorkScheduler
 import io.mockk.coEvery
@@ -148,6 +153,35 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `message screenshot management rows hide import timestamp from card source context`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(
+                    id = "screenshot-1",
+                    sourceType = "message_screenshot",
+                    sourceEventTitle = "카카오톡 캡처",
+                    sourceEventOccurredAt = Instant.parse("2026-05-17T06:00:00Z"),
+                    dueAt = Instant.parse("2026-05-20T05:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val settled = awaitItem()
+            val row = settled.items.single()
+            assertEquals("message_screenshot", row.sourceType)
+            assertEquals("카카오톡 캡처", row.sourceTitle)
+            assertNull(row.sourceOccurredAt)
+            assertEquals(Instant.parse("2026-05-20T05:00:00Z"), row.dueAt)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-002 filter tabs isolate give take and action schedule commitments`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
@@ -240,6 +274,110 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `schedule rows without person are grouped as schedules rather than unknown person`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(id = "action-no-person", itemType = "action", direction = "give"),
+                entity(id = "schedule-no-person", itemType = "schedule", direction = null),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            val state = awaitItem()
+
+            assertEquals(
+                listOf(CommitmentPersonGroupType.UNKNOWN_PERSON, CommitmentPersonGroupType.SCHEDULE),
+                state.activePersonGroups.map { it.type },
+            )
+            assertEquals(listOf("action-no-person"), state.activePersonGroups[0].items.map { it.id })
+            assertEquals(listOf("schedule-no-person"), state.activePersonGroups[1].items.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `schedule filter projects timeline D labels and keeps no-date rows last`() = runTest {
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(
+                entity(
+                    id = "future",
+                    itemType = "schedule",
+                    direction = null,
+                    dueAt = Instant.parse("2026-05-07T00:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-05-01T00:00:00Z"),
+                ),
+                entity(
+                    id = "missing",
+                    itemType = "schedule",
+                    direction = null,
+                    dueAt = null,
+                    sourceEventOccurredAt = Instant.parse("2026-05-02T00:00:00Z"),
+                ),
+                entity(
+                    id = "today",
+                    itemType = "schedule",
+                    direction = null,
+                    dueAt = Instant.parse("2026-05-04T01:30:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-05-01T01:00:00Z"),
+                ),
+                entity(
+                    id = "approx",
+                    itemType = "schedule",
+                    direction = null,
+                    dueAt = Instant.parse("2026-05-06T00:00:00Z"),
+                    dueIsApproximate = true,
+                    sourceEventOccurredAt = Instant.parse("2026-05-03T00:00:00Z"),
+                ),
+                entity(
+                    id = "overdue",
+                    itemType = "schedule",
+                    direction = null,
+                    dueAt = Instant.parse("2026-05-02T00:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-05-01T02:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            awaitItem()
+
+            viewModel.onFilterChange(CommitmentFilter.SCHEDULE)
+            val schedule = awaitItem()
+
+            assertEquals(
+                listOf("overdue", "today", "future", "approx", "missing"),
+                schedule.items.map { it.id },
+            )
+            assertEquals(
+                listOf("today", "future", "approx", "missing"),
+                schedule.scheduleUpcomingItems.map { it.id },
+            )
+            assertEquals(listOf("overdue"), schedule.schedulePastSection.items.map { it.id })
+            assertFalse(schedule.schedulePastSection.expanded)
+            assertEquals("D+2", schedule.items.single { it.id == "overdue" }.scheduleTimelineTiming?.dayLabel)
+            assertEquals("09:00", schedule.items.single { it.id == "overdue" }.scheduleTimelineTiming?.timeLabel)
+            assertEquals("D-0", schedule.items.single { it.id == "today" }.scheduleTimelineTiming?.dayLabel)
+            assertEquals("10:30", schedule.items.single { it.id == "today" }.scheduleTimelineTiming?.timeLabel)
+            assertEquals("D-3", schedule.items.single { it.id == "future" }.scheduleTimelineTiming?.dayLabel)
+            assertEquals("약 D-2", schedule.items.single { it.id == "approx" }.scheduleTimelineTiming?.dayLabel)
+            assertNull(schedule.items.single { it.id == "approx" }.scheduleTimelineTiming?.timeLabel)
+            assertNull(schedule.items.single { it.id == "missing" }.scheduleTimelineTiming?.dayLabel)
+            assertTrue(requireNotNull(schedule.items.single { it.id == "missing" }.scheduleTimelineTiming).isUntimed)
+
+            viewModel.onTogglePastSection()
+            assertTrue(awaitItem().schedulePastSection.expanded)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT schedule link updates de-emphasize confirmed duplicate without commitment row requery`() = runTest {
         val linkFlow = MutableStateFlow<List<ScheduleEventLinkEntity>>(emptyList())
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
@@ -270,18 +408,64 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `CMT same schedule resolution de-emphasizes but adjustment resolution keeps schedule prominent`() = runTest {
+        val linkFlow = MutableStateFlow<List<ScheduleEventLinkEntity>>(emptyList())
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
+            managementRows(entity(id = "schedule-1", itemType = "schedule", direction = null)),
+        )
+        every {
+            scheduleEventLinkRepository.observeForProjectionRefs(
+                userId = "user-1",
+                commitmentIds = listOf("schedule-1"),
+                rawEventIds = emptyList(),
+                calendarEventIds = emptyList(),
+            )
+        } returns linkFlow
+
+        val viewModel = buildViewModel()
+
+        viewModel.uiState.test {
+            awaitItem()
+            awaitItem()
+
+            linkFlow.value = listOf(
+                scheduleLink(
+                    commitmentId = "schedule-1",
+                    relationType = "conflicts",
+                    status = "approved",
+                    resolutionChoice = ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
+                ),
+            )
+            val sameSchedule = awaitItem()
+            assertTrue(sameSchedule.items.single { it.id == "schedule-1" }.deEmphasized)
+
+            linkFlow.value = listOf(
+                scheduleLink(
+                    commitmentId = "schedule-1",
+                    relationType = "conflicts",
+                    status = "approved",
+                    resolutionChoice = ScheduleEventLinkResolutionChoice.SCHEDULE_ADJUSTMENT_NEEDED,
+                ),
+            )
+            val adjustmentNeeded = awaitItem()
+            assertFalse(adjustmentNeeded.items.single { it.id == "schedule-1" }.deEmphasized)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `commitment cards only expose exact due dates`() = runTest {
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(
             managementRows(
                 entity(
                     id = "exact",
-                    dueAt = Instant.parse("2026-04-20T03:00:00Z"),
+                    dueAt = Instant.parse("2026-05-04T03:00:00Z"),
                     dueIsApproximate = false,
                     dueHint = "정확한 시간",
                 ),
                 entity(
                     id = "approx",
-                    dueAt = Instant.parse("2026-04-21T03:00:00Z"),
+                    dueAt = Instant.parse("2026-05-05T03:00:00Z"),
                     dueIsApproximate = true,
                     dueHint = "다음주",
                 ),
@@ -294,12 +478,13 @@ class CommitmentManagementViewModelSpecTest {
         viewModel.uiState.test {
             awaitItem()
             val settled = awaitItem()
-            assertEquals(Instant.parse("2026-04-20T03:00:00Z"), settled.items.single { it.id == "exact" }.dueAt)
+            assertEquals(Instant.parse("2026-05-04T03:00:00Z"), settled.items.single { it.id == "exact" }.dueAt)
             assertNull(settled.items.single { it.id == "exact" }.dueHint)
-            assertNull(settled.items.single { it.id == "approx" }.dueAt)
-            assertNull(settled.items.single { it.id == "approx" }.dueHint)
+            assertEquals(Instant.parse("2026-05-05T03:00:00Z"), settled.items.single { it.id == "approx" }.dueAt)
+            assertTrue(settled.items.single { it.id == "approx" }.dueIsApproximate)
+            assertEquals("다음주", settled.items.single { it.id == "approx" }.dueHint)
             assertNull(settled.items.single { it.id == "missing" }.dueAt)
-            assertNull(settled.items.single { it.id == "missing" }.dueHint)
+            assertEquals("언젠가", settled.items.single { it.id == "missing" }.dueHint)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -311,7 +496,7 @@ class CommitmentManagementViewModelSpecTest {
                 entity(
                     id = "no-due",
                     dueAt = null,
-                    sourceEventOccurredAt = Instant.parse("2026-04-29T04:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-05-04T04:00:00Z"),
                 ),
                 entity(
                     id = "late-exact",
@@ -320,7 +505,7 @@ class CommitmentManagementViewModelSpecTest {
                 ),
                 entity(
                     id = "approx",
-                    dueAt = Instant.parse("2026-05-02T01:00:00Z"),
+                    dueAt = Instant.parse("2026-05-05T01:00:00Z"),
                     dueIsApproximate = true,
                     sourceEventOccurredAt = Instant.parse("2026-04-29T02:00:00Z"),
                 ),
@@ -328,6 +513,22 @@ class CommitmentManagementViewModelSpecTest {
                     id = "early-exact",
                     dueAt = Instant.parse("2026-05-03T01:00:00Z"),
                     sourceEventOccurredAt = Instant.parse("2026-04-29T01:00:00Z"),
+                ),
+                entity(
+                    id = "stale-exact",
+                    dueAt = Instant.parse("2026-05-02T01:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:30:00Z"),
+                ),
+                entity(
+                    id = "stale-approx",
+                    dueAt = Instant.parse("2026-05-02T01:00:00Z"),
+                    dueIsApproximate = true,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:30:00Z"),
+                ),
+                entity(
+                    id = "stale-no-due",
+                    dueAt = null,
+                    sourceEventOccurredAt = Instant.parse("2026-04-29T01:30:00Z"),
                 ),
                 entity(
                     id = "future-exact",
@@ -343,13 +544,34 @@ class CommitmentManagementViewModelSpecTest {
             awaitItem()
             val settled = awaitItem()
             assertEquals(
-                listOf("early-exact", "late-exact", "future-exact", "no-due", "approx"),
+                listOf(
+                    "early-exact",
+                    "stale-exact",
+                    "late-exact",
+                    "future-exact",
+                    "no-due",
+                    "approx",
+                    "stale-approx",
+                    "stale-no-due",
+                ),
                 settled.items.map { it.id },
             )
             assertEquals(
-                listOf("early-exact", "late-exact", "future-exact", "no-due", "approx"),
+                settled.items.map { it.id },
                 settled.activeItems.map { it.id },
             )
+            assertEquals(
+                listOf("early-exact", "late-exact", "future-exact"),
+                settled.confirmedSection.items.map { it.id },
+            )
+            assertEquals(
+                listOf("no-due", "approx", "stale-approx", "stale-no-due"),
+                settled.reviewSection.items.map { it.id },
+            )
+            assertEquals(listOf("stale-exact"), settled.pastSection.items.map { it.id })
+            assertTrue(settled.confirmedSection.expanded)
+            assertTrue(settled.reviewSection.expanded)
+            assertFalse(settled.pastSection.expanded)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -385,6 +607,10 @@ class CommitmentManagementViewModelSpecTest {
 
         val initial = viewModel.uiState.value
         assertEquals(listOf("pending-1"), initial.activeItems.map { it.id })
+        assertEquals(listOf("pending-1"), initial.reviewSection.items.map { it.id })
+        assertEquals(true, initial.confirmedSection.expanded)
+        assertEquals(true, initial.reviewSection.expanded)
+        assertEquals(false, initial.pastSection.expanded)
         assertEquals(2, initial.completedSection.count)
         assertEquals(listOf("completed-1", "completed-2"), initial.completedSection.items.map { it.id })
         assertEquals(false, initial.completedSection.expanded)
@@ -403,6 +629,12 @@ class CommitmentManagementViewModelSpecTest {
         val cancelledExpanded = viewModel.uiState.value
         assertEquals(true, cancelledExpanded.completedSection.expanded)
         assertEquals(true, cancelledExpanded.cancelledSection.expanded)
+
+        viewModel.onToggleReviewSection()
+        assertEquals(false, viewModel.uiState.value.reviewSection.expanded)
+
+        viewModel.onTogglePastSection()
+        assertEquals(true, viewModel.uiState.value.pastSection.expanded)
     }
 
     @Test
@@ -485,6 +717,22 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `pull refresh clears refreshing and surfaces error when coordinator throws`() = runTest {
+        coEvery { commitmentRepository.refreshSince("user-1", since = null) } throws
+            IllegalStateException("boom")
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onPullRefresh()
+        advanceUntilIdle()
+
+        assertEquals(false, viewModel.uiState.value.refreshing)
+        assertEquals(R.string.commitments_error_refresh_failed, viewModel.uiState.value.error?.resId)
+        coVerify(exactly = 1) { commitmentRepository.refreshSince("user-1", since = null) }
+    }
+
+    @Test
     fun `CMT-005 remind success schedules reminder when dueAt is present`() = runTest {
         val dueAt = Instant.parse("2026-04-20T03:00:00Z")
         val pending = entity(id = "remind-1", dueAt = dueAt)
@@ -553,14 +801,29 @@ class CommitmentManagementViewModelSpecTest {
     }
 
     @Test
+    fun `action exceptions surface error instead of leaving coroutine silent`() = runTest {
+        coEvery { commitmentRepository.transitionState("follow-throw", CommitmentEvent.FollowUp) } throws
+            IllegalStateException("boom")
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onFollowUp("follow-throw")
+        advanceUntilIdle()
+
+        assertEquals(R.string.commitments_error_action_failed, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
     fun `CMT-007 complete cancels reminder and emits undo snapshot with prior state`() = runTest {
+        val analytics = RecordingProductAnalyticsClient()
         val item = entity(id = "complete-1", actionState = "reminded")
         every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(item))
         coEvery { commitmentRepository.transitionState("complete-1", CommitmentEvent.Complete) } returns
             BecalmResult.Success(item.copy(actionState = "completed"))
         every { reminderScheduler.cancel("complete-1") } just runs
 
-        val viewModel = buildViewModel()
+        val viewModel = buildViewModel(productAnalytics = analytics)
         advanceUntilIdle()
 
         viewModel.undoFlow.test {
@@ -575,6 +838,33 @@ class CommitmentManagementViewModelSpecTest {
         }
         verifyCancel("complete-1")
         assertNull(viewModel.uiState.value.error)
+        val quality = analytics.events.single {
+            it.eventName == ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED
+        }
+        assertEquals("accepted_commitment", quality.properties["quality_label"])
+        assertEquals(true, quality.properties["is_true_commitment"])
+        assertEquals("commitment_action_complete", quality.properties["review_signal"])
+    }
+
+    @Test
+    fun `duplicate action taps on the same row are ignored while transition is in flight`() = runTest {
+        val item = entity(id = "complete-dupe", actionState = "reminded")
+        every { commitmentRepository.observeManagementRowsForUser("user-1") } returns flowOf(managementRows(item))
+        coEvery { commitmentRepository.transitionState("complete-dupe", CommitmentEvent.Complete) } returns
+            BecalmResult.Success(item.copy(actionState = "completed"))
+        every { reminderScheduler.cancel("complete-dupe") } just runs
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onComplete("complete-dupe")
+        viewModel.onComplete("complete-dupe")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            commitmentRepository.transitionState("complete-dupe", CommitmentEvent.Complete)
+        }
+        verifyCancel("complete-dupe")
     }
 
     @Test
@@ -664,7 +954,9 @@ class CommitmentManagementViewModelSpecTest {
         coVerify(exactly = 0) { reminderScheduler.schedule(any(), any()) }
     }
 
-    private fun buildViewModel(): CommitmentManagementViewModel = CommitmentManagementViewModel(
+    private fun buildViewModel(
+        productAnalytics: ProductAnalyticsClient = com.becalm.android.core.analytics.NoopProductAnalyticsClient(),
+    ): CommitmentManagementViewModel = CommitmentManagementViewModel(
         commitmentRepository = commitmentRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
         commitmentParticipantRepository = commitmentParticipantRepository,
@@ -673,6 +965,7 @@ class CommitmentManagementViewModelSpecTest {
         reminderScheduler = reminderScheduler,
         userPrefsStore = userPrefsStore,
         logger = logger,
+        productAnalytics = productAnalytics,
         clock = clock,
     )
 
@@ -748,7 +1041,12 @@ class CommitmentManagementViewModelSpecTest {
             )
         }
 
-    private fun scheduleLink(commitmentId: String): ScheduleEventLinkEntity =
+    private fun scheduleLink(
+        commitmentId: String,
+        relationType: String = "confirms",
+        status: String = "auto_linked",
+        resolutionChoice: String? = null,
+    ): ScheduleEventLinkEntity =
         ScheduleEventLinkEntity(
             id = "link-$commitmentId",
             userId = "user-1",
@@ -759,14 +1057,27 @@ class CommitmentManagementViewModelSpecTest {
             sourceRef = "mail-1",
             rawEventId = "raw-1",
             commitmentId = commitmentId,
-            relationType = "confirms",
-            status = "auto_linked",
+            relationType = relationType,
+            status = status,
             confidence = 0.95,
             proposedStartAt = Instant.parse("2026-05-04T04:00:00Z"),
             proposedEndAt = null,
             proposedTitle = "title-$commitmentId",
             evidence = "confirmed",
+            resolutionChoice = resolutionChoice,
             createdAt = Instant.parse("2026-05-04T03:00:00Z"),
             updatedAt = Instant.parse("2026-05-04T03:00:00Z"),
         )
+
+    private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
+        val events: MutableList<ProductAnalyticsEvent> = mutableListOf()
+
+        override fun track(event: ProductAnalyticsEvent) {
+            events += event
+        }
+
+        override fun setUserScope(userId: String?) = Unit
+
+        override fun resetUserScope() = Unit
+    }
 }

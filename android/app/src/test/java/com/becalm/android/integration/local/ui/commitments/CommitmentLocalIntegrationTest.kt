@@ -6,6 +6,7 @@ import com.becalm.android.R
 import com.becalm.android.core.util.RecordingLogger
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.remote.api.RailwayApi
@@ -13,6 +14,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -67,6 +69,7 @@ class CommitmentLocalIntegrationTest {
     )
     private val sourceEventParticipantRepository = mockk<SourceEventParticipantRepository>(relaxed = true)
     private val commitmentParticipantRepository = mockk<CommitmentParticipantRepository>(relaxed = true)
+    private val sourceArtifactRepository = mockk<SourceArtifactRepository>(relaxed = true)
     private val workScheduler = mockk<WorkScheduler>(relaxed = true)
     private val reminderScheduler = mockk<ReminderScheduler>(relaxed = true)
 
@@ -149,6 +152,58 @@ class CommitmentLocalIntegrationTest {
     }
 
     @Test
+    fun `management screen hides non person lifecycle actions but keeps schedules`() = runTest {
+        db.commitmentDao().insertAll(
+            listOf(
+                commitment(
+                    id = "slack-action",
+                    title = "Slack 이메일 주소를 확인하세요",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = null,
+                    sourceEventTitle = "Slack에서 이메일 주소를 확인하세요.",
+                ),
+                commitment(
+                    id = "asan-action",
+                    title = "아산나눔재단에 추가 문의 사항을 채널톡으로 문의하다",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = null,
+                    sourceEventTitle = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+                ),
+                commitment(
+                    id = "asan-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    title = "2026 아산 두어스 서류 결과 안내를 받다",
+                    actionState = "pending",
+                    sourceType = SourceType.GMAIL,
+                    dueAt = Instant.parse("2026-04-30T08:00:00Z"),
+                    sourceEventTitle = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+                ),
+            ),
+        )
+
+        val viewModel = CommitmentManagementViewModel(
+            commitmentRepository = commitmentRepository,
+            sourceEventParticipantRepository = sourceEventParticipantRepository,
+            commitmentParticipantRepository = commitmentParticipantRepository,
+            workScheduler = workScheduler,
+            reminderScheduler = reminderScheduler,
+            userPrefsStore = userPrefsStore,
+            logger = logger,
+        )
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.items.isEmpty()) state = awaitItem()
+
+            assertEquals(listOf("asan-schedule"), state.items.map { it.id })
+            assertEquals(listOf("asan-schedule"), state.activeItems.map { it.id })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `CMT-003 EDIT-008 and MAN-004 detail sheet projects source and edit history from room`() = runTest {
         enrichmentRepository.upsert(
             PersonEnrichmentEntity(
@@ -174,6 +229,9 @@ class CommitmentLocalIntegrationTest {
         val viewModel = CommitmentDetailViewModel(
             commitmentRepository = commitmentRepository,
             personEnrichmentRepository = enrichmentRepository,
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            meetingSpeakerAliasDao = db.meetingSpeakerAliasDao(),
+            sourceArtifactRepository = sourceArtifactRepository,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to "manual-detail")),
             logger = logger,
@@ -254,7 +312,9 @@ class CommitmentLocalIntegrationTest {
         actionState: String,
         sourceType: String,
         dueAt: Instant?,
+        itemType: String = CommitmentItemType.ACTION,
         dueIsApproximate: Boolean = false,
+        sourceEventTitle: String = "source-$id",
         sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T05:00:00Z"),
         createdAt: Instant = Instant.parse("2026-04-18T05:30:00Z"),
         lastEditedAt: Instant? = null,
@@ -263,13 +323,14 @@ class CommitmentLocalIntegrationTest {
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = USER_ID,
+        itemType = itemType,
         direction = "give",
         counterpartyRaw = PERSON_REF,
         counterpartyRef = PERSON_REF,
         title = title,
         description = null,
         quote = "quote-$id",
-        sourceEventTitle = "source-$id",
+        sourceEventTitle = sourceEventTitle,
         sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
         dueHint = null,

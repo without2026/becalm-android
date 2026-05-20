@@ -86,7 +86,7 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `keeps local memory and reports pending when mirror upload fails`() = runTest {
+    fun `keeps local memory and retries when mirror upload is transient`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         seedPersonGraph()
 
@@ -95,9 +95,7 @@ class ProfileMemoryWorkerLocalIntegrationTest {
             remoteResult = BecalmResult.Failure(BecalmError.Network(503, "offline")),
         ).doWork()
 
-        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_UPLOAD_PENDING, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
-        assertEquals("Network", result.outputData.getString(ProfileMemoryWorker.KEY_UPLOAD_ERROR))
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
         assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
         val markdown = memoryFile(USER_ID, PERSON_ID).readText(Charsets.UTF_8)
         assertEquals(
@@ -107,7 +105,7 @@ class ProfileMemoryWorkerLocalIntegrationTest {
     }
 
     @Test
-    fun `e2e 064 offline mirror failure leaves local memory retryable`() = runTest {
+    fun `e2e 064 offline mirror failure leaves local memory for workmanager retry`() = runTest {
         userPrefsStore.setCurrentUserId(USER_ID)
         seedPersonGraph()
 
@@ -116,10 +114,24 @@ class ProfileMemoryWorkerLocalIntegrationTest {
             remoteResult = BecalmResult.Failure(BecalmError.Network(0, "offline")),
         ).doWork()
 
+        assertEquals(ListenableWorker.Result.retry().javaClass, result.javaClass)
+        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
+    }
+
+    @Test
+    fun `keeps local memory and reports pending when mirror upload is not retryable`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        seedPersonGraph()
+
+        val result = newWorker(
+            personId = PERSON_ID,
+            remoteResult = BecalmResult.Failure(BecalmError.Validation("content_markdown", "rejected")),
+        ).doWork()
+
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals(ProfileMemoryWorker.STATUS_WRITTEN_UPLOAD_PENDING, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
+        assertEquals("Validation", result.outputData.getString(ProfileMemoryWorker.KEY_UPLOAD_ERROR))
         assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
-        assertEquals(PERSON_ID, result.outputData.getString(ProfileMemoryWorker.KEY_PERSON_ID))
     }
 
     @Test
@@ -130,6 +142,24 @@ class ProfileMemoryWorkerLocalIntegrationTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertEquals(ProfileMemoryWorker.STATUS_SKIPPED_NO_USER, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
+        assertFalse(memoryFile(USER_ID, PERSON_ID).exists())
+    }
+
+    @Test
+    fun `deletes stale local memory when person only has self evidence`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        seedSelfOnlyPersonGraph()
+        PersonMemoryStore(LocalIntegrationSupport.appContext()).write(
+            userId = USER_ID,
+            personId = PERSON_ID,
+            markdown = "stale self memory",
+        )
+        assertTrue(memoryFile(USER_ID, PERSON_ID).exists())
+
+        val result = newWorker(PERSON_ID).doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertEquals(ProfileMemoryWorker.STATUS_SKIPPED_NO_EVIDENCE, result.outputData.getString(ProfileMemoryWorker.KEY_STATUS))
         assertFalse(memoryFile(USER_ID, PERSON_ID).exists())
     }
 
@@ -175,6 +205,50 @@ class ProfileMemoryWorkerLocalIntegrationTest {
             logger = logger,
             ioDispatcher = dispatcher,
         )
+
+    private suspend fun seedSelfOnlyPersonGraph() {
+        db.personIndexDao().upsertPersons(
+            listOf(
+                PersonEntity(
+                    id = PERSON_ID,
+                    userId = USER_ID,
+                    displayName = "김민홍",
+                    kind = "person",
+                    primaryEmail = "me@example.com",
+                    primaryPhone = null,
+                    confidence = 0.95,
+                    createdAt = NOW,
+                    updatedAt = NOW,
+                    archivedAt = null,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-self",
+                    userId = USER_ID,
+                    sourceEventId = "raw-self",
+                    sourceType = "gmail",
+                    sourceRef = "gmail-self",
+                    personId = PERSON_ID,
+                    role = "sender",
+                    relationToUser = "self",
+                    identityType = "email",
+                    normalizedValue = "me@example.com",
+                    displayNameRaw = "김민홍",
+                    emailRaw = "me@example.com",
+                    phoneRaw = null,
+                    organizationRaw = "BeCalm",
+                    titleRaw = null,
+                    evidence = "김민홍 <me@example.com>",
+                    confidence = 0.95,
+                    resolutionStatus = "self_resolved",
+                    createdAt = NOW,
+                ),
+            ),
+        )
+    }
 
     private suspend fun seedPersonGraph() {
         db.personIndexDao().upsertPersons(

@@ -16,6 +16,7 @@ import com.becalm.android.data.remote.dto.SelfIdentityAnchorPatchRequestDto
 import com.becalm.android.data.remote.dto.SourceConnectionDto
 import com.becalm.android.data.remote.dto.SourceConnectionPatchRequestDto
 import java.io.IOException
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -40,6 +41,18 @@ public interface SelfIdentityRepository {
         sourceConnectionId: String? = null,
         sourceEventId: String? = null,
     ): BecalmResult<SelfIdentityAnchorEntity>
+    public suspend fun upsertLocalAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+        displayValue: String? = null,
+        source: String = "user_profile",
+        scope: String = "global",
+        trust: String = "user_confirmed",
+        status: String = "active",
+        sourceConnectionId: String? = null,
+        sourceEventId: String? = null,
+    ): SelfIdentityAnchorEntity
     public suspend fun updateAnchor(
         id: String,
         displayValue: String? = null,
@@ -140,6 +153,38 @@ public class SelfIdentityRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun upsertLocalAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+        displayValue: String?,
+        source: String,
+        scope: String,
+        trust: String,
+        status: String,
+        sourceConnectionId: String?,
+        sourceEventId: String?,
+    ): SelfIdentityAnchorEntity = withContext(ioDispatcher) {
+        val normalized = value.trim()
+        val entity = SelfIdentityAnchorEntity(
+            id = localSelfAnchorId(userId, anchorType, normalized, scope, sourceConnectionId, sourceEventId),
+            userId = userId,
+            anchorType = anchorType,
+            normalizedValue = normalized,
+            displayValue = displayValue?.trim()?.takeIf { it.isNotEmpty() } ?: normalized,
+            source = source,
+            scope = scope,
+            sourceConnectionId = sourceConnectionId,
+            sourceEventId = sourceEventId,
+            trust = trust,
+            status = status,
+            createdAt = kotlinx.datetime.Clock.System.now(),
+            updatedAt = kotlinx.datetime.Clock.System.now(),
+        )
+        dao.upsert(entity)
+        entity
+    }
+
     override suspend fun updateAnchor(
         id: String,
         displayValue: String?,
@@ -238,6 +283,20 @@ public class SourceConnectionRepositoryImpl @Inject constructor(
 }
 
 private const val TAG = "IdentityRepository"
+
+private fun localSelfAnchorId(
+    userId: String,
+    anchorType: String,
+    normalizedValue: String,
+    scope: String,
+    sourceConnectionId: String?,
+    sourceEventId: String?,
+): String {
+    val key = listOf(userId, anchorType, normalizedValue, scope, sourceConnectionId.orEmpty(), sourceEventId.orEmpty())
+        .joinToString("|")
+    val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
+    return "local-self-" + digest.joinToString("") { "%02x".format(it) }.take(24)
+}
 
 private fun SelfIdentityAnchorDto.toEntity(fallbackUserId: String): SelfIdentityAnchorEntity =
     SelfIdentityAnchorEntity(

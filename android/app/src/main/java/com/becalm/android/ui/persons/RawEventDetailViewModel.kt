@@ -65,6 +65,7 @@ public data class RawEventDetailUiState(
     val location: String? = null,
     val attendeesRaw: String? = null,
     val commitmentQuotes: List<String> = emptyList(),
+    val extractedCommitments: List<RawEventCommitmentSummary> = emptyList(),
     val emailBody: EmailBodyUi? = null,
     val archivedOriginal: ArchivedOriginalUi? = null,
     val attachmentCount: Int = 0,
@@ -72,6 +73,15 @@ public data class RawEventDetailUiState(
     val syncStatus: String? = null,
     val loading: Boolean = true,
     val error: UiMessage? = null,
+)
+
+public data class RawEventCommitmentSummary(
+    val id: String,
+    val title: String,
+    val itemType: String,
+    val direction: String?,
+    val status: String?,
+    val quote: String,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -142,6 +152,7 @@ public class RawEventDetailViewModel @Inject constructor(
 
             val loadedState = withContext(ioDispatcher) {
                 val commitmentQuotes = projectionPort.loadCommitmentQuotes(userId, entity)
+                val extractedCommitments = projectionPort.loadCommitmentSummaries(userId, entity)
                 val attendeesRaw = projectionPort.loadCalendarAttendeesRaw(userId, entity)
                 val sourceOriginal = sourceOriginalResolver.resolve(userId, entity)
                 RawEventDetailProjector.buildLoadedState(
@@ -149,6 +160,7 @@ public class RawEventDetailViewModel @Inject constructor(
                     emailBody = sourceOriginal.emailBody,
                     archivedOriginal = sourceOriginal.archivedOriginal,
                     commitmentQuotes = commitmentQuotes,
+                    extractedCommitments = extractedCommitments,
                     attendeesRaw = attendeesRaw,
                 )
             }

@@ -9,6 +9,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.becalm.android.ui.auth.LoginScreen
+import com.becalm.android.ui.auth.AuthRecoveryScreen
+import com.becalm.android.ui.auth.SignUpScreen
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsScreen
 import com.becalm.android.ui.commitments.CommitmentCreateSheet
@@ -68,7 +70,7 @@ private fun NavBackStackEntry.stringArg(key: String): String? =
 /**
  * Root navigation host for the BeCalm Android app.
  *
- * Every route declared in `.spec/contracts/ui-map.yml` (version 1, 24 routes) is
+     * Every route declared in `.spec/contracts/ui-map.yml` plus auth split routes is
  * registered and wired to its screen composable.
  *
  * ## Usage
@@ -123,6 +125,37 @@ public fun BecalmNavHost(
                 override(backStackEntry)
             } else {
                 LoginScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.SignUp.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.SignUp.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                SignUpScreen(navController = navController)
+            }
+        }
+
+        composable(
+            route = BecalmRoute.AuthRecovery.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.AuthRecovery.ARG_TERMS_ACCEPTED) {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+            ),
+        ) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.AuthRecovery.PATH]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                AuthRecoveryScreen(
+                    navController = navController,
+                    termsAccepted = backStackEntry.arguments
+                        ?.getBoolean(BecalmRoute.AuthRecovery.ARG_TERMS_ACCEPTED)
+                        ?: false,
+                )
             }
         }
 
@@ -362,6 +395,11 @@ public fun BecalmNavHost(
                     onOpenSettings = {
                         navController.navigate(BecalmRoute.Settings.path)
                     },
+                    onOpenSources = {
+                        navController.navigate(BecalmRoute.SettingsSources.path) {
+                            launchSingleTop = true
+                        }
+                    },
                     onOpenUnassigned = {
                         navController.navigate(BecalmRoute.PersonsUnassigned.path)
                     },
@@ -522,12 +560,48 @@ public fun BecalmNavHost(
             }
         }
 
+        composable(
+            route = BecalmRoute.SettingsSourceConnection.PATH,
+            arguments = listOf(
+                navArgument(BecalmRoute.SettingsSourceConnection.ARG_PROVIDER) {
+                    type = NavType.StringType
+                },
+            ),
+        ) { entry ->
+            val override = routeOverrides[BecalmRoute.SettingsSourceConnection.PATH]
+            if (override != null) {
+                override(entry)
+            } else {
+                SettingsSourceConnectionsScreen(
+                    navController = navController,
+                    targetProviderSlug = entry.stringArg(BecalmRoute.SettingsSourceConnection.ARG_PROVIDER),
+                )
+            }
+        }
+
         composable(route = BecalmRoute.ContactsSourceDetail.path) { backStackEntry ->
             val override = routeOverrides[BecalmRoute.ContactsSourceDetail.path]
             if (override != null) {
                 override(backStackEntry)
             } else {
                 ContactsSourceDetailScreen(navController = navController)
+            }
+        }
+
+        composable(route = BecalmRoute.SettingsContactsPermission.path) { backStackEntry ->
+            val override = routeOverrides[BecalmRoute.SettingsContactsPermission.path]
+            if (override != null) {
+                override(backStackEntry)
+            } else {
+                ContactsPermissionScreen(
+                    navController = navController,
+                    onNavigateToSources = {
+                        navController.navigate(BecalmRoute.SettingsSources.path) {
+                            popUpTo(BecalmRoute.SettingsSources.path) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    },
+                )
             }
         }
 

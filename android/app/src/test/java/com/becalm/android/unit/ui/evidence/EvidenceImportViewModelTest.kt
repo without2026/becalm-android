@@ -4,6 +4,7 @@ import android.net.Uri
 import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.MeetingImportResult
 import com.becalm.android.data.repository.MeetingSpeakerPreviewResult
 import com.becalm.android.data.repository.MeetingSpeakerReviewContext
@@ -16,6 +17,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +25,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -31,6 +34,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -43,6 +47,7 @@ class EvidenceImportViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { sourceImportRepository.observeLatestMeetingSpeakerReview() } returns flowOf(null)
     }
 
     @After
@@ -71,12 +76,55 @@ class EvidenceImportViewModelTest {
 
     @Test
     // spec: RUX-009
-    fun `meeting speaker review confirmation sends escaped mapping json`() = runTest {
+    fun `meeting audio selection stages preview without blocking loading sheet`() = runTest {
         val uri = mockk<Uri>(relaxed = true)
+        coEvery { sourceImportRepository.stageMeetingAudioForSpeakerReview(uri) } returns
+            BecalmResult.Success(MeetingImportResult("raw-meeting", "content://saved/audio"))
+
+        val viewModel = EvidenceImportViewModel(
+            sourceImportRepository,
+            FakeStatusProjectionPort(EvidenceImportPersistentStatus.NONE),
+        )
+
+        viewModel.onMeetingAudioSelected(uri)
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.loadingMessage)
+        assertEquals(
+            UiMessage.resource(R.string.evidence_import_meeting_preview_started),
+            viewModel.state.value.message,
+        )
+        coVerify(exactly = 1) { sourceImportRepository.stageMeetingAudioForSpeakerReview(uri) }
+    }
+
+    @Test
+    fun `meeting preview loading cancel remains a no-op for non blocking pipeline`() = runTest {
+        val uri = mockk<Uri>(relaxed = true)
+        coEvery { sourceImportRepository.stageMeetingAudioForSpeakerReview(uri) } returns
+            BecalmResult.Success(MeetingImportResult("raw-meeting", "content://saved/audio"))
+        val viewModel = EvidenceImportViewModel(
+            sourceImportRepository,
+            FakeStatusProjectionPort(EvidenceImportPersistentStatus.NONE),
+        )
+
+        viewModel.onMeetingAudioSelected(uri)
+        advanceUntilIdle()
+
+        viewModel.onMeetingPreviewLoadingCancelled()
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.loadingMessage)
+        assertNull(viewModel.state.value.meetingReview)
+    }
+
+    @Test
+    // spec: RUX-009
+    fun `meeting speaker review confirmation sends escaped mapping json`() = runTest {
         val capturedContext = slot<MeetingSpeakerReviewContext>()
-        coEvery { sourceImportRepository.previewMeetingAudioSpeakers(uri) } returns BecalmResult.Success(
+        every { sourceImportRepository.observeLatestMeetingSpeakerReview() } returns flowOf(
             MeetingSpeakerPreviewResult(
                 rawEventId = "raw-preview",
+                sourceRef = "content://saved/audio",
                 speakerPreviewId = "preview-1",
                 speakers = listOf(
                     MeetingSpeakerPreviewDto(speakerId = "SPEAKER_01"),
@@ -86,7 +134,7 @@ class EvidenceImportViewModelTest {
             ),
         )
         coEvery {
-            sourceImportRepository.importMeetingAudio(uri, capture(capturedContext))
+            sourceImportRepository.confirmMeetingSpeakerReview("raw-preview", capture(capturedContext))
         } returns BecalmResult.Success(MeetingImportResult("raw-meeting", "content://saved/audio"))
 
         val viewModel = EvidenceImportViewModel(
@@ -94,18 +142,53 @@ class EvidenceImportViewModelTest {
             FakeStatusProjectionPort(EvidenceImportPersistentStatus.NONE),
         )
 
-        viewModel.onMeetingAudioSelected(uri)
         advanceUntilIdle()
         viewModel.onMeetingSelfSpeakerSelected("""SPEAKER_"02\민홍""")
-        viewModel.onMeetingSpeakerReviewConfirmed()
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { sourceImportRepository.importMeetingAudio(uri, any()) }
+        coVerify(exactly = 1) { sourceImportRepository.confirmMeetingSpeakerReview("raw-preview", any()) }
         val rows = parseRows(capturedContext.captured.speakerMappingsJson)
         assertEquals("""SPEAKER_"02\민홍""", rows[1]["speaker_id"])
         assertEquals("self", rows[1]["relation_to_user"])
         assertEquals(true, rows[1]["confirmed_by_user"])
         assertEquals(false, rows[0]["confirmed_by_user"])
+    }
+
+    @Test
+    fun `call speaker review treats selected speaker as counterparty and infers self speaker`() = runTest {
+        val capturedContext = slot<MeetingSpeakerReviewContext>()
+        every { sourceImportRepository.observeLatestMeetingSpeakerReview() } returns flowOf(
+            MeetingSpeakerPreviewResult(
+                rawEventId = "raw-call-preview",
+                sourceRef = "content://saved/call",
+                sourceType = SourceType.CALL_RECORDING,
+                speakerPreviewId = "preview-call",
+                speakers = listOf(
+                    MeetingSpeakerPreviewDto(speakerId = "SPEAKER_01"),
+                    MeetingSpeakerPreviewDto(speakerId = "SPEAKER_02"),
+                ),
+                billableSeconds = 24,
+            ),
+        )
+        coEvery {
+            sourceImportRepository.confirmMeetingSpeakerReview("raw-call-preview", capture(capturedContext))
+        } returns BecalmResult.Success(MeetingImportResult("raw-call", "content://saved/call"))
+
+        val viewModel = EvidenceImportViewModel(
+            sourceImportRepository,
+            FakeStatusProjectionPort(EvidenceImportPersistentStatus.NONE),
+        )
+
+        advanceUntilIdle()
+        viewModel.onMeetingSelfSpeakerSelected("SPEAKER_02")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { sourceImportRepository.confirmMeetingSpeakerReview("raw-call-preview", any()) }
+        assertEquals("SPEAKER_01", capturedContext.captured.selfSpeakerId)
+        val rows = parseRows(capturedContext.captured.speakerMappingsJson)
+        assertEquals("self", rows[0]["relation_to_user"])
+        assertEquals("counterparty", rows[1]["relation_to_user"])
+        assertEquals(true, rows[1]["confirmed_by_user"])
     }
 
     private suspend fun EvidenceImportViewModel.awaitStatusMessage(): UiMessage =

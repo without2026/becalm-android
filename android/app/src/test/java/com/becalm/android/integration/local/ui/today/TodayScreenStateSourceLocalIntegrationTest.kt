@@ -7,8 +7,10 @@ import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.AuthRepository
@@ -29,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
@@ -166,6 +169,17 @@ class TodayScreenStateSourceLocalIntegrationTest {
             )
             db.commitmentDao().insert(
                 commitment(
+                    id = "action-past",
+                    userId = userId,
+                    counterpartyRef = "+821012345678",
+                    counterpartyRaw = "01012345678",
+                    title = "4월 초 과거 액션",
+                    dueAt = Instant.parse("2026-04-01T09:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-01T08:00:00Z"),
+                ),
+            )
+            db.commitmentDao().insert(
+                commitment(
                     id = "schedule-past",
                     userId = userId,
                     itemType = CommitmentItemType.SCHEDULE,
@@ -212,9 +226,119 @@ class TodayScreenStateSourceLocalIntegrationTest {
             assertEquals("Daily standup", meeting.title)
             assertFalse(updated.timeline.any { it.title == "Tomorrow planning" })
             assertFalse(updated.timeline.any { it.title == "영희와 결정" })
+            assertFalse(updated.timeline.any { it.title == "4월 초 과거 액션" })
             assertFalse(updated.timeline.any { it.title == "4월 초 과거 일정" })
             assertFalse(updated.overallSyncing)
 
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `today timeline rolls over to the actual KST date while app stays open`() = runTest {
+        clock.nowInstant = Instant.parse("2026-04-23T14:59:30Z")
+        val stateSource = TodayScreenStateSource(
+            commitmentRepository = commitmentRepository,
+            calendarEventRepository = calendarRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            authRepository = authRepository,
+            userPrefsStore = userPrefsStore,
+            clock = clock,
+            logger = logger,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        val refreshing = MutableStateFlow(false)
+        val userIdFlow = stateSource.userIdFlow(this.backgroundScope)
+        db.commitmentDao().insert(
+            commitment(
+                id = "after-midnight-kst",
+                userId = userId,
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                counterpartyRef = "+821012345678",
+                counterpartyRaw = "01012345678",
+                title = "자정 이후 일정",
+                dueAt = Instant.parse("2026-04-23T15:30:00Z"),
+                sourceEventOccurredAt = Instant.parse("2026-04-23T14:00:00Z"),
+            ),
+        )
+
+        stateSource.observeUiState(userIdFlow, refreshing).test {
+            val beforeMidnight = awaitItem()
+            assertTrue(beforeMidnight.timeline.isEmpty())
+
+            clock.nowInstant = Instant.parse("2026-04-23T15:00:30Z")
+            advanceTimeBy(60_000L)
+
+            var afterMidnight = awaitItem()
+            while (afterMidnight.timeline.isEmpty()) {
+                afterMidnight = awaitItem()
+            }
+            assertEquals(listOf("자정 이후 일정"), afterMidnight.timeline.map { it.title })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `today timeline resolves display name from commitment participant person graph`() = runTest {
+        val stateSource = TodayScreenStateSource(
+            commitmentRepository = commitmentRepository,
+            calendarEventRepository = calendarRepository,
+            sourceStatusRepository = sourceStatusRepository,
+            authRepository = authRepository,
+            userPrefsStore = userPrefsStore,
+            clock = clock,
+            logger = logger,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        val refreshing = MutableStateFlow(false)
+        val userIdFlow = stateSource.userIdFlow(this.backgroundScope)
+
+        stateSource.observeUiState(userIdFlow, refreshing).test {
+            awaitItem()
+            db.personIndexDao().upsertPersons(
+                listOf(
+                    person(
+                        id = "person-minhong",
+                        displayName = "김민홍",
+                        primaryEmail = "minhong@example.com",
+                    ),
+                ),
+            )
+            db.personIndexDao().upsertCommitmentParticipants(
+                listOf(
+                    commitmentParticipant(
+                        id = "cp-1",
+                        commitmentId = "commitment-graph-person",
+                        personId = "person-minhong",
+                    ),
+                ),
+            )
+            db.commitmentDao().insert(
+                commitment(
+                    id = "commitment-graph-person",
+                    userId = userId,
+                    counterpartyRef = null,
+                    counterpartyRaw = null,
+                    title = "민홍에게 자료 전달",
+                    dueAt = Instant.parse("2026-04-23T08:00:00Z"),
+                    sourceEventOccurredAt = Instant.parse("2026-04-23T01:00:00Z"),
+                ),
+            )
+
+            var updated = awaitItem()
+            while (
+                updated.timeline.filterIsInstance<TimelineItem.Commitment>()
+                    .singleOrNull()
+                    ?.counterpartyDisplayName == null
+            ) {
+                updated = awaitItem()
+            }
+
+            val commitment = updated.timeline.single() as TimelineItem.Commitment
+            assertEquals("김민홍", commitment.counterpartyDisplayName)
+            assertEquals("김민홍", updated.personFocus.single().displayName)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -230,6 +354,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
         title: String,
         dueAt: Instant?,
         sourceEventOccurredAt: Instant,
+        sourceEventTitle: String = "source-$id",
     ): CommitmentEntity = CommitmentEntity(
         id = id,
         userId = userId,
@@ -241,7 +366,7 @@ class TodayScreenStateSourceLocalIntegrationTest {
         title = title,
         description = null,
         quote = "quote-$id",
-        sourceEventTitle = "source-$id",
+        sourceEventTitle = sourceEventTitle,
         sourceEventOccurredAt = sourceEventOccurredAt,
         dueAt = dueAt,
         dueHint = null,
@@ -270,5 +395,37 @@ class TodayScreenStateSourceLocalIntegrationTest {
         endAt = endAt,
         attendeesRaw = attendeesRaw,
         syncStatus = "synced",
+    )
+
+    private fun person(
+        id: String,
+        displayName: String,
+        primaryEmail: String?,
+    ): PersonEntity = PersonEntity(
+        id = id,
+        userId = userId,
+        displayName = displayName,
+        kind = "person",
+        primaryEmail = primaryEmail,
+        primaryPhone = null,
+        confidence = 0.95,
+        createdAt = Instant.parse("2026-04-23T00:00:00Z"),
+        updatedAt = Instant.parse("2026-04-23T00:00:00Z"),
+        archivedAt = null,
+    )
+
+    private fun commitmentParticipant(
+        id: String,
+        commitmentId: String,
+        personId: String,
+    ): CommitmentParticipantEntity = CommitmentParticipantEntity(
+        id = id,
+        userId = userId,
+        commitmentId = commitmentId,
+        personId = personId,
+        role = "counterparty",
+        evidence = "quote",
+        confidence = 0.95,
+        createdAt = Instant.parse("2026-04-23T00:00:00Z"),
     )
 }

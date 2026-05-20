@@ -17,6 +17,19 @@ class PersonIdentityResolverSpecTest {
     }
 
     @Test
+    fun `relation email identity collapses plus address aliases`() {
+        assertEquals(
+            "bye@town.com",
+            PersonIdentityResolver.normalizeRelationEmailAnchor("Bye <bye+j57angcdxgs0t717kta8xcgkjh85c117@town.com>"),
+        )
+        assertEquals(
+            "bye@town.com",
+            PersonIdentityResolver.normalizeRelationEmailAnchor("bye+notif-px74yy9nadppavzc0zqwq0awg986ant8@town.com"),
+        )
+        assertEquals("alice@example.com", PersonIdentityResolver.normalizeRelationEmailAnchor("alice@example.com"))
+    }
+
+    @Test
     fun `phone identity keeps phone anchor`() {
         val result = requireNotNull(PersonIdentityResolver.resolve("user-1", "+82 10-1234-5678"))
 
@@ -55,6 +68,7 @@ class PersonIdentityResolverSpecTest {
             "webmaster@example.com",
             "return@mailer.example",
             "naverpay@naver.com",
+            "bye+notif-px74yy9nadppavzc0zqwq0awg986ant8@town.com",
             "billing@example.com",
             "support@example.com",
         )

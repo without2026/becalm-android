@@ -24,7 +24,8 @@ import com.becalm.android.ui.components.IngestionTimestamp
 
 /**
  * Source-event card renderer for [PersonDetailScreen].
- * One card owns the original source evidence plus extracted give/take/schedule items.
+ * One card owns the original source evidence. Extracted give/take/schedule items
+ * live in the raw event detail drill-down so timeline filtering stays source-based.
  */
 @Composable
 internal fun SourceEventCardRow(
@@ -63,9 +64,6 @@ internal fun SourceEventCardRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            CommitmentBucket(label = stringResource(R.string.person_detail_bucket_my_actions), items = card.myActions)
-            CommitmentBucket(label = stringResource(R.string.person_detail_bucket_their_actions), items = card.theirActions)
-            CommitmentBucket(label = stringResource(R.string.commitment_item_type_schedule), items = card.schedules)
             if (card.linkedCalendarEventId != null) {
                 Text(
                     text = stringResource(R.string.person_detail_linked_calendar),
@@ -109,28 +107,4 @@ private fun sourceTypeLabelRes(sourceType: String): Int = when (sourceType) {
     SourceType.MEETING -> R.string.raw_event_source_badge_meeting
     SourceType.MESSAGE_SCREENSHOT -> R.string.raw_event_source_badge_message_screenshot
     else -> R.string.raw_event_source_badge_unknown
-}
-
-@Composable
-private fun CommitmentBucket(
-    label: String,
-    items: List<PersonDetailCommitmentSummary>,
-) {
-    if (items.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        items.forEach { item ->
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
 }

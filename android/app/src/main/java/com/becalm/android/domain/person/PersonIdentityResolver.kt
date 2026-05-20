@@ -27,6 +27,7 @@ public object PersonIdentityResolver {
     private val PERSON_NAMESPACE: UUID = UUID.fromString("b69fa098-8289-46d4-857a-5e9a9c113c79")
     private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
     private val PHONE_CHARS = Regex("[^0-9+]")
+    private val SPEAKER_LABEL_REGEX = Regex("""^speaker[_\s-]?\d+$""", RegexOption.IGNORE_CASE)
     private val AUTOMATED_EMAIL_LOCALS = setOf(
         "noreply",
         "no-reply",
@@ -43,6 +44,7 @@ public object PersonIdentityResolver {
         "hostmaster",
         "notification",
         "notifications",
+        "notif",
         "calendar-notification",
         "alert",
         "alerts",
@@ -95,6 +97,7 @@ public object PersonIdentityResolver {
         "do-not-reply",
         "do_not_reply",
         "notification",
+        "notif",
         "newsletter",
         "mailer-daemon",
         "bounce",
@@ -108,6 +111,15 @@ public object PersonIdentityResolver {
         return EMAIL_REGEX.find(value)?.value?.lowercase(Locale.ROOT)
     }
 
+    public fun normalizeRelationEmailAnchor(raw: String?): String? {
+        val email = normalizeEmailAnchor(raw) ?: return null
+        if (!email.contains('+')) return email
+        val local = email.substringBefore('@')
+        val domain = email.substringAfter('@')
+        val base = local.substringBefore('+').trim()
+        return if (base.length >= 2) "$base@$domain" else email
+    }
+
     public fun normalizePhoneAnchor(raw: String?): String? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         PhoneNumberUtils.toE164OrNull(value)?.let { return it }
@@ -115,9 +127,13 @@ public object PersonIdentityResolver {
             .takeIf { it.length >= 7 && it.any(Char::isDigit) }
     }
 
+    public fun isSpeakerLabelValue(raw: String?): Boolean =
+        raw?.trim()?.matches(SPEAKER_LABEL_REGEX) == true
+
     public fun resolve(userId: String, raw: String?): PersonIdentityResolution? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val email = normalizeEmailAnchor(value)
+        if (isSpeakerLabelValue(value)) return null
+        val email = normalizeRelationEmailAnchor(value)
         if (email != null) {
             return resolution(userId, identityKey = "email:$email", identityType = "email", rawValue = email)
         }
@@ -183,7 +199,7 @@ public object PersonIdentityResolver {
 
     public fun normalizeBlockKey(raw: String?): String? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val email = normalizeEmailAnchor(value)
+        val email = normalizeRelationEmailAnchor(value)
         if (email != null) return email
         val phone = normalizePhoneAnchor(value)
         if (phone != null) return phone
@@ -199,11 +215,22 @@ public object PersonIdentityResolver {
     public fun isLikelyAutomated(raw: String?): Boolean {
         val value = raw?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return false
         val email = normalizeEmailAnchor(value)
-        val local = email?.substringBefore('@')
-            ?.replace(".", "-")
-            ?.replace("_", "-")
-        return local in AUTOMATED_EMAIL_LOCALS || AUTOMATED_LOCAL_MARKERS.any { marker ->
-            local?.contains(marker) == true
+        val local = email?.substringBefore('@') ?: return false
+        val localParts = buildSet {
+            add(local)
+            if ('+' in local) {
+                val base = local.substringBefore('+')
+                val tag = local.substringAfter('+')
+                if (base.isNotBlank()) add(base)
+                if (tag.isNotBlank()) add(tag)
+            }
+        }.map {
+            it.replace(".", "-")
+                .replace("_", "-")
+                .replace("+", "-")
+        }
+        return localParts.any { part ->
+            part in AUTOMATED_EMAIL_LOCALS || AUTOMATED_LOCAL_MARKERS.any { marker -> marker in part }
         }
     }
 

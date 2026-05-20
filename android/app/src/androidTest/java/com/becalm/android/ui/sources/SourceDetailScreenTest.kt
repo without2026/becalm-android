@@ -15,6 +15,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
 import com.becalm.android.ui.components.SourceSyncStatus
+import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -117,6 +118,20 @@ class SourceDetailScreenTest {
             .assertCountEquals(0)
     }
 
+    @Test
+    fun source_detail_shows_manual_sync_progress_and_success_feedback() {
+        setScreen(
+            state = baseState(
+                actionMessage = UiMessage.resource(R.string.source_detail_manual_sync_started),
+                manualSyncLoading = true,
+            ),
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.source_detail_manual_sync_started))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag("source-detail-sync-now").assertIsDisplayed()
+    }
+
     private fun setScreen(
         state: SourceDetailUiState,
         onDisconnectDismiss: () -> Unit = {},
@@ -145,6 +160,8 @@ class SourceDetailScreenTest {
         showDisconnectButton: Boolean = true,
         showManualSyncButton: Boolean = true,
         showDisconnectConfirmDialog: Boolean = false,
+        actionMessage: UiMessage? = null,
+        manualSyncLoading: Boolean = false,
     ): SourceDetailUiState = SourceDetailUiState(
         sourceType = "gmail",
         status = status,
@@ -155,6 +172,8 @@ class SourceDetailScreenTest {
         showDisconnectButton = showDisconnectButton,
         showManualSyncButton = showManualSyncButton,
         showDisconnectConfirmDialog = showDisconnectConfirmDialog,
+        actionMessage = actionMessage,
+        manualSyncLoading = manualSyncLoading,
         recentEvents = listOf(
             RecentEventSummary(
                 id = "evt-1",

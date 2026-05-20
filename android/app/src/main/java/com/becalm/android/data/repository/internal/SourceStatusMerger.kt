@@ -68,6 +68,12 @@ internal suspend fun mergeServerState(
                 WIRE_STATE_IDLE -> {
                     prefs.remove(inProgress(item.sourceType))
                     prefs.remove(lastError(item.sourceType))
+                    val at = item.lastSyncAt
+                    if (at != null) {
+                        prefs[lastSyncedAt(item.sourceType)] = at.toEpochMilliseconds()
+                    } else {
+                        prefs.remove(lastSyncedAt(item.sourceType))
+                    }
                 }
                 else -> {
                     logger.w(TAG, "refreshFromServer unknown state='${item.state}' for source='${item.sourceType}'")

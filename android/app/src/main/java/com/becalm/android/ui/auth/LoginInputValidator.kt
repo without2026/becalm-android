@@ -6,6 +6,13 @@ internal enum class LoginInputValidationError {
     ShortPassword,
 }
 
+internal enum class SignUpInputValidationError {
+    EmptyFields,
+    InvalidEmail,
+    ShortPassword,
+    PasswordMismatch,
+}
+
 internal object LoginInputValidator {
     private const val PasswordMinLength = 8
     private val emailPattern = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
@@ -17,6 +24,21 @@ internal object LoginInputValidator {
         return buildSet {
             if (!emailPattern.matches(email.trim())) add(LoginInputValidationError.InvalidEmail)
             if (password.length < PasswordMinLength) add(LoginInputValidationError.ShortPassword)
+        }
+    }
+
+    fun validateSignUp(
+        email: String,
+        password: String,
+        confirmPassword: String,
+    ): Set<SignUpInputValidationError> {
+        if (email.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
+            return setOf(SignUpInputValidationError.EmptyFields)
+        }
+        return buildSet {
+            if (!emailPattern.matches(email.trim())) add(SignUpInputValidationError.InvalidEmail)
+            if (password.length < PasswordMinLength) add(SignUpInputValidationError.ShortPassword)
+            if (password != confirmPassword) add(SignUpInputValidationError.PasswordMismatch)
         }
     }
 }

@@ -55,6 +55,14 @@ internal object CommitmentDetailFormatter {
         )
 
     private fun buildEventSourceText(entity: CommitmentEntity): CommitmentText {
+        if (entity.sourceType == SourceType.MESSAGE_SCREENSHOT) {
+            val title = entity.sourceEventTitle?.takeIf { it.isNotBlank() }
+            return if (title == null) {
+                CommitmentText.resource(R.string.raw_event_source_badge_message_screenshot)
+            } else {
+                CommitmentText.resource(R.string.commitment_detail_source_title_fmt, title)
+            }
+        }
         val formattedTime = formatShortKst(entity.sourceEventOccurredAt)
         val title = entity.sourceEventTitle?.takeIf { it.isNotBlank() }
         return if (title == null) {

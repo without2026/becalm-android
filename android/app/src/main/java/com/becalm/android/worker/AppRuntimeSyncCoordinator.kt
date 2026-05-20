@@ -6,11 +6,13 @@ import com.becalm.android.core.di.MainDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
+import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.sources.ContactsPermissionChecker
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.datetime.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.delay
@@ -39,6 +41,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private var backendMailScheduled: Boolean = false
     private var commonRecurringWorkScheduled: Boolean = false
     private var sourceParticipantMirrorRetryScheduledForUser: String? = null
+    private var staleLinkedSourceProjectionRepairScheduledForUser: String? = null
+    private var staleRawSourceProjectionRepairScheduledForUser: String? = null
 
     public fun start() {
         registerForegroundCatchUp()
@@ -92,6 +96,8 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             backendMailScheduled = false
             commonRecurringWorkScheduled = false
             sourceParticipantMirrorRetryScheduledForUser = null
+            staleLinkedSourceProjectionRepairScheduledForUser = null
+            staleRawSourceProjectionRepairScheduledForUser = null
         }
         refreshPermissionManagedRegistrations(currentUserId)
     }
@@ -117,9 +123,12 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
             workScheduler.scheduleUploadRedundancy()
             workScheduler.scheduleRetentionSweep()
             workScheduler.scheduleOverdueSweep()
+            workScheduler.scheduleProcessDoneSweep()
             commonRecurringWorkScheduled = true
         }
         enqueuePendingSourceParticipantMirrorsIfNeeded(userId)
+        enqueueStaleLinkedSourceProjectionRepairIfNeeded(userId)
+        enqueueStaleRawSourceProjectionRepairIfNeeded(userId)
     }
 
     private suspend fun enqueuePendingSourceParticipantMirrorsIfNeeded(userId: String) {
@@ -135,6 +144,54 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
     }
 
+    private suspend fun enqueueStaleLinkedSourceProjectionRepairIfNeeded(userId: String) {
+        if (staleLinkedSourceProjectionRepairScheduledForUser == userId) return
+        val staleRows = personIndexDao.findStaleLinkedSourceProjectionRows(
+            userId = userId,
+            limit = STALE_LINKED_SOURCE_REPAIR_LIMIT,
+        )
+        staleLinkedSourceProjectionRepairScheduledForUser = userId
+        if (staleRows.isEmpty()) return
+        val now = Clock.System.now()
+        personIndexDao.upsertDirtySources(
+            staleRows.map { row ->
+                PersonIndexDirtySources.rawEvent(
+                    userId = userId,
+                    sourceType = row.sourceType,
+                    sourceEventId = row.sourceEventId,
+                    reason = "stale_linked_source_projection_repair",
+                    now = now,
+                )
+            },
+        )
+        workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
+        logger.d(TAG, "stale linked source projection repair scheduled count=${staleRows.size}")
+    }
+
+    private suspend fun enqueueStaleRawSourceProjectionRepairIfNeeded(userId: String) {
+        if (staleRawSourceProjectionRepairScheduledForUser == userId) return
+        val staleRows = personIndexDao.findStaleRawSourceProjectionRows(
+            userId = userId,
+            limit = STALE_LINKED_SOURCE_REPAIR_LIMIT,
+        )
+        staleRawSourceProjectionRepairScheduledForUser = userId
+        if (staleRows.isEmpty()) return
+        val now = Clock.System.now()
+        personIndexDao.upsertDirtySources(
+            staleRows.map { row ->
+                PersonIndexDirtySources.rawEvent(
+                    userId = userId,
+                    sourceType = row.sourceType,
+                    sourceEventId = row.sourceEventId,
+                    reason = "stale_raw_source_projection_repair",
+                    now = now,
+                )
+            },
+        )
+        workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
+        logger.d(TAG, "stale raw source projection repair scheduled count=${staleRows.size}")
+    }
+
     private suspend fun refreshPermissionManagedRegistrations(currentUserId: String?) {
         if (currentUserId == null) {
             contentObserverBootstrap.stop()
@@ -143,18 +200,27 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
         }
 
         val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
+        val callRecordingEnabled = userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING).first()
         val meetingEnabled = userPrefsStore.observeSourceEnabled(SourceType.MEETING).first()
-        val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
+        val voiceTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE).first()
+        val callRecordingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING).first()
+        val meetingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first()
         val audioGranted = mediaAudioPermissionChecker.isGranted()
-        if ((voiceEnabled || meetingEnabled) && !recordingsTreeUri.isNullOrBlank() && (audioGranted || meetingEnabled)) {
+        val canObserveRecordings =
+            (voiceEnabled && !voiceTreeUri.isNullOrBlank() && audioGranted) ||
+                (callRecordingEnabled && !callRecordingTreeUri.isNullOrBlank() && audioGranted) ||
+                (meetingEnabled && !meetingTreeUri.isNullOrBlank())
+        if (canObserveRecordings) {
             contentObserverBootstrap.start()
             logger.d(TAG, "recordings realtime observer enabled")
         } else {
             contentObserverBootstrap.stop()
             logger.d(
                 TAG,
-                "recordings realtime observer disabled voiceEnabled=$voiceEnabled meetingEnabled=$meetingEnabled " +
-                    "audioGranted=$audioGranted hasTree=${!recordingsTreeUri.isNullOrBlank()}",
+                "recordings realtime observer disabled voiceEnabled=$voiceEnabled " +
+                    "callRecordingEnabled=$callRecordingEnabled meetingEnabled=$meetingEnabled " +
+                    "audioGranted=$audioGranted hasVoiceTree=${!voiceTreeUri.isNullOrBlank()} " +
+                    "hasCallTree=${!callRecordingTreeUri.isNullOrBlank()} hasMeetingTree=${!meetingTreeUri.isNullOrBlank()}",
             )
         }
 
@@ -173,5 +239,6 @@ public class AppRuntimeSyncCoordinator @Inject constructor(
     private companion object {
         private const val TAG = "AppRuntimeSync"
         private const val STARTUP_RUNTIME_DELAY_MS: Long = 5_000L
+        private const val STALE_LINKED_SOURCE_REPAIR_LIMIT: Int = 500
     }
 }

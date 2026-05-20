@@ -49,6 +49,18 @@ public sealed class BecalmRoute(public val path: String) {
     /** Email/password + Google Sign-In login screen. */
     public data object Login : BecalmRoute("login")
 
+    /** Email/password account creation screen. */
+    public data object SignUp : BecalmRoute("signup")
+
+    /** Recoverable auth bootstrap failure screen with a route back to the auth shell. */
+    public data class AuthRecovery(public val termsAccepted: Boolean) :
+        BecalmRoute("auth/recovery?termsAccepted=$termsAccepted") {
+        public companion object {
+            public const val PATH: String = "auth/recovery?termsAccepted={termsAccepted}"
+            public const val ARG_TERMS_ACCEPTED: String = "termsAccepted"
+        }
+    }
+
     // ── Onboarding (auth required) ─────────────────────────────────────────────
 
     /**
@@ -280,6 +292,15 @@ public sealed class BecalmRoute(public val path: String) {
     /** Settings source connection hub shared with onboarding source OAuth rows. */
     public data object SettingsSourceConnections : BecalmRoute("settings/sources/connect")
 
+    /** Settings source connection flow scoped to a single provider. */
+    public data class SettingsSourceConnection(public val provider: String) :
+        BecalmRoute("settings/sources/connect/$provider") {
+        public companion object {
+            public const val PATH: String = "settings/sources/connect/{provider}"
+            public const val ARG_PROVIDER: String = "provider"
+        }
+    }
+
     /**
      * Contacts pseudo-source detail under Settings.
      *
@@ -287,6 +308,9 @@ public sealed class BecalmRoute(public val path: String) {
      * routes to [OnboardingContacts] instead.
      */
     public data object ContactsSourceDetail : BecalmRoute("settings/sources/contacts")
+
+    /** Settings-only READ_CONTACTS permission request that returns to the sources list. */
+    public data object SettingsContactsPermission : BecalmRoute("settings/sources/contacts/permission")
 
     /**
      * Source detail: status, last-sync info, reconnect / disconnect / manual-sync

@@ -8,6 +8,8 @@ import kotlinx.datetime.Instant
 
 public object ScheduleEventLinkRelationType {
     public const val CONFIRMS: String = "confirms"
+    public const val ENRICHES: String = "enriches"
+    public const val CONFLICTS: String = "conflicts"
     public const val RESCHEDULES: String = "reschedules"
     public const val CANCELS: String = "cancels"
     public const val CREATES_CANDIDATE: String = "creates_candidate"
@@ -19,6 +21,14 @@ public object ScheduleEventLinkStatus {
     public const val NEEDS_REVIEW: String = "needs_review"
     public const val APPROVED: String = "approved"
     public const val REJECTED: String = "rejected"
+}
+
+public object ScheduleEventLinkResolutionChoice {
+    public const val SAME_SCHEDULE: String = "same_schedule"
+    public const val SCHEDULE_ADJUSTMENT_NEEDED: String = "schedule_adjustment_needed"
+    public const val KEEP_BOTH: String = "keep_both"
+    public const val CALENDAR: String = "calendar"
+    public const val SOURCE: String = "source"
 }
 
 @Entity(
@@ -78,6 +88,27 @@ public data class ScheduleEventLinkEntity(
 
     @ColumnInfo(name = "evidence")
     val evidence: String?,
+
+    @ColumnInfo(name = "conflict_fields", defaultValue = "'[]'")
+    val conflictFieldsJson: String = "[]",
+
+    @ColumnInfo(name = "calendar_snapshot")
+    val calendarSnapshotJson: String? = null,
+
+    @ColumnInfo(name = "source_snapshot")
+    val sourceSnapshotJson: String? = null,
+
+    @ColumnInfo(name = "resolution_choice")
+    val resolutionChoice: String? = null,
+
+    @ColumnInfo(name = "resolved_by")
+    val resolvedBy: String? = null,
+
+    @ColumnInfo(name = "resolved_at")
+    val resolvedAt: Instant? = null,
+
+    @ColumnInfo(name = "reopen_reason")
+    val reopenReason: String? = null,
 
     @ColumnInfo(name = "created_at")
     val createdAt: Instant,

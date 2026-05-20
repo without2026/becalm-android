@@ -10,6 +10,7 @@ import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import dagger.assisted.Assisted
@@ -72,6 +73,7 @@ public class UploadWorker @AssistedInject constructor(
     private val commitmentParticipantRepositoryProvider: Provider<CommitmentParticipantRepository>,
     private val sourceStatusRepositoryProvider: Provider<SourceStatusRepository>,
     private val workSchedulerProvider: Provider<WorkScheduler>,
+    private val processingStatusRepositoryProvider: Provider<ProcessingStatusRepository>,
     private val processingPauseGate: ProcessingPauseGate,
     private val logger: Logger,
 ) : CoroutineWorker(appContext, workerParams) {
@@ -88,6 +90,7 @@ public class UploadWorker @AssistedInject constructor(
         workScheduler: WorkScheduler,
         processingPauseGate: ProcessingPauseGate,
         logger: Logger,
+        processingStatusRepository: ProcessingStatusRepository? = null,
     ) : this(
         appContext = appContext,
         workerParams = workerParams,
@@ -98,6 +101,9 @@ public class UploadWorker @AssistedInject constructor(
         commitmentParticipantRepositoryProvider = Provider { commitmentParticipantRepository },
         sourceStatusRepositoryProvider = Provider { sourceStatusRepository },
         workSchedulerProvider = Provider { workScheduler },
+        processingStatusRepositoryProvider = Provider {
+            processingStatusRepository ?: error("ProcessingStatusRepository is required for production UploadWorker")
+        },
         processingPauseGate = processingPauseGate,
         logger = logger,
     )
@@ -119,6 +125,7 @@ public class UploadWorker @AssistedInject constructor(
             rawEventUploader = RawEventUploader(
                 rawIngestionRepository = rawIngestionRepositoryProvider.get(),
                 logger = logger,
+                processingStatusRepository = runCatching { processingStatusRepositoryProvider.get() }.getOrNull(),
             ),
             commitmentUploader = CommitmentUploader(
                 commitmentRepository = commitmentRepositoryProvider.get(),

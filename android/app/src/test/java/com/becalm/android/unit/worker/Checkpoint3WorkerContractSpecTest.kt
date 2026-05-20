@@ -70,7 +70,8 @@ class Checkpoint3WorkerContractSpecTest {
     @Test
     fun e2e_037_supported_call_recording_file_is_detected_by_mediastore_pipeline_owner() {
         assertEquals(MediaStoreWorker::class.java, WorkSchedulerRequests.resolveSource(SourceType.VOICE)?.workerClass)
-        assertTrue(SourceType.CALL_RECORDING in SourceType.ALL)
+        assertEquals(MediaStoreWorker::class.java, WorkSchedulerRequests.resolveSource(SourceType.CALL_RECORDING)?.workerClass)
+        assertEquals(UniqueWorkKeys.MEDIA_STORE, WorkSchedulerRequests.resolveSource(SourceType.CALL_RECORDING)?.uniqueKey)
     }
 
     @Test

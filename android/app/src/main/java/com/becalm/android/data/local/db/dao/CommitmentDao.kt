@@ -18,6 +18,7 @@ public data class TodayCommitmentRow(
     val counterpartyDisplayName: String?,
     val sourceType: String?,
     val sourceRef: String?,
+    val sourceTitle: String?,
     val dueAt: Instant?,
     val dueIsApproximate: Boolean,
     val dueHint: String?,
@@ -41,17 +42,33 @@ public data class CommitmentManagementRow(
     val dueHint: String?,
 )
 
+public data class RawEventCommitmentRow(
+    val id: String,
+    val itemType: String,
+    val title: String,
+    val direction: String?,
+    val status: String?,
+    val quote: String,
+)
+
+public data class CompletionMatchCandidateRow(
+    val id: String,
+    val title: String,
+    val quote: String,
+    val sourceEventOccurredAt: Instant,
+    val conversationRef: String?,
+)
+
 /**
  * Room DAO for the `commitments` table.
  *
  * All write paths use [OnConflictStrategy.REPLACE] because Railway is the source of truth;
  * receiving a fresher record from GET /v1/commitments must always overwrite the local copy.
  *
- * The [observePendingForToday] query accepts `endOfTodayEpochMs` as a UTC epoch-millisecond
- * bound rather than a date string because `commitments.due_at` is stored as an
- * [kotlinx.datetime.Instant] (INTEGER epoch ms via the Room converter) as of DB v4.
- * Callers compute the bound as Asia/Seoul 23:59:59.999 → UTC epoch ms — see
- * `.spec/contracts/data-model.yml:132-144` and VOI-003.
+ * The [observePendingForToday] query accepts UTC epoch-millisecond bounds rather than
+ * date strings because `commitments.due_at` is stored as an [kotlinx.datetime.Instant]
+ * (INTEGER epoch ms via the Room converter) as of DB v4. Callers compute the bounds
+ * as the current Asia/Seoul day window.
  *
  * All [Flow]-returning queries are cold; collection begins on the first downstream
  * collector and Room re-emits on every matching table write.
@@ -117,6 +134,28 @@ public interface CommitmentDao {
         """
     )
     public suspend fun updateActionState(id: String, newState: String, updatedAt: Instant): Int
+
+    /**
+     * Completion-signal transition used by ProcessDoneWorker.
+     *
+     * Unlike the general user action-state update, this keeps the eligibility guard in SQL
+     * so terminal, soft-deleted, schedule, and decision rows cannot be overwritten if the
+     * local graph changes between candidate selection and update.
+     */
+    @Query(
+        """
+        UPDATE commitments
+        SET action_state = 'completed',
+            updated_at   = :updatedAt,
+            sync_status  = 'pending'
+        WHERE user_id = :userId
+          AND id = :id
+          AND item_type = 'action'
+          AND action_state IN ('pending', 'reminded', 'followed_up', 'overdue')
+          AND deleted_at IS NULL
+        """,
+    )
+    public suspend fun completeActionIfEligible(userId: String, id: String, updatedAt: Instant): Int
 
     /**
      * Sets [CommitmentEntity.syncStatus] to "synced" for all rows whose [CommitmentEntity.id]
@@ -421,6 +460,69 @@ public interface CommitmentDao {
     )
     public suspend fun findLiveByIdsForPersonIndex(userId: String, ids: List<String>): List<CommitmentEntity>
 
+    @Query(
+        """
+        SELECT c.id AS id,
+               c.title AS title,
+               c.quote AS quote,
+               c.source_event_occurred_at AS sourceEventOccurredAt,
+               (
+                   SELECT raw.conversation_ref
+                   FROM raw_ingestion_events AS raw
+                   WHERE raw.user_id = c.user_id
+                     AND (
+                         raw.id = c.source_ref
+                         OR (c.source_ref IS NOT NULL AND raw.source_ref = c.source_ref)
+                         OR (
+                             raw.source_type = c.source_type
+                             AND raw.timestamp = c.source_event_occurred_at
+                             AND (
+                                 raw.event_title = c.source_event_title
+                                 OR (raw.event_title IS NULL AND c.source_event_title IS NULL)
+                             )
+                         )
+                     )
+                   ORDER BY
+                       CASE
+                           WHEN :conversationRef IS NOT NULL AND raw.conversation_ref = :conversationRef THEN 0
+                           ELSE 1
+                       END,
+                       raw.timestamp DESC
+                   LIMIT 1
+               ) AS conversationRef
+        FROM commitments AS c
+        JOIN commitment_participants AS cp
+          ON cp.user_id = c.user_id
+         AND cp.commitment_id = c.id
+        WHERE c.user_id = :userId
+          AND cp.person_id = :personId
+          AND c.item_type = 'action'
+          AND c.action_state IN ('pending', 'reminded', 'followed_up', 'overdue')
+          AND c.deleted_at IS NULL
+          AND c.source_event_occurred_at < (
+              SELECT source.timestamp
+              FROM raw_ingestion_events AS source
+              WHERE source.user_id = :userId
+                AND source.id = :sourceEventId
+              LIMIT 1
+          )
+        ORDER BY
+            CASE
+                WHEN :conversationRef IS NOT NULL AND conversationRef = :conversationRef THEN 0
+                ELSE 1
+            END,
+            c.source_event_occurred_at DESC
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findCompletionMatchCandidates(
+        userId: String,
+        personId: String,
+        sourceEventId: String,
+        conversationRef: String?,
+        limit: Int,
+    ): List<CompletionMatchCandidateRow>
+
     // ─── List reads ────────────────────────────────────────────────────────────
 
     /**
@@ -458,10 +560,28 @@ public interface CommitmentDao {
                c.action_state AS actionState,
                c.due_at AS dueAt,
                c.due_is_approximate AS dueIsApproximate,
-               CASE
-                   WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
-                   ELSE SUBSTR(c.counterparty_raw, 1, 30)
-               END AS counterpartyDisplayName,
+               COALESCE(
+                   (
+                       SELECT COALESCE(
+                           NULLIF(person.display_name, ''),
+                           NULLIF(person.primary_email, ''),
+                           NULLIF(person.primary_phone, '')
+                       )
+                       FROM commitment_participants AS cp
+                       JOIN persons AS person
+                         ON person.user_id = cp.user_id
+                        AND person.id = cp.person_id
+                        AND person.archived_at IS NULL
+                       WHERE cp.user_id = c.user_id
+                         AND cp.commitment_id = c.id
+                       ORDER BY cp.confidence DESC, cp.created_at ASC
+                       LIMIT 1
+                   ),
+                   CASE
+                       WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
+                       ELSE SUBSTR(c.counterparty_raw, 1, 30)
+                   END
+               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_event_title AS sourceTitle,
                c.source_event_occurred_at AS sourceOccurredAt,
@@ -499,16 +619,14 @@ public interface CommitmentDao {
     /**
      * Emits live action/schedule commitment items for [userId] in the Today timeline.
      *
-     * Action commitments are included when undated or due on/before end-of-today so
-     * overdue follow-ups remain visible. Schedule commitments are included only when
-     * their due time falls within today's KST day window; older calendar-backed
-     * schedules should not behave like overdue actions.
+     * Action and schedule commitments are included only when their due time falls
+     * within today's KST day window. Older follow-ups stay available in person detail
+     * history, not in the Today operational surface.
      *
      * `endOfTodayEpochMs` is an inclusive UTC epoch-millisecond upper bound. The caller
      * must compute it as `Asia/Seoul` 23:59:59.999 converted to UTC epoch ms so that the
-     * comparison `due_at <= :endOfTodayEpochMs` correctly captures every commitment whose
-     * KST calendar date is on or before today (consistent with data-model.yml:132-144 and
-     * VOI-003 KST-rendered due semantics).
+     * range comparison correctly captures every commitment whose KST calendar date is today
+     * (consistent with data-model.yml:132-144 and VOI-003 KST-rendered due semantics).
      *
      * Soft-deleted rows (`deleted_at IS NOT NULL`) are excluded per
      * `.spec/contracts/data-model.yml:204-205` MUST-invariant.
@@ -527,7 +645,7 @@ public interface CommitmentDao {
           AND item_type    IN ('action', 'schedule')
           AND action_state = 'pending'
           AND (
-              (item_type = 'action' AND (due_at IS NULL OR due_at <= :endOfTodayEpochMs))
+              (item_type = 'action' AND due_at >= :startOfTodayEpochMs AND due_at <= :endOfTodayEpochMs)
               OR
               (item_type = 'schedule' AND due_at >= :startOfTodayEpochMs AND due_at <= :endOfTodayEpochMs)
           )
@@ -548,12 +666,31 @@ public interface CommitmentDao {
                c.title AS title,
                c.direction AS direction,
                c.schedule_status AS scheduleStatus,
-               CASE
-                   WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
-                   ELSE SUBSTR(c.counterparty_raw, 1, 30)
-               END AS counterpartyDisplayName,
+               COALESCE(
+                   (
+                       SELECT COALESCE(
+                           NULLIF(person.display_name, ''),
+                           NULLIF(person.primary_email, ''),
+                           NULLIF(person.primary_phone, '')
+                       )
+                       FROM commitment_participants AS cp
+                       JOIN persons AS person
+                         ON person.user_id = cp.user_id
+                        AND person.id = cp.person_id
+                        AND person.archived_at IS NULL
+                       WHERE cp.user_id = c.user_id
+                         AND cp.commitment_id = c.id
+                       ORDER BY cp.confidence DESC, cp.created_at ASC
+                       LIMIT 1
+                   ),
+                   CASE
+                       WHEN c.counterparty_ref IS NOT NULL THEN COALESCE(p.display_name, p.nickname, c.counterparty_ref)
+                       ELSE SUBSTR(c.counterparty_raw, 1, 30)
+                   END
+               ) AS counterpartyDisplayName,
                c.source_type AS sourceType,
                c.source_ref AS sourceRef,
+               c.source_event_title AS sourceTitle,
                c.due_at AS dueAt,
                c.due_is_approximate AS dueIsApproximate,
                c.due_hint AS dueHint,
@@ -564,7 +701,7 @@ public interface CommitmentDao {
           AND c.item_type    IN ('action', 'schedule')
           AND c.action_state = 'pending'
           AND (
-              (c.item_type = 'action' AND (c.due_at IS NULL OR c.due_at <= :endOfTodayEpochMs))
+              (c.item_type = 'action' AND c.due_at >= :startOfTodayEpochMs AND c.due_at <= :endOfTodayEpochMs)
               OR
               (c.item_type = 'schedule' AND c.due_at >= :startOfTodayEpochMs AND c.due_at <= :endOfTodayEpochMs)
           )
@@ -620,6 +757,30 @@ public interface CommitmentDao {
         userId: String,
         sourceRef: String,
     ): List<String>
+
+    @Query(
+        """
+        SELECT id AS id,
+               item_type AS itemType,
+               title AS title,
+               direction AS direction,
+               CASE
+                   WHEN item_type = 'schedule' THEN schedule_status
+                   WHEN item_type = 'decision' THEN decision_status
+                   ELSE action_state
+               END AS status,
+               quote AS quote
+        FROM commitments
+        WHERE user_id = :userId
+          AND source_ref IN (:sourceRefs)
+          AND deleted_at IS NULL
+        ORDER BY source_event_occurred_at DESC, created_at DESC
+        """
+    )
+    public suspend fun findRawEventCommitmentsBySourceRefsForUser(
+        userId: String,
+        sourceRefs: List<String>,
+    ): List<RawEventCommitmentRow>
 
     // ─── Sync helpers ──────────────────────────────────────────────────────────
 

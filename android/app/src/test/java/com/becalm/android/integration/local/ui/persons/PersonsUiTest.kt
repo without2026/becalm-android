@@ -136,7 +136,7 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `person detail shows source filters and unified timeline`() {
+    fun `person detail shows source filters and source-only timeline`() {
         composeRule.setContent {
             BecalmTheme {
                 PersonDetailScreenContent(
@@ -197,17 +197,10 @@ class PersonsUiTest {
         composeRule.onNodeWithText(string(R.string.person_detail_filter_all)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 2)).assertIsDisplayed()
         composeRule.onNodeWithTag("person-detail-list")
-            .performScrollToNode(hasText("제안서 보내기"))
-        composeRule.onNodeWithText("제안서 보내기").assertExists()
-        composeRule.onNodeWithTag("person-detail-list")
-            .performScrollToNode(hasText("완료된 약속"))
-        composeRule.onNodeWithText("완료된 약속").assertExists()
-        composeRule.onNodeWithTag("person-detail-list")
-            .performScrollToNode(hasText(string(R.string.person_detail_filter_email)))
-        composeRule.onNodeWithTag("person-detail-filter-email").performClick()
-        composeRule.onNodeWithText(string(R.string.person_detail_timeline_section_fmt, 1)).assertExists()
-        composeRule.onNodeWithText("메일").assertExists()
-        composeRule.onAllNodesWithText("콜 녹음").assertCountEquals(0)
+            .performScrollToNode(hasText("콜 녹음"))
+        composeRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 1)).assertExists()
+        composeRule.onAllNodesWithText("제안서 보내기").assertCountEquals(0)
+        composeRule.onAllNodesWithText("완료된 약속").assertCountEquals(0)
     }
 
     @Test
@@ -273,7 +266,7 @@ class PersonsUiTest {
     }
 
     @Test
-    fun `source event card buckets localize commitment roles`() {
+    fun `source event card shows source preview without extracted buckets`() {
         composeRule.setContent {
             BecalmTheme {
                 Column {
@@ -285,6 +278,7 @@ class PersonsUiTest {
                             occurredAt = Instant.parse("2026-04-24T01:00:00Z"),
                             title = "메일",
                             snippet = null,
+                            commitmentsExtractedCount = 1,
                             myActions = listOf(
                                 PersonDetailCommitmentSummary(
                                     title = "제안서 보내기",
@@ -304,6 +298,7 @@ class PersonsUiTest {
                             occurredAt = Instant.parse("2026-04-24T02:00:00Z"),
                             title = "데모 미팅",
                             snippet = null,
+                            commitmentsExtractedCount = 1,
                             schedules = listOf(
                                 PersonDetailCommitmentSummary(
                                     title = "데모 미팅",
@@ -318,8 +313,9 @@ class PersonsUiTest {
             }
         }
 
-        composeRule.onNodeWithText(string(R.string.person_detail_bucket_my_actions)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.commitment_item_type_schedule)).assertIsDisplayed()
+        composeRule.onAllNodesWithText(string(R.string.raw_event_commitments_extracted, 1)).assertCountEquals(2)
+        composeRule.onAllNodesWithText(string(R.string.person_detail_bucket_my_actions)).assertCountEquals(0)
+        composeRule.onAllNodesWithText(string(R.string.commitment_item_type_schedule)).assertCountEquals(0)
         composeRule.onAllNodesWithText("give").assertCountEquals(0)
         composeRule.onAllNodesWithText("pending").assertCountEquals(0)
         composeRule.onAllNodesWithText("confirmed").assertCountEquals(0)

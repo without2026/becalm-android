@@ -1,7 +1,9 @@
 package com.becalm.android.worker
 
 import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
+import com.becalm.android.data.remote.dto.SourceCompletionSignalDto
 import com.becalm.android.data.remote.dto.DecisionStatus
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
 import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
@@ -109,6 +111,106 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
+    fun `call recording counterparty ref supplies the single person fallback for schedules`() {
+        val raw = rawEvent().copy(
+            sourceType = SourceType.CALL_RECORDING,
+            sourceRef = "content://call-recording-1",
+            counterpartyRef = "+821012341234",
+            eventTitle = "통화 녹음",
+            folder = "Call",
+        )
+
+        val participant = emptyList<SourceExtractedParticipantDto>()
+            .withCallRecordingCounterpartyFallback(raw)
+            .single()
+
+        assertEquals("counterparty", participant.role)
+        assertEquals("counterparty", participant.relationToUser)
+        assertEquals("phone", participant.identityType)
+        assertEquals("+821012341234", participant.phone)
+
+        val sourceParticipant = participant.toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = raw.id,
+            sourceType = raw.sourceType,
+            sourceRef = raw.sourceRef,
+            index = 0,
+            now = NOW,
+        )
+        val schedule = SourceExtractedItemDto(
+            type = SourceExtractedItemType.SCHEDULE,
+            text = "다음 주 화요일에 후속 통화를 한다",
+            quote = "다음 주 화요일에 다시 통화하시죠.",
+            counterpartyRef = null,
+            dueAt = null,
+            dueHint = "다음 주 화요일",
+            dueIsApproximate = true,
+            confidence = 0.86f,
+            scheduleStatus = "confirmed",
+        ).toTrackableCommitmentEntity(
+            rawEventId = raw.id,
+            index = 0,
+            userId = USER_ID,
+            sourceRef = raw.sourceRef,
+            sourceType = raw.sourceType,
+            sourceEventTitle = raw.eventTitle,
+            sourceEventOccurredAt = raw.timestamp,
+            now = NOW,
+        )
+        val scheduleParticipant = schedule.toCommitmentParticipantEntity(
+            userId = USER_ID,
+            index = 0,
+            fallbackPersonId = sourceParticipant.personId,
+            now = NOW,
+        )
+
+        assertEquals("resolved", sourceParticipant.resolutionStatus)
+        assertNotNull(sourceParticipant.personId)
+        assertEquals(sourceParticipant.personId, scheduleParticipant?.personId)
+        assertEquals("attendee", scheduleParticipant?.role)
+    }
+
+    @Test
+    fun `completed updates map to progress events rather than extracted action items`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "sender",
+            relationToUser = "counterparty",
+            identityType = "email",
+            normalizedValue = "partner@acme.kr",
+            email = "partner@acme.kr",
+            confidence = 0.95,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message",
+            index = 0,
+            now = NOW,
+        )
+        val signal = SourceCompletionSignalDto(
+            eventType = "completed",
+            personRef = "partner@acme.kr",
+            evidenceQuote = "제안서 송부 완료했습니다.",
+            confidence = 0.93,
+        )
+
+        val progress = signal.toCommitmentProgressEventEntity(
+            userId = USER_ID,
+            sourceEvent = rawEvent(),
+            index = 0,
+            sourceParticipants = listOf(participant),
+            fallbackPersonId = null,
+            now = NOW,
+        )
+
+        assertNotNull(progress)
+        assertEquals("completed", progress?.eventType)
+        assertEquals("needs_review", progress?.status)
+        assertEquals(participant.personId, progress?.personId)
+        assertEquals("gmail:thread-1", progress?.conversationRef)
+    }
+
+    @Test
     fun `name-only extracted participants stay unresolved for user confirmation`() {
         val participant = SourceExtractedParticipantDto(
             role = "speaker",
@@ -197,6 +299,62 @@ class Checkpoint4ExtractionPersistenceSpecTest {
     }
 
     @Test
+    fun `unmatched speaker label remains source local and ignored`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "speaker",
+            relationToUser = "counterparty",
+            identityType = "speaker_label",
+            rawValue = "SPEAKER_02",
+            normalizedValue = "SPEAKER_02",
+            displayName = "SPEAKER_02",
+            confidence = 0.9,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.CALL_RECORDING,
+            sourceRef = "call-audio",
+            index = 0,
+            now = NOW,
+            selfIdentityAnchors = emptyList(),
+        )
+
+        assertEquals(null, participant.personId)
+        assertEquals("counterparty", participant.relationToUser)
+        assertEquals("speaker_label", participant.identityType)
+        assertEquals("ignored", participant.resolutionStatus)
+    }
+
+    @Test
+    fun `self alias anchor stays suggested for user confirmation without creating person`() {
+        val participant = SourceExtractedParticipantDto(
+            role = "sender",
+            relationToUser = "counterparty",
+            identityType = "name",
+            normalizedValue = "jake",
+            displayName = "Jake",
+            confidence = 0.78,
+        ).toSourceEventParticipantEntity(
+            userId = USER_ID,
+            sourceEventId = RAW_EVENT_ID,
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message",
+            index = 0,
+            now = NOW,
+            selfIdentityAnchors = listOf(
+                selfAnchor(
+                    id = "anchor-alias",
+                    anchorType = "alias",
+                    normalizedValue = "jake",
+                ),
+            ),
+        )
+
+        assertEquals(null, participant.personId)
+        assertEquals("counterparty", participant.relationToUser)
+        assertEquals("suggested_self", participant.resolutionStatus)
+    }
+
+    @Test
     fun `self identity email anchor prevents commitment counterparty participant creation`() {
         val commitment = SourceExtractedItemDto(
             type = SourceExtractedItemType.ACTION,
@@ -232,6 +390,91 @@ class Checkpoint4ExtractionPersistenceSpecTest {
         )
 
         assertEquals(null, participant)
+    }
+
+    @Test
+    fun `third party item person refs are filtered before local persistence`() {
+        val items = listOf(
+            SourceExtractedItemDto(
+                type = SourceExtractedItemType.ACTION,
+                text = "Bob이 Carol에게 계약서를 보낸다",
+                quote = "Bob will send Carol the contract by tomorrow.",
+                counterpartyRef = "bob@example.com",
+                dueAt = null,
+                confidence = 0.9f,
+                direction = "take",
+            ),
+            SourceExtractedItemDto(
+                type = SourceExtractedItemType.ACTION,
+                text = "고객이 자료를 보낸다",
+                quote = "자료는 오후에 보내드릴게요.",
+                counterpartyRef = "customer@example.com",
+                dueAt = null,
+                confidence = 0.9f,
+                direction = "take",
+            ),
+        )
+        val participants = listOf(
+            SourceExtractedParticipantDto(
+                role = "sender",
+                relationToUser = "counterparty",
+                identityType = "email",
+                normalizedValue = "customer@example.com",
+                email = "customer@example.com",
+                confidence = 0.96,
+            ),
+            SourceExtractedParticipantDto(
+                role = "mentioned",
+                relationToUser = "referenced",
+                identityType = "email",
+                normalizedValue = "bob@example.com",
+                email = "bob@example.com",
+                confidence = 0.9,
+            ),
+        )
+
+        val relevant = items.filterUserRelevantItems(
+            rawCounterpartyRef = "customer@example.com",
+            participants = participants,
+        )
+
+        assertEquals(listOf("customer@example.com"), relevant.map { it.counterpartyRef })
+    }
+
+    @Test
+    fun `self item person refs are cleared before local persistence`() {
+        val item = SourceExtractedItemDto(
+            type = SourceExtractedItemType.ACTION,
+            text = "내가 자료를 보낸다",
+            quote = "제가 자료를 보내겠습니다.",
+            counterpartyRef = "me@example.com",
+            dueAt = null,
+            confidence = 0.9f,
+            direction = "give",
+        )
+
+        val relevant = listOf(item).filterUserRelevantItems(
+            rawCounterpartyRef = "customer@example.com",
+            participants = listOf(
+                SourceExtractedParticipantDto(
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = "customer@example.com",
+                    email = "customer@example.com",
+                    confidence = 0.96,
+                ),
+            ),
+            selfIdentityAnchors = listOf(
+                selfAnchor(
+                    id = "anchor-email",
+                    anchorType = "provider_email",
+                    normalizedValue = "me@example.com",
+                ),
+            ),
+        )
+
+        assertEquals(listOf(null), relevant.map { it.counterpartyRef })
     }
 
     @Test
@@ -281,6 +524,25 @@ class Checkpoint4ExtractionPersistenceSpecTest {
             status = "active",
             createdAt = NOW,
             updatedAt = NOW,
+        )
+
+    private fun rawEvent(): RawIngestionEventEntity =
+        RawIngestionEventEntity(
+            id = RAW_EVENT_ID,
+            userId = USER_ID,
+            clientEventId = "client-1",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "gmail-message",
+            counterpartyRef = "partner@acme.kr",
+            eventTitle = "제안서 follow-up",
+            eventSnippet = null,
+            durationSeconds = null,
+            location = null,
+            conversationRef = "gmail:thread-1",
+            folder = "INBOX",
+            commitmentsExtractedCount = 0,
+            timestamp = OCCURRED_AT,
+            syncStatus = "synced",
         )
 
     private companion object {

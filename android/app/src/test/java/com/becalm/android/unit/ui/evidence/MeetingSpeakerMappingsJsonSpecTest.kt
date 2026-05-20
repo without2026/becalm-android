@@ -32,6 +32,24 @@ class MeetingSpeakerMappingsJsonSpecTest {
         assertEquals(false, rows[1]["confirmed_by_user"])
     }
 
+    @Test
+    fun `encodes call speaker mapping with selected speaker as counterparty and remaining speaker as self`() {
+        val json = MeetingSpeakerMappingsJson.encodeCallCounterparty(
+            speakers = listOf(
+                speaker("SPEAKER_01"),
+                speaker("SPEAKER_02"),
+            ),
+            counterpartySpeakerId = "SPEAKER_02",
+        )
+
+        val rows = parseRows(json)
+
+        assertEquals("self", rows[0]["relation_to_user"])
+        assertEquals(true, rows[0]["confirmed_by_user"])
+        assertEquals("counterparty", rows[1]["relation_to_user"])
+        assertEquals(true, rows[1]["confirmed_by_user"])
+    }
+
     private fun speaker(id: String): MeetingSpeakerPreviewDto =
         MeetingSpeakerPreviewDto(speakerId = id)
 

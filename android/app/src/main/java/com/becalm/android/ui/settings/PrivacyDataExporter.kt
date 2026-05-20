@@ -17,6 +17,7 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceArtifactEntity
 import com.becalm.android.data.local.db.entity.UserProfileEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.scopes.ViewModelScoped
@@ -101,6 +102,10 @@ public class PrivacyDataExporter @Inject constructor(
             "current_user_id" to userPrefsStore.observeCurrentUserId().first(),
             "onboarding_completed" to userPrefsStore.observeOnboardingCompleted().first(),
             "recording_folder_tree_uri" to userPrefsStore.observeRecordingFolderTreeUri().first(),
+            "voice_recording_folder_tree_uri" to userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE).first(),
+            "call_recording_folder_tree_uri" to
+                userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING).first(),
+            "meeting_recording_folder_tree_uri" to userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first(),
             "notifications_enabled" to userPrefsStore.observeNotificationsEnabled().first(),
             "pipa_third_party_consent" to userPrefsStore.observeThirdPartyProvisionConsent().first(),
             "processing_paused" to userPrefsStore.observeProcessingPaused().first(),

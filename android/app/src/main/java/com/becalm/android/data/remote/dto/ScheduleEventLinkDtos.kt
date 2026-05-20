@@ -22,6 +22,13 @@ public data class ScheduleEventLinkDto(
     @field:Json(name = "proposed_end_at") val proposedEndAt: Instant? = null,
     @field:Json(name = "proposed_title") val proposedTitle: String? = null,
     @field:Json(name = "evidence") val evidence: String? = null,
+    @field:Json(name = "conflict_fields") val conflictFields: List<String> = emptyList(),
+    @field:Json(name = "calendar_snapshot") val calendarSnapshot: Map<String, Any?>? = null,
+    @field:Json(name = "source_snapshot") val sourceSnapshot: Map<String, Any?>? = null,
+    @field:Json(name = "resolution_choice") val resolutionChoice: String? = null,
+    @field:Json(name = "resolved_by") val resolvedBy: String? = null,
+    @field:Json(name = "resolved_at") val resolvedAt: Instant? = null,
+    @field:Json(name = "reopen_reason") val reopenReason: String? = null,
     @field:Json(name = "created_at") val createdAt: Instant,
     @field:Json(name = "updated_at") val updatedAt: Instant,
 )
@@ -34,8 +41,9 @@ public data class ScheduleEventLinksResponse(
 )
 
 @JsonClass(generateAdapter = true)
-public data class ScheduleEventLinkStatusPatchDto(
-    @field:Json(name = "status") val status: String,
+public data class ScheduleEventLinkPatchDto(
+    @field:Json(name = "status") val status: String? = null,
+    @field:Json(name = "resolution_choice") val resolutionChoice: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

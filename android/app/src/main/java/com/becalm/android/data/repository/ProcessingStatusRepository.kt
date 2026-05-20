@@ -35,10 +35,10 @@ public enum class ProcessingPhase {
 public val ProcessingPhase.isActive: Boolean
     get() = when (this) {
         ProcessingPhase.SCANNING,
-        ProcessingPhase.NEW_ITEMS,
         ProcessingPhase.GEMINI,
         ProcessingPhase.UPLOADING
         -> true
+        ProcessingPhase.NEW_ITEMS,
         ProcessingPhase.IDLE,
         ProcessingPhase.NO_NEW_ITEMS,
         ProcessingPhase.SYNCED,
@@ -106,8 +106,8 @@ public class ProcessingStatusRepository @Inject constructor(
         record(sourceType, ProcessingPhase.BLOCKED, message = message)
     }
 
-    public suspend fun recordError(sourceType: String, message: String? = null) {
-        record(sourceType, ProcessingPhase.ERROR, message = message)
+    public suspend fun recordError(sourceType: String, message: String? = null, itemCount: Int = 0) {
+        record(sourceType, ProcessingPhase.ERROR, itemCount = itemCount, message = message)
     }
 
     private suspend fun record(

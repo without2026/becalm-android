@@ -12,6 +12,7 @@ import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.PersonMemorySemanticIndexEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
 import com.becalm.android.data.remote.dto.SourceType
@@ -60,6 +61,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     private val projectionPort = EnrichmentBackedPersonsScreenProjectionPort(
         personEnrichmentRepository = enrichmentRepository,
         personIndexDao = db.personIndexDao(),
+        selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
         sourceStatusRepository = sourceStatusRepository,
         userPrefsStore = userPrefsStore,
     )
@@ -221,7 +223,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `SRC-001 first page exposes hasMorePages and nextCursor when more than twenty rows exist`() = runTest {
+    fun `SRC-001 people list keeps rows beyond first twenty searchable and visible`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -253,13 +255,124 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             var state = awaitItem()
-            while (state.people.size < 20) {
+            while (state.people.size < 21) {
                 state = awaitItem()
             }
-            assertEquals(20, state.people.size)
-            assertTrue(state.hasMorePages)
-            assertFalse(state.nextCursor.isNullOrBlank())
+            assertEquals(21, state.people.size)
+            assertFalse(state.hasMorePages)
+            assertTrue(state.nextCursor.isNullOrBlank())
             assertEquals("person-21@corp.com", state.people.first().displayLabel)
+            assertTrue(state.people.any { it.displayLabel == "person-1@corp.com" })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SRC-001 aggregate display falls back to source participant display when identity was degraded`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val anchor = "gogo20043@hnu.kr"
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, anchor)).personId
+        val occurredAt = Instant.parse("2026-05-08T05:18:20Z")
+
+        upsertIdentityAndInteraction(
+            anchor = anchor,
+            sourceType = SourceType.NAVER_IMAP,
+            sourceRef = "raw:naver-gogo",
+            kind = "commitment",
+            role = "attendee",
+            occurredAt = occurredAt,
+            title = "MINI 모두의 창업 발표 참석",
+            snippet = "수요일 예정되어 있는 MINI 모두의 창업 발표",
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "source-participant-gogo",
+                    userId = USER_ID,
+                    sourceEventId = "naver-gogo",
+                    sourceType = SourceType.NAVER_IMAP,
+                    sourceRef = "naver-gogo",
+                    personId = personId,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = anchor,
+                    displayNameRaw = "고주영",
+                    emailRaw = anchor,
+                    phoneRaw = null,
+                    organizationRaw = "한남대학교 창업지원단",
+                    titleRaw = null,
+                    evidence = "고주영 <gogo20043@hnu.kr>",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.people.none { it.personId == personId }) {
+                state = awaitItem()
+            }
+            val row = state.people.single { it.personId == personId }
+            assertEquals("고주영", row.displayLabel)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `contact match choices exclude active self identity anchors`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val syncedAt = Instant.parse("2026-04-23T00:00:00Z")
+
+        db.selfIdentityAnchorDao().insertAll(
+            listOf(
+                selfAnchor(
+                    id = "self-email",
+                    anchorType = "email",
+                    normalizedValue = "me@corp.com",
+                    displayValue = "Me",
+                    now = syncedAt,
+                ),
+            ),
+        )
+        db.personEnrichmentDao().upsert(
+            PersonEnrichmentEntity(
+                personRef = "me@corp.com",
+                displayName = "Me",
+                nickname = "Jake",
+                company = "Becalm",
+                title = "Owner",
+                lastSyncedAt = syncedAt,
+            ),
+        )
+        db.personEnrichmentDao().upsert(
+            PersonEnrichmentEntity(
+                personRef = "minji@corp.com",
+                displayName = "김민지",
+                nickname = "민지",
+                company = "Acme",
+                title = "PM",
+                lastSyncedAt = syncedAt,
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.matchChoices.isEmpty()) {
+                state = awaitItem()
+            }
+
+            assertEquals(listOf("minji@corp.com"), state.matchChoices.map { it.anchor })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -449,7 +562,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `unassigned meeting candidates exclude resolved self speaker rows`() = runTest {
+    fun `unassigned meeting candidates hide source local speaker labels`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -521,12 +634,276 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         )
 
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.none { it.suggestedLabel == "SPEAKER_02" })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `suggested self participant is surfaced as self review instead of person recommendation`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+
+        upsertIdentityAndInteraction(
+            anchor = "Jake",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-known-jake",
+            kind = "email",
+            role = "counterparty",
+            occurredAt = occurredAt,
+            title = "Known Jake",
+            snippet = "이전 대화",
+        )
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-suggested-self",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-mail",
+                    interactionKind = "email",
+                    title = "내 별칭이 포함된 메일",
+                    snippet = "Jake가 정리하겠습니다.",
+                    suggestedLabel = "Jake",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "participant-suggested-self",
+                    userId = USER_ID,
+                    sourceEventId = "raw-mail",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-source",
+                    personId = null,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "name",
+                    normalizedValue = "jake",
+                    displayNameRaw = "Jake",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "Jake가 정리하겠습니다.",
+                    confidence = 0.72,
+                    resolutionStatus = "suggested_self",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             var state = awaitItem()
             while (state.unassignedEvents.firstOrNull()?.candidates?.isEmpty() != false) {
                 state = awaitItem()
             }
 
-            assertEquals(listOf("SPEAKER_02"), state.unassignedEvents.single().candidates.map { it.anchor })
+            val candidate = state.unassignedEvents.single().candidates.single()
+            assertEquals("Jake", candidate.anchor)
+            assertFalse(candidate.recommended)
+            assertTrue(candidate.isSelfSuggestion)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `terminal source participant statuses are hidden from manual person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        val terminalStatuses = listOf(
+            "resolved",
+            "person_resolved",
+            "self_resolved",
+            "ignored",
+        )
+
+        db.personIndexDao().upsertUnmatchedInteractions(
+            terminalStatuses.map { status ->
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-$status",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-$status",
+                    interactionKind = "email",
+                    title = "이미 확인된 메일",
+                    snippet = "사용자 확인 또는 자동 확정이 끝난 참여자입니다.",
+                    suggestedLabel = "박서연",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                )
+            },
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            terminalStatuses.map { status ->
+                SourceEventParticipantEntity(
+                    id = "participant-$status",
+                    userId = USER_ID,
+                    sourceEventId = "raw-$status",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-$status",
+                    personId = "person-$status".takeUnless { status == "self_resolved" || status == "ignored" },
+                    role = "sender",
+                    relationToUser = if (status == "self_resolved") "self" else "counterparty",
+                    identityType = "name",
+                    normalizedValue = "박서연",
+                    displayNameRaw = "박서연",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "박서연님이 일정 확인을 요청했습니다.",
+                    confidence = 0.95,
+                    resolutionStatus = status,
+                    createdAt = occurredAt,
+                )
+            },
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `service account verification unmatched rows are hidden from person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-slack-verification",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-slack-verification",
+                    interactionKind = "email",
+                    title = "Slack에서 이메일 주소를 확인하세요.",
+                    snippet = "Slack을 시작하려면 이메일 주소를 확인하세요. 워크스페이스를 찾거나 새 워크스페이스를 생성할 수 있습니다.",
+                    suggestedLabel = "me@example.com",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `program application unmatched rows are hidden from person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        db.personIndexDao().upsertUnmatchedInteractions(
+            listOf(
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-asan-doers",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-asan-doers",
+                    interactionKind = "email",
+                    title = "아산 두어스 지원 접수 안내",
+                    snippet = "아산 두어스 프로그램 지원서가 정상 접수되었습니다. 선발 결과는 추후 안내됩니다.",
+                    suggestedLabel = "아산 두어스",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `program application service senders without commitments are hidden from people list`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-asan-doers",
+            kind = "email",
+            role = "sender",
+            occurredAt = occurredAt,
+            title = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+            snippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.people.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `program application participant with pending commitments stays visible in people list`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-asan-doers",
+            kind = "email",
+            role = "sender",
+            occurredAt = occurredAt,
+            title = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+            snippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
+        )
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "commitment:asan-contact",
+            kind = "commitment",
+            role = "action",
+            occurredAt = Instant.parse("2026-04-23T05:00:00Z"),
+            title = "추가 문의",
+            snippet = "모집 페이지 하단의 채널톡으로 문의",
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.people.isEmpty()) {
+                state = awaitItem()
+            }
+            assertEquals(1, state.people.single().pendingCommitmentCount)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -634,6 +1011,28 @@ class PersonsScreenStateSourceLocalIntegrationTest {
             ),
         )
     }
+
+    private fun selfAnchor(
+        id: String,
+        anchorType: String,
+        normalizedValue: String,
+        displayValue: String?,
+        now: Instant,
+    ): SelfIdentityAnchorEntity = SelfIdentityAnchorEntity(
+        id = id,
+        userId = USER_ID,
+        anchorType = anchorType,
+        normalizedValue = normalizedValue,
+        displayValue = displayValue,
+        source = "test",
+        scope = "global",
+        sourceConnectionId = null,
+        sourceEventId = null,
+        trust = "user_confirmed",
+        status = "active",
+        createdAt = now,
+        updatedAt = now,
+    )
 
     private companion object {
         const val USER_ID: String = "user-1"

@@ -176,8 +176,13 @@ class SettingsUiTest {
         }
 
         composeRule.onNodeWithTag("settings-identity-save").performClick()
+        composeRule.onNodeWithText(string(R.string.settings_identity_profile_body)).assertExists()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_display_name_help)).assertExists()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_phone_help)).assertExists()
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasTestTag("settings-identity-anchor-add"))
+        composeRule.onNodeWithText(string(R.string.settings_identity_anchor_alias)).assertExists()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_email_help)).assertExists()
         composeRule.onNodeWithTag("settings-identity-anchor-add").performClick()
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasTestTag("settings-identity-anchor-archive"))
@@ -185,6 +190,9 @@ class SettingsUiTest {
         composeRule.onAllNodesWithText("SPEAKER_01").assertCountEquals(0)
         composeRule.onNodeWithTag("settings-identity-list")
             .performScrollToNode(hasText("Gmail"))
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_shared)).assertExists()
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_delegated)).assertExists()
+        composeRule.onNodeWithText(string(R.string.settings_identity_connection_unknown)).assertExists()
         composeRule.onNodeWithText(string(R.string.settings_identity_connection_self)).performClick()
 
         composeRule.runOnIdle {

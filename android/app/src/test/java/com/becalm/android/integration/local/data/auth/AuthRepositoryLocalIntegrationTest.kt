@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import java.io.IOException
 import javax.inject.Provider
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -171,6 +172,46 @@ class AuthRepositoryLocalIntegrationTest {
     }
 
     @Test
+    fun `AUTH-008 post-auth local commit failure rolls back session and user scope`() = runTest {
+        val session = LocalIntegrationSupport.authenticatedSession(userId = USER_ID)
+        val localPrefsStore = UserPrefsStoreImpl(
+            dataStore = LocalIntegrationSupport.prefsDataStore("auth-local-rollback"),
+        )
+        val localSessionStore = InMemorySessionStore()
+        val failingDatabaseProvider = mockk<BeCalmDatabaseProvider>()
+        every { failingDatabaseProvider.currentUserIdHash() } returns null
+        every { failingDatabaseProvider.ensureOpenFor(any()) } throws IOException("db unavailable")
+        every { processRestarter.restart() } answers { throw AssertionError("restart not expected") }
+        coEvery { authClient.signInWithEmail("user@example.com", "pw") } returns BecalmResult.Success(session)
+        val rollbackRepository = AuthRepositoryImpl(
+            authClientProvider = Provider { authClient },
+            sessionStore = localSessionStore,
+            tokenProvider = tokenProvider,
+            deviceKeyStore = deviceKeyStore,
+            syncCursorStore = syncCursorStore,
+            userPrefsStore = localPrefsStore,
+            databaseProvider = failingDatabaseProvider,
+            workScheduler = workScheduler,
+            contentObserverBootstrap = contentObserverBootstrap,
+            personEnrichmentRepository = enrichmentRepository,
+            sourceArtifactRepository = sourceArtifactRepository,
+            imapCredentialStore = imapCredentialStore,
+            oauthCredentialStore = oauthCredentialStore,
+            processRestarter = processRestarter,
+            ioDispatcher = Dispatchers.IO,
+            logger = logger,
+        )
+
+        val result = rollbackRepository.signInWithEmail("user@example.com", "pw")
+
+        assertTrue(result is BecalmResult.Failure)
+        assertNull(localSessionStore.load())
+        assertNull(localPrefsStore.observeCurrentUserId().first())
+        assertEquals(0, localSessionStore.saveCount)
+        coVerify(exactly = 1) { authClient.signInWithEmail("user@example.com", "pw") }
+    }
+
+    @Test
     fun `AUTH-005 routine invalidateSession preserves room rows while clearing session mirror`() = runTest {
         val session = LocalIntegrationSupport.authenticatedSession(userId = USER_ID)
         sessionStore.save(session)
@@ -266,8 +307,11 @@ class AuthRepositoryLocalIntegrationTest {
     private class InMemorySessionStore : SupabaseSessionStore {
         private val flow = MutableSharedFlow<SupabaseSession?>(extraBufferCapacity = 1)
         private var current: SupabaseSession? = null
+        var saveCount: Int = 0
+            private set
 
         override suspend fun save(session: SupabaseSession) {
+            saveCount += 1
             current = session
             flow.emit(session)
         }

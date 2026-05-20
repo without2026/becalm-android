@@ -7,6 +7,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -23,6 +24,7 @@ import kotlinx.datetime.Clock
 internal class LocalSourceExtractionDelegate(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val commitmentDao: CommitmentDao,
+    private val commitmentProgressEventDao: CommitmentProgressEventDao,
     private val personIndexDao: PersonIndexDao,
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val sourceExtractionApi: SourceExtractionApi,
@@ -67,6 +69,7 @@ internal class LocalSourceExtractionDelegate(
                 syncStatus = "failed",
                 retryCount = entity.retryCount + 1,
                 lastAttemptAt = Clock.System.now(),
+                lastError = reasonCode,
             ),
         )
     }
@@ -79,6 +82,7 @@ internal class LocalSourceExtractionDelegate(
             extractionPersister = StructuredExtractionPersister(
                 rawIngestionEventDao = rawIngestionEventDao,
                 commitmentDao = commitmentDao,
+                commitmentProgressEventDao = commitmentProgressEventDao,
                 personIndexDao = personIndexDao,
                 sourceStatusRepository = sourceStatusRepository,
                 processingStatusRepository = processingStatusRepository,

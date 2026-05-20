@@ -2,6 +2,7 @@ package com.becalm.android.unit.ui
 
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,6 +56,14 @@ class UiKoreanCopyInvariantSpecTest {
             assertNotEquals("Display label must not expose raw source id for $key", rawId, value)
             assertTrue("Display label must not expose underscores for $key: $value", "_" !in value)
         }
+        assertEquals("Naver Email", strings["raw_event_source_badge_naver_imap"])
+        assertEquals("Daum Email", strings["raw_event_source_badge_daum_imap"])
+        assertEquals("Naver Email", strings["privacy_withdraw_naver_label"])
+        assertEquals("Daum Email", strings["privacy_withdraw_daum_label"])
+        assertEquals("Naver Email", strings["onb_imap_provider_naver"])
+        assertEquals("Daum Email", strings["onb_imap_provider_daum"])
+        assertEquals("name@naver.com", strings["onb_imap_username_hint_naver"])
+        assertEquals("name@daum.net 또는 name@hanmail.net", strings["onb_imap_username_hint_daum"])
     }
 
     private fun koreanStrings(): Map<String, String> {

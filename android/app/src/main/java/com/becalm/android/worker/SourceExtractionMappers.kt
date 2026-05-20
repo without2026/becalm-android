@@ -3,11 +3,15 @@ package com.becalm.android.worker
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
+import com.becalm.android.data.local.db.entity.CommitmentProgressEventEntity
+import com.becalm.android.data.local.db.entity.CommitmentProgressEventStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
+import com.becalm.android.data.remote.dto.SourceCompletionSignalDto
 import com.becalm.android.data.remote.dto.SourceExtractedParticipantDto
 import com.becalm.android.data.remote.dto.SourceExtractedItemDto
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonIdentityTypes
@@ -18,6 +22,49 @@ import java.util.UUID
 // 파일 분리 시 sync_status 리터럴 문자열을 재사용하기 위해 mapper 파일로 이동.
 // 동작 변경 없음 — 기존과 동일하게 "pending" 리터럴을 사용한다.
 internal const val STATUS_PENDING: String = "pending"
+
+internal fun List<SourceExtractedParticipantDto>.withCallRecordingCounterpartyFallback(
+    sourceEvent: RawIngestionEventEntity,
+): List<SourceExtractedParticipantDto> {
+    val fallback = sourceEvent.callRecordingCounterpartyParticipant() ?: return this
+    val existing = firstOrNull { participant ->
+        participant.relationToUser.equals("counterparty", ignoreCase = true) &&
+            participant.matchesCounterpartyRef(requireNotNull(fallback.normalizedValue))
+    }
+    return listOf(existing?.mergeCallCounterpartyFallback(fallback) ?: fallback)
+}
+
+internal fun List<SourceExtractedItemDto>.filterUserRelevantItems(
+    rawCounterpartyRef: String?,
+    participants: List<SourceExtractedParticipantDto>,
+    selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
+): List<SourceExtractedItemDto> {
+    val allowedRefs = buildSet {
+        addAll(rawCounterpartyRef.normalizedPersonRefValues())
+        participants
+            .filter { it.relationToUser.equals("counterparty", ignoreCase = true) }
+            .forEach { participant ->
+                addAll(participant.email.normalizedPersonRefValues())
+                addAll(participant.phone.normalizedPersonRefValues())
+                addAll(participant.normalizedValue.normalizedPersonRefValues())
+                addAll(participant.rawValue.normalizedPersonRefValues())
+                addAll(participant.displayName.normalizedPersonRefValues())
+                addAll(participant.organization.normalizedPersonRefValues())
+            }
+    }
+    val cleaned = map { item ->
+        if (item.counterpartyRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) {
+            item.copy(counterpartyRef = null)
+        } else {
+            item
+        }
+    }
+    if (allowedRefs.isEmpty()) return cleaned
+    return cleaned.filter { item ->
+        val ref = item.counterpartyRef
+        ref.isNullOrBlank() || ref.normalizedPersonRefValues().any { it in allowedRefs }
+    }
+}
 
 internal fun SourceExtractedItemDto.toTrackableCommitmentEntity(
     rawEventId: String,
@@ -67,8 +114,10 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
     selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): SourceEventParticipantEntity {
     val anchor = email ?: phone
-    val selfMatch = matchesSelfIdentityAnchor(selfIdentityAnchors)
-    val resolved = if (selfMatch) null else PersonIdentityResolver.resolve(userId, anchor)
+    val selfMatch = matchSelfIdentityAnchor(selfIdentityAnchors)
+    val selfResolved = selfMatch?.resolutionStatus == RESOLUTION_SELF_RESOLVED
+    val sourceLocalSpeakerLabel = isSourceLocalSpeakerLabel()
+    val resolved = if (selfMatch != null || sourceLocalSpeakerLabel) null else PersonIdentityResolver.resolve(userId, anchor)
     val normalized = normalizedValue ?: resolved?.identityKey?.substringAfter(':', missingDelimiterValue = resolved.rawValue)
     val participantAnchor = anchor ?: normalizedValue ?: displayName ?: organization ?: rawValue
     val participantId = UUID.nameUUIDFromBytes(
@@ -82,7 +131,7 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         sourceRef = sourceRef,
         personId = resolved?.personId,
         role = role,
-        relationToUser = if (selfMatch) {
+        relationToUser = if (selfResolved) {
             "self"
         } else {
             relationToUser.takeIf { it in RELATION_TO_USER_VALUES } ?: relationToUserForRole(role)
@@ -97,7 +146,8 @@ internal fun SourceExtractedParticipantDto.toSourceEventParticipantEntity(
         evidence = evidence,
         confidence = confidence.coerceIn(0.0, 1.0),
         resolutionStatus = when {
-            selfMatch -> "self_resolved"
+            selfMatch != null -> selfMatch.resolutionStatus
+            sourceLocalSpeakerLabel -> "ignored"
             resolved == null -> "unresolved"
             else -> "resolved"
         },
@@ -112,7 +162,7 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
     now: Instant,
     selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
 ): CommitmentParticipantEntity? {
-    if (counterpartyRef.matchesSelfIdentityAnchor(selfIdentityAnchors)) return null
+    if (counterpartyRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) return null
     val resolved = PersonIdentityResolver.resolve(userId, counterpartyRef)
     val personId = resolved?.personId ?: fallbackPersonId ?: return null
     val participantId = UUID.nameUUIDFromBytes(
@@ -135,6 +185,43 @@ internal fun CommitmentEntity.toCommitmentParticipantEntity(
     )
 }
 
+internal fun SourceCompletionSignalDto.toCommitmentProgressEventEntity(
+    userId: String,
+    sourceEvent: RawIngestionEventEntity,
+    index: Int,
+    sourceParticipants: List<SourceEventParticipantEntity>,
+    fallbackPersonId: String?,
+    now: Instant,
+    selfIdentityAnchors: List<SelfIdentityAnchorEntity> = emptyList(),
+): CommitmentProgressEventEntity? {
+    if (!eventType.equals("completed", ignoreCase = true)) return null
+    if (personRef.matchSelfIdentityAnchor(selfIdentityAnchors) != null) return null
+    val quote = evidenceQuote.trim().take(PROGRESS_EVIDENCE_MAX_CHARS)
+    if (quote.isBlank()) return null
+    val resolvedPersonId = PersonIdentityResolver.resolve(userId, personRef)?.personId
+        ?: sourceParticipants.personIdForCompletionRef(personRef)
+        ?: fallbackPersonId
+    return CommitmentProgressEventEntity(
+        id = UUID.nameUUIDFromBytes(
+            "completion-signal:$userId:${sourceEvent.id}:$index:$quote".toByteArray(Charsets.UTF_8),
+        ).toString(),
+        userId = userId,
+        sourceEventId = sourceEvent.id,
+        sourceType = sourceEvent.sourceType,
+        sourceRef = sourceEvent.sourceRef,
+        conversationRef = sourceEvent.conversationRef,
+        personId = resolvedPersonId,
+        eventType = "completed",
+        status = CommitmentProgressEventStatus.NEEDS_REVIEW,
+        confidence = confidence.coerceIn(0.0, 1.0),
+        evidenceQuote = quote,
+        reason = null,
+        appliedAt = null,
+        createdAt = now,
+        updatedAt = now,
+    )
+}
+
 internal fun List<SourceEventParticipantEntity>.singleSourceCounterpartyPersonId(): String? {
     val counterpartyPersonIds = asSequence()
         .filter { participant ->
@@ -149,8 +236,75 @@ internal fun List<SourceEventParticipantEntity>.singleSourceCounterpartyPersonId
     return counterpartyPersonIds.singleOrNull()
 }
 
+private fun List<SourceEventParticipantEntity>.personIdForCompletionRef(personRef: String?): String? {
+    val normalizedRefs = personRef.normalizedPersonRefValues()
+    if (normalizedRefs.isEmpty()) return null
+    return firstOrNull { participant ->
+        participant.personId != null &&
+            participant.relationToUser == "counterparty" &&
+            listOf(
+                participant.emailRaw,
+                participant.phoneRaw,
+                participant.normalizedValue,
+                participant.displayNameRaw,
+                participant.organizationRaw,
+            ).any { value -> value.normalizedPersonRefValues().any { it in normalizedRefs } }
+    }?.personId
+}
+
+private fun RawIngestionEventEntity.callRecordingCounterpartyParticipant(): SourceExtractedParticipantDto? {
+    if (sourceType != SourceType.CALL_RECORDING) return null
+    val ref = counterpartyRef?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val email = PersonIdentityResolver.normalizeEmailAnchor(ref)
+    val phone = if (email == null) PersonIdentityResolver.normalizePhoneAnchor(ref) else null
+    val alias = if (email == null && phone == null) PersonIdentityResolver.normalizeAlias(ref) else null
+    val normalized = email ?: phone ?: alias ?: return null
+    val identityType = when {
+        email != null -> "email"
+        phone != null -> "phone"
+        else -> "name"
+    }
+    return SourceExtractedParticipantDto(
+        role = "counterparty",
+        relationToUser = "counterparty",
+        identityType = identityType,
+        rawValue = ref,
+        normalizedValue = normalized,
+        displayName = ref.takeIf { identityType == "name" },
+        email = email,
+        phone = phone,
+        evidence = ref,
+        evidenceSource = "metadata",
+        confidence = if (identityType == "name") 0.55 else 0.9,
+    )
+}
+
+private fun SourceExtractedParticipantDto.matchesCounterpartyRef(normalizedRef: String): Boolean {
+    val counterpartyValues = normalizedRef.normalizedPersonRefValues()
+    return listOf(email, phone, normalizedValue, rawValue, displayName, organization)
+        .any { value -> value.normalizedPersonRefValues().any { it in counterpartyValues } }
+}
+
+private fun SourceExtractedParticipantDto.mergeCallCounterpartyFallback(
+    fallback: SourceExtractedParticipantDto,
+): SourceExtractedParticipantDto =
+    fallback.copy(
+        displayName = displayName ?: fallback.displayName,
+        organization = organization ?: fallback.organization,
+        title = title ?: fallback.title,
+        evidence = evidence ?: fallback.evidence,
+        confidence = maxOf(confidence, fallback.confidence),
+    )
+
+private const val PROGRESS_EVIDENCE_MAX_CHARS = 500
+private const val RESOLUTION_SELF_RESOLVED = "self_resolved"
+private const val RESOLUTION_SUGGESTED_SELF = "suggested_self"
 private val RELATION_TO_USER_VALUES = setOf("self", "counterparty", "participant", "referenced", "unknown")
 private val STRONG_SELF_EMAIL_TYPES = setOf("auth_email", "provider_email", "email")
+
+private data class LocalSelfIdentityMatch(
+    val resolutionStatus: String,
+)
 
 private fun relationToUserForRole(role: String): String =
     when (role.lowercase()) {
@@ -160,32 +314,36 @@ private fun relationToUserForRole(role: String): String =
         else -> "referenced"
     }
 
-private fun SourceExtractedParticipantDto.matchesSelfIdentityAnchor(
+private fun SourceExtractedParticipantDto.matchSelfIdentityAnchor(
     anchors: List<SelfIdentityAnchorEntity>,
-): Boolean =
-    anchors.any { anchor ->
+): LocalSelfIdentityMatch? =
+    anchors.firstNotNullOfOrNull { anchor ->
         when (anchor.anchorType) {
             in STRONG_SELF_EMAIL_TYPES ->
-                participantEmails().any { value ->
+                participantEmails().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "phone" ->
-                participantPhones().any { value ->
+                participantPhones().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "alias" ->
-                participantAliases().any { value ->
+                participantAliases().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
+                }?.let {
+                    LocalSelfIdentityMatch(
+                        if (anchor.trust == "user_confirmed") RESOLUTION_SELF_RESOLVED else RESOLUTION_SUGGESTED_SELF,
+                    )
                 }
 
             PersonIdentityTypes.SPEAKER_LABEL ->
-                participantSpeakerLabels().any { value ->
+                participantSpeakerLabels().firstOrNull { value ->
                     normalizedEquals(value, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
-                }
+                }?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
-            else -> false
+            else -> null
         }
     }
 
@@ -205,22 +363,46 @@ private fun SourceExtractedParticipantDto.participantSpeakerLabels(): List<Strin
         displayName.takeIf { identityType == PersonIdentityTypes.SPEAKER_LABEL || role.equals("speaker", ignoreCase = true) },
     )
 
-private fun String?.matchesSelfIdentityAnchor(anchors: List<SelfIdentityAnchorEntity>): Boolean =
-    anchors.any { anchor ->
+private fun SourceExtractedParticipantDto.isSourceLocalSpeakerLabel(): Boolean =
+    identityType == PersonIdentityTypes.SPEAKER_LABEL &&
+        email.isNullOrBlank() &&
+        phone.isNullOrBlank() &&
+        organization.isNullOrBlank() &&
+        listOf(normalizedValue, rawValue, displayName, evidence)
+            .filterNotNull()
+            .any { PersonIdentityResolver.isSpeakerLabelValue(it) } &&
+        listOf(displayName, rawValue)
+            .filterNotNull()
+            .none { value -> value.isNotBlank() && !PersonIdentityResolver.isSpeakerLabelValue(value) }
+
+private fun String?.matchSelfIdentityAnchor(anchors: List<SelfIdentityAnchorEntity>): LocalSelfIdentityMatch? =
+    anchors.firstNotNullOfOrNull { anchor ->
         when (anchor.anchorType) {
             in STRONG_SELF_EMAIL_TYPES ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeEmailAnchor)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "phone" ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizePhoneAnchor)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
             "alias" ->
                 normalizedEquals(this, anchor.normalizedValue, PersonIdentityResolver::normalizeAlias)
+                    .takeIf { it }
+                    ?.let {
+                        LocalSelfIdentityMatch(
+                            if (anchor.trust == "user_confirmed") RESOLUTION_SELF_RESOLVED else RESOLUTION_SUGGESTED_SELF,
+                        )
+                    }
 
             PersonIdentityTypes.SPEAKER_LABEL ->
                 normalizedEquals(this, anchor.normalizedValue, ::normalizeSourceLocalIdentity)
+                    .takeIf { it }
+                    ?.let { LocalSelfIdentityMatch(RESOLUTION_SELF_RESOLVED) }
 
-            else -> false
+            else -> null
         }
     }
 
@@ -232,6 +414,16 @@ private fun normalizedEquals(
     val normalizedLeft = normalize(left)
     val normalizedRight = normalize(right)
     return normalizedLeft != null && normalizedRight != null && normalizedLeft == normalizedRight
+}
+
+private fun String?.normalizedPersonRefValues(): Set<String> {
+    val raw = this?.trim()?.takeIf { it.isNotEmpty() } ?: return emptySet()
+    return buildSet {
+        PersonIdentityResolver.normalizeEmailAnchor(raw)?.let(::add)
+        PersonIdentityResolver.normalizePhoneAnchor(raw)?.let(::add)
+        PersonIdentityResolver.normalizeAlias(raw)?.let(::add)
+        add(raw.lowercase(Locale.ROOT))
+    }
 }
 
 private fun normalizeSourceLocalIdentity(value: String?): String? =

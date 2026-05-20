@@ -1226,6 +1226,290 @@ private val MIGRATION_22_23 = object : Migration(22, 23) {
     }
 }
 
+// ─── Migration 23 → 24 (raw ingestion failure reason) ───────────────────────
+//
+// Preserves the machine-readable reason for terminal raw-event upload/extraction failures.
+// Existing failed rows backfill NULL, which intentionally marks them as legacy repair
+// candidates for mail sources in RawIngestionEventDao.findPendingForUpload.
+private val MIGRATION_23_24 = object : Migration(23, 24) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "raw_ingestion_events",
+            columnName = "last_error",
+            definition = "TEXT",
+        )
+    }
+}
+
+// ─── Migration 24 → 25 (calendar-first schedule reconciliation) ─────────────
+//
+// Calendar events keep provider status/location/update metadata locally, and
+// schedule_event_links mirror backend conflict snapshots plus the user's chosen
+// resolution so Today/Commitments can suppress duplicates without losing review context.
+private val MIGRATION_24_25 = object : Migration(24, 25) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "status",
+            definition = "TEXT NOT NULL DEFAULT 'confirmed'",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "location",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "provider_updated_at",
+            definition = "INTEGER",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "conflict_fields",
+            definition = "TEXT NOT NULL DEFAULT '[]'",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "calendar_snapshot",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "source_snapshot",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "resolution_choice",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "resolved_by",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "resolved_at",
+            definition = "INTEGER",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "schedule_event_links",
+            columnName = "reopen_reason",
+            definition = "TEXT",
+        )
+    }
+}
+
+// ─── Migration 25 → 26 (calendar canonical provider semantics) ───────────────
+//
+// Calendar-origin rows keep provider truth fields locally. LLM-derived schedule
+// commitments remain on the existing commitments schema and are only bridged via
+// schedule_event_links, so source proposals do not inherit calendar-only semantics.
+private val MIGRATION_25_26 = object : Migration(25, 26) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "start_local",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "end_local",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "time_zone",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "is_all_day",
+            definition = "INTEGER NOT NULL DEFAULT 0",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "availability",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "attendees_json",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "organizer_json",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "recurrence_json",
+            definition = "TEXT",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "original_start_at",
+            definition = "INTEGER",
+        )
+        addColumnIfMissing(
+            db = db,
+            tableName = "calendar_events",
+            columnName = "provider_payload_hash",
+            definition = "TEXT",
+        )
+    }
+}
+
+// ─── Migration 26 → 27 (durable meeting speaker preview state) ─────────────
+//
+// Meeting audio preview is no longer a foreground-only transient. This table keeps the
+// CLOVA speaker preview and transcript metadata locally so users can leave the import flow
+// while the backend work runs and resume speaker selection after process death.
+private val MIGRATION_26_27 = object : Migration(26, 27) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `meeting_speaker_previews` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `raw_event_id` TEXT NOT NULL,
+                `source_ref` TEXT NOT NULL,
+                `speaker_preview_id` TEXT,
+                `speakers_json` TEXT NOT NULL,
+                `transcript_segments_json` TEXT,
+                `billable_seconds` INTEGER NOT NULL,
+                `status` TEXT NOT NULL,
+                `selected_self_speaker_id` TEXT,
+                `last_error` TEXT,
+                `expires_at` INTEGER,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS `ux_meeting_speaker_previews_raw_event` " +
+                "ON `meeting_speaker_previews` (`raw_event_id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_meeting_speaker_previews_user_status` " +
+                "ON `meeting_speaker_previews` (`user_id`, `status`, `updated_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_meeting_speaker_previews_preview_id` " +
+                "ON `meeting_speaker_previews` (`speaker_preview_id`)",
+        )
+    }
+}
+
+// ─── Migration 27 → 28 (local meeting speaker aliases) ─────────────────────
+//
+// Speaker labels in paid meeting transcripts remain immutable evidence. This local table
+// stores user-facing display aliases per raw event and speaker id so transcript rendering
+// can show "나" or a participant name without rewriting the archived transcript.
+private val MIGRATION_27_28 = object : Migration(27, 28) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `meeting_speaker_aliases` (
+                `user_id` TEXT NOT NULL,
+                `raw_event_id` TEXT NOT NULL,
+                `speaker_id` TEXT NOT NULL,
+                `display_name` TEXT NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`raw_event_id`, `speaker_id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_meeting_speaker_aliases_user_raw_event` " +
+                "ON `meeting_speaker_aliases` (`user_id`, `raw_event_id`)",
+        )
+    }
+}
+
+// ─── Migration 28 → 29 (completion progress events + conversation_ref) ─────
+//
+// Stores source-level completion evidence separately from actionable commitments.
+// `conversation_ref` is added to raw events so ProcessDoneWorker can require a thread
+// match before auto-completing a same-person action.
+private val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        addColumnIfMissing(
+            db = db,
+            tableName = "raw_ingestion_events",
+            columnName = "conversation_ref",
+            definition = "TEXT",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_raw_events_user_source_conversation_time` " +
+                "ON `raw_ingestion_events` (`user_id`, `source_type`, `conversation_ref`, `timestamp`)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `commitment_progress_events` (
+                `id` TEXT NOT NULL,
+                `user_id` TEXT NOT NULL,
+                `commitment_id` TEXT,
+                `source_event_id` TEXT NOT NULL,
+                `source_type` TEXT NOT NULL,
+                `source_ref` TEXT,
+                `conversation_ref` TEXT,
+                `person_id` TEXT,
+                `event_type` TEXT NOT NULL,
+                `status` TEXT NOT NULL,
+                `confidence` REAL NOT NULL,
+                `evidence_quote` TEXT NOT NULL,
+                `reason` TEXT,
+                `applied_at` INTEGER,
+                `created_at` INTEGER NOT NULL,
+                `updated_at` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitment_progress_events_user_status` " +
+                "ON `commitment_progress_events` (`user_id`, `status`, `created_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitment_progress_events_user_commitment` " +
+                "ON `commitment_progress_events` (`user_id`, `commitment_id`, `created_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitment_progress_events_user_source` " +
+                "ON `commitment_progress_events` (`user_id`, `source_event_id`, `created_at`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_commitment_progress_events_user_person` " +
+                "ON `commitment_progress_events` (`user_id`, `person_id`, `created_at`)",
+        )
+    }
+}
+
 private fun addColumnIfMissing(
     db: SupportSQLiteDatabase,
     tableName: String,
@@ -1262,4 +1546,10 @@ public val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_20_21,
     MIGRATION_21_22,
     MIGRATION_22_23,
+    MIGRATION_23_24,
+    MIGRATION_24_25,
+    MIGRATION_25_26,
+    MIGRATION_26_27,
+    MIGRATION_27_28,
+    MIGRATION_28_29,
 )

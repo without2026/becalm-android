@@ -1,5 +1,8 @@
 package com.becalm.android.unit.ui.sources
 
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.remote.api.RailwayApi
@@ -12,6 +15,8 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.RawIngestionRepository
+import com.becalm.android.data.repository.SelfIdentityRepository
+import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.ui.sources.DefaultSourceSyncPort
@@ -22,6 +27,7 @@ import io.mockk.mockk
 import javax.inject.Provider
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.Response
@@ -35,9 +41,12 @@ class SourceSyncPortSpecTest {
     private val commitmentParticipantRepository: CommitmentParticipantRepository = mockk()
     private val rawIngestionRepository: RawIngestionRepository = mockk()
     private val sourceEventParticipantRepository: SourceEventParticipantRepository = mockk()
+    private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
+    private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
+    private val productAnalytics = RecordingProductAnalyticsClient()
 
     private val subject = DefaultSourceSyncPort(
         authRepository = authRepository,
@@ -47,9 +56,12 @@ class SourceSyncPortSpecTest {
         commitmentParticipantRepository = commitmentParticipantRepository,
         rawIngestionRepository = rawIngestionRepository,
         sourceEventParticipantRepository = sourceEventParticipantRepository,
+        sourceConnectionRepository = sourceConnectionRepository,
+        selfIdentityRepository = selfIdentityRepository,
         sourceStatusRepository = sourceStatusRepository,
         workScheduler = workScheduler,
         logger = logger,
+        productAnalytics = productAnalytics,
     )
 
     @Test
@@ -95,18 +107,53 @@ class SourceSyncPortSpecTest {
                     nextCursor = "commitment-participant-cursor-1",
                 ),
             )
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GMAIL)
 
         assertTrue(result is BecalmResult.Success)
+        assertEquals(
+            listOf(
+                ProductAnalyticsEvents.SOURCE_SYNC_STARTED,
+                ProductAnalyticsEvents.SOURCE_SYNC_COMPLETED,
+            ),
+            productAnalytics.events.map { it.eventName },
+        )
+        assertEquals("gmail", productAnalytics.events.last().properties["source_type"])
+        assertEquals("backend", productAnalytics.events.last().properties["owner"])
+        assertEquals("success", productAnalytics.events.last().properties["result"])
         coVerify(exactly = 1) { api.syncMailSource(provider = SourceType.GMAIL) }
         coVerify(exactly = 1) { rawIngestionRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GMAIL, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
+        coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `manual backend sync tracks failed source sync without throwing`() = runTest {
+        coEvery { authRepository.currentSession() } returns null
+
+        val result = subject.requestManualSync(SourceType.GMAIL)
+
+        assertTrue(result is BecalmResult.Failure)
+        assertEquals(
+            listOf(
+                ProductAnalyticsEvents.SOURCE_SYNC_STARTED,
+                ProductAnalyticsEvents.SOURCE_SYNC_FAILED,
+            ),
+            productAnalytics.events.map { it.eventName },
+        )
+        assertEquals("gmail", productAnalytics.events.last().properties["source_type"])
+        assertEquals("backend", productAnalytics.events.last().properties["owner"])
+        assertEquals("unauthorized", productAnalytics.events.last().properties["result"])
+        assertEquals(false, productAnalytics.events.last().properties["retryable"])
     }
 
     @Test
@@ -152,6 +199,8 @@ class SourceSyncPortSpecTest {
                     nextCursor = "commitment-participant-cursor-1",
                 ),
             )
+        coEvery { sourceConnectionRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
+        coEvery { selfIdentityRepository.refresh("user-1") } returns BecalmResult.Success(emptyList())
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
 
         val result = subject.requestManualSync(SourceType.GOOGLE_CALENDAR)
@@ -162,8 +211,30 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceEventParticipantRepository.refreshSince(userId = "user-1", sourceType = SourceType.GOOGLE_CALENDAR, since = null) }
         coVerify(exactly = 1) { commitmentRepository.refreshSince(userId = "user-1", since = null) }
         coVerify(exactly = 1) { commitmentParticipantRepository.refreshSince(userId = "user-1", since = null) }
+        coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
+        coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GOOGLE_CALENDAR, any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
+    }
+
+    @Test
+    fun `manual local sync tracks enqueued source sync`() = runTest {
+        val result = subject.requestManualSync(SourceType.NAVER_IMAP)
+
+        assertTrue(result is BecalmResult.Success)
+        assertEquals(
+            listOf(
+                ProductAnalyticsEvents.SOURCE_SYNC_STARTED,
+                ProductAnalyticsEvents.SOURCE_SYNC_COMPLETED,
+            ),
+            productAnalytics.events.map { it.eventName },
+        )
+        assertEquals("naver_imap", productAnalytics.events.last().properties["source_type"])
+        assertEquals("local", productAnalytics.events.last().properties["owner"])
+        assertEquals("mail", productAnalytics.events.last().properties["provider_family"])
+        assertEquals("enqueued", productAnalytics.events.last().properties["result"])
+        coVerify(exactly = 1) { workScheduler.enqueueExpedited(SourceType.NAVER_IMAP) }
     }
 
     private fun session(): SupabaseSession = SupabaseSession(
@@ -173,4 +244,16 @@ class SourceSyncPortSpecTest {
         email = "user@example.com",
         expiresAt = Instant.parse("2026-04-28T12:00:00Z"),
     )
+
+    private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
+        val events = mutableListOf<ProductAnalyticsEvent>()
+
+        override fun track(event: ProductAnalyticsEvent) {
+            events += event
+        }
+
+        override fun setUserScope(userId: String?) = Unit
+
+        override fun resetUserScope() = Unit
+    }
 }

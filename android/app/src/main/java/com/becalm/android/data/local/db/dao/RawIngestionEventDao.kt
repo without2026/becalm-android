@@ -80,14 +80,31 @@ public interface RawIngestionEventDao {
     ): RawIngestionEventEntity?
 
     /**
-     * Returns up to [limit] events for [userId] with syncStatus = "pending", ordered oldest-first
-     * so that the sync worker uploads in ingestion order.
+     * Returns up to [limit] events for [userId] ordered oldest-first so that the sync worker
+     * uploads in ingestion order.
+     *
+     * In addition to normal `pending` rows, this intentionally revives legacy failed email rows
+     * that do not have a stored [RawIngestionEventEntity.lastError]. Those rows were quarantined
+     * before reason persistence existed, so treating them as repair candidates is the only safe
+     * way to recover already-collected mail without a destructive re-sync. Once a repaired row
+     * fails again, [markFailed] records `last_error` and the row stops matching this query.
      */
     @Query(
         """
         SELECT * FROM raw_ingestion_events
         WHERE user_id = :userId
-          AND sync_status = 'pending'
+          AND (
+            sync_status = 'pending'
+            OR (
+              sync_status = 'failed'
+              AND (
+                last_error IS NULL
+                OR last_error IN ('cancelled', 'unknown_CancellationException', 'unknown_JobCancellationException')
+              )
+              AND retry_count < :maxLegacyRepairAttempts
+              AND source_type IN ('gmail', 'outlook_mail', 'naver_imap', 'daum_imap')
+            )
+          )
         ORDER BY timestamp ASC
         LIMIT :limit
         """,
@@ -95,6 +112,7 @@ public interface RawIngestionEventDao {
     public suspend fun findPendingForUpload(
         userId: String,
         limit: Int,
+        maxLegacyRepairAttempts: Int,
     ): List<RawIngestionEventEntity>
 
     /**
@@ -104,7 +122,8 @@ public interface RawIngestionEventDao {
     @Query(
         """
         UPDATE raw_ingestion_events
-        SET sync_status = 'synced'
+        SET sync_status = 'synced',
+            last_error = NULL
         WHERE id IN (:ids)
         """,
     )
@@ -114,17 +133,16 @@ public interface RawIngestionEventDao {
      * Records a failed upload attempt for a single event: sets syncStatus = "failed",
      * increments retryCount by [retryIncrement], and stamps [now] as lastAttemptAt.
      *
-     * The sync worker calls this for each event returned in the Railway
-     * `BatchUploadResponse.failed` list where `retryable == true`, and may also
-     * call it for transient network errors. Callers set [retryIncrement] to 0
-     * when recording a transient error without consuming a retry budget.
+     * The sync worker calls this for terminal upload/extraction failures, including
+     * Railway `BatchUploadResponse.failed` items where `retryable == false`.
      */
     @Query(
         """
         UPDATE raw_ingestion_events
         SET sync_status = 'failed',
             retry_count = retry_count + :retryIncrement,
-            last_attempt_at = :now
+            last_attempt_at = :now,
+            last_error = :lastError
         WHERE id = :id
         """,
     )
@@ -132,7 +150,24 @@ public interface RawIngestionEventDao {
         id: String,
         retryIncrement: Int = 1,
         now: Instant,
+        lastError: String?,
     )
+
+    @Query(
+        """
+        UPDATE raw_ingestion_events
+        SET sync_status = :status,
+            last_error = :lastError,
+            last_attempt_at = :now
+        WHERE id = :id
+        """,
+    )
+    public suspend fun updateSyncStatus(
+        id: String,
+        status: String,
+        now: Instant,
+        lastError: String? = null,
+    ): Int
 
     /**
      * Emits a live list of the most recent events associated with [counterpartyRef] for [userId],
@@ -229,7 +264,13 @@ public interface RawIngestionEventDao {
         SELECT COUNT(*) FROM raw_ingestion_events
         WHERE user_id = :userId
           AND source_type IN ('meeting', 'message_screenshot')
-          AND sync_status IN ('pending', 'awaiting_consent')
+          AND sync_status IN (
+            'pending',
+            'awaiting_consent',
+            'meeting_preview_pending',
+            'meeting_extract_pending',
+            'meeting_extract_running'
+          )
         """,
     )
     public fun observeEvidenceImportProcessingCount(userId: String): Flow<Int>
@@ -284,6 +325,16 @@ public interface RawIngestionEventDao {
         """,
     )
     public suspend fun findByIdsForUser(userId: String, ids: List<String>): List<RawIngestionEventEntity>
+
+    @Query(
+        """
+        SELECT * FROM raw_ingestion_events
+        WHERE user_id = :userId
+          AND source_ref IN (:sourceRefs)
+        ORDER BY timestamp DESC
+        """,
+    )
+    public suspend fun findBySourceRefsForUser(userId: String, sourceRefs: List<String>): List<RawIngestionEventEntity>
 
     @Query(
         """

@@ -2,7 +2,6 @@ package com.becalm.android.unit.ui.persons
 
 import androidx.lifecycle.SavedStateHandle
 import com.becalm.android.R
-import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
@@ -42,7 +41,6 @@ class PersonDetailViewModelSpecTest {
     private val personIndexDao: PersonIndexDao = mockk()
     private val userPrefsStore: UserPrefsStore = mockk()
     private val logger: Logger = mockk(relaxed = true)
-    private val clock = FakeClock(Instant.parse("2026-04-23T03:00:00Z"))
 
     @Before
     fun setUp() {
@@ -110,8 +108,10 @@ class PersonDetailViewModelSpecTest {
                         id = "give",
                         personId = personId,
                         sourceType = SourceType.GMAIL,
-                        sourceRef = "raw:raw-mail-1",
+                        sourceRef = "commitment:give",
                         interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "give",
                         role = CommitmentItemType.ACTION,
                         direction = "give",
                         status = "pending",
@@ -122,8 +122,10 @@ class PersonDetailViewModelSpecTest {
                         id = "schedule",
                         personId = personId,
                         sourceType = SourceType.GMAIL,
-                        sourceRef = "raw:raw-mail-1",
+                        sourceRef = "commitment:schedule",
                         interactionKind = "commitment",
+                        sourceEventId = "raw-mail-1",
+                        commitmentId = "schedule",
                         role = CommitmentItemType.SCHEDULE,
                         status = "confirmed",
                         title = "데모 미팅",
@@ -184,7 +186,7 @@ class PersonDetailViewModelSpecTest {
     }
 
     @Test
-    fun `calendar history before yesterday is hidden from indexed rows`() = runTest {
+    fun `calendar history before yesterday remains visible in person detail`() = runTest {
         val personId = "person-1"
         every { personIndexDao.observeInteractionsForPerson("user-1", personId, 150) } returns
             flowOf(
@@ -214,7 +216,7 @@ class PersonDetailViewModelSpecTest {
         advanceUntilIdle()
 
         val titles = viewModel.uiState.value.sourceEventCards.map { it.title }
-        assertEquals(listOf("yesterday"), titles)
+        assertEquals(listOf("yesterday", "old"), titles)
     }
 
     @Test
@@ -334,7 +336,6 @@ class PersonDetailViewModelSpecTest {
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(ARG_PERSON_ID to personId)),
             logger = logger,
-            clock = clock,
         )
 
     private fun identity(
@@ -362,6 +363,8 @@ class PersonDetailViewModelSpecTest {
         sourceType: String,
         sourceRef: String,
         interactionKind: String,
+        sourceEventId: String? = sourceRef.removePrefix("raw:").takeIf { sourceRef.startsWith("raw:") },
+        commitmentId: String? = sourceRef.removePrefix("commitment:").takeIf { sourceRef.startsWith("commitment:") },
         role: String = "counterparty",
         direction: String? = null,
         status: String? = null,
@@ -376,6 +379,8 @@ class PersonDetailViewModelSpecTest {
             sourceType = sourceType,
             sourceRef = sourceRef,
             interactionKind = interactionKind,
+            sourceEventId = sourceEventId,
+            commitmentId = commitmentId,
             role = role,
             direction = direction,
             status = status,

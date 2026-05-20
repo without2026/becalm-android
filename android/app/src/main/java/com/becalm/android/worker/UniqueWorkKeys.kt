@@ -9,7 +9,7 @@ package com.becalm.android.worker
  * request.
  */
 public object UniqueWorkKeys {
-    /** One-shot and periodic MediaStore (voice) ingestion via [com.becalm.android.worker.ingestion.MediaStoreWorker]. */
+    /** One-shot and periodic MediaStore audio ingestion via [com.becalm.android.worker.ingestion.MediaStoreWorker]. */
     public const val MEDIA_STORE: String = "ingest.media_store"
 
     /** One-shot and periodic Naver IMAP ingestion via [com.becalm.android.worker.ingestion.ImapNaverWorker]. */
@@ -71,6 +71,7 @@ public object UniqueWorkKeys {
      * Spec refs: VOI-001.
      */
     public const val VOICE_UPLOAD_PREFIX: String = "voice.upload"
+    public const val MEETING_SPEAKER_PREVIEW_PREFIX: String = "meeting.speaker.preview"
     public const val MESSAGE_SCREENSHOT_UPLOAD_PREFIX: String = "message.screenshot.upload"
 
     /**
@@ -83,6 +84,8 @@ public object UniqueWorkKeys {
      * @param rawEventId UUID of the [com.becalm.android.data.local.db.entity.RawIngestionEventEntity].
      */
     public fun voiceUpload(rawEventId: String): String = "$VOICE_UPLOAD_PREFIX.$rawEventId"
+
+    public fun meetingSpeakerPreview(rawEventId: String): String = "$MEETING_SPEAKER_PREVIEW_PREFIX.$rawEventId"
 
     public fun messageScreenshotUpload(rawEventId: String): String = "$MESSAGE_SCREENSHOT_UPLOAD_PREFIX.$rawEventId"
 
@@ -111,6 +114,17 @@ public object UniqueWorkKeys {
      * fan out duplicate workers.
      */
     public const val OVERDUE_SWEEP: String = "commitment.overdue_sweep"
+
+    /**
+     * One-shot and periodic completion-evidence processor.
+     *
+     * This applies backend/LLM-structured `completion_signals` to local action rows only
+     * after deterministic graph checks pass.
+     */
+    public const val PROCESS_DONE: String = "commitment.process_done"
+
+    /** Periodic safety sweep for [PROCESS_DONE]. Kept separate so one-shot REPLACE cannot cancel it. */
+    public const val PROCESS_DONE_PERIODIC: String = "commitment.process_done.periodic"
 
     /** Background continuation of deferred Stage 1 cold sync. */
     public const val COLD_SYNC_STAGE1_DEFERRED: String = "cold-sync-stage1-deferred"

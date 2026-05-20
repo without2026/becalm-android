@@ -9,6 +9,9 @@ import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -17,6 +20,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
+import com.becalm.android.ui.auth.AuthUiState
+import com.becalm.android.ui.auth.AuthViewModel
+import com.becalm.android.ui.navigation.BecalmRoute
+import com.becalm.android.ui.navigation.navigateAfterSignOut
 import kotlinx.coroutines.flow.Flow
 
 @Composable
@@ -27,10 +34,14 @@ public fun OnboardingSetupScreen(
     calendarEventsOverride: Flow<CalendarConnectEvent>? = null,
     stateOverride: OnboardingUiState? = null,
     onConnectSource: ((OnboardingSourceProvider, Activity) -> Unit)? = null,
+    onSkipSource: ((OnboardingSourceProvider) -> Unit)? = null,
     onPersistEmailConsent: (suspend (EmailPipaProvider) -> Boolean)? = null,
     onRefreshSource: ((OnboardingSourceProvider) -> Unit)? = null,
     onCompleteSetup: (() -> Unit)? = null,
     onNavigateToday: (() -> Unit)? = null,
+    authViewModel: AuthViewModel? = null,
+    onChangeAccount: (() -> Unit)? = null,
+    onNavigateAfterSignOut: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
     val needsViewModel = stateOverride == null ||
@@ -49,8 +60,43 @@ public fun OnboardingSetupScreen(
         val collectedState by requireNotNull(resolvedViewModel).uiState.collectAsStateWithLifecycle()
         collectedState
     }
+    val needsAuthViewModel = onChangeAccount == null || onNavigateAfterSignOut == null
+    val resolvedAuthViewModel = if (needsAuthViewModel) {
+        authViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<AuthViewModel>()
+    } else {
+        authViewModel
+    }
+    val authState = if (resolvedAuthViewModel != null && onNavigateAfterSignOut == null) {
+        val collectedAuthState by resolvedAuthViewModel.uiState.collectAsStateWithLifecycle()
+        collectedAuthState
+    } else {
+        null
+    }
     val context = LocalContext.current
     val detection by rememberRecordingFolderDetection()
+    if (resolvedViewModel != null && onCompleteSetup == null) {
+        val setupEffects = resolvedViewModel.setupEffects
+        LaunchedEffect(setupEffects, onNavigateToday) {
+            setupEffects.collect { effect ->
+                when (effect) {
+                    OnboardingSetupEffect.NavigateToToday -> {
+                        val navigate = onNavigateToday ?: {
+                            navController.navigate(BecalmRoute.Today.path) {
+                                popUpTo(BecalmRoute.OnboardingSetup.path) { inclusive = true }
+                            }
+                        }
+                        navigate()
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(authState, onNavigateAfterSignOut) {
+        if (authState is AuthUiState.SignedOut) {
+            val navigate = onNavigateAfterSignOut ?: { navController.navigateAfterSignOut() }
+            navigate()
+        }
+    }
 
     val recordingTreePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -58,6 +104,10 @@ public fun OnboardingSetupScreen(
         val vm = requireNotNull(resolvedViewModel)
         if (uri == null) {
             vm.onRecordingFolderPermissionResult(false)
+            return@rememberLauncherForActivityResult
+        }
+        if (!RecordingFolderSelection.isSupportedTree(uri)) {
+            vm.onRecordingFolderTreeRejected()
             return@rememberLauncherForActivityResult
         }
         try {
@@ -110,11 +160,38 @@ public fun OnboardingSetupScreen(
         calendarEventsOverride = calendarEventsOverride,
         stateOverride = state,
         onConnectSource = onConnectSource,
+        onSkipSource = onSkipSource,
         onPersistEmailConsent = onPersistEmailConsent,
         onRefreshSource = onRefreshSource,
         onCompleteSetup = onCompleteSetup,
         onNavigateComplete = onNavigateToday,
         onLaunchPendingIntent = onLaunchPendingIntent,
+        actions = {
+            TextButton(
+                onClick = onChangeAccount ?: { requireNotNull(resolvedAuthViewModel).onSignOut() },
+            ) {
+                Text(text = stringResource(R.string.action_sign_out))
+            }
+        },
+        selfIdentity = OnboardingSelfIdentityUi(
+            displayName = state.selfDisplayName,
+            email = state.selfEmail,
+            phone = state.selfPhone,
+            alias = state.selfAlias,
+            confirmed = state.selfIdentityConfirmed,
+            saving = state.isSavingSelfIdentity,
+        ),
+        onSelfDisplayNameChange = { value -> requireNotNull(resolvedViewModel).onSelfDisplayNameChange(value) },
+        onSelfEmailChange = { value -> requireNotNull(resolvedViewModel).onSelfEmailChange(value) },
+        onSelfPhoneChange = { value -> requireNotNull(resolvedViewModel).onSelfPhoneChange(value) },
+        onSelfAliasChange = { value -> requireNotNull(resolvedViewModel).onSelfAliasChange(value) },
+        onSaveSelfIdentity = { requireNotNull(resolvedViewModel).onSaveSelfIdentity() },
+        sourceOwnerships = state.sourceOwnerships,
+        sourceOwnershipsReady = state.sourceOwnershipsLoaded && !state.sourceOwnershipLoadFailed,
+        updatingSourceOwnershipId = state.updatingSourceOwnershipId,
+        onSourceOwnership = { id, ownership ->
+            requireNotNull(resolvedViewModel).onSetSourceConnectionOwnership(id, ownership)
+        },
         setupItems = setupItems(state.stepStates),
         onConnectSetupItem = { item ->
             val vm = requireNotNull(resolvedViewModel)

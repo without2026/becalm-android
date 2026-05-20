@@ -17,11 +17,13 @@ import com.becalm.android.integration.local.LocalIntegrationSupport
 import io.mockk.coEvery
 import io.mockk.slot
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -209,6 +211,89 @@ class RawIngestionRepositoryLocalIntegrationTest {
         assertEquals("<message-1@example.com>", uploaded.messageIdHeader)
         assertEquals("<parent@example.com>", uploaded.inReplyToHeader)
         assertEquals("<root@example.com> <parent@example.com>", uploaded.referencesHeader)
+    }
+
+    @Test
+    fun `findPendingSync revives legacy failed mail rows and cancelled mail uploads only`() = runTest {
+        db.rawIngestionEventDao().insert(
+            rawEvent(id = "pending-voice", clientEventId = "client-pending").copy(
+                sourceType = SourceType.VOICE,
+                syncStatus = "pending",
+                timestamp = Instant.parse("2026-04-28T00:00:00Z"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(id = "legacy-mail", clientEventId = "client-legacy").copy(
+                sourceType = SourceType.NAVER_IMAP,
+                syncStatus = "failed",
+                retryCount = 1,
+                lastError = null,
+                timestamp = Instant.parse("2026-04-28T00:01:00Z"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(id = "cancelled-mail", clientEventId = "client-cancelled").copy(
+                sourceType = SourceType.NAVER_IMAP,
+                syncStatus = "failed",
+                retryCount = 1,
+                lastError = "unknown_JobCancellationException",
+                timestamp = Instant.parse("2026-04-28T00:01:30Z"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(id = "known-mail", clientEventId = "client-known").copy(
+                sourceType = SourceType.NAVER_IMAP,
+                syncStatus = "failed",
+                retryCount = 1,
+                lastError = "schema_invalid",
+                timestamp = Instant.parse("2026-04-28T00:02:00Z"),
+            ),
+        )
+        db.rawIngestionEventDao().insert(
+            rawEvent(id = "failed-voice", clientEventId = "client-voice").copy(
+                sourceType = SourceType.VOICE,
+                syncStatus = "failed",
+                retryCount = 1,
+                lastError = null,
+                timestamp = Instant.parse("2026-04-28T00:03:00Z"),
+            ),
+        )
+
+        val rows = repository.findPendingSync(USER_ID, limit = 10)
+
+        assertEquals(listOf("pending-voice", "legacy-mail", "cancelled-mail"), rows.map { it.id })
+    }
+
+    @Test
+    fun `uploadBatch rethrows cancellation so worker replace does not quarantine pending rows`() = runTest {
+        coEvery { api.batchUploadRawEvents(request = any()) } throws CancellationException("worker replaced")
+
+        try {
+            repository.uploadBatch(listOf(rawEvent(id = "raw-cancel", clientEventId = "client-cancel")))
+            fail("CancellationException should be rethrown")
+        } catch (_: CancellationException) {
+            // expected
+        }
+    }
+
+    @Test
+    fun `markFailed preserves reason and removes mail row from legacy repair set`() = runTest {
+        val raw = rawEvent(id = "raw-failed", clientEventId = "client-failed")
+        db.rawIngestionEventDao().insert(raw)
+
+        val result = repository.markFailed(
+            id = raw.id,
+            lastAttemptAt = Instant.parse("2026-04-28T00:10:00Z"),
+            lastError = "schema_invalid",
+        )
+
+        assertTrue(result is BecalmResult.Success)
+        val stored = db.rawIngestionEventDao().findById(raw.id, USER_ID)
+        requireNotNull(stored)
+        assertEquals("failed", stored.syncStatus)
+        assertEquals(1, stored.retryCount)
+        assertEquals("schema_invalid", stored.lastError)
+        assertEquals(emptyList<RawIngestionEventEntity>(), repository.findPendingSync(USER_ID, limit = 10))
     }
 
     private fun rawEvent(id: String, clientEventId: String): RawIngestionEventEntity =

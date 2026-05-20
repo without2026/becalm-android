@@ -85,14 +85,15 @@ public object SourceType {
     /**
      * **Product-UI source set** — the user-facing sources shown in Sources and Today.
      *
-     * Includes [VOICE] because the product treats recorder ingestion as a first-class
-     * user-facing source (Today chips / Sources list / overall sync), but continues to
-     * exclude [CALL_RECORDING] because wave 0 ships only the schema-side carve-out.
+     * Includes [VOICE], [CALL_RECORDING], and [MEETING] as separate rows. Each row owns
+     * its source-specific folder grant and maps to a different source_type value in
+     * raw_ingestion_events.
      *
      * Iteration order is the canonical render order for the Sources list and Today strip.
      */
     public val PRODUCT_SOURCES: Set<String> = setOf(
         VOICE,
+        CALL_RECORDING,
         MEETING,
         MESSAGE_SCREENSHOT,
         GMAIL,

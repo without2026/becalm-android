@@ -59,6 +59,9 @@ public data class RawIngestionEventDto(
     /** Email RFC 5322 References header, when available. */
     @field:Json(name = "references_header") val referencesHeader: String? = null,
 
+    /** Provider or server-derived conversation/thread reference. */
+    @field:Json(name = "conversation_ref") val conversationRef: String? = null,
+
     /**
      * Canonicalized counterparty identifier.
      * Precedence: E.164 phone > lowercase email > normalized display name.
@@ -119,6 +122,12 @@ public data class RawIngestionEventDto(
      * action / schedule / decision items from Naver, Daum, Gmail, and Outlook mail.
      */
     @field:Json(name = "email_body_plain") val emailBodyPlain: String? = null,
+
+    /** Safe email header signals for server-side noise filtering. Raw header values stay on-device. */
+    @field:Json(name = "has_list_unsubscribe") val hasListUnsubscribe: Boolean = false,
+    @field:Json(name = "has_list_id") val hasListId: Boolean = false,
+    @field:Json(name = "auto_submitted") val autoSubmitted: Boolean = false,
+    @field:Json(name = "bulk_precedence") val bulkPrecedence: Boolean = false,
 
     /** ISO 8601 timestamp of when the event occurred (not upload time). */
     @field:Json(name = "timestamp") val timestamp: Instant,
@@ -208,7 +217,11 @@ public data class SourceEventParticipantsResponse(
 
 @JsonClass(generateAdapter = true)
 public data class SourceEventParticipantPatchRequestDto(
+    @field:Json(name = "source_event_id") val sourceEventId: String? = null,
+    @field:Json(name = "source_type") val sourceType: String? = null,
+    @field:Json(name = "source_ref") val sourceRef: String? = null,
     @field:Json(name = "person_id") val personId: String? = null,
+    @field:Json(name = "role") val role: String? = null,
     @field:Json(name = "identity_type") val identityType: String? = null,
     @field:Json(name = "normalized_value") val normalizedValue: String? = null,
     @field:Json(name = "display_name_raw") val displayNameRaw: String? = null,

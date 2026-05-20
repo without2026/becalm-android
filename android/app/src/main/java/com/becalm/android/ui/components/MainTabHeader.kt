@@ -56,6 +56,7 @@ public fun MainTabHeaderActions(
 public fun MainTabStatusHeader(
     state: MainTabHeaderState,
     onOpenSettings: (() -> Unit)? = null,
+    onOpenSources: (() -> Unit)? = onOpenSettings,
     modifier: Modifier = Modifier,
 ) {
     val sourceChips = buildChips(state.sourceStatus)
@@ -66,7 +67,7 @@ public fun MainTabStatusHeader(
         MainTabSourceAttentionBanner(
             disconnectedCount = sourceAttention.disconnectedCount,
             failedCount = sourceAttention.failedCount,
-            onOpenSettings = onOpenSettings,
+            onOpenSources = onOpenSources,
             modifier = modifier,
         )
     }
@@ -79,7 +80,7 @@ public fun MainTabStatusHeader(
 private fun MainTabSourceAttentionBanner(
     disconnectedCount: Int,
     failedCount: Int,
-    onOpenSettings: (() -> Unit)?,
+    onOpenSources: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val text = when {
@@ -118,8 +119,8 @@ private fun MainTabSourceAttentionBanner(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        if (onOpenSettings != null) {
-            TextButton(onClick = onOpenSettings) {
+        if (onOpenSources != null) {
+            TextButton(onClick = onOpenSources) {
                 Text(text = stringResource(R.string.today_source_attention_action))
             }
         }

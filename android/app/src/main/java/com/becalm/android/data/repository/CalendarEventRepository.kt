@@ -8,7 +8,9 @@ import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
+import com.becalm.android.data.remote.dto.CalendarAttendeeDto
 import com.becalm.android.data.remote.dto.CalendarEventDto
+import com.becalm.android.data.remote.dto.CalendarOrganizerDto
 import com.becalm.android.data.remote.dto.CalendarSyncResponse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -241,7 +243,7 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             )
 
         val filtered = body.data.filter { dto ->
-            val meetsStart = rangeStart == null || dto.startAt >= rangeStart
+            val meetsStart = rangeStart == null || dto.endAt > rangeStart
             val meetsEnd = rangeEnd == null || dto.startAt < rangeEnd
             meetsStart && meetsEnd
         }
@@ -351,7 +353,78 @@ public class CalendarEventRepositoryImpl @Inject constructor(
             title = title,
             startAt = startAt,
             endAt = endAt,
+            startLocal = startLocal,
+            endLocal = endLocal,
+            timeZone = timeZone,
+            isAllDay = isAllDay,
             attendeesRaw = attendeesRaw,
+            status = status,
+            availability = availability,
+            location = location,
+            providerUpdatedAt = providerUpdatedAt,
+            attendeesJson = attendeesJson.toJsonString(),
+            organizerJson = organizerJson?.toJsonString(),
+            recurrenceJson = recurrence.toJsonValueString(),
+            originalStartAt = originalStartAt,
+            providerPayloadHash = providerPayloadHash,
             syncStatus = "synced",
         )
+
+    private fun List<CalendarAttendeeDto>.toJsonString(): String? {
+        if (isEmpty()) return null
+        return joinToString(prefix = "[", postfix = "]") { attendee ->
+            mapOf(
+                "email" to attendee.email,
+                "name" to attendee.name,
+                "response_status" to attendee.responseStatus,
+                "role" to attendee.role,
+                "optional" to attendee.optional,
+                "self" to attendee.self,
+            ).toJsonObjectString()
+        }
+    }
+
+    private fun CalendarOrganizerDto.toJsonString(): String? =
+        mapOf(
+            "email" to email,
+            "name" to name,
+            "self" to self,
+        ).toJsonObjectString().takeUnless { it == "{}" }
+
+    private fun Map<String, Any?>.toJsonObjectString(): String =
+        entries
+            .filter { (_, value) -> value != null }
+            .joinToString(prefix = "{", postfix = "}") { (key, value) ->
+                "\"${key.jsonEscaped()}\":${value.toJsonValueString() ?: "null"}"
+            }
+
+    private fun Any?.toJsonValueString(): String? = when (this) {
+        null -> null
+        is Boolean -> toString()
+        is Number -> toString()
+        is String -> "\"${jsonEscaped()}\""
+        is Map<*, *> -> entries
+            .filter { it.key != null && it.value != null }
+            .joinToString(prefix = "{", postfix = "}") { entry ->
+                "\"${entry.key.toString().jsonEscaped()}\":${entry.value.toJsonValueString() ?: "null"}"
+            }
+        is Iterable<*> -> joinToString(prefix = "[", postfix = "]") { value ->
+            value.toJsonValueString() ?: "null"
+        }
+        else -> "\"${toString().jsonEscaped()}\""
+    }
+
+    private fun String.jsonEscaped(): String =
+        buildString {
+            this@jsonEscaped.forEach { char ->
+                when (char) {
+                    '\\' -> append("\\\\")
+                    '"' -> append("\\\"")
+                    '\n' -> append("\\n")
+                    '\r' -> append("\\r")
+                    '\t' -> append("\\t")
+                    else -> append(char)
+                }
+            }
+        }
 }

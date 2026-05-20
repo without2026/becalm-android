@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
+import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.ui.components.OverallSyncIndicator
 import com.becalm.android.ui.components.SourceStatusChip
 import com.becalm.android.ui.components.SourceStatusStrip
@@ -39,6 +40,8 @@ class TodayTimelineScreenTest {
     // spec: ERR-003
     fun today_content_shows_processing_banner_active_source_chips_source_warning_and_settings_action() {
         var openSettingsCount = 0
+        var openSourcesCount = 0
+        var openProcessingCount = 0
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -48,6 +51,12 @@ class TodayTimelineScreenTest {
                         processingPaused = true,
                         overall = OverallSyncState.Syncing(count = 1, total = 7),
                         overallSyncing = true,
+                        processingStatus = TodayProcessingStatusUi(
+                            activeCount = 1,
+                            activeItemCount = 3,
+                            latestPhase = ProcessingPhase.GEMINI,
+                            latestUpdatedAt = Instant.parse("2026-04-24T01:03:00Z"),
+                        ),
                         sourceStatus = mapOf(
                             "voice" to SourceStatusUi(
                                 status = SourceSyncStatus.Syncing,
@@ -72,12 +81,16 @@ class TodayTimelineScreenTest {
                         ),
                     ),
                     onOpenSettings = { openSettingsCount += 1 },
+                    onOpenSources = { openSourcesCount += 1 },
+                    onOpenProcessingStatus = { openProcessingCount += 1 },
                     onPullRefresh = {},
                 )
             }
         }
 
         composeTestRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_processing_active_items_fmt, 3)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.today_processing_open)).performClick()
         composeTestRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.today_source_attention_action)).performClick()
@@ -88,7 +101,9 @@ class TodayTimelineScreenTest {
         composeTestRule.onNodeWithContentDescription(string(R.string.label_settings)).performClick()
 
         composeTestRule.runOnIdle {
-            assertEquals(2, openSettingsCount)
+            assertEquals(1, openSettingsCount)
+            assertEquals(1, openSourcesCount)
+            assertEquals(1, openProcessingCount)
         }
     }
 

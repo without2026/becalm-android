@@ -67,6 +67,7 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
         var totalUpserted = 0
         var lastHasMore = false
         var lastCursor: String? = null
+        val fetchedIds = mutableSetOf<String>()
 
         repeat(REFRESH_PAGE_CAP) { pageIndex ->
             if (pageIndex > 0 && !lastHasMore) return@repeat
@@ -97,6 +98,7 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
                     BecalmError.Unknown(IllegalStateException("null body on page $pageIndex")),
                 )
             val participants = body.data.map { it.toEntity(userId) }
+            fetchedIds += participants.map { it.id }
             if (participants.isNotEmpty()) {
                 personIndexDao.upsertCommitmentParticipants(participants)
                 personIndexDao.upsertDirtySources(
@@ -114,6 +116,12 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
             lastCursor = body.cursor
             cursor = body.cursor
         }
+        if (since == null && personId == null && commitmentId == null && !lastHasMore) {
+            replaceFullMirror(
+                userId = userId,
+                keepIds = fetchedIds,
+            )
+        }
 
         logger.d(
             TAG,
@@ -127,6 +135,28 @@ public class CommitmentParticipantRepositoryImpl @Inject constructor(
                 nextCursor = lastCursor,
             ),
         )
+    }
+
+    private suspend fun replaceFullMirror(
+        userId: String,
+        keepIds: Set<String>,
+    ) {
+        val existing = personIndexDao.findCommitmentParticipantsForUser(userId)
+        val stale = existing.filter { it.id !in keepIds }
+        if (stale.isEmpty()) return
+        val now = Clock.System.now()
+        personIndexDao.upsertDirtySources(
+            PersonIndexDirtySources.forCommitmentParticipants(
+                participants = stale,
+                reason = "commitment_participant_refresh_delete",
+                now = now,
+            ),
+        )
+        if (keepIds.isEmpty()) {
+            personIndexDao.deleteCommitmentParticipantsForUser(userId)
+        } else {
+            personIndexDao.deleteCommitmentParticipantsForUserExcept(userId, keepIds.toList())
+        }
     }
 
     private fun CommitmentParticipantDto.toEntity(userId: String): CommitmentParticipantEntity =

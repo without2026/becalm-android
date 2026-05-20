@@ -35,22 +35,22 @@ public interface CalendarEventDao {
     // ── Reactive queries ─────────────────────────────────────────────────────
 
     /**
-     * Returns a [Flow] of events for [userId] whose [CalendarEventEntity.startAt] falls
-     * within [[rangeStart], [rangeEnd]), ordered chronologically.
+     * Returns a [Flow] of events for [userId] whose interval overlaps
+     * [[rangeStart], [rangeEnd]), ordered chronologically.
      *
      * The flow re-emits automatically when the table changes. Intended for the
      * today-timeline view where the caller controls the day window.
      *
      * @param userId     Owner user UUID.
-     * @param rangeStart Inclusive lower bound on [CalendarEventEntity.startAt].
-     * @param rangeEnd   Exclusive upper bound on [CalendarEventEntity.startAt].
+     * @param rangeStart Inclusive lower bound of the requested interval.
+     * @param rangeEnd   Exclusive upper bound of the requested interval.
      */
     @Query(
         """
         SELECT * FROM calendar_events
         WHERE user_id  = :userId
-          AND start_at >= :rangeStart
-          AND start_at <  :rangeEnd
+          AND start_at < :rangeEnd
+          AND end_at > :rangeStart
         ORDER BY start_at ASC
         """,
     )

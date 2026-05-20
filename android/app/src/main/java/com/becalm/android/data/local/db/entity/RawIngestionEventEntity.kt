@@ -10,7 +10,7 @@ import kotlinx.datetime.Instant
  * Room entity mirroring the `raw_ingestion_events` Supabase table.
  *
  * Columns are a 1-to-1 mapping of `data-model.yml § raw_ingestion_events`.
- * Three Room-only tracking columns ([syncStatus], [retryCount], [lastAttemptAt])
+ * Room-only tracking columns ([syncStatus], [retryCount], [lastAttemptAt], [lastError])
  * are never uploaded to Railway or Supabase; they exist solely to drive the
  * local sync queue managed by the ingestion WorkManager pipeline.
  *
@@ -55,6 +55,10 @@ import kotlinx.datetime.Instant
             name = "ux_raw_events_user_client_event",
             value = ["user_id", "client_event_id"],
             unique = true,
+        ),
+        Index(
+            name = "idx_raw_events_user_source_conversation_time",
+            value = ["user_id", "source_type", "conversation_ref", "timestamp"],
         ),
     ],
 )
@@ -142,6 +146,15 @@ public data class RawIngestionEventEntity(
     val location: String? = null,
 
     /**
+     * Provider or derived thread identifier for email/message-like sources.
+     *
+     * This lets local completion matching distinguish "the counterparty completed a
+     * previous item in the same thread" from unrelated messages with the same person.
+     */
+    @ColumnInfo(name = "conversation_ref")
+    val conversationRef: String? = null,
+
+    /**
      * EMAIL-001 direction hint: `INBOX` or `SENT` for email source types
      * (`gmail` / `outlook_mail` / `naver_imap` / `daum_imap`). Null for all other
      * sources (`voice`, `google_calendar`, `outlook_calendar`, etc.).
@@ -205,4 +218,13 @@ public data class RawIngestionEventEntity(
      */
     @ColumnInfo(name = "last_attempt_at")
     val lastAttemptAt: Instant? = null,
+
+    /**
+     * Room-only machine-readable failure reason for the most recent terminal upload/extraction
+     * failure. Preserves Railway `BatchUploadResponse.failed.reason` so failed rows can be
+     * audited and repair jobs can distinguish legacy unknown failures from deterministic
+     * server rejections.
+     */
+    @ColumnInfo(name = "last_error")
+    val lastError: String? = null,
 )

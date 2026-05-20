@@ -7,6 +7,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -25,6 +26,7 @@ import kotlinx.datetime.Instant
 internal class RawEventUploader(
     private val rawIngestionRepository: RawIngestionRepository,
     private val logger: Logger,
+    private val processingStatusRepository: ProcessingStatusRepository? = null,
 ) {
 
     /**
@@ -35,16 +37,19 @@ internal class RawEventUploader(
      */
     suspend fun flushRawIngestion(userId: String, attempt: Int): FlushOutcome {
         var totalUploaded = 0
+        val progressBySource = mutableMapOf<String, RawUploadSourceProgress>()
 
         while (true) {
             val pending = rawIngestionRepository.findPendingSync(userId, RAW_UPLOAD_BATCH_SIZE)
             if (pending.isEmpty()) break
 
             logger.d(TAG, "rawIngestion batch count=${pending.size} attempt=$attempt")
+            recordUploading(pending, progressBySource)
 
             when (val uploadResult = rawIngestionRepository.uploadBatch(pending)) {
                 is BecalmResult.Success -> {
                     val ack = partitionAndAckBatch(pending, uploadResult.value, Clock.System.now())
+                    recordBatchAck(pending, uploadResult.value, progressBySource)
                     totalUploaded += ack.syncedCount
                     logger.d(
                         TAG,
@@ -63,27 +68,117 @@ internal class RawEventUploader(
                             TAG,
                             "rawIngestion batch all retryable — returning RetryNeeded to let WorkManager retry",
                         )
+                        recordRetryableBatch(pending, progressBySource)
                         return FlushOutcome.RetryNeeded
                     }
                 }
 
                 is BecalmResult.Failure -> {
+                    recordBatchError(pending, uploadResult.error.rawUploadFailureReason())
                     val outcome = mapErrorToOutcome(
                         logger = logger,
                         error = uploadResult.error,
                         attempt = attempt,
                         domain = "rawIngestion",
                     )
-                    if (outcome is FlushOutcome.PermanentFailure) {
+                    if (outcome is FlushOutcome.PermanentFailure && outcome.quarantinePending) {
                         val now = Clock.System.now()
-                        pending.forEach { rawIngestionRepository.markFailed(it.id, now) }
+                        val reason = uploadResult.error.rawUploadFailureReason()
+                        pending.forEach { rawIngestionRepository.markFailed(it.id, now, reason) }
                     }
                     return outcome
                 }
             }
         }
 
+        recordFinalProgress(progressBySource)
         return FlushOutcome.Success(totalUploaded)
+    }
+
+    private suspend fun recordUploading(
+        pending: List<RawIngestionEventEntity>,
+        progressBySource: MutableMap<String, RawUploadSourceProgress>,
+    ) {
+        val statusRepository = processingStatusRepository ?: return
+        pending.groupBy { it.sourceType }.forEach { (sourceType, rows) ->
+            val progress = progressBySource.getOrPut(sourceType) { RawUploadSourceProgress() }
+            statusRepository.recordUploading(
+                sourceType = sourceType,
+                message = "서버에 반영 중: ${progress.completedCount}/${progress.completedCount + rows.size}개",
+            )
+        }
+    }
+
+    private suspend fun recordBatchAck(
+        pending: List<RawIngestionEventEntity>,
+        response: BatchUploadResponse,
+        progressBySource: MutableMap<String, RawUploadSourceProgress>,
+    ) {
+        val statusRepository = processingStatusRepository ?: return
+        val failedByClientId = response.failed.associateBy { it.clientEventId }
+        pending.groupBy { it.sourceType }.forEach { (sourceType, rows) ->
+            val progress = progressBySource.getOrPut(sourceType) { RawUploadSourceProgress() }
+            rows.forEach { event ->
+                val failure = failedByClientId[event.clientEventId]
+                when {
+                    failure == null -> progress.syncedCount += 1
+                    failure.retryable -> progress.retryableCount += 1
+                    else -> progress.failedCount += 1
+                }
+            }
+            statusRepository.recordUploading(
+                sourceType = sourceType,
+                message = "서버에 반영 중: ${progress.completedCount}개 완료",
+            )
+        }
+    }
+
+    private suspend fun recordRetryableBatch(
+        pending: List<RawIngestionEventEntity>,
+        progressBySource: MutableMap<String, RawUploadSourceProgress>,
+    ) {
+        val statusRepository = processingStatusRepository ?: return
+        pending.groupBy { it.sourceType }.forEach { (sourceType, rows) ->
+            val progress = progressBySource.getOrPut(sourceType) { RawUploadSourceProgress() }
+            progress.retryableCount += rows.size
+            statusRepository.recordError(
+                sourceType = sourceType,
+                message = "서버가 일시적으로 응답하지 않습니다. 다시 시도합니다.",
+                itemCount = rows.size,
+            )
+        }
+    }
+
+    private suspend fun recordBatchError(
+        pending: List<RawIngestionEventEntity>,
+        reason: String,
+    ) {
+        val statusRepository = processingStatusRepository ?: return
+        pending.groupBy { it.sourceType }.forEach { (sourceType, rows) ->
+            statusRepository.recordError(
+                sourceType = sourceType,
+                message = "서버 반영 실패: $reason",
+                itemCount = rows.size,
+            )
+        }
+    }
+
+    private suspend fun recordFinalProgress(progressBySource: Map<String, RawUploadSourceProgress>) {
+        val statusRepository = processingStatusRepository ?: return
+        progressBySource.forEach { (sourceType, progress) ->
+            when {
+                progress.failedCount > 0 -> statusRepository.recordError(
+                    sourceType = sourceType,
+                    message = "${progress.syncedCount}개 반영, ${progress.failedCount}개 확인 필요",
+                    itemCount = progress.failedCount,
+                )
+                progress.syncedCount > 0 -> statusRepository.recordSynced(
+                    sourceType = sourceType,
+                    itemCount = progress.syncedCount,
+                    message = "${progress.syncedCount}개 반영됨",
+                )
+            }
+        }
     }
 
     /**
@@ -109,10 +204,7 @@ internal class RawEventUploader(
                 failure == null -> syncedIds.add(event.id)
                 !failure.retryable -> {
                     // Persist quarantine: server has deterministically rejected this event.
-                    // TODO: Add a dedicated `updateQuarantineStatus(id, reason)` DAO method
-                    //   so the quarantine reason code from the server is preserved.
-                    //   Today we reuse markFailed which only records sync_status="failed".
-                    rawIngestionRepository.markFailed(event.id, now)
+                    rawIngestionRepository.markFailed(event.id, now, failure.reason)
                     quarantinedCount++
                 }
                 else -> {
@@ -133,8 +225,31 @@ internal class RawEventUploader(
 
     private companion object {
         private const val TAG = "UploadWorker"
-        private const val RAW_UPLOAD_BATCH_SIZE = 20
+        private const val RAW_UPLOAD_BATCH_SIZE = 50
     }
+}
+
+private data class RawUploadSourceProgress(
+    var syncedCount: Int = 0,
+    var failedCount: Int = 0,
+    var retryableCount: Int = 0,
+) {
+    val completedCount: Int
+        get() = syncedCount + failedCount
+}
+
+private fun BecalmError.rawUploadFailureReason(): String = when (this) {
+    is BecalmError.Validation -> "validation_error"
+    is BecalmError.Network -> "network_${code}"
+    is BecalmError.ServerError -> "server_${code}"
+    is BecalmError.RateLimited -> "rate_limited"
+    is BecalmError.Unauthorized -> "unauthorized"
+    is BecalmError.NotFound -> "not_found"
+    is BecalmError.Io -> "io_error"
+    is BecalmError.Permission -> "permission_denied"
+    is BecalmError.Cancelled -> "cancelled"
+    is BecalmError.ExtractorUnavailable -> "extractor_${reason}"
+    is BecalmError.Unknown -> "unknown_${throwable::class.simpleName}"
 }
 
 // ── Shared cross-uploader types and helpers ──────────────────────────────────
@@ -168,7 +283,10 @@ internal sealed interface FlushOutcome {
      */
     data object RetryNeeded : FlushOutcome
 
-    data class PermanentFailure(val result: Result) : FlushOutcome
+    data class PermanentFailure(
+        val result: Result,
+        val quarantinePending: Boolean = true,
+    ) : FlushOutcome
 }
 
 /**
@@ -192,7 +310,8 @@ internal fun mapErrorToOutcome(
             if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
                 logger.w(SHARED_TAG, "$domain rateLimit maxAttempts=$attempt — permanent failure")
                 return FlushOutcome.PermanentFailure(
-                    Result.failure(retryOutput("rate_limited_max_attempts", attempt).build()),
+                    result = Result.failure(retryOutput("rate_limited_max_attempts", attempt).build()),
+                    quarantinePending = false,
                 )
             }
             val delaySec = UploadBackoff.nextDelaySeconds(attempt + 1, error.retryAfterSeconds)
@@ -210,7 +329,8 @@ internal fun mapErrorToOutcome(
         is BecalmError.Unauthorized -> {
             logger.e(SHARED_TAG, "$domain 401 unauthorized — permanent failure attempt=$attempt")
             FlushOutcome.PermanentFailure(
-                Result.failure(retryOutput("unauthorized", attempt).build()),
+                result = Result.failure(retryOutput("unauthorized", attempt).build()),
+                quarantinePending = false,
             )
         }
 
@@ -265,7 +385,10 @@ private fun logAndRetryable(
 ): FlushOutcome {
     if (attempt >= UploadBackoff.MAX_ATTEMPTS) {
         logger.e(SHARED_TAG, "$domain $noun maxAttempts=$attempt — permanent failure code=$code")
-        return FlushOutcome.PermanentFailure(Result.failure(retryOutput(permanentReason, attempt).build()))
+        return FlushOutcome.PermanentFailure(
+            result = Result.failure(retryOutput(permanentReason, attempt).build()),
+            quarantinePending = false,
+        )
     }
     // Retry reason / attempt counter are captured in the log line above; WorkManager's
     // Result.retry() does not accept output data, so retain the diagnostic context in the

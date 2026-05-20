@@ -43,5 +43,14 @@
                 <action android:name="com.becalm.android.DEBUG_AMPLITUDE_METRICS_SMOKE" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".debug.DebugEmailExtractionRepairReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.becalm.android.DEBUG_REPAIR_HTML_ONLY_EMAIL_EXTRACTION" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

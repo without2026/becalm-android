@@ -5,16 +5,18 @@ import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.PhoneNumberUtils
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceConnectionEntity
-import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.sources.sourceConnectionTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +35,7 @@ public data class SettingsIdentityUiState(
     val loading: Boolean = true,
     val savingProfile: Boolean = false,
     val addingAnchor: Boolean = false,
+    val archivingAnchorIds: Set<String> = emptySet(),
     val updatingConnectionId: String? = null,
     val error: UiMessage? = null,
 )
@@ -129,7 +132,7 @@ public class SettingsIdentityViewModel @Inject constructor(
     }
 
     public fun onNewAnchorTypeChange(value: String) {
-        if (value !in setOf("email", "phone")) return
+        if (value !in SELF_ANCHOR_TYPES) return
         _uiState.update { it.copy(newAnchorType = value) }
     }
 
@@ -140,29 +143,30 @@ public class SettingsIdentityViewModel @Inject constructor(
     public fun onSaveProfile() {
         val state = _uiState.value
         val userId = state.userId ?: return
+        val phone = normalizeSelfPhone(state.phone)
         viewModelScope.launch {
             _uiState.update { it.copy(savingProfile = true, error = null) }
-            when (
-                val result = userProfileRepository.updateRemote(
+            try {
+                val localProfile = userProfileRepository.upsertLocal(
                     userId = userId,
                     displayName = state.displayName,
-                    phoneE164Self = state.phone,
+                    phoneE164Self = phone,
                 )
-            ) {
-                is BecalmResult.Success -> {
-                    selfIdentityRepository.refresh(userId)
-                    val anchors = selfIdentityRepository.observeAll(userId).first()
-                    _uiState.update {
-                        it.copy(
-                            displayName = result.value.displayNameOverride.orEmpty(),
-                            phone = result.value.phoneE164Self.orEmpty(),
-                            anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
-                            savingProfile = false,
-                            error = null,
-                        )
-                    }
+                upsertOptionalLocalSelfAnchor(userId, anchorType = "phone", value = phone)
+                val anchors = selfIdentityRepository.observeAll(userId).first()
+                _uiState.update {
+                    it.copy(
+                        displayName = localProfile.displayNameOverride.orEmpty(),
+                        phone = localProfile.phoneE164Self.orEmpty(),
+                        anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
+                        savingProfile = false,
+                        error = null,
+                    )
                 }
-                is BecalmResult.Failure -> _uiState.update {
+                mirrorProfileRemote(userId, localProfile.displayNameOverride.orEmpty(), localProfile.phoneE164Self.orEmpty())
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                _uiState.update {
                     it.copy(
                         savingProfile = false,
                         error = UiMessage.resource(R.string.settings_identity_error_save_profile),
@@ -172,37 +176,104 @@ public class SettingsIdentityViewModel @Inject constructor(
         }
     }
 
+    private suspend fun upsertOptionalLocalSelfAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+    ) {
+        val trimmed = normalizeSelfAnchorValue(anchorType, value)
+        if (trimmed.isEmpty()) return
+        selfIdentityRepository.upsertLocalAnchor(
+            userId = userId,
+            anchorType = anchorType,
+            value = trimmed,
+            displayValue = trimmed,
+            source = "user_profile",
+        )
+    }
+
+    private suspend fun mirrorProfileRemote(
+        userId: String,
+        displayName: String,
+        phone: String,
+    ) {
+        try {
+            when (userProfileRepository.updateRemote(userId = userId, displayName = displayName, phoneE164Self = phone)) {
+                is BecalmResult.Success -> {
+                    createOptionalSelfAnchor(userId, anchorType = "phone", value = phone)
+                    selfIdentityRepository.refresh(userId)
+                }
+                is BecalmResult.Failure -> logger.w(TAG, "settings identity remote profile mirror failed")
+            }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            logger.w(TAG, "settings identity remote profile mirror failed", t)
+        }
+    }
+
+    private suspend fun createOptionalSelfAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+    ): Boolean {
+        val trimmed = normalizeSelfAnchorValue(anchorType, value)
+        if (trimmed.isEmpty()) return true
+        return when (
+            selfIdentityRepository.createAnchor(
+                userId = userId,
+                anchorType = anchorType,
+                value = trimmed,
+                displayValue = trimmed,
+                source = "user_profile",
+            )
+        ) {
+            is BecalmResult.Success -> true
+            is BecalmResult.Failure -> false
+        }
+    }
+
     public fun onAddAnchor() {
         val state = _uiState.value
         val userId = state.userId ?: return
-        val value = state.newAnchorValue.trim()
+        val value = normalizeSelfAnchorValue(state.newAnchorType, state.newAnchorValue)
         if (value.isEmpty()) {
             _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_anchor_value)) }
             return
         }
         viewModelScope.launch {
             _uiState.update { it.copy(addingAnchor = true, error = null) }
-            when (
-                selfIdentityRepository.createAnchor(
+            try {
+                selfIdentityRepository.upsertLocalAnchor(
                     userId = userId,
                     anchorType = state.newAnchorType,
                     value = value,
                     displayValue = value,
                     source = "user_profile",
                 )
-            ) {
-                is BecalmResult.Success -> {
-                    val anchors = selfIdentityRepository.observeAll(userId).first()
-                    _uiState.update {
-                        it.copy(
-                            newAnchorValue = "",
-                            anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
-                            addingAnchor = false,
-                            error = null,
-                        )
-                    }
+                val anchors = selfIdentityRepository.observeAll(userId).first()
+                _uiState.update {
+                    it.copy(
+                        newAnchorValue = "",
+                        anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
+                        addingAnchor = false,
+                        error = null,
+                    )
                 }
-                is BecalmResult.Failure -> _uiState.update {
+                when (
+                    selfIdentityRepository.createAnchor(
+                        userId = userId,
+                        anchorType = state.newAnchorType,
+                        value = value,
+                        displayValue = value,
+                        source = "user_profile",
+                    )
+                ) {
+                    is BecalmResult.Success -> Unit
+                    is BecalmResult.Failure -> logger.w(TAG, "settings identity remote anchor mirror failed")
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                _uiState.update {
                     it.copy(
                         addingAnchor = false,
                         error = UiMessage.resource(R.string.settings_identity_error_add_anchor),
@@ -212,16 +283,39 @@ public class SettingsIdentityViewModel @Inject constructor(
         }
     }
 
+    private fun normalizeSelfAnchorValue(anchorType: String, value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return ""
+        return if (anchorType == "phone") normalizeSelfPhone(trimmed) else trimmed
+    }
+
+    private fun normalizeSelfPhone(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return ""
+        return PhoneNumberUtils.toE164OrNull(trimmed) ?: trimmed
+    }
+
     public fun onArchiveAnchor(id: String) {
+        val userId = _uiState.value.userId ?: return
+        if (id in _uiState.value.archivingAnchorIds) return
+        _uiState.update { it.copy(archivingAnchorIds = it.archivingAnchorIds + id, error = null) }
         viewModelScope.launch {
-            val userId = _uiState.value.userId ?: return@launch
-            when (selfIdentityRepository.updateAnchor(id = id, status = "inactive")) {
+            when (selfIdentityRepository.updateAnchor(id = id, status = "disabled")) {
                 is BecalmResult.Success -> {
                     val anchors = selfIdentityRepository.observeAll(userId).first()
-                    _uiState.update { it.copy(anchors = anchors.map(SelfIdentityAnchorEntity::toUi), error = null) }
+                    _uiState.update {
+                        it.copy(
+                            anchors = anchors.map(SelfIdentityAnchorEntity::toUi),
+                            archivingAnchorIds = it.archivingAnchorIds - id,
+                            error = null,
+                        )
+                    }
                 }
                 is BecalmResult.Failure -> _uiState.update {
-                    it.copy(error = UiMessage.resource(R.string.settings_identity_error_update_anchor))
+                    it.copy(
+                        archivingAnchorIds = it.archivingAnchorIds - id,
+                        error = UiMessage.resource(R.string.settings_identity_error_update_anchor),
+                    )
                 }
             }
         }
@@ -229,7 +323,7 @@ public class SettingsIdentityViewModel @Inject constructor(
 
     public fun onSetConnectionOwnership(connectionId: String, ownership: String) {
         val userId = _uiState.value.userId ?: return
-        if (ownership !in setOf("self", "other")) return
+        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
         viewModelScope.launch {
             _uiState.update { it.copy(updatingConnectionId = connectionId, error = null) }
             when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
@@ -280,13 +374,5 @@ private fun SourceConnectionEntity.toUi(): SourceConnectionOwnershipUi =
         status = status,
     )
 
-private fun sourceConnectionTitle(provider: String, capability: String): String =
-    when {
-        provider == "google" && capability == "mail" -> "Gmail"
-        provider == "google" && capability == "calendar" -> "Google Calendar"
-        provider == "outlook" && capability == "mail" -> "Outlook Mail"
-        provider == "outlook" && capability == "calendar" -> "Outlook Calendar"
-        provider == SourceType.NAVER_IMAP -> "Naver Mail"
-        provider == SourceType.DAUM_IMAP -> "Daum Mail"
-        else -> "$provider · $capability"
-    }
+private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
+private val SELF_ANCHOR_TYPES = setOf("email", "phone", "alias")

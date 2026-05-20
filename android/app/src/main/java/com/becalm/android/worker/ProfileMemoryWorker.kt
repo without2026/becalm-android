@@ -6,6 +6,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.becalm.android.core.di.IoDispatcher
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
@@ -79,12 +80,16 @@ public class ProfileMemoryWorker @AssistedInject constructor(
             userId = userId,
             personId = personId,
             generatedAt = Clock.System.now(),
-        ) ?: return@withContext Result.success(
-            workDataOf(
-                KEY_STATUS to STATUS_SKIPPED_NO_EVIDENCE,
-                KEY_PERSON_ID to personId,
-            ),
         )
+        if (input == null) {
+            memoryStoreProvider.get().delete(userId, personId)
+            return@withContext Result.success(
+                workDataOf(
+                    KEY_STATUS to STATUS_SKIPPED_NO_EVIDENCE,
+                    KEY_PERSON_ID to personId,
+                ),
+            )
+        }
 
         val markdown = PersonMemoryMarkdownBuilder.build(input)
         val validation = PersonMemoryMarkdownValidator.validate(
@@ -125,6 +130,9 @@ public class ProfileMemoryWorker @AssistedInject constructor(
             }
             is BecalmResult.Failure -> {
                 logger.w(TAG, "memory upload pending personId=$personId error=${upload.error::class.simpleName}")
+                if (upload.error.isRetryableUploadError()) {
+                    return@withContext Result.retry()
+                }
                 Result.success(
                     workDataOf(
                         KEY_STATUS to STATUS_WRITTEN_UPLOAD_PENDING,
@@ -137,6 +145,20 @@ public class ProfileMemoryWorker @AssistedInject constructor(
                 )
             }
         }
+    }
+
+    private fun BecalmError.isRetryableUploadError(): Boolean = when (this) {
+        is BecalmError.Network,
+        is BecalmError.RateLimited,
+        is BecalmError.ServerError -> true
+        is BecalmError.Unauthorized,
+        is BecalmError.Validation,
+        is BecalmError.Io,
+        is BecalmError.Permission,
+        is BecalmError.NotFound,
+        is BecalmError.Cancelled,
+        is BecalmError.ExtractorUnavailable,
+        is BecalmError.Unknown -> false
     }
 
     public companion object {

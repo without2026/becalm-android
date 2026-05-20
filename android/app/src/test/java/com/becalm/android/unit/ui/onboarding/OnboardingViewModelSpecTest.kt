@@ -7,21 +7,28 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
+import com.becalm.android.data.local.db.entity.UserProfileEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.onboarding.ContactsPermissionEffect
 import com.becalm.android.ui.onboarding.CalendarConnectEvent
 import com.becalm.android.ui.onboarding.CalendarOAuthConnector
 import com.becalm.android.ui.onboarding.CalendarOAuthProvider
 import com.becalm.android.ui.onboarding.CalendarOAuthResult
 import com.becalm.android.ui.onboarding.EmailOAuthConnector
+import com.becalm.android.ui.onboarding.EmailConnectEvent
 import com.becalm.android.ui.onboarding.EmailOAuthProvider
 import com.becalm.android.ui.onboarding.EmailOAuthResult
 import com.becalm.android.ui.onboarding.OnboardingStep
 import com.becalm.android.ui.onboarding.OnboardingSourceProvider
+import com.becalm.android.ui.onboarding.OnboardingSetupEffect
 import com.becalm.android.ui.onboarding.OnboardingViewModel
 import com.becalm.android.ui.onboarding.PipaConsentEvent
 import com.becalm.android.ui.onboarding.StepStatus
@@ -33,6 +40,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -40,6 +48,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,6 +70,7 @@ class OnboardingViewModelSpecTest {
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
     private val sourceConnectionRepository: SourceConnectionRepository = mockk(relaxed = true)
     private val selfIdentityRepository: SelfIdentityRepository = mockk(relaxed = true)
+    private val userProfileRepository: UserProfileRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -73,7 +83,18 @@ class OnboardingViewModelSpecTest {
         }
         coEvery { sourceStatusRepository.refreshFromServer() } returns BecalmResult.Success(Unit)
         coEvery { sourceConnectionRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(emptyList())
+        every { selfIdentityRepository.observeAll("user-123") } returns flowOf(emptyList())
         coEvery { selfIdentityRepository.refresh("user-123") } returns BecalmResult.Success(emptyList())
+        coEvery { userProfileRepository.find("user-123") } returns null
+        coEvery { userProfileRepository.upsertLocal(any(), any(), any()) } answers {
+            userProfile(displayName = secondArg<String?>().orEmpty(), phone = thirdArg<String?>())
+        }
+        coEvery {
+            selfIdentityRepository.upsertLocalAnchor(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        } answers {
+            selfAnchor(id = "local-${secondArg<String>()}-${thirdArg<String>()}", type = secondArg(), value = thirdArg())
+        }
     }
 
     @After
@@ -162,7 +183,11 @@ class OnboardingViewModelSpecTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.VOICE, null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.CALL_RECORDING, null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.MEETING, null) }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.VOICE, false) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.CALL_RECORDING, false) }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.MEETING, false) }
         verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
         assertEquals(
@@ -179,13 +204,62 @@ class OnboardingViewModelSpecTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri("content://tree/recordings") }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.VOICE, "content://tree/recordings") }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.CALL_RECORDING, "content://tree/recordings") }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.MEETING, "content://tree/recordings") }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.VOICE, true) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.CALL_RECORDING, true) }
         coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.MEETING, true) }
         verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
         assertEquals(
             StepStatus.GRANTED,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.RECORDING_FOLDER),
         )
+    }
+
+    @Test
+    fun `settings recording reconnect enables only the selected recording source`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onRecordingFolderTreeGranted(
+            uri = "content://tree/recordings",
+            targetSourceType = SourceType.CALL_RECORDING,
+        )
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setRecordingFolderTreeUri("content://tree/recordings") }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.CALL_RECORDING, "content://tree/recordings") }
+        coVerify(exactly = 0) { userPrefsStore.setRecordingFolderTreeUri(SourceType.VOICE, "content://tree/recordings") }
+        coVerify(exactly = 0) { userPrefsStore.setRecordingFolderTreeUri(SourceType.MEETING, "content://tree/recordings") }
+        coVerify(exactly = 0) { userPrefsStore.setSourceEnabled(SourceType.VOICE, true) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(SourceType.CALL_RECORDING, true) }
+        coVerify(exactly = 0) { userPrefsStore.setSourceEnabled(SourceType.MEETING, true) }
+        verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
+        assertTrue(
+            viewModel.uiState.value.stepStates[OnboardingStep.RECORDING_FOLDER] != StepStatus.GRANTED,
+        )
+    }
+
+    @Test
+    fun `ONB-003 invalid recording folder selection stays retryable and shows error`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onRecordingFolderTreeRejected()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.VOICE, null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.CALL_RECORDING, null) }
+        coVerify(exactly = 1) { userPrefsStore.setRecordingFolderTreeUri(SourceType.MEETING, null) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.VOICE, false) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.CALL_RECORDING, false) }
+        coVerify(exactly = 1) { userPrefsStore.setSourceEnabled(com.becalm.android.data.remote.dto.SourceType.MEETING, false) }
+        verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
+        assertEquals(
+            StepStatus.NOT_STARTED,
+            viewModel.uiState.value.stepStates.getValue(OnboardingStep.RECORDING_FOLDER),
+        )
+        assertEquals(R.string.onb_recording_folder_invalid_selection, viewModel.uiState.value.error?.resId)
     }
 
     @Test
@@ -433,6 +507,7 @@ class OnboardingViewModelSpecTest {
 
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true) }
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true) }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
@@ -461,10 +536,38 @@ class OnboardingViewModelSpecTest {
 
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true) }
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceManagedByBackend(EmailPipaProvider.GMAIL, true) }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GMAIL),
         )
+    }
+
+    @Test
+    fun `ONB gmail status refresh failure emits failed event for browser callback return`() = runTest {
+        coEvery { userPrefsStore.observeEmailPipaConsent(EmailPipaProvider.GMAIL) } returns flowOf(true)
+        coEvery { emailOAuthConnector.refreshConnectionStatus(EmailOAuthProvider.GMAIL) } returns
+            EmailOAuthResult.Failed("network_error")
+        val viewModel = buildViewModel()
+
+        viewModel.emailConnectEvents.test {
+            viewModel.refreshEmailProviderConnection(EmailPipaProvider.GMAIL)
+            advanceUntilIdle()
+
+            assertEquals(EmailConnectEvent.Failed(EmailPipaProvider.GMAIL, "network_error"), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.GMAIL, true) }
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_GMAIL",
+                    "error_code" to "network_error",
+                ),
+            )
+        }
     }
 
     @Test
@@ -512,10 +615,45 @@ class OnboardingViewModelSpecTest {
         coVerify(exactly = 1) {
             userPrefsStore.setSourceEnabled(CalendarOAuthProvider.GOOGLE_CALENDAR.sourceType, true)
         }
+        coVerify(exactly = 1) {
+            sourceStatusRepository.recordSyncSuccess(SourceType.GOOGLE_CALENDAR, any())
+        }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_GOOGLE_CALENDAR),
         )
+    }
+
+    @Test
+    fun `calendar status refresh failure emits failed event for browser callback return`() = runTest {
+        coEvery {
+            calendarOAuthConnector.refreshConnectionStatus(CalendarOAuthProvider.GOOGLE_CALENDAR)
+        } returns CalendarOAuthResult.Failed("network_error")
+        val viewModel = buildViewModel()
+
+        viewModel.calendarConnectEvents.test {
+            viewModel.refreshCalendarProviderConnection(CalendarOAuthProvider.GOOGLE_CALENDAR)
+            advanceUntilIdle()
+
+            assertEquals(
+                CalendarConnectEvent.Failed(CalendarOAuthProvider.GOOGLE_CALENDAR, "network_error"),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            userPrefsStore.setSourceEnabled(CalendarOAuthProvider.GOOGLE_CALENDAR.sourceType, true)
+        }
+        verify(exactly = 1) {
+            observability.captureMessage(
+                message = "onboarding_step_failed",
+                tags = mapOf(
+                    "step" to "LINK_GOOGLE_CALENDAR",
+                    "error_code" to "network_error",
+                ),
+            )
+        }
     }
 
     @Test
@@ -600,6 +738,8 @@ class OnboardingViewModelSpecTest {
 
         coVerify(exactly = 1) { imapCredentialStore.save(com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP, creds) }
         coVerify(exactly = 1) { userPrefsStore.setEmailSourceConnected(EmailPipaProvider.NAVER_IMAP, true) }
+        coVerify(exactly = 1) { sourceStatusRepository.clear(com.becalm.android.data.remote.dto.SourceType.NAVER_IMAP) }
+        verify(exactly = 1) { appRuntimeSyncCoordinator.refresh() }
         assertEquals(
             StepStatus.COMPLETE,
             viewModel.uiState.value.stepStates.getValue(OnboardingStep.LINK_IMAP),
@@ -742,9 +882,29 @@ class OnboardingViewModelSpecTest {
         viewModel.onMarkStepStatus(OnboardingStep.TERMS, StepStatus.GRANTED)
         viewModel.onMarkStepStatus(OnboardingStep.LOGIN, StepStatus.GRANTED)
         viewModel.onMarkStepStatus(OnboardingStep.CONTACTS_PERM, StepStatus.GRANTED)
-
-        viewModel.onCompleteSetup()
+        viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfPhoneChange("+821012345678")
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        } returns BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "phone",
+                value = "+821012345678",
+                displayValue = "+821012345678",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-phone", type = "phone", value = "+821012345678"))
+        viewModel.onSaveSelfIdentity()
         advanceUntilIdle()
+
+        viewModel.setupEffects.test {
+            viewModel.onCompleteSetup()
+            advanceUntilIdle()
+            assertEquals(OnboardingSetupEffect.NavigateToToday, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
 
         coVerify(exactly = 1) { userPrefsStore.setOnboardingCompleted(true) }
         assertEquals(StepStatus.GRANTED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.CONTACTS_PERM))
@@ -752,6 +912,256 @@ class OnboardingViewModelSpecTest {
         assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.RECORDING_FOLDER))
         assertEquals(StepStatus.SKIPPED, viewModel.uiState.value.stepStates.getValue(OnboardingStep.BATTERY_OPT))
         assertEquals(StepStatus.COMPLETE, viewModel.uiState.value.stepStates.getValue(OnboardingStep.COLD_SYNC))
+    }
+
+    @Test
+    fun `setup completion is blocked until self identity is confirmed`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(R.string.onb_error_self_identity_required, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `self identity save requires display name plus at least one identity hint`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.onSelfAliasChange("MH")
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userProfileRepository.updateRemote(any(), any(), any()) }
+        assertEquals(R.string.onb_error_self_identity_required, viewModel.uiState.value.error?.resId)
+        assertFalse(viewModel.uiState.value.selfIdentityConfirmed)
+    }
+
+    @Test
+    fun `saving self identity updates profile creates anchors refreshes mirror and opens setup gate`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        } returns BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "email",
+                value = "me@example.com",
+                displayValue = "me@example.com",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-email", type = "email", value = "me@example.com"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "alias",
+                value = "민홍",
+                displayValue = "민홍",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-alias", type = "alias", value = "민홍"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "phone",
+                value = "+821012345678",
+                displayValue = "+821012345678",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-phone", type = "phone", value = "+821012345678"))
+
+        viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfEmailChange("me@example.com")
+        viewModel.onSelfPhoneChange("+821012345678")
+        viewModel.onSelfAliasChange("민홍")
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "email", "me@example.com", "me@example.com", "user_profile")
+        }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "phone", "+821012345678", "+821012345678", "user_profile")
+        }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "alias", "민홍", "민홍", "user_profile")
+        }
+        coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
+        assertEquals("민홍", viewModel.uiState.value.selfDisplayName)
+        assertEquals("me@example.com", viewModel.uiState.value.selfEmail)
+        assertEquals("+821012345678", viewModel.uiState.value.selfPhone)
+        assertEquals("민홍", viewModel.uiState.value.selfAlias)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
+        assertFalse(viewModel.uiState.value.isSavingSelfIdentity)
+    }
+
+    @Test
+    fun `saving self identity normalizes Korean local phone before profile and anchor writes`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        } returns BecalmResult.Success(userProfile(displayName = "민홍", phone = "+821012345678"))
+        coEvery {
+            selfIdentityRepository.createAnchor(
+                userId = "user-123",
+                anchorType = "phone",
+                value = "+821012345678",
+                displayValue = "+821012345678",
+                source = "user_profile",
+            )
+        } returns BecalmResult.Success(selfAnchor(id = "anchor-phone", type = "phone", value = "+821012345678"))
+
+        viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfPhoneChange("010-1234-5678")
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        }
+        coVerify(exactly = 1) {
+            selfIdentityRepository.createAnchor("user-123", "phone", "+821012345678", "+821012345678", "user_profile")
+        }
+        assertEquals("+821012345678", viewModel.uiState.value.selfPhone)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
+    }
+
+    @Test
+    fun `self identity save confirms local state when remote mirror fails`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            userProfileRepository.updateRemote("user-123", "민홍", "+821012345678")
+        } throws IllegalStateException("network parser failed")
+
+        viewModel.onSelfDisplayNameChange("민홍")
+        viewModel.onSelfPhoneChange("+821012345678")
+        viewModel.onSaveSelfIdentity()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.isSavingSelfIdentity)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
+        assertEquals(null, viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `onboarding hydrates self email and alias anchors from local mirror`() = runTest {
+        coEvery { userProfileRepository.find("user-123") } returns userProfile(displayName = "민홍")
+        every { selfIdentityRepository.observeAll("user-123") } returns flowOf(
+            listOf(
+                selfAnchor(id = "anchor-email", type = "email", value = "me@example.com"),
+                selfAnchor(id = "anchor-alias", type = "alias", value = "MH"),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals("me@example.com", viewModel.uiState.value.selfEmail)
+        assertEquals("MH", viewModel.uiState.value.selfAlias)
+        assertTrue(viewModel.uiState.value.selfIdentityConfirmed)
+    }
+
+    @Test
+    fun `onboarding hydrates connected source ownership rows from local mirror`() = runTest {
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(
+            listOf(
+                sourceConnection(
+                    id = "conn-gmail",
+                    provider = "google",
+                    capability = "mail",
+                    accountIdentifier = "work@example.com",
+                    accountDisplayName = "Work",
+                    ownership = "unknown",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(1, viewModel.uiState.value.sourceOwnerships.size)
+        assertEquals("Gmail", viewModel.uiState.value.sourceOwnerships.single().title)
+        assertEquals("Work", viewModel.uiState.value.sourceOwnerships.single().accountLabel)
+        assertEquals("unknown", viewModel.uiState.value.sourceOwnerships.single().ownership)
+    }
+
+    @Test
+    fun `onboarding source ownership update writes repository and refreshes self anchors`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
+        } returns BecalmResult.Success(sourceConnection(id = "conn-gmail", ownership = "self"))
+
+        viewModel.onSetSourceConnectionOwnership("conn-gmail", "self")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) {
+            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
+        }
+        coVerify(atLeast = 1) { selfIdentityRepository.refresh("user-123") }
+        assertEquals(null, viewModel.uiState.value.updatingSourceOwnershipId)
+        assertEquals(null, viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `source ownership update exception resets row loading and keeps setup retryable`() = runTest {
+        val viewModel = buildViewModel()
+        coEvery {
+            sourceConnectionRepository.setOwnership("user-123", "conn-gmail", "self", null)
+        } throws IllegalStateException("patch failed")
+
+        viewModel.onSetSourceConnectionOwnership("conn-gmail", "self")
+        advanceUntilIdle()
+
+        assertEquals(null, viewModel.uiState.value.updatingSourceOwnershipId)
+        assertEquals(R.string.settings_identity_error_update_connection, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `setup completion is blocked until connected source ownership is confirmed`() = runTest {
+        coEvery { userProfileRepository.find("user-123") } returns userProfile(
+            displayName = "민홍",
+            phone = "+821012345678",
+        )
+        every { sourceConnectionRepository.observeAll("user-123") } returns flowOf(
+            listOf(sourceConnection(id = "conn-gmail", ownership = "unknown")),
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(R.string.onb_error_source_ownership_required, viewModel.uiState.value.error?.resId)
+    }
+
+    @Test
+    fun `setup completion is blocked when source ownership hydration fails`() = runTest {
+        coEvery { userProfileRepository.find("user-123") } returns userProfile(
+            displayName = "민홍",
+            phone = "+821012345678",
+        )
+        every { sourceConnectionRepository.observeAll("user-123") } returns flow {
+            throw IllegalStateException("room failed")
+        }
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.sourceOwnershipsLoaded)
+        assertTrue(viewModel.uiState.value.sourceOwnershipLoadFailed)
+        viewModel.onCompleteSetup()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { userPrefsStore.setOnboardingCompleted(true) }
+        assertEquals(R.string.onb_error_source_ownership_required, viewModel.uiState.value.error?.resId)
     }
 
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
@@ -765,5 +1175,65 @@ class OnboardingViewModelSpecTest {
         sourceStatusRepository = sourceStatusRepository,
         sourceConnectionRepository = sourceConnectionRepository,
         selfIdentityRepository = selfIdentityRepository,
+        userProfileRepository = userProfileRepository,
     )
+
+    private fun userProfile(
+        displayName: String,
+        phone: String? = null,
+    ): UserProfileEntity =
+        UserProfileEntity(
+            userId = "user-123",
+            displayNameOverride = displayName,
+            phoneE164Self = phone,
+            timezone = "Asia/Seoul",
+            preferredLocale = "ko",
+            createdAt = Instant.parse("2026-05-16T00:00:00Z"),
+            updatedAt = Instant.parse("2026-05-16T00:00:00Z"),
+        )
+
+    private fun sourceConnection(
+        id: String,
+        provider: String = "google",
+        capability: String = "mail",
+        accountIdentifier: String? = "me@example.com",
+        accountDisplayName: String? = null,
+        ownership: String = "unknown",
+        status: String = "connected",
+    ): SourceConnectionEntity =
+        SourceConnectionEntity(
+            id = id,
+            userId = "user-123",
+            provider = provider,
+            capability = capability,
+            accountIdentifier = accountIdentifier,
+            accountDisplayName = accountDisplayName,
+            ownership = ownership,
+            status = status,
+            linkedSelfAnchorId = null,
+            lastSyncAt = null,
+            lastError = null,
+        )
+
+    private fun selfAnchor(
+        id: String,
+        type: String,
+        value: String,
+        status: String = "active",
+    ): SelfIdentityAnchorEntity =
+        SelfIdentityAnchorEntity(
+            id = id,
+            userId = "user-123",
+            anchorType = type,
+            normalizedValue = value,
+            displayValue = value,
+            source = "user_profile",
+            scope = "global",
+            sourceConnectionId = null,
+            sourceEventId = null,
+            trust = "user_confirmed",
+            status = status,
+            createdAt = Instant.parse("2026-05-16T00:00:00Z"),
+            updatedAt = Instant.parse("2026-05-16T00:00:00Z"),
+        )
 }

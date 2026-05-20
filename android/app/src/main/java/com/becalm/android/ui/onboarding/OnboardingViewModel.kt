@@ -7,18 +7,23 @@ import com.becalm.android.R
 import com.becalm.android.core.observability.ObservabilityClient
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.PhoneNumberUtils
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.entity.SourceConnectionEntity
 import com.becalm.android.data.local.secure.ImapCredentialStore
 import com.becalm.android.data.local.secure.ImapCredentials
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SelfIdentityRepository
 import com.becalm.android.data.repository.SourceConnectionRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.UserProfileRepository
 import com.becalm.android.ui.components.UiMessage
+import com.becalm.android.ui.sources.sourceConnectionTitle
 import com.becalm.android.worker.AppRuntimeSyncCoordinator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +31,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -48,7 +54,7 @@ import kotlinx.datetime.Clock
  * **Canonical onboarding flow**:
  *
  * ```
- * 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 소스) → Today
+ * 약관 → 로그인 → Setup(필수 요약 + 추천 권한 + 선택 출처) → Today
  * ```
  *
  * Completion is signalled by [UserPrefsStore.setOnboardingCompleted] `true` from
@@ -170,6 +176,11 @@ public sealed interface ContactsPermissionEffect {
     public data object NavigateToSources : ContactsPermissionEffect
 }
 
+/** One-shot effects for compact first-run setup completion. */
+public sealed interface OnboardingSetupEffect {
+    public data object NavigateToToday : OnboardingSetupEffect
+}
+
 // ─── UI State ─────────────────────────────────────────────────────────────────
 
 /**
@@ -183,6 +194,16 @@ public sealed interface ContactsPermissionEffect {
 public data class OnboardingUiState(
     val currentStepIndex: Int = 0,
     val stepStates: Map<OnboardingStep, StepStatus> = OnboardingStep.entries.associateWith { StepStatus.NOT_STARTED },
+    val selfDisplayName: String = "",
+    val selfEmail: String = "",
+    val selfPhone: String = "",
+    val selfAlias: String = "",
+    val selfIdentityConfirmed: Boolean = false,
+    val isSavingSelfIdentity: Boolean = false,
+    val sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    val sourceOwnershipsLoaded: Boolean = false,
+    val sourceOwnershipLoadFailed: Boolean = false,
+    val updatingSourceOwnershipId: String? = null,
     val isCompleting: Boolean = false,
     val error: UiMessage? = null,
 )
@@ -210,6 +231,7 @@ public class OnboardingViewModel @Inject constructor(
     private val sourceStatusRepository: SourceStatusRepository,
     private val sourceConnectionRepository: SourceConnectionRepository,
     private val selfIdentityRepository: SelfIdentityRepository,
+    private val userProfileRepository: UserProfileRepository,
 ) : ViewModel() {
 
     private val emailActionHandler: OnboardingEmailActionHandler = OnboardingEmailActionHandler(
@@ -272,8 +294,19 @@ public class OnboardingViewModel @Inject constructor(
     public val contactsPermissionEffects: SharedFlow<ContactsPermissionEffect> =
         _contactsPermissionEffects.asSharedFlow()
 
+    private val _setupEffects: MutableSharedFlow<OnboardingSetupEffect> = MutableSharedFlow(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Collect in [OnboardingSetupScreen] and navigate only after completion is durable. */
+    public val setupEffects: SharedFlow<OnboardingSetupEffect> = _setupEffects.asSharedFlow()
+
     init {
         hydrateDurableProgress()
+        hydrateSelfIdentity()
+        hydrateSourceOwnerships()
     }
 
     // ─── Navigation actions ───────────────────────────────────────────────────
@@ -346,42 +379,290 @@ public class OnboardingViewModel @Inject constructor(
         persistStepStatus(step, status)
     }
 
+    public fun onSelfDisplayNameChange(value: String) {
+        _uiState.update { it.copy(selfDisplayName = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSelfEmailChange(value: String) {
+        _uiState.update { it.copy(selfEmail = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSelfPhoneChange(value: String) {
+        _uiState.update { it.copy(selfPhone = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSelfAliasChange(value: String) {
+        _uiState.update { it.copy(selfAlias = value, selfIdentityConfirmed = false) }
+    }
+
+    public fun onSaveSelfIdentity() {
+        viewModelScope.launch {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                    return@launch
+                }
+                _uiState.update { it.copy(error = null) }
+                val state = _uiState.value
+                if (!isSelfIdentityReady(state)) {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.onb_error_self_identity_required)) }
+                    return@launch
+                }
+                val displayName = state.selfDisplayName.trim()
+                val phone = normalizeSelfPhone(state.selfPhone)
+                val email = state.selfEmail.trim()
+                val alias = state.selfAlias.trim()
+                _uiState.update { it.copy(isSavingSelfIdentity = true, error = null) }
+                val localProfile = userProfileRepository.upsertLocal(
+                    userId = userId,
+                    displayName = displayName,
+                    phoneE164Self = phone,
+                )
+                upsertOptionalLocalSelfAnchor(userId, anchorType = "email", value = email)
+                upsertOptionalLocalSelfAnchor(userId, anchorType = "phone", value = phone)
+                upsertOptionalLocalSelfAnchor(userId, anchorType = "alias", value = alias)
+                _uiState.update {
+                    it.copy(
+                        selfDisplayName = localProfile.displayNameOverride.orEmpty(),
+                        selfEmail = email,
+                        selfPhone = localProfile.phoneE164Self.orEmpty(),
+                        selfAlias = alias,
+                        selfIdentityConfirmed = true,
+                        isSavingSelfIdentity = false,
+                        error = null,
+                    )
+                }
+                mirrorSelfIdentityRemote(userId, displayName, phone, email, alias)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to save onboarding self identity", e)
+                _uiState.update {
+                    it.copy(
+                        isSavingSelfIdentity = false,
+                        error = UiMessage.resource(R.string.settings_identity_error_save_profile),
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun upsertOptionalLocalSelfAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+    ) {
+        val trimmed = normalizeSelfAnchorValue(anchorType, value)
+        if (trimmed.isEmpty()) return
+        selfIdentityRepository.upsertLocalAnchor(
+            userId = userId,
+            anchorType = anchorType,
+            value = trimmed,
+            displayValue = trimmed,
+            source = "user_profile",
+        )
+    }
+
+    private suspend fun mirrorSelfIdentityRemote(
+        userId: String,
+        displayName: String,
+        phone: String,
+        email: String,
+        alias: String,
+    ) {
+        try {
+            when (
+                userProfileRepository.updateRemote(
+                    userId = userId,
+                    displayName = displayName,
+                    phoneE164Self = phone,
+                )
+            ) {
+                is BecalmResult.Success -> {
+                    createOptionalSelfAnchor(userId, anchorType = "email", value = email)
+                    createOptionalSelfAnchor(userId, anchorType = "phone", value = phone)
+                    createOptionalSelfAnchor(userId, anchorType = "alias", value = alias)
+                    selfIdentityRepository.refresh(userId)
+                }
+                is BecalmResult.Failure -> logger.w(TAG, "self identity remote mirror failed")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            logger.w(TAG, "self identity remote mirror failed", t)
+        }
+    }
+
+    private suspend fun createOptionalSelfAnchor(
+        userId: String,
+        anchorType: String,
+        value: String,
+    ): Boolean {
+        val trimmed = normalizeSelfAnchorValue(anchorType, value)
+        if (trimmed.isEmpty()) return true
+        return when (
+            selfIdentityRepository.createAnchor(
+                userId = userId,
+                anchorType = anchorType,
+                value = trimmed,
+                displayValue = trimmed,
+                source = "user_profile",
+            )
+        ) {
+            is BecalmResult.Success -> true
+            is BecalmResult.Failure -> false
+        }
+    }
+
+    private fun normalizeSelfAnchorValue(anchorType: String, value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return ""
+        return if (anchorType == "phone") normalizeSelfPhone(trimmed) else trimmed
+    }
+
+    private fun normalizeSelfPhone(value: String): String {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return ""
+        return PhoneNumberUtils.toE164OrNull(trimmed) ?: trimmed
+    }
+
+    public fun onSetSourceConnectionOwnership(connectionId: String, ownership: String) {
+        if (ownership !in SOURCE_OWNERSHIP_VALUES) return
+        viewModelScope.launch {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update { it.copy(error = UiMessage.resource(R.string.settings_identity_error_no_user)) }
+                    return@launch
+                }
+                _uiState.update { it.copy(updatingSourceOwnershipId = connectionId, error = null) }
+                when (sourceConnectionRepository.setOwnership(userId, connectionId, ownership)) {
+                    is BecalmResult.Success -> {
+                        selfIdentityRepository.refresh(userId)
+                        _uiState.update {
+                            it.copy(
+                                updatingSourceOwnershipId = null,
+                                error = null,
+                            )
+                        }
+                    }
+                    is BecalmResult.Failure -> _uiState.update {
+                        it.copy(
+                            updatingSourceOwnershipId = null,
+                            error = UiMessage.resource(R.string.settings_identity_error_update_connection),
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to update source connection ownership", e)
+                _uiState.update {
+                    it.copy(
+                        updatingSourceOwnershipId = null,
+                        error = UiMessage.resource(R.string.settings_identity_error_update_connection),
+                    )
+                }
+            }
+        }
+    }
+
     /**
      * Persists the current voice-source availability and records the recording-folder step
      * result using the same public state machine as the rest of onboarding.
      */
-    public fun onRecordingFolderPermissionResult(granted: Boolean) {
+    public fun onRecordingFolderPermissionResult(
+        granted: Boolean,
+        targetSourceType: String? = null,
+    ) {
         if (granted) return
         viewModelScope.launch {
-            userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
-            userPrefsStore.setSourceEnabled(SourceType.MEETING, false)
-            userPrefsStore.setRecordingFolderTreeUri(null)
-            onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.DENIED)
+            setRecordingSourcesEnabled(targetSourceType, enabled = false)
+            if (targetSourceType == null) {
+                userPrefsStore.setRecordingFolderTreeUri(null)
+                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
+                onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.DENIED)
+            } else {
+                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
+            }
             appRuntimeSyncCoordinator.refresh()
         }
     }
 
     /** Persists the shared Recordings SAF tree grant and enables voice/meeting capture. */
-    public fun onRecordingFolderTreeGranted(uri: String) {
+    public fun onRecordingFolderTreeGranted(
+        uri: String,
+        targetSourceType: String? = null,
+    ) {
         viewModelScope.launch {
-            userPrefsStore.setRecordingFolderTreeUri(uri)
-            userPrefsStore.setSourceEnabled(SourceType.VOICE, true)
-            userPrefsStore.setSourceEnabled(SourceType.MEETING, true)
-            onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
+            if (targetSourceType == null) {
+                userPrefsStore.setRecordingFolderTreeUri(uri)
+                setRecordingSourceTreeUris(uri = uri, targetSourceType = null)
+            } else {
+                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, uri)
+            }
+            setRecordingSourcesEnabled(targetSourceType, enabled = true)
+            if (targetSourceType == null) {
+                onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.GRANTED)
+            }
+            appRuntimeSyncCoordinator.refresh()
+        }
+    }
+
+    /** Keeps the recording-folder step retryable when the selected tree is not useful. */
+    public fun onRecordingFolderTreeRejected(targetSourceType: String? = null) {
+        viewModelScope.launch {
+            setRecordingSourcesEnabled(targetSourceType, enabled = false)
+            if (targetSourceType == null) {
+                userPrefsStore.setRecordingFolderTreeUri(null)
+                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
+                onMarkStepStatus(OnboardingStep.RECORDING_FOLDER, StepStatus.NOT_STARTED)
+            } else {
+                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
+            }
+            _uiState.update {
+                it.copy(error = UiMessage.resource(R.string.onb_recording_folder_invalid_selection))
+            }
             appRuntimeSyncCoordinator.refresh()
         }
     }
 
     /** Explicit graceful-skip branch for the recording-folder step. */
-    public fun onSkipRecordingFolder() {
+    public fun onSkipRecordingFolder(targetSourceType: String? = null) {
         viewModelScope.launch {
-            userPrefsStore.setRecordingFolderTreeUri(null)
-            userPrefsStore.setSourceEnabled(SourceType.VOICE, false)
-            userPrefsStore.setSourceEnabled(SourceType.MEETING, false)
-            onSkipStep(OnboardingStep.RECORDING_FOLDER)
+            setRecordingSourcesEnabled(targetSourceType, enabled = false)
+            if (targetSourceType == null) {
+                userPrefsStore.setRecordingFolderTreeUri(null)
+                setRecordingSourceTreeUris(uri = null, targetSourceType = null)
+                onSkipStep(OnboardingStep.RECORDING_FOLDER)
+            } else {
+                userPrefsStore.setRecordingFolderTreeUri(targetSourceType, null)
+            }
             appRuntimeSyncCoordinator.refresh()
         }
     }
+
+    private suspend fun setRecordingSourcesEnabled(targetSourceType: String?, enabled: Boolean) {
+        recordingSourceTypesFor(targetSourceType).forEach { sourceType ->
+            userPrefsStore.setSourceEnabled(sourceType, enabled)
+        }
+    }
+
+    private suspend fun setRecordingSourceTreeUris(uri: String?, targetSourceType: String?) {
+        recordingSourceTypesFor(targetSourceType).forEach { sourceType ->
+            userPrefsStore.setRecordingFolderTreeUri(sourceType, uri)
+        }
+    }
+
+    private fun recordingSourceTypesFor(targetSourceType: String?): Set<String> =
+        when (targetSourceType) {
+            SourceType.VOICE,
+            SourceType.CALL_RECORDING,
+            SourceType.MEETING,
+            -> setOf(targetSourceType)
+            else -> RECORDING_SOURCE_TYPES
+        }
 
     /** Persists optional CallLog matching consent for call-recording person resolution. */
     public fun onCallLogMatchingConsentResult(granted: Boolean) {
@@ -517,10 +798,19 @@ public class OnboardingViewModel @Inject constructor(
                     TAG,
                     "calendar OAuth resume refresh not connected provider=${provider.sourceType}",
                 )
-                is CalendarOAuthResult.Failed -> logger.w(
-                    TAG,
-                    "calendar OAuth status refresh failed provider=${provider.sourceType} error=${result.errorCode}",
-                )
+                is CalendarOAuthResult.Failed -> {
+                    logger.w(
+                        TAG,
+                        "calendar OAuth status refresh failed provider=${provider.sourceType} error=${result.errorCode}",
+                    )
+                    reportOnboardingStepFailed(provider.step, result.errorCode)
+                    _calendarConnectEvents.emit(
+                        CalendarConnectEvent.Failed(
+                            provider = provider,
+                            errorCode = result.errorCode,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -686,10 +976,14 @@ public class OnboardingViewModel @Inject constructor(
                     TAG,
                     "email OAuth resume refresh not connected provider=${provider.storageKey}",
                 )
-                is EmailOAuthResult.Failed -> logger.w(
-                    TAG,
-                    "email OAuth status refresh failed provider=${provider.storageKey} error=${result.errorCode}",
-                )
+                is EmailOAuthResult.Failed -> {
+                    logger.w(
+                        TAG,
+                        "email OAuth status refresh failed provider=${provider.storageKey} error=${result.errorCode}",
+                    )
+                    reportOnboardingStepFailed(oauthProvider.step, result.errorCode)
+                    _emailConnectEvents.emit(EmailConnectEvent.Failed(provider, result.errorCode))
+                }
             }
         }
     }
@@ -716,9 +1010,9 @@ public class OnboardingViewModel @Inject constructor(
             is BecalmResult.Success -> Unit
             is BecalmResult.Failure -> {
                 logger.w(TAG, "source_status refresh failed after OAuth connect sourceType=$sourceType")
-                sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
             }
         }
+        sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
     }
 
     private suspend fun refreshIdentityMirrorsAfterBackendSync(sourceType: String) {
@@ -756,6 +1050,10 @@ public class OnboardingViewModel @Inject constructor(
                 updateState = _uiState::update,
                 emitEvent = { event -> _emailConnectEvents.emit(event) },
                 reportStepFailed = ::reportOnboardingStepFailed,
+                onSaved = {
+                    sourceStatusRepository.clear(sourceType)
+                    appRuntimeSyncCoordinator.refresh()
+                },
             )
         }
     }
@@ -876,15 +1174,15 @@ public class OnboardingViewModel @Inject constructor(
                 return@launch
             }
             try {
-                userPrefsStore.setOnboardingCompleted(true)
-                logger.i(TAG, "onboarding marked complete")
                 _uiState.update { state ->
                     state.copy(
                         isCompleting = false,
                         stepStates = state.stepStates + (OnboardingStep.COLD_SYNC to StepStatus.COMPLETE),
                     )
                 }
-                persistStepStatus(OnboardingStep.COLD_SYNC, StepStatus.COMPLETE)
+                persistStepStatusesNow(mapOf(OnboardingStep.COLD_SYNC to StepStatus.COMPLETE))
+                userPrefsStore.setOnboardingCompleted(true)
+                logger.i(TAG, "onboarding marked complete")
             } catch (e: Exception) {
                 logger.e(TAG, "failed to persist onboarding completion", e)
                 _uiState.update { it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed)) }
@@ -904,6 +1202,33 @@ public class OnboardingViewModel @Inject constructor(
     public fun onCompleteSetup() {
         viewModelScope.launch {
             _uiState.update { it.copy(isCompleting = true, error = null) }
+            if (!_uiState.value.selfIdentityConfirmed || !isSelfIdentityReady(_uiState.value)) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        error = UiMessage.resource(R.string.onb_error_self_identity_required),
+                    )
+                }
+                return@launch
+            }
+            if (!_uiState.value.sourceOwnershipsLoaded || _uiState.value.sourceOwnershipLoadFailed) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
+                    )
+                }
+                return@launch
+            }
+            if (_uiState.value.sourceOwnerships.any { it.ownership == "unknown" }) {
+                _uiState.update {
+                    it.copy(
+                        isCompleting = false,
+                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
+                    )
+                }
+                return@launch
+            }
             val current = _uiState.value.stepStates
             val terminal = setOf(
                 StepStatus.GRANTED,
@@ -925,11 +1250,12 @@ public class OnboardingViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(stepStates = nextStates)
                 }
-                persistStepStatuses(updates)
+                persistStepStatusesNow(updates)
                 userPrefsStore.setOnboardingCompleted(true)
                 appRuntimeSyncCoordinator.refresh()
                 logger.i(TAG, "compact onboarding setup marked complete")
                 _uiState.update { it.copy(isCompleting = false, error = null) }
+                _setupEffects.emit(OnboardingSetupEffect.NavigateToToday)
             } catch (e: Exception) {
                 logger.e(TAG, "failed to complete compact onboarding setup", e)
                 _uiState.update { it.copy(isCompleting = false, error = UiMessage.resource(R.string.onb_error_completion_failed)) }
@@ -950,6 +1276,10 @@ public class OnboardingViewModel @Inject constructor(
     private fun isTerminalGatePassed(stepStates: Map<OnboardingStep, StepStatus>): Boolean {
         return OnboardingStateReducer.isTerminalGatePassed(stepStates)
     }
+
+    private fun isSelfIdentityReady(state: OnboardingUiState): Boolean =
+        state.selfDisplayName.isNotBlank() &&
+            listOf(state.selfEmail, state.selfPhone, state.selfAlias).any { it.isNotBlank() }
 
     private fun hydrateDurableProgress() {
         viewModelScope.launch {
@@ -975,15 +1305,104 @@ public class OnboardingViewModel @Inject constructor(
         }
     }
 
+    private fun hydrateSelfIdentity() {
+        viewModelScope.launch {
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) return@launch
+                val profile = userProfileRepository.find(userId) ?: return@launch
+                val anchors = selfIdentityRepository.observeAll(userId).first()
+                val displayName = profile.displayNameOverride.orEmpty()
+                val phone = profile.phoneE164Self.orEmpty()
+                val email = anchors.firstActiveValue("email")
+                val alias = anchors.firstActiveValue("alias")
+                _uiState.update {
+                    it.copy(
+                        selfDisplayName = displayName,
+                        selfEmail = email,
+                        selfPhone = phone,
+                        selfAlias = alias,
+                        selfIdentityConfirmed = displayName.isNotBlank() &&
+                            listOf(email, phone, alias).any(String::isNotBlank),
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to hydrate onboarding self identity", e)
+                _uiState.update {
+                    it.copy(error = UiMessage.resource(R.string.settings_identity_error_save_profile))
+                }
+            }
+        }
+    }
+
+    private fun hydrateSourceOwnerships() {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(sourceOwnershipsLoaded = false, sourceOwnershipLoadFailed = false) }
+                val userId = userPrefsStore.observeCurrentUserId().first()
+                if (userId.isNullOrBlank()) {
+                    _uiState.update { it.copy(sourceOwnershipsLoaded = true, sourceOwnershipLoadFailed = false) }
+                    return@launch
+                }
+                sourceConnectionRepository.observeAll(userId).collect { connections ->
+                    _uiState.update { state ->
+                        state.copy(
+                            sourceOwnerships = connections.map(SourceConnectionEntity::toOnboardingOwnershipUi),
+                            sourceOwnershipsLoaded = true,
+                            sourceOwnershipLoadFailed = false,
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "failed to hydrate source ownerships", e)
+                _uiState.update {
+                    it.copy(
+                        sourceOwnershipsLoaded = false,
+                        sourceOwnershipLoadFailed = true,
+                        error = UiMessage.resource(R.string.onb_error_source_ownership_required),
+                    )
+                }
+            }
+        }
+    }
+
     private fun persistStepStatus(step: OnboardingStep, status: StepStatus) {
         persistStepStatuses(mapOf(step to status))
     }
 
     private fun persistStepStatuses(statuses: Map<OnboardingStep, StepStatus>) {
         viewModelScope.launch {
-            userPrefsStore.setOnboardingStepStatuses(
-                OnboardingProgressResolver.encodeStepStatuses(statuses),
-            )
+            persistStepStatusesNow(statuses)
         }
     }
+
+    private suspend fun persistStepStatusesNow(statuses: Map<OnboardingStep, StepStatus>) {
+        userPrefsStore.setOnboardingStepStatuses(
+            OnboardingProgressResolver.encodeStepStatuses(statuses),
+        )
+    }
 }
+
+private fun SourceConnectionEntity.toOnboardingOwnershipUi(): OnboardingSourceOwnershipUi =
+    OnboardingSourceOwnershipUi(
+        id = id,
+        title = sourceConnectionTitle(provider = provider, capability = capability),
+        accountLabel = accountDisplayName ?: accountIdentifier ?: provider,
+        ownership = ownership,
+        status = status,
+    )
+
+private val SOURCE_OWNERSHIP_VALUES = setOf("self", "shared", "delegated", "unknown")
+
+private val RECORDING_SOURCE_TYPES = setOf(
+    SourceType.VOICE,
+    SourceType.CALL_RECORDING,
+    SourceType.MEETING,
+)
+
+private fun List<com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity>.firstActiveValue(type: String): String =
+    firstOrNull { it.anchorType == type && it.status == "active" }?.let { it.displayValue ?: it.normalizedValue }.orEmpty()

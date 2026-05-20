@@ -2,8 +2,10 @@ package com.becalm.android.ui.persons
 
 import android.content.Context
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -45,11 +47,12 @@ class PersonDetailScreenTest {
     }
 
     @Test
-    fun person_detail_renders_commitment_buckets_inside_source_event_card() {
+    fun person_detail_keeps_extracted_commitments_out_of_source_timeline_card() {
         setScreen(
             state = baseState(
                 sourceEventCards = listOf(
                     sourceEventCard(
+                        commitmentsExtractedCount = 2,
                         myActions = listOf(
                             PersonDetailCommitmentSummary(
                                 title = "제안서 보내기",
@@ -69,10 +72,11 @@ class PersonDetailScreenTest {
             ),
         )
 
-        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_my_actions)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_their_actions)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("자료 확인하기").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 2)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.person_detail_bucket_my_actions)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("제안서 보내기").assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.person_detail_bucket_their_actions)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText("자료 확인하기").assertCountEquals(0)
     }
 
     @Test

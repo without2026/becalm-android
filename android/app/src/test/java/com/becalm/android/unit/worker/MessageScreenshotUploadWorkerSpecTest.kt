@@ -15,6 +15,7 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -58,6 +59,7 @@ class MessageScreenshotUploadWorkerSpecTest {
     private val appContext: Context = mockk(relaxed = true)
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
+    private val commitmentProgressEventDao: CommitmentProgressEventDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao = mockk(relaxed = true)
     private val sourceExtractionApi: SourceExtractionApi = mockk()
@@ -185,6 +187,7 @@ class MessageScreenshotUploadWorkerSpecTest {
             workerParams = workerParams(),
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
+            commitmentProgressEventDao = commitmentProgressEventDao,
             personIndexDao = personIndexDao,
             selfIdentityAnchorDao = selfIdentityAnchorDao,
             sourceExtractionApi = sourceExtractionApi,

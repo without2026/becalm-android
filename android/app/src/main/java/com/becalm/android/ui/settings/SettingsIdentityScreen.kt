@@ -146,7 +146,11 @@ internal fun SettingsIdentityContent(
             )
         }
         items(state.anchors.filterNot { it.scope == "source_event" }, key = { it.id }) { anchor ->
-            SettingsIdentityAnchorRow(anchor = anchor, onArchive = { onArchiveAnchor(anchor.id) })
+            SettingsIdentityAnchorRow(
+                anchor = anchor,
+                archiving = anchor.id in state.archivingAnchorIds,
+                onArchive = { onArchiveAnchor(anchor.id) },
+            )
         }
         item {
             SettingsSectionLabel(stringResource(R.string.settings_identity_connections_section))
@@ -193,6 +197,8 @@ private fun SettingsIdentityProfilePanel(
                 value = state.displayName,
                 onValueChange = onDisplayNameChange,
                 label = stringResource(R.string.settings_identity_display_name_label),
+                placeholder = stringResource(R.string.onb_setup_identity_display_name_placeholder),
+                supportingText = stringResource(R.string.onb_setup_identity_display_name_help),
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -201,6 +207,7 @@ private fun SettingsIdentityProfilePanel(
                 onValueChange = onPhoneChange,
                 label = stringResource(R.string.settings_identity_phone_label),
                 placeholder = "+82 10 0000 0000",
+                supportingText = stringResource(R.string.onb_setup_identity_phone_help),
                 keyboardType = KeyboardType.Phone,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -235,12 +242,16 @@ private fun SettingsIdentityAnchorPanel(
             )
             Spacer(modifier = Modifier.height(12.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                listOf("email" to R.string.settings_identity_anchor_email, "phone" to R.string.settings_identity_anchor_phone)
+                listOf(
+                    "email" to R.string.settings_identity_anchor_email,
+                    "phone" to R.string.settings_identity_anchor_phone,
+                    "alias" to R.string.settings_identity_anchor_alias,
+                )
                     .forEachIndexed { index, option ->
                         SegmentedButton(
                             selected = state.newAnchorType == option.first,
                             onClick = { onAnchorTypeChange(option.first) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
                         ) {
                             Text(stringResource(option.second))
                         }
@@ -252,7 +263,13 @@ private fun SettingsIdentityAnchorPanel(
                 onValueChange = onAnchorValueChange,
                 label = stringResource(R.string.settings_identity_anchor_value_label),
                 modifier = Modifier.fillMaxWidth(),
-                keyboardType = if (state.newAnchorType == "phone") KeyboardType.Phone else KeyboardType.Email,
+                placeholder = stringResource(anchorPlaceholderFor(state.newAnchorType)),
+                supportingText = stringResource(anchorHelpFor(state.newAnchorType)),
+                keyboardType = when (state.newAnchorType) {
+                    "phone" -> KeyboardType.Phone
+                    "email" -> KeyboardType.Email
+                    else -> KeyboardType.Text
+                },
             )
             Spacer(modifier = Modifier.height(12.dp))
             BecalmButton(
@@ -267,9 +284,26 @@ private fun SettingsIdentityAnchorPanel(
     }
 }
 
+private fun anchorPlaceholderFor(anchorType: String): Int =
+    when (anchorType) {
+        "email" -> R.string.onb_setup_identity_email_placeholder
+        "phone" -> R.string.settings_identity_anchor_phone_placeholder
+        "alias" -> R.string.onb_setup_identity_alias_placeholder
+        else -> R.string.settings_identity_anchor_value_label
+    }
+
+private fun anchorHelpFor(anchorType: String): Int =
+    when (anchorType) {
+        "email" -> R.string.onb_setup_identity_email_help
+        "phone" -> R.string.onb_setup_identity_phone_help
+        "alias" -> R.string.onb_setup_identity_alias_help
+        else -> R.string.settings_identity_anchors_body
+    }
+
 @Composable
 private fun SettingsIdentityAnchorRow(
     anchor: SelfIdentityAnchorUi,
+    archiving: Boolean,
     onArchive: () -> Unit,
 ) {
     QuietPanel(modifier = Modifier.fillMaxWidth()) {
@@ -291,6 +325,7 @@ private fun SettingsIdentityAnchorRow(
                     text = stringResource(R.string.settings_identity_anchor_archive),
                     onClick = onArchive,
                     variant = BecalmButtonVariant.Text,
+                    loading = archiving,
                     modifier = Modifier.testTag("settings-identity-anchor-archive"),
                 )
             }
@@ -319,13 +354,18 @@ private fun SettingsSourceOwnershipRow(
         )
         Spacer(modifier = Modifier.height(12.dp))
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            listOf("self" to R.string.settings_identity_connection_self, "other" to R.string.settings_identity_connection_other)
+            listOf(
+                "self" to R.string.settings_identity_connection_self,
+                "shared" to R.string.settings_identity_connection_shared,
+                "delegated" to R.string.settings_identity_connection_delegated,
+                "unknown" to R.string.settings_identity_connection_unknown,
+            )
                 .forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = connection.ownership == option.first,
                         enabled = !updating,
                         onClick = { onOwnership(option.first) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 4),
                     ) {
                         Text(stringResource(option.second))
                     }

@@ -36,16 +36,21 @@ public class PersonMemoryInputCollector @Inject constructor(
     ): PersonMemoryInput? = withContext(ioDispatcher) {
         val person = personIndexDao.findPersonForMemory(userId, personId)
         val identities = personIndexDao.findIdentitiesForMemory(userId, personId)
-        val participants = personIndexDao.findSourceEventParticipantsForMemory(
+        val sourceParticipants = personIndexDao.findSourceEventParticipantsForMemory(
             userId = userId,
             personId = personId,
             limit = participantLimit,
         )
+        val excludedSourceRefs = sourceParticipants
+            .filterNot { it.isCounterpartyMemorySafe() }
+            .map { it.memorySourceRef() }
+            .toSet()
+        val participants = sourceParticipants.filter { it.isCounterpartyMemorySafe() }
         val interactions = personIndexDao.findInteractionsForMemory(
             userId = userId,
             personId = personId,
             limit = interactionLimit,
-        )
+        ).filterNot { it.sourceRef in excludedSourceRefs }
         val commitmentParticipants = personIndexDao.findCommitmentParticipantsForMemory(
             userId = userId,
             personId = personId,
@@ -61,13 +66,17 @@ public class PersonMemoryInputCollector @Inject constructor(
             emptyList()
         } else {
             commitmentDao.findLiveByIdsForPersonIndex(userId = userId, ids = commitmentIds)
+                .filterNot { it.sourceRef in excludedSourceRefs }
+        }
+        val keptCommitmentRefs = commitments.map { "commitment:${it.id}" }.toSet()
+        val memoryInteractions = interactions.filterNot {
+            it.sourceRef.startsWith("commitment:") && it.sourceRef !in keptCommitmentRefs
         }
 
         if (
-            person == null &&
             identities.isEmpty() &&
             participants.isEmpty() &&
-            interactions.isEmpty() &&
+            memoryInteractions.isEmpty() &&
             commitments.isEmpty()
         ) {
             return@withContext null
@@ -82,7 +91,7 @@ public class PersonMemoryInputCollector @Inject constructor(
             generatedAt = generatedAt,
             identities = identities.map { it.toMemoryIdentity() },
             participants = participants.map { it.toMemoryParticipant() },
-            interactions = interactions.map { it.toMemoryInteraction() },
+            interactions = memoryInteractions.map { it.toMemoryInteraction() },
             commitments = commitments.map { it.toMemoryCommitment() },
             voiceEvidence = participants.mapNotNull { it.toMemoryVoiceEvidence(userId = userId, personId = personId) },
         )
@@ -122,6 +131,11 @@ public class PersonMemoryInputCollector @Inject constructor(
             evidence = evidence,
             occurredAt = createdAt,
         )
+
+    private fun SourceEventParticipantEntity.isCounterpartyMemorySafe(): Boolean =
+        !relationToUser.equals("self", ignoreCase = true) &&
+            !resolutionStatus.equals("self_resolved", ignoreCase = true) &&
+            !resolutionStatus.equals("suggested_self", ignoreCase = true)
 
     private fun SourceEventParticipantEntity.toMemoryVoiceEvidence(
         userId: String,

@@ -182,6 +182,8 @@ public fun CommitmentCard(
     val cardAlpha = if (isTerminal) 0.6f else 1.0f
     // Chip is always shown so the terminal-state reason is visible even when dimmed.
     val showChip = normalizedItemType == CommitmentItemType.ACTION && normalized.isNotBlank()
+    val hasCounterparty = !counterpartyDisplayName.isNullOrBlank()
+    val showPersonContext = hasCounterparty || normalizedItemType != CommitmentItemType.SCHEDULE
     val itemTypeLabel = remember(normalizedItemType) { commitmentItemTypeLabelRes(normalizedItemType) }
     val subtypeLabel = when (normalizedItemType) {
         CommitmentItemType.ACTION -> stringResource(commitmentActionLabelRes(normalizedDirection))
@@ -217,14 +219,13 @@ public fun CommitmentCard(
     // [KST] is the canonical business-calendar zone shared with
     // TodayViewModel.endOfTodayEpochMs — do not substitute TimeZone.currentSystemDefault
     // here.
-    val exactDueAt = dueAt?.takeUnless { dueIsApproximate }
     // Re-key daysUntil on the single shared KST midnight tick owned by
     // BecalmTheme so the D-N badge rolls forward when the user keeps a card
     // on screen across the calendar boundary. One coroutine for the whole
     // content tree instead of one per card. See ui/theme/KstClock.kt.
     val kstDayTick = LocalKstDayTick.current
-    val daysUntil: Int? = remember(exactDueAt, kstDayTick) {
-        daysUntilInKst(dueAt = exactDueAt, now = Clock.System.now(), zone = KST)
+    val daysUntil: Int? = remember(dueAt, kstDayTick) {
+        daysUntilInKst(dueAt = dueAt, now = Clock.System.now(), zone = KST)
     }
     val cardInteractionSource = remember { MutableInteractionSource() }
     val markDoneInteractionSource = remember { MutableInteractionSource() }
@@ -235,12 +236,13 @@ public fun CommitmentCard(
             days >= 4 -> colors.dayBadgeUpcoming
             else -> colors.dayBadgeOverdue // negative = past due
         }
-        val label = formatDayBadgeLabel(days = days, approximate = false)
+        val label = formatDayBadgeLabel(days = days, approximate = dueIsApproximate)
         label to stateColors
     }
 
     val semanticsDesc = "${commitmentActionSemanticsLabel(normalizedDirection)} $title"
     val showMarkDone = onMarkDone != null && !isTerminal
+    val approximateDueHint = dueHint?.takeIf { dueIsApproximate && it.isNotBlank() }
 
     // Mark-done confirmation pulse: brief 1.0 → 1.04 → 1.0 scale on the card
     // when isTerminal flips from false to true (e.g. user marked done from
@@ -347,11 +349,22 @@ public fun CommitmentCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    PersonContext(
-                        name = counterpartyDisplayName ?: stringResource(R.string.commitment_counterparty_unknown),
-                        sourceContextLabel = sourceContextLabel,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (showPersonContext) {
+                        PersonContext(
+                            name = counterpartyDisplayName ?: stringResource(R.string.commitment_counterparty_unknown),
+                            sourceContextLabel = sourceContextLabel,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Text(
+                            text = sourceContextLabel.orEmpty(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     if (isManual) {
                         Spacer(modifier = Modifier.width(8.dp))
                         PillBadge(
@@ -398,6 +411,16 @@ public fun CommitmentCard(
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (approximateDueHint != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.commitment_due_hint_fmt, approximateDueHint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(

@@ -16,6 +16,7 @@ import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
@@ -104,11 +105,19 @@ public class DebugPersonRenderingSeedReceiver : BroadcastReceiver() {
             eventSnippet = null,
             durationSeconds = durationSeconds,
             timestamp = now,
-            syncStatus = "pending",
+            syncStatus = if (sourceType in setOf(SourceType.MEETING, SourceType.CALL_RECORDING)) {
+                MeetingSpeakerPreviewStatus.PENDING
+            } else {
+                "pending"
+            },
         )
         val inserted = db.rawIngestionEventDao().insert(entity)
         require(inserted != -1L) { "Raw event insert ignored for clientEventId=${entity.clientEventId}" }
-        workScheduler.enqueueVoiceUpload(rawEventId = rawEventId, audioUri = sourceRef)
+        if (sourceType in setOf(SourceType.MEETING, SourceType.CALL_RECORDING)) {
+            workScheduler.enqueueMeetingSpeakerPreview(rawEventId = rawEventId, audioUri = sourceRef)
+        } else {
+            workScheduler.enqueueVoiceUpload(rawEventId = rawEventId, audioUri = sourceRef)
+        }
         Timber.i(
             "Debug Clova audio E2E enqueued rawEventId=$rawEventId " +
                 "sourceType=$sourceType durationSeconds=$durationSeconds sourceRef=$sourceRef",

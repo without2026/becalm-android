@@ -8,6 +8,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -64,7 +65,7 @@ class VoiceMediaStoreProbeMeetingSpecTest {
 
     @Test
     // spec: ING-001B
-    fun `MTG-007 meeting audio scanner inserts meeting raw event and enqueues upload`() = runTest {
+    fun `MTG-007 meeting audio scanner inserts meeting raw event and enqueues speaker preview`() = runTest {
         stubCommon()
         every {
             contentResolver.query(
@@ -83,7 +84,7 @@ class VoiceMediaStoreProbeMeetingSpecTest {
                 MediaStore.Audio.Media.RELATIVE_PATH,
             ),
         ).apply {
-            addRow(arrayOf(42L, 1_777_766_400L, 120_000L, "1777766400000-standup.m4a", "Recordings/BeCalm Meetings/Audio/"))
+            addRow(arrayOf<Any?>(42L, 1_777_766_400L, 120_000L, "1777766400000-standup.m4a", "Recordings/BeCalm Meetings/Audio/"))
         }
         coEvery { rawIngestionEventDao.findByClientEventId("user-1", any()) } returns null
         val inserted = slot<RawIngestionEventEntity>()
@@ -93,18 +94,56 @@ class VoiceMediaStoreProbeMeetingSpecTest {
 
         assertEquals(SourceType.MEETING, inserted.captured.sourceType)
         assertEquals("1777766400000-standup.m4a", inserted.captured.eventTitle)
-        assertEquals("pending", inserted.captured.syncStatus)
+        assertEquals(MeetingSpeakerPreviewStatus.PENDING, inserted.captured.syncStatus)
         assertEquals(1, (outcome as com.becalm.android.worker.ingestion.MeetingIngestOutcome.Success).insertedCount)
         coVerify(exactly = 1) {
             syncCursorStore.setMediaStoreLastSeen(MediaStoreWorker.KIND_MEETING, 1_777_766_400_000L)
         }
-        coVerify(exactly = 1) { workScheduler.enqueueVoiceUpload(inserted.captured.id, any()) }
+        coVerify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(inserted.captured.id, any()) }
+        coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `call recording scanner inserts call raw event and enqueues speaker preview`() = runTest {
+        stubCommon()
+        every {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                any<Array<String>>(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns MatrixCursor(
+            arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+            ),
+        ).apply {
+            addRow(arrayOf<Any?>(43L, 1_777_766_500L, 24_000L, "HS0007.m4a", "HS0007", "Recordings/Call/"))
+        }
+        coEvery { rawIngestionEventDao.findByClientEventId("user-1", any()) } returns null
+        val inserted = slot<RawIngestionEventEntity>()
+        coEvery { rawIngestionEventDao.insert(capture(inserted)) } returns 1L
+
+        val outcome = buildProbe().ingestCallRecordings(Instant.parse("2026-05-03T00:00:00Z"))
+
+        assertEquals(SourceType.CALL_RECORDING, inserted.captured.sourceType)
+        assertEquals(MeetingSpeakerPreviewStatus.PENDING, inserted.captured.syncStatus)
+        assertEquals(1, (outcome as com.becalm.android.worker.ingestion.CallRecordingIngestOutcome.Success).insertedCount)
+        coVerify(exactly = 1) { workScheduler.enqueueMeetingSpeakerPreview(inserted.captured.id, any()) }
+        coVerify(exactly = 0) { workScheduler.enqueueVoiceUpload(any(), any(), any(), any(), any()) }
     }
 
     private fun stubCommon() {
         every { appContext.contentResolver } returns contentResolver
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        every { userPrefsStore.observeCallLogMatchingConsent() } returns flowOf(false)
         every { syncCursorStore.observeMediaStoreLastSeen(any()) } returns flowOf(null)
     }
 

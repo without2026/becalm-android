@@ -10,6 +10,7 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.Jsoup
 
 /**
  * Source-neutral adapter from local ingestion rows to the backend extraction contract.
@@ -53,6 +54,7 @@ internal data class SourceExtractionRequestParts(
     val counterpartyRef: RequestBody?,
     val eventTitle: RequestBody?,
     val folder: RequestBody?,
+    val conversationRef: RequestBody?,
 )
 
 internal fun String.toPlainRequestBody(): RequestBody =
@@ -71,6 +73,7 @@ internal fun NormalizedSourceEvent.toRequestParts(
         counterpartyRef = dto.counterpartyRef?.toPlainRequestBody(),
         eventTitle = dto.eventTitle?.toPlainRequestBody(),
         folder = dto.folder?.toPlainRequestBody(),
+        conversationRef = dto.conversationRef?.toPlainRequestBody(),
     )
 }
 
@@ -79,6 +82,7 @@ internal data class NormalizedSourceEvent(
     val bodyPlainForExtraction: String?,
     val participants: List<SourceEventParticipantInputDto>,
     val emailHeaders: NormalizedEmailHeaders?,
+    val emailHeaderHints: NormalizedEmailHeaderHints,
 ) {
     fun toDto(): RawIngestionEventDto =
         RawIngestionEventDto(
@@ -90,6 +94,7 @@ internal data class NormalizedSourceEvent(
             messageIdHeader = emailHeaders?.messageIdHeader,
             inReplyToHeader = emailHeaders?.inReplyToHeader,
             referencesHeader = emailHeaders?.referencesHeader,
+            conversationRef = rawEvent.conversationRef,
             counterpartyRef = rawEvent.counterpartyRef,
             participants = participants.takeIf { it.isNotEmpty() },
             eventTitle = rawEvent.eventTitle,
@@ -99,6 +104,10 @@ internal data class NormalizedSourceEvent(
             folder = rawEvent.folder,
             commitmentsExtractedCount = rawEvent.commitmentsExtractedCount,
             emailBodyPlain = bodyPlainForExtraction,
+            hasListUnsubscribe = emailHeaderHints.hasListUnsubscribe,
+            hasListId = emailHeaderHints.hasListId,
+            autoSubmitted = emailHeaderHints.autoSubmitted,
+            bulkPrecedence = emailHeaderHints.bulkPrecedence,
             timestamp = rawEvent.timestamp,
         )
 
@@ -115,8 +124,10 @@ internal data class NormalizedSourceEvent(
                         listOf(counterpartyParticipant(it, evidenceSource = "metadata"))
                     }.orEmpty(),
                     emailHeaders = rawEvent.emailHeaderContext(),
+                    emailHeaderHints = NormalizedEmailHeaderHints.EMPTY,
                 )
             }
+            val headerHints = emailBody.rawHeaders.emailHeaderHints()
 
             val participants = emailParticipants(
                 folder = emailBody.folder,
@@ -125,15 +136,30 @@ internal data class NormalizedSourceEvent(
             )
             return NormalizedSourceEvent(
                 rawEvent = rawEvent,
-                bodyPlainForExtraction = if (emailBody.parseFailed || emailBody.groupEmail) {
-                    null
-                } else {
-                    emailBody.bodyPlain?.takeIf { it.isNotBlank() }
-                },
+                bodyPlainForExtraction = emailBody.bodyTextForExtraction(),
                 participants = participants,
                 emailHeaders = rawEvent.emailHeaderContext(),
+                emailHeaderHints = headerHints,
             )
         }
+
+        private fun EmailBodyEntity.bodyTextForExtraction(): String? {
+            if (parseFailed || groupEmail) return null
+            bodyPlain.normalizedExtractionBody()?.let { return it }
+            return bodyHtml
+                ?.takeIf { it.isNotBlank() }
+                ?.let { html ->
+                    runCatching { Jsoup.parse(html).text() }.getOrNull()
+                }
+                .normalizedExtractionBody()
+        }
+
+        private fun String?.normalizedExtractionBody(): String? =
+            this
+                ?.replace(WHITESPACE_RUN, " ")
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.take(MAX_EMAIL_BODY_CHARS)
 
         private fun RawIngestionEventEntity.emailHeaderContext(): NormalizedEmailHeaders? {
             val raw = sourceRef?.takeIf { it.isNotBlank() } ?: return null
@@ -213,6 +239,32 @@ internal data class NormalizedSourceEvent(
                 ?.getOrNull(1)
                 ?.takeIf { it.isNotBlank() }
 
+        private fun String?.emailHeaderHints(): NormalizedEmailHeaderHints {
+            if (isNullOrBlank()) return NormalizedEmailHeaderHints.EMPTY
+            val lowered = lowercase()
+            val parsed = runCatching {
+                val json = JSONObject(this)
+                val precedence = json.optString("precedence", "").trim().lowercase()
+                val autoSubmitted = json.optString("auto-submitted", "").trim().lowercase()
+                NormalizedEmailHeaderHints(
+                    hasListUnsubscribe = json.optNonBlankString("list-unsubscribe") != null,
+                    hasListId = json.optNonBlankString("list-id") != null,
+                    autoSubmitted = autoSubmitted.isNotBlank() && autoSubmitted != "no",
+                    bulkPrecedence = precedence == "bulk" || precedence == "list" || precedence == "junk",
+                )
+            }.getOrNull()
+            return NormalizedEmailHeaderHints(
+                hasListUnsubscribe = parsed?.hasListUnsubscribe ?: lowered.contains("list-unsubscribe"),
+                hasListId = parsed?.hasListId ?: lowered.contains("list-id"),
+                autoSubmitted = parsed?.autoSubmitted
+                    ?: (lowered.contains("auto-submitted") && !lowered.contains("\"auto-submitted\":\"no\"")),
+                bulkPrecedence = parsed?.bulkPrecedence
+                    ?: (lowered.contains("precedence") && (
+                        lowered.contains("bulk") || lowered.contains("list") || lowered.contains("junk")
+                    )),
+            )
+        }
+
         private fun emailParticipant(
             role: String,
             relationToUser: String,
@@ -262,6 +314,8 @@ internal data class NormalizedSourceEvent(
         }
 
         private val EMAIL_REGEX = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE)
+        private val WHITESPACE_RUN = Regex("\\s+")
+        private const val MAX_EMAIL_BODY_CHARS = 16_000
     }
 }
 
@@ -271,6 +325,17 @@ internal data class NormalizedEmailHeaders(
     val referencesHeader: String?,
 )
 
+internal data class NormalizedEmailHeaderHints(
+    val hasListUnsubscribe: Boolean = false,
+    val hasListId: Boolean = false,
+    val autoSubmitted: Boolean = false,
+    val bulkPrecedence: Boolean = false,
+) {
+    companion object {
+        val EMPTY = NormalizedEmailHeaderHints()
+    }
+}
+
 internal fun RawIngestionEventDto.toRawIngestionEventEntity(userId: String): RawIngestionEventEntity =
     RawIngestionEventEntity(
         id = id ?: UUID.nameUUIDFromBytes("$userId:$sourceType:$clientEventId".toByteArray()).toString(),
@@ -278,6 +343,7 @@ internal fun RawIngestionEventDto.toRawIngestionEventEntity(userId: String): Raw
         clientEventId = clientEventId,
         sourceType = sourceType,
         sourceRef = sourceRef,
+        conversationRef = conversationRef,
         counterpartyRef = counterpartyRef,
         eventTitle = eventTitle,
         eventSnippet = eventSnippet,

@@ -11,6 +11,7 @@ import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.SourceExtractionApi
 import com.becalm.android.data.remote.dto.SourceExtractionErrorEnvelope
+import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.SourceExtractionInputAdapter
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
@@ -33,6 +34,8 @@ internal data class SourceExtractionUploadRequest(
     val nonRetryableErrorMessage: String,
     val onMarkFailed: suspend (reasonCode: String?) -> Unit,
     val onRateLimited: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
+    val onJobAccepted: (suspend (jobId: String, retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
+    val onJobRetryableFailure: (suspend (retryAfterSeconds: Long?) -> ListenableWorker.Result)? = null,
     val selfSpeakerId: String? = null,
     val speakerMappingsJson: String? = null,
     val speakerPreviewId: String? = null,
@@ -75,7 +78,7 @@ internal class SourceExtractionUploadRunner(
                 counterpartyRef = parts.counterpartyRef,
                 eventTitle = parts.eventTitle,
                 folder = parts.folder,
-                conversationRef = null,
+                conversationRef = parts.conversationRef,
                 previousThreadContext = null,
                 selfSpeakerId = request.selfSpeakerId?.toPlainRequestBody(),
                 speakerMappings = request.speakerMappingsJson?.toPlainRequestBody(),
@@ -93,25 +96,8 @@ internal class SourceExtractionUploadRunner(
         }
 
         return when (response.code()) {
-            200 -> {
-                val body = response.body()
-                    ?: return handleTransientFailure(request)
-                extractionPersister.persist(
-                    userId = request.userId,
-                    entity = request.entity,
-                    body = body,
-                    now = Clock.System.now(),
-                )
-                logger.d(tag, "upload success id=${redact(request.rawEventId)} items=${body.items.size}")
-                trackExtraction(
-                    eventName = ProductAnalyticsEvents.EXTRACTION_COMPLETED,
-                    request = request,
-                    result = "success",
-                    itemCount = body.items.size,
-                    participantCount = body.sourceEventParticipants.size,
-                )
-                ListenableWorker.Result.success()
-            }
+            200 -> persistSuccess(response.body() ?: return handleTransientFailure(request), request)
+            202 -> handleJobAccepted(response.body(), request)
             401 -> {
                 logger.w(tag, "HTTP 401 after refresh id=${redact(request.rawEventId)} — marking failed")
                 processingStatusRepository.recordError(request.entity.sourceType, "Unauthorized")
@@ -168,6 +154,202 @@ internal class SourceExtractionUploadRunner(
                     retryable = false,
                 )
                 ListenableWorker.Result.success()
+            }
+        }
+    }
+
+    suspend fun pollJob(
+        request: SourceExtractionUploadRequest,
+        jobId: String,
+    ): ListenableWorker.Result {
+        val normalizedJobId = jobId.trim()
+        if (normalizedJobId.isEmpty()) {
+            return handleTransientFailure(request)
+        }
+        trackExtraction(
+            eventName = ProductAnalyticsEvents.EXTRACTION_STARTED,
+            request = request,
+            result = "job_poll",
+        )
+        val response = try {
+            sourceExtractionApi.commitmentExtractionJob(normalizedJobId)
+        } catch (e: IOException) {
+            logger.w(
+                tag,
+                "job poll network error id=${redact(request.rawEventId)} job=${redact(normalizedJobId)} " +
+                    "attempt=$runAttemptCount: ${e.message}",
+            )
+            trackExtraction(
+                eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                request = request,
+                result = "job_poll_network_error",
+                retryable = true,
+            )
+            return handleTransientFailure(request)
+        }
+
+        return when (response.code()) {
+            200 -> handleJobBody(response.body() ?: return handleTransientFailure(request), request, normalizedJobId)
+            401 -> {
+                logger.w(tag, "job poll HTTP 401 id=${redact(request.rawEventId)} — marking failed")
+                processingStatusRepository.recordError(request.entity.sourceType, "Unauthorized")
+                request.onMarkFailed("unauthorized")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "job_poll_unauthorized",
+                    retryable = false,
+                )
+                ListenableWorker.Result.success()
+            }
+            404 -> {
+                logger.w(
+                    tag,
+                    "job poll not found id=${redact(request.rawEventId)} job=${redact(normalizedJobId)} — re-uploading",
+                )
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "job_not_found",
+                    retryable = true,
+                )
+                request.onJobRetryableFailure?.invoke(null) ?: handleTransientFailure(request)
+            }
+            429 -> {
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "job_poll_rate_limited",
+                    retryable = true,
+                )
+                request.onJobAccepted?.invoke(
+                    normalizedJobId,
+                    response.headers()[HEADER_RETRY_AFTER]?.toLongOrNull(),
+                ) ?: handleTransientFailure(request)
+            }
+            500, 503 -> {
+                logger.w(
+                    tag,
+                    "job poll HTTP ${response.code()} transient id=${redact(request.rawEventId)} " +
+                        "job=${redact(normalizedJobId)} attempt=$runAttemptCount",
+                )
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "job_poll_transient_http_${response.code()}",
+                    retryable = true,
+                )
+                request.onJobAccepted?.invoke(normalizedJobId, null) ?: handleTransientFailure(request)
+            }
+            else -> {
+                logger.w(
+                    tag,
+                    "job poll HTTP ${response.code()} unexpected id=${redact(request.rawEventId)} — marking failed",
+                )
+                processingStatusRepository.recordError(request.entity.sourceType, "Unexpected HTTP ${response.code()}")
+                request.onMarkFailed("job_poll_unexpected_http_${response.code()}")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                    request = request,
+                    result = "job_poll_unexpected_http_${response.code()}",
+                    retryable = false,
+                )
+                ListenableWorker.Result.success()
+            }
+        }
+    }
+
+    private suspend fun persistSuccess(
+        body: SourceExtractionResponse,
+        request: SourceExtractionUploadRequest,
+    ): ListenableWorker.Result {
+        extractionPersister.persist(
+            userId = request.userId,
+            entity = request.entity,
+            body = body,
+            now = Clock.System.now(),
+        )
+        logger.d(tag, "upload success id=${redact(request.rawEventId)} items=${body.items.size}")
+        trackExtraction(
+            eventName = ProductAnalyticsEvents.EXTRACTION_COMPLETED,
+            request = request,
+            result = "success",
+            itemCount = body.items.size,
+            participantCount = body.sourceEventParticipants.size,
+        )
+        return ListenableWorker.Result.success()
+    }
+
+    private suspend fun handleJobAccepted(
+        body: SourceExtractionResponse?,
+        request: SourceExtractionUploadRequest,
+    ): ListenableWorker.Result {
+        val jobId = body?.jobId?.trim().orEmpty()
+        if (jobId.isEmpty()) {
+            logger.w(tag, "async job accepted without job id=${redact(request.rawEventId)}")
+            return handleTransientFailure(request)
+        }
+        processingStatusRepository.recordGemini(request.entity.sourceType, "내용 정리 중")
+        trackExtraction(
+            eventName = ProductAnalyticsEvents.EXTRACTION_STARTED,
+            request = request,
+            result = "async_job_accepted",
+        )
+        return request.onJobAccepted?.invoke(jobId, body?.retryAfterSeconds)
+            ?: handleTransientFailure(request)
+    }
+
+    private suspend fun handleJobBody(
+        body: SourceExtractionResponse,
+        request: SourceExtractionUploadRequest,
+        fallbackJobId: String,
+    ): ListenableWorker.Result {
+        return when (body.status?.trim()?.lowercase()) {
+            null, "", JOB_STATUS_SUCCEEDED -> persistSuccess(body, request)
+            JOB_STATUS_PENDING, JOB_STATUS_PROCESSING -> {
+                val jobId = body.jobId?.trim().orEmpty().ifEmpty { fallbackJobId }
+                processingStatusRepository.recordGemini(request.entity.sourceType, "내용 정리 중")
+                trackExtraction(
+                    eventName = ProductAnalyticsEvents.EXTRACTION_STARTED,
+                    request = request,
+                    result = "async_job_${body.status}",
+                )
+                request.onJobAccepted?.invoke(jobId, body.retryAfterSeconds)
+                    ?: handleTransientFailure(request)
+            }
+            JOB_STATUS_FAILED -> {
+                val errorCode = body.error ?: "extraction_job_failed"
+                if (body.retryable == true) {
+                    processingStatusRepository.recordGemini(request.entity.sourceType, "내용 정리 중")
+                    trackExtraction(
+                        eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                        request = request,
+                        result = errorCode,
+                        retryable = true,
+                    )
+                    request.onJobRetryableFailure?.invoke(body.retryAfterSeconds)
+                        ?: handleTransientFailure(request)
+                } else {
+                    processingStatusRepository.recordError(
+                        request.entity.sourceType,
+                        body.message ?: errorCode,
+                    )
+                    request.onMarkFailed(errorCode)
+                    trackExtraction(
+                        eventName = ProductAnalyticsEvents.EXTRACTION_FAILED,
+                        request = request,
+                        result = errorCode,
+                        retryable = false,
+                    )
+                    ListenableWorker.Result.success()
+                }
+            }
+            else -> {
+                logger.w(
+                    tag,
+                    "unknown job status id=${redact(request.rawEventId)} status=${body.status}",
+                )
+                handleTransientFailure(request)
             }
         }
     }
@@ -302,5 +484,9 @@ internal class SourceExtractionUploadRunner(
     private companion object {
         private const val HEADER_RETRY_AFTER: String = "Retry-After"
         private const val STATUS_PENDING: String = "pending"
+        private const val JOB_STATUS_PENDING: String = "pending"
+        private const val JOB_STATUS_PROCESSING: String = "processing"
+        private const val JOB_STATUS_SUCCEEDED: String = "succeeded"
+        private const val JOB_STATUS_FAILED: String = "failed"
     }
 }

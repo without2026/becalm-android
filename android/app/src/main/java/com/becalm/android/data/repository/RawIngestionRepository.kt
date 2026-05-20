@@ -10,6 +10,7 @@ import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.BatchUploadRequest
 import com.becalm.android.data.remote.dto.BatchUploadResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -125,11 +126,15 @@ public interface RawIngestionRepository {
 
     /**
      * Records a failed upload attempt for event [id]: sets status to "failed",
-     * increments retry_count by 1, and records [lastAttemptAt].
+     * increments retry_count by 1, records [lastAttemptAt], and preserves [lastError].
      *
      * @return [BecalmResult.Success(Unit)] on success.
      */
-    public suspend fun markFailed(id: String, lastAttemptAt: Instant): BecalmResult<Unit>
+    public suspend fun markFailed(
+        id: String,
+        lastAttemptAt: Instant,
+        lastError: String? = null,
+    ): BecalmResult<Unit>
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
@@ -307,7 +312,11 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         userId: String,
         limit: Int,
     ): List<RawIngestionEventEntity> =
-        dao.findPendingForUpload(userId, limit)
+        dao.findPendingForUpload(
+            userId = userId,
+            limit = limit,
+            maxLegacyRepairAttempts = MAX_LEGACY_FAILED_MAIL_REPAIR_ATTEMPTS,
+        )
 
     override suspend fun markSynced(ids: List<String>): BecalmResult<Unit> {
         if (ids.isEmpty()) return BecalmResult.Success(Unit)
@@ -317,10 +326,14 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun markFailed(id: String, lastAttemptAt: Instant): BecalmResult<Unit> =
+    override suspend fun markFailed(
+        id: String,
+        lastAttemptAt: Instant,
+        lastError: String?,
+    ): BecalmResult<Unit> =
         logger.daoOp(TAG, "markFailed failed") {
-            dao.markFailed(id = id, retryIncrement = 1, now = lastAttemptAt)
-            logger.d(TAG, "markFailed id=$id")
+            dao.markFailed(id = id, retryIncrement = 1, now = lastAttemptAt, lastError = lastError)
+            logger.d(TAG, "markFailed id=$id reason=$lastError")
         }
 
     // ── Upload ────────────────────────────────────────────────────────────────
@@ -336,6 +349,8 @@ public class RawIngestionRepositoryImpl @Inject constructor(
         } catch (e: IOException) {
             logger.e(TAG, "uploadBatch network error count=${events.size}", e)
             BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             logger.e(TAG, "uploadBatch unexpected error count=${events.size}", e)
             BecalmResult.Failure(BecalmError.Unknown(e))
@@ -366,6 +381,8 @@ public class RawIngestionRepositoryImpl @Inject constructor(
             } catch (e: IOException) {
                 logger.e(TAG, "refreshSince network error on page $pageIndex", e)
                 return@withContext BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 logger.e(TAG, "refreshSince unexpected error on page $pageIndex", e)
                 return@withContext BecalmResult.Failure(BecalmError.Unknown(e))
@@ -491,6 +508,7 @@ public class RawIngestionRepositoryImpl @Inject constructor(
 
     private companion object {
         private const val PAGE_LIMIT = 100
+        private const val MAX_LEGACY_FAILED_MAIL_REPAIR_ATTEMPTS = 3
     }
 }
 

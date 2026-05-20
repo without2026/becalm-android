@@ -62,6 +62,10 @@ public data class SourceExtractionResponse(
     /** Extracted structured items from the source by the LLM. Empty list when none detected. */
     @field:Json(name = "items") val items: List<SourceExtractedItemDto>,
 
+    /** Completion evidence for previously extracted action commitments. Not a new item. */
+    @field:Json(name = "completion_signals")
+    val completionSignals: List<SourceCompletionSignalDto> = emptyList(),
+
     /** Canonical source-level participant signals emitted by Vertex Gemini for person matching. */
     @field:Json(name = "source_event_participants")
     val sourceEventParticipants: List<SourceExtractedParticipantDto> = emptyList(),
@@ -74,6 +78,24 @@ public data class SourceExtractionResponse(
 
     /** Raw model JSON text for diagnostics. Optional because older backends omit it. */
     @field:Json(name = "raw_model_text") val rawModelText: String? = null,
+
+    /** Server-side async extraction job id. Present for HTTP 202 and polling responses. */
+    @field:Json(name = "job_id") val jobId: String? = null,
+
+    /** Async extraction job status: pending, processing, succeeded, or failed. */
+    @field:Json(name = "status") val status: String? = null,
+
+    /** Polling hint in seconds for async extraction jobs. */
+    @field:Json(name = "retry_after_seconds") val retryAfterSeconds: Long? = null,
+
+    /** Machine-readable async job failure code when status is failed. */
+    @field:Json(name = "error") val error: String? = null,
+
+    /** Human-readable async job failure message when status is failed. */
+    @field:Json(name = "message") val message: String? = null,
+
+    /** Whether a failed async job can be recovered by re-uploading or polling later. */
+    @field:Json(name = "retryable") val retryable: Boolean? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -83,6 +105,7 @@ public data class MeetingSpeakerPreviewResponse(
     @field:Json(name = "speakers") val speakers: List<MeetingSpeakerPreviewDto>,
     @field:Json(name = "model") val model: String,
     @field:Json(name = "billable_seconds") val billableSeconds: Int,
+    @field:Json(name = "transcript_segments") val transcriptSegments: List<MeetingTranscriptSegmentDto> = emptyList(),
 )
 
 @JsonClass(generateAdapter = true)
@@ -91,6 +114,14 @@ public data class MeetingSpeakerPreviewDto(
     @field:Json(name = "sample_texts") val sampleTexts: List<String> = emptyList(),
     @field:Json(name = "first_start") val firstStart: Double = 0.0,
     @field:Json(name = "total_seconds") val totalSeconds: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+public data class MeetingTranscriptSegmentDto(
+    @field:Json(name = "speaker_id") val speakerId: String,
+    @field:Json(name = "start_seconds") val startSeconds: Double = 0.0,
+    @field:Json(name = "end_seconds") val endSeconds: Double = 0.0,
+    @field:Json(name = "text") val text: String,
 )
 
 @JsonClass(generateAdapter = true)
@@ -108,6 +139,15 @@ public data class SourceExtractedParticipantDto(
     @field:Json(name = "evidence") val evidence: String? = null,
     @field:Json(name = "evidence_source") val evidenceSource: String? = null,
     @field:Json(name = "confidence") val confidence: Double = 0.0,
+)
+
+@JsonClass(generateAdapter = true)
+public data class SourceCompletionSignalDto(
+    @field:Json(name = "event_type") val eventType: String = "completed",
+    @field:Json(name = "person_ref") val personRef: String? = null,
+    @field:Json(name = "evidence_quote") val evidenceQuote: String,
+    @field:Json(name = "confidence") val confidence: Double = 0.0,
+    @field:Json(name = "reason") val reason: String? = null,
 )
 
 public object SourceExtractedItemType {

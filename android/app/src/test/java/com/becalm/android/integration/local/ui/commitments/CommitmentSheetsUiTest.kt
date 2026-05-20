@@ -40,6 +40,7 @@ import com.becalm.android.ui.commitments.DetailSheetContent
 import com.becalm.android.ui.commitments.EditReadOnly
 import com.becalm.android.ui.commitments.EditSheetContent
 import com.becalm.android.ui.commitments.EditUiState
+import com.becalm.android.ui.commitments.MeetingTranscriptPresentation
 import com.becalm.android.ui.theme.BecalmTheme
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
@@ -99,7 +100,7 @@ class CommitmentSheetsUiTest {
         composeRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
-        composeRule.onNodeWithText("PENDING").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.commitment_action_state_pending)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.commitment_detail_llm_source_fmt, "voice", "4/24 10:00"))
             .assertIsDisplayed()
         composeRule.onAllNodesWithText(string(R.string.commitment_detail_last_edited_fmt, "4/24 10:30"))
@@ -152,6 +153,53 @@ class CommitmentSheetsUiTest {
         composeRule.onAllNodesWithText("PENDING").assertCountEquals(0)
         composeRule.onAllNodesWithText(string(R.string.commitment_action_remind)).assertCountEquals(0)
         composeRule.onAllNodesWithText(string(R.string.commitment_action_edit)).assertCountEquals(0)
+    }
+
+    @Test
+    fun `commitment detail content lets user rename meeting transcript speakers`() {
+        var renamed: Pair<String, String>? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                var aliases by remember { mutableStateOf(emptyMap<String, String>()) }
+                val originalTranscript = "SPEAKER_01: 제가 자료 보낼게요."
+                DetailSheetContent(
+                    entity = commitmentEntity(
+                        itemType = CommitmentItemType.SCHEDULE,
+                        direction = null,
+                    ),
+                    quote = "standup.m4a",
+                    actionState = CommitmentState.PENDING,
+                    source = CommitmentSourcePresentation(),
+                    history = CommitmentHistoryPresentation(),
+                    meetingTranscript = MeetingTranscriptPresentation(
+                        rawEventId = "raw-meeting-1",
+                        originalBodyText = originalTranscript,
+                        bodyText = originalTranscript.replace("SPEAKER_01", aliases["SPEAKER_01"] ?: "SPEAKER_01"),
+                        speakerIds = listOf("SPEAKER_01"),
+                        aliases = aliases,
+                        truncated = false,
+                    ),
+                    actionButtons = CommitmentDetailActionState(),
+                    counterpartyDisplayName = null,
+                    onRemind = {},
+                    onFollowUp = {},
+                    onComplete = {},
+                    onCancel = {},
+                    onEdit = {},
+                    onSpeakerAliasChange = { speakerId, displayName ->
+                        renamed = speakerId to displayName
+                        aliases = aliases + (speakerId to displayName)
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("meeting-speaker-alias-SPEAKER_01").performTextReplacement("Jake")
+        composeRule.onAllNodesWithText("Jake: 제가 자료 보낼게요.").assertCountEquals(1)
+        composeRule.runOnIdle {
+            assertEquals("SPEAKER_01" to "Jake", renamed)
+        }
     }
 
     @Test

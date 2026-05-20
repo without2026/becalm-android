@@ -47,6 +47,7 @@ internal fun SourceConnectionEmailEventEffect(
     transientStates: MutableState<Map<OnboardingSourceProvider, SourceConnectionState>>,
     pendingIntentProvider: MutableState<OnboardingSourceProvider?>,
     onLaunchPendingIntent: (IntentSenderRequest) -> Unit,
+    onConnected: (OnboardingSourceProvider) -> Unit = {},
 ) {
     LaunchedEffect(events, entryPoint, resources) {
         events
@@ -60,6 +61,7 @@ internal fun SourceConnectionEmailEventEffect(
                             provider = provider,
                             entryPoint = entryPoint,
                         )
+                        onConnected(provider)
                     }
                     is EmailConnectEvent.PendingIntentRequired -> {
                         pendingIntentProvider.value = provider
@@ -96,6 +98,7 @@ internal fun SourceConnectionCalendarEventEffect(
     resources: Resources,
     snackbarHostState: SnackbarHostState,
     transientStates: MutableState<Map<OnboardingSourceProvider, SourceConnectionState>>,
+    onConnected: (OnboardingSourceProvider) -> Unit = {},
 ) {
     LaunchedEffect(events, entryPoint, resources) {
         events.collect { event ->
@@ -107,6 +110,7 @@ internal fun SourceConnectionCalendarEventEffect(
                         provider = provider,
                         entryPoint = entryPoint,
                     )
+                    onConnected(provider)
                 }
                 is CalendarConnectEvent.Failed -> {
                     transientStates.value = transientStates.value + (provider to SourceConnectionState.Failed)

@@ -188,8 +188,11 @@ class SourceConnectionsCheckpoint2E2eTest {
             BecalmTheme {
                 RecordingFolderContent(
                     displayPath = "/storage/emulated/0/Recordings",
+                    targetPath = string(R.string.onb_recording_folder_target_common),
+                    sourceSpecific = false,
                     voiceFolderDetected = true,
                     callFolderDetected = true,
+                    meetingFolderDetected = true,
                     requiresManualPicker = false,
                     onGrant = { grants += 1 },
                     onSkip = { skips += 1 },
