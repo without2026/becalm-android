@@ -9,7 +9,7 @@ import com.becalm.android.data.local.db.dao.ScheduleEventLinkDao
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.ScheduleEventLinkDto
-import com.becalm.android.data.remote.dto.ScheduleEventLinkStatusPatchDto
+import com.becalm.android.data.remote.dto.ScheduleEventLinkPatchDto
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Provider
@@ -29,6 +29,8 @@ public interface ScheduleEventLinkRepository {
     ): BecalmResult<RefreshStats>
 
     public suspend fun updateStatus(userId: String, id: String, status: String): BecalmResult<ScheduleEventLinkEntity>
+
+    public suspend fun resolve(userId: String, id: String, choice: String): BecalmResult<ScheduleEventLinkEntity>
 
     public fun observePendingReview(userId: String): Flow<List<ScheduleEventLinkEntity>>
 
@@ -138,20 +140,36 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
         id: String,
         status: String,
     ): BecalmResult<ScheduleEventLinkEntity> = withContext(ioDispatcher) {
+        patchLink(userId = userId, id = id, request = ScheduleEventLinkPatchDto(status = status))
+    }
+
+    override suspend fun resolve(
+        userId: String,
+        id: String,
+        choice: String,
+    ): BecalmResult<ScheduleEventLinkEntity> = withContext(ioDispatcher) {
+        patchLink(userId = userId, id = id, request = ScheduleEventLinkPatchDto(resolutionChoice = choice))
+    }
+
+    private suspend fun patchLink(
+        userId: String,
+        id: String,
+        request: ScheduleEventLinkPatchDto,
+    ): BecalmResult<ScheduleEventLinkEntity> {
         val response = try {
-            api.patchScheduleEventLink(id = id, request = ScheduleEventLinkStatusPatchDto(status))
+            api.patchScheduleEventLink(id = id, request = request)
         } catch (e: IOException) {
-            logger.e(TAG, "updateStatus network error", e)
-            return@withContext BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
+            logger.e(TAG, "patchLink network error", e)
+            return BecalmResult.Failure(BecalmError.Network(0, e.message ?: "network error"))
         } catch (e: Exception) {
-            logger.e(TAG, "updateStatus unexpected error", e)
-            return@withContext BecalmResult.Failure(BecalmError.Unknown(e))
+            logger.e(TAG, "patchLink unexpected error", e)
+            return BecalmResult.Failure(BecalmError.Unknown(e))
         }
         if (!response.isSuccessful) {
-            return@withContext BecalmResult.Failure(response.toRefreshError())
+            return BecalmResult.Failure(response.toRefreshError())
         }
         val dto = response.body()?.data
-            ?: return@withContext BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null body")))
+            ?: return BecalmResult.Failure(BecalmError.Unknown(IllegalStateException("null body")))
         val entity = dto.toEntity(userId)
         when (
             val localWrite = logger.daoOp(TAG, "updateStatus local upsert failed") {
@@ -159,9 +177,9 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
             }
         ) {
             is BecalmResult.Success -> Unit
-            is BecalmResult.Failure -> return@withContext localWrite
+            is BecalmResult.Failure -> return localWrite
         }
-        BecalmResult.Success(entity)
+        return BecalmResult.Success(entity)
     }
 
     override fun observePendingReview(userId: String): Flow<List<ScheduleEventLinkEntity>> =
@@ -213,9 +231,21 @@ public class ScheduleEventLinkRepositoryImpl @Inject constructor(
             proposedEndAt = proposedEndAt,
             proposedTitle = proposedTitle,
             evidence = evidence,
+            conflictFieldsJson = conflictFields.toJsonArrayString(),
+            calendarSnapshotJson = calendarSnapshot?.toString(),
+            sourceSnapshotJson = sourceSnapshot?.toString(),
+            resolutionChoice = resolutionChoice,
+            resolvedBy = resolvedBy,
+            resolvedAt = resolvedAt,
+            reopenReason = reopenReason,
             createdAt = createdAt,
             updatedAt = updatedAt,
         )
+
+    private fun List<String>.toJsonArrayString(): String =
+        joinToString(prefix = "[", postfix = "]") { value ->
+            "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        }
 
     private fun List<String>.nonEmptySqlList(): List<String> =
         if (isEmpty()) listOf("__none__") else this

@@ -15,6 +15,7 @@ import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -128,6 +129,9 @@ public data class PersonsUiState(
     val nextCursor: String? = null,
     val refreshing: Boolean = false,
     val lastRefreshSnapshot: PersonsRefreshSnapshot? = null,
+    val savingMatchEventIds: Set<String> = emptySet(),
+    val resolvedMatchEventIds: Set<String> = emptySet(),
+    val notSelfMatchEventIds: Set<String> = emptySet(),
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )
@@ -237,8 +241,24 @@ public class PersonsViewModel @Inject constructor(
     public fun onPullRefresh() {
         _uiState.update { it.copy(refreshing = true) }
         viewModelScope.launch(ioDispatcher) {
-            val snapshot = refreshCoordinator.refresh()
-            _uiState.update { it.copy(refreshing = false, lastRefreshSnapshot = snapshot) }
+            try {
+                val snapshot = refreshCoordinator.refresh()
+                _uiState.update {
+                    it.copy(
+                        refreshing = false,
+                        lastRefreshSnapshot = snapshot,
+                        error = null,
+                    )
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                _uiState.update {
+                    it.copy(
+                        refreshing = false,
+                        error = UiMessage.resource(R.string.persons_error_refresh_failed),
+                    )
+                }
+            }
         }
     }
 
@@ -247,10 +267,16 @@ public class PersonsViewModel @Inject constructor(
         personAnchor: String,
         nickname: String,
     ) {
+        val eventId = event.id
+        if (!markMatchSaving(eventId)) return
         viewModelScope.launch(ioDispatcher) {
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) {
-                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_sign_in_required)) }
+                finishMatchSaving(
+                    eventId = eventId,
+                    resolved = false,
+                    error = UiMessage.resource(R.string.persons_error_sign_in_required),
+                )
                 return@launch
             }
             val result = manualMatchRepository.matchInteraction(
@@ -263,6 +289,7 @@ public class PersonsViewModel @Inject constructor(
             )
             when (result) {
                 is BecalmResult.Success -> {
+                    finishMatchSaving(eventId = eventId, resolved = true)
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -276,17 +303,27 @@ public class PersonsViewModel @Inject constructor(
                     )
                 }
                 is BecalmResult.Failure -> {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+                    finishMatchSaving(
+                        eventId = eventId,
+                        resolved = false,
+                        error = UiMessage.resource(R.string.persons_error_manual_match_failed),
+                    )
                 }
             }
         }
     }
 
     public fun onSelfMatch(event: UnassignedEventSummary) {
+        val eventId = event.id
+        if (!markMatchSaving(eventId)) return
         viewModelScope.launch(ioDispatcher) {
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) {
-                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_sign_in_required)) }
+                finishMatchSaving(
+                    eventId = eventId,
+                    resolved = false,
+                    error = UiMessage.resource(R.string.persons_error_sign_in_required),
+                )
                 return@launch
             }
             when (
@@ -298,6 +335,7 @@ public class PersonsViewModel @Inject constructor(
                 )
             ) {
                 is BecalmResult.Success -> {
+                    finishMatchSaving(eventId = eventId, resolved = true)
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -312,17 +350,27 @@ public class PersonsViewModel @Inject constructor(
                     )
                 }
                 is BecalmResult.Failure -> {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+                    finishMatchSaving(
+                        eventId = eventId,
+                        resolved = false,
+                        error = UiMessage.resource(R.string.persons_error_manual_match_failed),
+                    )
                 }
             }
         }
     }
 
     public fun onNotSelfMatch(event: UnassignedEventSummary) {
+        val eventId = event.id
+        if (!markMatchSaving(eventId)) return
         viewModelScope.launch(ioDispatcher) {
             val userId = userPrefsStore.observeCurrentUserId().first()
             if (userId.isNullOrBlank()) {
-                _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_sign_in_required)) }
+                finishMatchSaving(
+                    eventId = eventId,
+                    resolved = false,
+                    error = UiMessage.resource(R.string.persons_error_sign_in_required),
+                )
                 return@launch
             }
             when (
@@ -334,6 +382,7 @@ public class PersonsViewModel @Inject constructor(
                 )
             ) {
                 is BecalmResult.Success -> {
+                    finishMatchSaving(eventId = eventId, resolved = false, notSelfRejected = true)
                     productAnalytics.track(
                         ProductAnalyticsEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -348,7 +397,11 @@ public class PersonsViewModel @Inject constructor(
                     )
                 }
                 is BecalmResult.Failure -> {
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.persons_error_manual_match_failed)) }
+                    finishMatchSaving(
+                        eventId = eventId,
+                        resolved = false,
+                        error = UiMessage.resource(R.string.persons_error_manual_match_failed),
+                    )
                 }
             }
         }
@@ -365,8 +418,60 @@ public class PersonsViewModel @Inject constructor(
             ).catch {
                 _uiState.update { it.copy(loading = false, error = UiMessage.resource(R.string.persons_error_load_failed)) }
             }.collect { state ->
-                _uiState.value = state.copy(query = _query.value)
+                val current = _uiState.value
+                val currentIds = state.unassignedEvents.mapTo(mutableSetOf(), UnassignedEventSummary::id)
+                _uiState.value = state.copy(
+                    query = _query.value,
+                    savingMatchEventIds = current.savingMatchEventIds.intersect(currentIds),
+                    resolvedMatchEventIds = current.resolvedMatchEventIds.intersect(currentIds),
+                    notSelfMatchEventIds = current.notSelfMatchEventIds.intersect(currentIds),
+                    error = current.error,
+                    refreshing = current.refreshing,
+                    lastRefreshSnapshot = current.lastRefreshSnapshot,
+                )
             }
+        }
+    }
+
+    private fun markMatchSaving(eventId: String): Boolean {
+        var accepted = false
+        _uiState.update { state ->
+            if (eventId in state.savingMatchEventIds) {
+                state
+            } else {
+                accepted = true
+                state.copy(
+                    savingMatchEventIds = state.savingMatchEventIds + eventId,
+                    error = null,
+                )
+            }
+        }
+        return accepted
+    }
+
+    private fun finishMatchSaving(
+        eventId: String,
+        resolved: Boolean,
+        notSelfRejected: Boolean = false,
+        error: UiMessage? = null,
+    ) {
+        _uiState.update { state ->
+            state.copy(
+                savingMatchEventIds = state.savingMatchEventIds - eventId,
+                resolvedMatchEventIds = if (resolved) {
+                    state.resolvedMatchEventIds + eventId
+                } else {
+                    state.resolvedMatchEventIds - eventId
+                },
+                notSelfMatchEventIds = if (notSelfRejected) {
+                    state.notSelfMatchEventIds + eventId
+                } else if (error != null) {
+                    state.notSelfMatchEventIds - eventId
+                } else {
+                    state.notSelfMatchEventIds
+                },
+                error = error,
+            )
         }
     }
 

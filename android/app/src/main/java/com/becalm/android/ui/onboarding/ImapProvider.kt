@@ -22,7 +22,7 @@ public sealed class ImapProvider(
     @StringRes public val usernamePlaceholderRes: Int,
 ) {
 
-    /** Naver Mail (naver.com). */
+    /** Naver Email (naver.com). */
     public data object Naver : ImapProvider(
         sourceType = SourceType.NAVER_IMAP,
         host = "imap.naver.com",
@@ -31,7 +31,7 @@ public sealed class ImapProvider(
         usernamePlaceholderRes = R.string.onb_imap_username_hint_naver,
     )
 
-    /** Daum Mail (daum.net / hanmail.net). */
+    /** Daum Email (daum.net / hanmail.net). */
     public data object Daum : ImapProvider(
         sourceType = SourceType.DAUM_IMAP,
         host = "imap.daum.net",

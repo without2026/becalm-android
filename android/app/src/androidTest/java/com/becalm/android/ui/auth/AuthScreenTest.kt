@@ -1,19 +1,21 @@
 package com.becalm.android.ui.auth
 
 import android.content.Context
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -25,14 +27,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import androidx.navigation.compose.rememberNavController
 
 @RunWith(AndroidJUnit4::class)
 class AuthScreenTest {
     // spec: AUTH-012
 
     @get:Rule
-    val composeTestRule = createComposeRule()
+    val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun splash_content_shows_branding_and_tagline() {
@@ -152,21 +153,50 @@ class AuthScreenTest {
     }
 
     @Test
-    fun splash_screen_routes_error_state_to_terms() {
+    fun splash_screen_routes_recovery_state_to_auth_recovery() {
         var destination: String? = null
 
         composeTestRule.setContent {
             BecalmTheme {
                 SplashScreen(
                     navController = rememberNavController(),
-                    stateOverride = AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed)),
+                    stateOverride = AuthUiState.RecoveryRequired(
+                        message = UiMessage.resource(R.string.auth_error_session_restore_failed),
+                        termsAccepted = true,
+                    ),
                     onNavigate = { destination = it },
                 )
             }
         }
 
         composeTestRule.runOnIdle {
-            assertEquals(BecalmRoute.Terms.path, destination)
+            assertEquals(BecalmRoute.AuthRecovery(termsAccepted = true).path, destination)
+        }
+    }
+
+    @Test
+    fun auth_recovery_content_returns_to_login_and_supports_retry() {
+        var returned = 0
+        var retried = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                AuthRecoveryContent(
+                    termsAccepted = true,
+                    onReturnToAuthShell = { returned += 1 },
+                    onRetry = { retried += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_body)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_login_cta)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.auth_recovery_retry_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, returned)
+            assertEquals(1, retried)
         }
     }
 
@@ -182,7 +212,7 @@ class AuthScreenTest {
                     isLoading = false,
                     googleSignInEnabled = false,
                     onSignIn = { _, _ -> },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = {},
                 )
             }
@@ -210,7 +240,7 @@ class AuthScreenTest {
                     isLoading = false,
                     googleSignInEnabled = true,
                     onSignIn = { _, _ -> submitted += 1 },
-                    onSignUp = { _, _ -> submitted += 1 },
+                    onSignUp = { submitted += 1 },
                     onGoogleSignIn = {},
                 )
             }
@@ -241,7 +271,7 @@ class AuthScreenTest {
                         submittedEmail = email
                         submittedPassword = password
                     },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = {},
                 )
             }
@@ -258,9 +288,8 @@ class AuthScreenTest {
     }
 
     @Test
-    fun login_form_forwards_entered_credentials_to_signup() {
-        var submittedEmail: String? = null
-        var submittedPassword: String? = null
+    fun login_form_opens_separate_account_creation_intent_without_validating_email_fields() {
+        var createAccountCount = 0
 
         composeTestRule.setContent {
             BecalmTheme {
@@ -268,22 +297,96 @@ class AuthScreenTest {
                     isLoading = false,
                     googleSignInEnabled = true,
                     onSignIn = { _, _ -> },
-                    onSignUp = { email, password ->
-                        submittedEmail = email
-                        submittedPassword = password
-                    },
+                    onSignUp = { createAccountCount += 1 },
                     onGoogleSignIn = {},
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("login-email").performTextInput("new@example.com")
-        composeTestRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
         composeTestRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, createAccountCount)
+        }
+    }
+
+    @Test
+    fun signup_form_validates_confirmation_password_before_submit() {
+        var submitted = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SignUpForm(
+                    isLoading = false,
+                    onSignUp = { _, _ -> submitted += 1 },
+                    onNavigateToLogin = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("signup-email").performTextInput("new@example.com")
+        composeTestRule.onNodeWithTag("signup-password").performTextInput("ValidPass1!")
+        composeTestRule.onNodeWithTag("signup-password-confirm").performTextInput("Different1!")
+        composeTestRule.onNodeWithText(string(R.string.signup_cta)).performClick()
+
+        composeTestRule.onNodeWithText(string(R.string.signup_error_password_mismatch)).assertIsDisplayed()
+        composeTestRule.runOnIdle {
+            assertEquals(0, submitted)
+        }
+    }
+
+    @Test
+    fun signup_form_forwards_trimmed_email_and_password() {
+        var submittedEmail: String? = null
+        var submittedPassword: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SignUpForm(
+                    isLoading = false,
+                    onSignUp = { email, password ->
+                        submittedEmail = email
+                        submittedPassword = password
+                    },
+                    onNavigateToLogin = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("signup-email").performTextInput(" new@example.com ")
+        composeTestRule.onNodeWithTag("signup-password").performTextInput("ValidPass1!")
+        composeTestRule.onNodeWithTag("signup-password-confirm").performTextInput("ValidPass1!")
+        composeTestRule.onNodeWithText(string(R.string.signup_cta)).performClick()
 
         composeTestRule.runOnIdle {
             assertEquals("new@example.com", submittedEmail)
             assertEquals("ValidPass1!", submittedPassword)
+        }
+    }
+
+    @Test
+    fun signup_confirmation_content_separates_email_verification_from_failure() {
+        var loginCount = 0
+        var retryCount = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SignUpEmailConfirmationContent(
+                    email = "new@example.com",
+                    onNavigateToLogin = { loginCount += 1 },
+                    onTryDifferentEmail = { retryCount += 1 },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.signup_confirmation_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.signup_confirmation_body, "new@example.com")).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.signup_confirmation_login_cta)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.signup_confirmation_retry_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, loginCount)
+            assertEquals(1, retryCount)
         }
     }
 
@@ -301,7 +404,6 @@ class AuthScreenTest {
                         onboardingCompleted = false,
                     ),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = { destination = it },
@@ -333,7 +435,6 @@ class AuthScreenTest {
                         onboardingCompleted = true,
                     ),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = { destination = it },
@@ -362,7 +463,6 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.Error(UiMessage.resource(R.string.auth_error_unknown)),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},
@@ -391,7 +491,6 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = { launchCount += 1 },
                     onSignedInNavigate = {},
@@ -411,6 +510,62 @@ class AuthScreenTest {
     }
 
     @Test
+    fun login_screen_opens_signup_route_when_create_account_clicked() {
+        var navigateCount = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                LoginScreen(
+                    navController = rememberNavController(),
+                    stateOverride = AuthUiState.SignedOut(termsAccepted = true),
+                    onEmailSignIn = { _, _ -> },
+                    googleSignInEnabledOverride = true,
+                    onGoogleSignInLaunch = {},
+                    onNavigateToSignUp = { navigateCount += 1 },
+                    onSignedInNavigate = {},
+                    onGoogleIdToken = {},
+                    onErrorDismissed = {},
+                    onMarkLoginGranted = {},
+                    applySecureFlag = false,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(1, navigateCount)
+        }
+    }
+
+    @Test
+    fun signup_screen_navigates_after_signed_in_and_marks_login_granted() {
+        var destination: String? = null
+        var grantedCount = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SignUpScreen(
+                    navController = rememberNavController(),
+                    stateOverride = AuthUiState.SignedIn(
+                        userId = "user-1",
+                        onboardingCompleted = false,
+                    ),
+                    onEmailSignUp = { _, _ -> },
+                    onSignedInNavigate = { destination = it },
+                    onMarkLoginGranted = { grantedCount += 1 },
+                    applySecureFlag = false,
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            assertEquals(BecalmRoute.OnboardingSetup.path, destination)
+            assertEquals(1, grantedCount)
+        }
+    }
+
+    @Test
     fun login_screen_mounts_with_secure_flag_enabled() {
         composeTestRule.setContent {
             BecalmTheme {
@@ -418,7 +573,6 @@ class AuthScreenTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = true,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},
@@ -516,7 +670,7 @@ class AuthScreenTest {
         }
     }
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun string(resId: Int, vararg formatArgs: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *formatArgs)
 
 }

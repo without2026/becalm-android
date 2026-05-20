@@ -3,6 +3,9 @@ package com.becalm.android.unit.ui.commitments
 import app.cash.turbine.test
 import androidx.lifecycle.SavedStateHandle
 import com.becalm.android.R
+import com.becalm.android.core.analytics.ProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEvent
+import com.becalm.android.core.analytics.ProductAnalyticsEvents
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
@@ -130,18 +133,59 @@ class CommitmentEditViewModelSpecTest {
     }
 
     @Test
+    fun `EDIT save tracks correction details without raw field values`() = runTest {
+        val analytics = RecordingProductAnalyticsClient()
+        every { commitmentRepository.observeByIdForUser("user-1", "c-direction") } returns
+            flowOf(entity(id = "c-direction", direction = "give"))
+        coEvery { commitmentRepository.editCommitment(eq("c-direction"), any()) } returns
+            BecalmResult.Success(Unit)
+
+        val viewModel = buildViewModel("c-direction", productAnalytics = analytics)
+        advanceUntilIdle()
+        viewModel.onDirectionChange("take")
+        viewModel.onSave()
+        advanceUntilIdle()
+
+        val correction = analytics.events.single {
+            it.eventName == ProductAnalyticsEvents.COMMITMENT_CORRECTION_SUBMITTED
+        }
+        assertEquals(listOf("direction"), correction.properties["changed_fields"])
+        assertEquals(true, correction.properties["direction_changed"])
+        assertEquals("give", correction.properties["previous_direction"])
+        assertEquals("take", correction.properties["new_direction"])
+        assertEquals(false, correction.properties.containsKey("title"))
+        assertEquals(false, correction.properties.containsKey("counterparty_ref"))
+
+        val quality = analytics.events.single {
+            it.eventName == ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED
+        }
+        assertEquals("corrected_commitment", quality.properties["quality_label"])
+        assertEquals(true, quality.properties["is_true_commitment"])
+        assertEquals("edit_saved", quality.properties["review_signal"])
+        assertEquals(true, quality.properties["wrong_direction"])
+        assertEquals(false, quality.properties["wrong_person"])
+        assertEquals(false, quality.properties["wrong_due_date"])
+    }
+
+    @Test
     fun `EDIT-005 dispute set path calls markQuoteDisputed and flips read-only badge on`() = runTest {
+        val analytics = RecordingProductAnalyticsClient()
         every { commitmentRepository.observeByIdForUser("user-1", "c3-dispute") } returns
             flowOf(entity(id = "c3-dispute", quoteDisputed = false))
         coEvery { commitmentRepository.markQuoteDisputed("c3-dispute") } returns BecalmResult.Success(Unit)
 
-        val viewModel = buildViewModel("c3-dispute")
+        val viewModel = buildViewModel("c3-dispute", productAnalytics = analytics)
         advanceUntilIdle()
         viewModel.onToggleDispute()
         advanceUntilIdle()
 
         coVerify(exactly = 1) { commitmentRepository.markQuoteDisputed("c3-dispute") }
         assertEquals(true, viewModel.uiState.value.readOnly?.quoteDisputed)
+        val quality = analytics.events.single {
+            it.eventName == ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED
+        }
+        assertEquals("possible_false_positive", quality.properties["quality_label"])
+        assertEquals(false, quality.properties["is_true_commitment"])
     }
 
     @Test
@@ -161,10 +205,11 @@ class CommitmentEditViewModelSpecTest {
 
     @Test
     fun `EDIT-006 delete delegates to soft delete and emits Deleted dismiss event`() = runTest {
+        val analytics = RecordingProductAnalyticsClient()
         every { commitmentRepository.observeByIdForUser("user-1", "c5") } returns flowOf(entity(id = "c5"))
         coEvery { commitmentRepository.softDelete("c5") } returns BecalmResult.Success(Unit)
 
-        val viewModel = buildViewModel("c5")
+        val viewModel = buildViewModel("c5", productAnalytics = analytics)
         advanceUntilIdle()
 
         viewModel.dismiss.test {
@@ -173,12 +218,21 @@ class CommitmentEditViewModelSpecTest {
             assertEquals(EditDismissEvent.Deleted, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+        val quality = analytics.events.single {
+            it.eventName == ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED
+        }
+        assertEquals("false_positive", quality.properties["quality_label"])
+        assertEquals(false, quality.properties["is_true_commitment"])
     }
 
-    private fun buildViewModel(id: String): CommitmentEditViewModel = CommitmentEditViewModel(
+    private fun buildViewModel(
+        id: String,
+        productAnalytics: ProductAnalyticsClient = com.becalm.android.core.analytics.NoopProductAnalyticsClient(),
+    ): CommitmentEditViewModel = CommitmentEditViewModel(
         commitmentRepository = commitmentRepository,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentEdit.ARG_ID to id)),
+        productAnalytics = productAnalytics,
         logger = logger,
     )
 
@@ -219,4 +273,16 @@ class CommitmentEditViewModelSpecTest {
         deletedAt = null,
         supersedesCommitmentId = null,
     )
+
+    private class RecordingProductAnalyticsClient : ProductAnalyticsClient {
+        val events: MutableList<ProductAnalyticsEvent> = mutableListOf()
+
+        override fun track(event: ProductAnalyticsEvent) {
+            events += event
+        }
+
+        override fun setUserScope(userId: String?) = Unit
+
+        override fun resetUserScope() = Unit
+    }
 }

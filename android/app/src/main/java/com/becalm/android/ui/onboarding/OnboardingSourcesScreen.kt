@@ -4,10 +4,12 @@ import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +23,7 @@ import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.ui.components.BecalmScaffold
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.navigation.navigateAfterSourceReconnectOr
 import com.becalm.android.ui.navigation.returnToSettingsSourcesAfterSourceConnect
@@ -62,6 +65,7 @@ public fun OnboardingSourcesScreen(
 @Composable
 public fun SettingsSourceConnectionsScreen(
     navController: NavHostController,
+    targetProviderSlug: String? = null,
     viewModel: OnboardingViewModel? = null,
     emailEventsOverride: Flow<EmailConnectEvent>? = null,
     calendarEventsOverride: Flow<CalendarConnectEvent>? = null,
@@ -72,9 +76,11 @@ public fun SettingsSourceConnectionsScreen(
     onNavigateDone: (() -> Unit)? = null,
     onLaunchPendingIntent: ((IntentSenderRequest) -> Unit)? = null,
 ) {
+    val targetProvider = onboardingSourceProviderFromSettingsRouteSlug(targetProviderSlug)
     SourceConnectionsScreen(
         navController = navController,
         entryPoint = SourceConnectionsEntryPoint.Settings,
+        includedProviders = targetProvider?.let(::setOf),
         viewModel = viewModel,
         emailEventsOverride = emailEventsOverride,
         calendarEventsOverride = calendarEventsOverride,
@@ -111,10 +117,13 @@ internal fun SourceConnectionsScreen(
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    sourceOwnershipsReady: Boolean = true,
     updatingSourceOwnershipId: String? = null,
     onSourceOwnership: (String, String) -> Unit = { _, _ -> },
     onConnectSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
     onSkipSetupItem: ((OnboardingSetupItem) -> Unit)? = null,
+    includedProviders: Set<OnboardingSourceProvider>? = null,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     val needsViewModel = emailEventsOverride == null ||
         calendarEventsOverride == null ||
@@ -200,6 +209,13 @@ internal fun SourceConnectionsScreen(
 
     val activityMissingCopy = stringResource(R.string.onb_sources_activity_missing)
     val consentWriteFailedCopy = stringResource(R.string.onb_sources_consent_write_failed)
+    val stateErrorMessage = state.error?.let { uiMessageStringResource(it) }
+
+    LaunchedEffect(stateErrorMessage) {
+        if (!stateErrorMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(stateErrorMessage)
+        }
+    }
 
     SourceConnectionLifecycleRefreshEffect(
         lifecycleOwner = lifecycleOwner,
@@ -215,7 +231,10 @@ internal fun SourceConnectionsScreen(
         pendingIntentProvider = pendingIntentProviderState,
         onLaunchPendingIntent = launchPendingIntent,
         onConnected = {
-            if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+            if (
+                entryPoint == SourceConnectionsEntryPoint.Settings &&
+                (includedProviders == null || it in includedProviders)
+            ) {
                 navigateComplete()
             }
         },
@@ -227,7 +246,10 @@ internal fun SourceConnectionsScreen(
         snackbarHostState = snackbarHostState,
         transientStates = transientStatesState,
         onConnected = {
-            if (entryPoint == SourceConnectionsEntryPoint.Settings) {
+            if (
+                entryPoint == SourceConnectionsEntryPoint.Settings &&
+                (includedProviders == null || it in includedProviders)
+            ) {
                 navigateComplete()
             }
         },
@@ -237,7 +259,8 @@ internal fun SourceConnectionsScreen(
         stepStates = state.stepStates,
         transientStates = transientStates,
         respectStepStates = SourceConnectionProjector.respectStepStatesFor(entryPoint),
-        includedProviders = SourceConnectionProjector.sourceProvidersFor(entryPoint),
+        respectConnectedStepStates = entryPoint != SourceConnectionsEntryPoint.Settings || includedProviders == null,
+        includedProviders = includedProviders ?: SourceConnectionProjector.sourceProvidersFor(entryPoint),
         stringFor = resources::getString,
     )
     val hasIncomplete = entryPoint == SourceConnectionsEntryPoint.Onboarding &&
@@ -247,6 +270,7 @@ internal fun SourceConnectionsScreen(
     val copy = SourceConnectionCopy.copyFor(entryPoint)
     BecalmScaffold(
         title = stringResource(copy.titleRes),
+        actions = actions,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         SourceConnectionsContent(
@@ -288,17 +312,28 @@ internal fun SourceConnectionsScreen(
             onSelfAliasChange = onSelfAliasChange,
             onSaveSelfIdentity = onSaveSelfIdentity,
             sourceOwnerships = sourceOwnerships,
+            sourceOwnershipsReady = sourceOwnershipsReady,
             updatingSourceOwnershipId = updatingSourceOwnershipId,
             onSourceOwnership = onSourceOwnership,
             onConnectSetupItem = onConnectSetupItem ?: {},
             onSkipSetupItem = onSkipSetupItem ?: {},
+            continueEnabled = !state.isCompleting,
+            continueLoading = state.isCompleting,
+            showImapLaterNotice = entryPoint != SourceConnectionsEntryPoint.Settings,
             onContinue = {
                 if (entryPoint == SourceConnectionsEntryPoint.Setup) {
-                    (onCompleteSetup ?: { requireNotNull(resolvedViewModel).onCompleteSetup() }).invoke()
+                    if (onCompleteSetup != null) {
+                        onCompleteSetup.invoke()
+                        navigateComplete()
+                    } else {
+                        requireNotNull(resolvedViewModel).onCompleteSetup()
+                    }
                 } else if (entryPoint == SourceConnectionsEntryPoint.Onboarding) {
                     requireNotNull(skipRemaining).invoke()
+                    navigateComplete()
+                } else {
+                    navigateComplete()
                 }
-                navigateComplete()
             },
             modifier = Modifier.padding(padding),
         )

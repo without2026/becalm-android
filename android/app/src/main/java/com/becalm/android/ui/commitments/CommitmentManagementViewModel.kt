@@ -12,8 +12,10 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Clock
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.SystemClock
+import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentManagementRow
+import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
@@ -27,6 +29,7 @@ import com.becalm.android.worker.SourceRelationRefreshPlan
 import com.becalm.android.worker.SourceParticipantRefreshScope
 import com.becalm.android.worker.WorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +118,17 @@ public data class CommitmentRow(
      */
     val isManual: Boolean = false,
     val deEmphasized: Boolean = false,
+    val scheduleTimelineTiming: ScheduleTimelineTiming? = null,
+)
+
+/**
+ * Display labels used only by the schedule-filter timeline. The projector owns
+ * KST D-day math so Compose rows do not call the system clock independently.
+ */
+public data class ScheduleTimelineTiming(
+    val dayLabel: String?,
+    val timeLabel: String?,
+    val isUntimed: Boolean,
 )
 
 /**
@@ -125,21 +139,42 @@ public data class CommitmentRow(
 public data class CommitmentPersonGroup(
     val displayName: String?,
     val items: List<CommitmentRow>,
+    val type: CommitmentPersonGroupType = CommitmentPersonGroupType.PERSON,
 ) {
     public val count: Int get() = items.size
-    public val stableKey: String get() = displayName?.let { "person-$it" } ?: "person-unassigned"
+    public val stableKey: String get() = when (type) {
+        CommitmentPersonGroupType.PERSON -> displayName?.let { "person-$it" } ?: "person-unassigned"
+        CommitmentPersonGroupType.UNKNOWN_PERSON -> "person-unassigned"
+        CommitmentPersonGroupType.SCHEDULE -> "schedule-without-person"
+    }
+}
+
+public enum class CommitmentPersonGroupType {
+    PERSON,
+    UNKNOWN_PERSON,
+    SCHEDULE,
 }
 
 public fun buildCommitmentPersonGroups(rows: List<CommitmentRow>): List<CommitmentPersonGroup> {
-    val grouped = linkedMapOf<String?, MutableList<CommitmentRow>>()
+    val grouped = linkedMapOf<CommitmentPersonGroupKey, MutableList<CommitmentRow>>()
     rows.forEach { row ->
         val displayName = row.counterpartyDisplayName?.takeIf { it.isNotBlank() }
-        grouped.getOrPut(displayName) { mutableListOf() }.add(row)
+        val groupKey = when {
+            displayName != null -> CommitmentPersonGroupKey(CommitmentPersonGroupType.PERSON, displayName)
+            row.itemType == CommitmentItemType.SCHEDULE -> CommitmentPersonGroupKey(CommitmentPersonGroupType.SCHEDULE, null)
+            else -> CommitmentPersonGroupKey(CommitmentPersonGroupType.UNKNOWN_PERSON, null)
+        }
+        grouped.getOrPut(groupKey) { mutableListOf() }.add(row)
     }
-    return grouped.map { (displayName, items) ->
-        CommitmentPersonGroup(displayName = displayName, items = items)
+    return grouped.map { (key, items) ->
+        CommitmentPersonGroup(displayName = key.displayName, items = items, type = key.type)
     }
 }
+
+private data class CommitmentPersonGroupKey(
+    val type: CommitmentPersonGroupType,
+    val displayName: String?,
+)
 
 // ─── Undo snapshot ────────────────────────────────────────────────────────────
 
@@ -197,6 +232,11 @@ public sealed interface CommitmentUndoSnapshot {
 public data class CommitmentUiState(
     val items: List<CommitmentRow> = emptyList(),
     val activeItems: List<CommitmentRow> = emptyList(),
+    val scheduleUpcomingItems: List<CommitmentRow> = emptyList(),
+    val schedulePastSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = false, dimmed = true),
+    val confirmedSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = true, dimmed = false),
+    val reviewSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = true, dimmed = false),
+    val pastSection: CommitmentSectionUiState = CommitmentSectionUiState(expanded = false, dimmed = true),
     val completedSection: CommitmentSectionUiState = CommitmentSectionUiState(),
     val cancelledSection: CommitmentSectionUiState = CommitmentSectionUiState(),
     val filter: CommitmentFilter = CommitmentFilter.ALL,
@@ -306,6 +346,7 @@ public class CommitmentManagementViewModel @Inject constructor(
     private val allRows: MutableStateFlow<List<CommitmentManagementRow>> = MutableStateFlow(emptyList())
     private val allScheduleLinks: MutableStateFlow<List<com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity>> =
         MutableStateFlow(emptyList())
+    private val inFlightActionIds: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
     init {
         observeCommitments()
@@ -431,6 +472,44 @@ public class CommitmentManagementViewModel @Inject constructor(
         }
     }
 
+    public fun onToggleConfirmedSection() {
+        _uiState.update { state ->
+            state.copy(
+                confirmedSection = state.confirmedSection.copy(
+                    expanded = !state.confirmedSection.expanded,
+                ),
+            )
+        }
+    }
+
+    public fun onToggleReviewSection() {
+        _uiState.update { state ->
+            state.copy(
+                reviewSection = state.reviewSection.copy(
+                    expanded = !state.reviewSection.expanded,
+                ),
+            )
+        }
+    }
+
+    public fun onTogglePastSection() {
+        _uiState.update { state ->
+            if (state.filter == CommitmentFilter.SCHEDULE) {
+                state.copy(
+                    schedulePastSection = state.schedulePastSection.copy(
+                        expanded = !state.schedulePastSection.expanded,
+                    ),
+                )
+            } else {
+                state.copy(
+                    pastSection = state.pastSection.copy(
+                        expanded = !state.pastSection.expanded,
+                    ),
+                )
+            }
+        }
+    }
+
     /**
      * Handles pull-to-refresh from [CommitmentManagementScreen] (CMT-010).
      *
@@ -448,27 +527,35 @@ public class CommitmentManagementViewModel @Inject constructor(
         if (_uiState.value.refreshing) return
         _uiState.update { it.copy(refreshing = true) }
         viewModelScope.launch(ioDispatcher) {
-            val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
-            if (userId == null) {
-                _uiState.update { it.copy(refreshing = false) }
-                return@launch
-            }
-            when (
-                val result = relationRefreshCoordinator().refresh(
-                    userId = userId,
-                    plan = SourceRelationRefreshPlan(
-                        sourceType = PULL_REFRESH_SOURCE,
-                        sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
-                    ),
-                )
-            ) {
-                is BecalmResult.Success ->
-                    _uiState.update { it.copy(refreshing = false, error = null) }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "onPullRefresh failed: ${result.error}")
-                    _uiState.update {
-                        it.copy(refreshing = false, error = UiMessage.resource(R.string.commitments_error_refresh_failed))
+            try {
+                val userId = userPrefsStore.observeCurrentUserId().firstOrNull()
+                if (userId == null) {
+                    _uiState.update { it.copy(refreshing = false) }
+                    return@launch
+                }
+                when (
+                    val result = relationRefreshCoordinator().refresh(
+                        userId = userId,
+                        plan = SourceRelationRefreshPlan(
+                            sourceType = PULL_REFRESH_SOURCE,
+                            sourceParticipantRefreshScope = SourceParticipantRefreshScope.ALL,
+                        ),
+                    )
+                ) {
+                    is BecalmResult.Success ->
+                        _uiState.update { it.copy(refreshing = false, error = null) }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "onPullRefresh failed: ${result.error}")
+                        _uiState.update {
+                            it.copy(refreshing = false, error = UiMessage.resource(R.string.commitments_error_refresh_failed))
+                        }
                     }
+                }
+            } catch (e: Throwable) {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "onPullRefresh unexpected failure", e)
+                _uiState.update {
+                    it.copy(refreshing = false, error = UiMessage.resource(R.string.commitments_error_refresh_failed))
                 }
             }
         }
@@ -645,18 +732,30 @@ public class CommitmentManagementViewModel @Inject constructor(
         effect: (suspend () -> Unit)? = null,
         block: suspend () -> BecalmResult<*>,
     ) {
+        if (!inFlightActionIds.add(id)) {
+            logger.d(TAG, "$name ignored duplicate in-flight action id=${hashId(id)}")
+            return
+        }
         viewModelScope.launch(ioDispatcher) {
-            when (val result = block()) {
-                is BecalmResult.Success -> {
-                    logger.d(TAG, "$name succeeded id=${hashId(id)}")
-                    _uiState.update { it.copy(error = null) }
-                    trackActionSelected(name, id)
-                    effect?.invoke()
+            try {
+                when (val result = block()) {
+                    is BecalmResult.Success -> {
+                        logger.d(TAG, "$name succeeded id=${hashId(id)}")
+                        _uiState.update { it.copy(error = null) }
+                        trackActionSelected(name, id)
+                        effect?.invoke()
+                    }
+                    is BecalmResult.Failure -> {
+                        logger.w(TAG, "$name failed id=${hashId(id)}: ${result.error}")
+                        _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
+                    }
                 }
-                is BecalmResult.Failure -> {
-                    logger.w(TAG, "$name failed id=${hashId(id)}: ${result.error}")
-                    _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
-                }
+            } catch (e: Throwable) {
+                e.rethrowIfCancellation()
+                logger.e(TAG, "$name unexpected failure id=${hashId(id)}", e)
+                _uiState.update { it.copy(error = UiMessage.resource(R.string.commitments_error_action_failed)) }
+            } finally {
+                inFlightActionIds.remove(id)
             }
         }
     }
@@ -698,8 +797,25 @@ public class CommitmentManagementViewModel @Inject constructor(
                 ),
             ),
         )
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED,
+                occurredAt = now,
+                properties = mapOf(
+                    "commitment_id" to id,
+                    "source_type" to (row?.sourceType ?: "unknown"),
+                    "item_type" to (row?.itemType ?: "unknown"),
+                    "quality_label" to "accepted_commitment",
+                    "is_true_commitment" to true,
+                    "review_signal" to "commitment_action_$action",
+                    "action" to action,
+                    "core_active" to true,
+                    "high_intent" to (action in HIGH_INTENT_ACTIONS),
+                ),
+            ),
+        )
     }
-
     private fun actionStrength(action: String): String =
         when (action) {
             "remind" -> "weak"

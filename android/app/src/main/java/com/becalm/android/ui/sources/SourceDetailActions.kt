@@ -11,12 +11,12 @@ internal object SourceDetailActionResolver {
     fun reconnectDestinationFor(sourceType: String): SourceReconnectDestination? =
         when (sourceType) {
             SourceType.VOICE -> SourceReconnectDestination.RECORDING_FOLDER
+            SourceType.CALL_RECORDING -> SourceReconnectDestination.RECORDING_FOLDER
             SourceType.MEETING -> SourceReconnectDestination.RECORDING_FOLDER
             SourceType.GMAIL -> SourceReconnectDestination.GMAIL
             SourceType.OUTLOOK_MAIL -> SourceReconnectDestination.OUTLOOK_MAIL
-            SourceType.NAVER_IMAP,
-            SourceType.DAUM_IMAP,
-            -> SourceReconnectDestination.IMAP
+            SourceType.NAVER_IMAP -> SourceReconnectDestination.NAVER_IMAP
+            SourceType.DAUM_IMAP -> SourceReconnectDestination.DAUM_IMAP
             SourceType.GOOGLE_CALENDAR -> SourceReconnectDestination.GOOGLE_CALENDAR
             SourceType.OUTLOOK_CALENDAR -> SourceReconnectDestination.OUTLOOK_CALENDAR
             else -> null
@@ -32,7 +32,7 @@ internal class SourceDetailActionHandler(
         sourceType: String,
         hasValidSourceType: Boolean,
     ): BecalmResult<Unit> {
-        if (!hasValidSourceType || sourceType == SourceType.CALL_RECORDING) {
+        if (!hasValidSourceType) {
             logger.w(TAG, "onManualSync ignored for unsupported sourceType=$sourceType")
             return BecalmResult.Failure(BecalmError.Validation("sourceType", "unsupported source"))
         }

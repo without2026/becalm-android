@@ -18,6 +18,8 @@ import com.becalm.android.R
 import com.becalm.android.ui.auth.AuthUiState
 import com.becalm.android.ui.auth.LoginForm
 import com.becalm.android.ui.auth.LoginScreen
+import com.becalm.android.ui.auth.SignUpEmailConfirmationContent
+import com.becalm.android.ui.auth.SignUpForm
 import com.becalm.android.ui.auth.SplashContent
 import com.becalm.android.ui.auth.SplashScreen
 import com.becalm.android.ui.auth.TermsContent
@@ -99,10 +101,10 @@ class AuthUiTest {
     }
 
     @Test
-    fun `splash screen routes error state to terms`() {
+    fun `splash screen routes error state to auth recovery`() {
         assertSplashRoute(
             AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed)),
-            BecalmRoute.Terms.path,
+            BecalmRoute.AuthRecovery(termsAccepted = false).path,
         )
     }
 
@@ -114,7 +116,7 @@ class AuthUiTest {
                     isLoading = false,
                     googleSignInEnabled = false,
                     onSignIn = { _, _ -> },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = {},
                 )
             }
@@ -138,7 +140,7 @@ class AuthUiTest {
                     googleSignInEnabled = false,
                     authErrorMessage = string(R.string.auth_error_network),
                     onSignIn = { _, _ -> },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = {},
                 )
             }
@@ -160,7 +162,7 @@ class AuthUiTest {
                     isLoading = false,
                     googleSignInEnabled = true,
                     onSignIn = { _, _ -> submitted += 1 },
-                    onSignUp = { _, _ -> submitted += 1 },
+                    onSignUp = { submitted += 1 },
                     onGoogleSignIn = {},
                 )
             }
@@ -191,7 +193,7 @@ class AuthUiTest {
                         submittedEmail = email
                         submittedPassword = password
                     },
-                    onSignUp = { _, _ -> },
+                    onSignUp = {},
                     onGoogleSignIn = {},
                 )
             }
@@ -208,9 +210,8 @@ class AuthUiTest {
     }
 
     @Test
-    fun `login form forwards entered credentials for account creation`() {
-        var submittedEmail: String? = null
-        var submittedPassword: String? = null
+    fun `login form opens separate account creation intent without validating email fields`() {
+        var createAccountCount = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -218,22 +219,96 @@ class AuthUiTest {
                     isLoading = false,
                     googleSignInEnabled = true,
                     onSignIn = { _, _ -> },
-                    onSignUp = { email, password ->
-                        submittedEmail = email
-                        submittedPassword = password
-                    },
+                    onSignUp = { createAccountCount += 1 },
                     onGoogleSignIn = {},
                 )
             }
         }
 
-        composeRule.onNodeWithTag("login-email").performTextInput("new@example.com")
-        composeRule.onNodeWithTag("login-password").performTextInput("ValidPass1!")
         composeRule.onNodeWithText(string(R.string.login_signup_cta)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, createAccountCount)
+        }
+    }
+
+    @Test
+    fun `signup form validates confirmation password before submit`() {
+        var submitted = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SignUpForm(
+                    isLoading = false,
+                    onSignUp = { _, _ -> submitted += 1 },
+                    onNavigateToLogin = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("signup-email").performTextInput("new@example.com")
+        composeRule.onNodeWithTag("signup-password").performTextInput("ValidPass1!")
+        composeRule.onNodeWithTag("signup-password-confirm").performTextInput("Different1!")
+        composeRule.onNodeWithText(string(R.string.signup_cta)).performClick()
+
+        composeRule.onNodeWithText(string(R.string.signup_error_password_mismatch)).assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(0, submitted)
+        }
+    }
+
+    @Test
+    fun `signup form forwards trimmed email and password`() {
+        var submittedEmail: String? = null
+        var submittedPassword: String? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                SignUpForm(
+                    isLoading = false,
+                    onSignUp = { email, password ->
+                        submittedEmail = email
+                        submittedPassword = password
+                    },
+                    onNavigateToLogin = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("signup-email").performTextInput(" new@example.com ")
+        composeRule.onNodeWithTag("signup-password").performTextInput("ValidPass1!")
+        composeRule.onNodeWithTag("signup-password-confirm").performTextInput("ValidPass1!")
+        composeRule.onNodeWithText(string(R.string.signup_cta)).performClick()
 
         composeRule.runOnIdle {
             assertEquals("new@example.com", submittedEmail)
             assertEquals("ValidPass1!", submittedPassword)
+        }
+    }
+
+    @Test
+    fun `signup confirmation content separates email verification from failure`() {
+        var loginCount = 0
+        var retryCount = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SignUpEmailConfirmationContent(
+                    email = "new@example.com",
+                    onNavigateToLogin = { loginCount += 1 },
+                    onTryDifferentEmail = { retryCount += 1 },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.signup_confirmation_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.signup_confirmation_body, "new@example.com")).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.signup_confirmation_login_cta)).performClick()
+        composeRule.onNodeWithText(string(R.string.signup_confirmation_retry_cta)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, loginCount)
+            assertEquals(1, retryCount)
         }
     }
 
@@ -245,7 +320,6 @@ class AuthUiTest {
                     navController = rememberNavController(),
                     stateOverride = AuthUiState.SignedOut(termsAccepted = true),
                     onEmailSignIn = { _, _ -> },
-                    onEmailSignUp = { _, _ -> },
                     googleSignInEnabledOverride = false,
                     onGoogleSignInLaunch = {},
                     onSignedInNavigate = {},
@@ -311,8 +385,8 @@ class AuthUiTest {
         }
     }
 
-    private fun string(resId: Int): String =
-        ApplicationProvider.getApplicationContext<Context>().getString(resId)
+    private fun string(resId: Int, vararg formatArgs: Any): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, *formatArgs)
 
     private fun assertSplashRoute(state: AuthUiState, expectedRoute: String) {
         var route: String? = null

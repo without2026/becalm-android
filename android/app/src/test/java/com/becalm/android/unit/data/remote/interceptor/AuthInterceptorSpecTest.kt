@@ -61,6 +61,50 @@ class AuthInterceptorSpecTest {
     }
 
     @Test
+    fun `railway request without token omits bearer header and does not invalidate on unauthenticated refresh`() {
+        every { authTokenProvider.currentAccessToken() } returns null
+        coEvery { authTokenProvider.refresh("") } returns AuthTokenProvider.RefreshResult.Unauthenticated
+
+        val interceptor = buildInterceptor()
+        val chain = FakeChain(
+            request = request("https://railway.example.com/v1/resource"),
+            responses = mutableListOf(response(code = 401, body = "signed-out")),
+        )
+
+        val result = interceptor.intercept(chain)
+
+        assertEquals(401, result.code)
+        assertEquals("signed-out", result.body!!.string())
+        assertEquals(1, chain.proceededRequests.size)
+        assertNull(chain.proceededRequests.single().header("Authorization"))
+        coVerify(exactly = 1) { authTokenProvider.refresh("") }
+        coVerify(exactly = 0) { invalidator.invalidate() }
+    }
+
+    @Test
+    fun `railway request without cached token can refresh and retry once`() {
+        every { authTokenProvider.currentAccessToken() } returns null
+        coEvery { authTokenProvider.refresh("") } returns AuthTokenProvider.RefreshResult.Refreshed("fresh-token")
+
+        val interceptor = buildInterceptor()
+        val chain = FakeChain(
+            request = request("https://railway.example.com/v1/resource"),
+            responses = mutableListOf(
+                response(code = 401, body = "cache-empty"),
+                response(code = 200, body = "ok"),
+            ),
+        )
+
+        val result = interceptor.intercept(chain)
+
+        assertEquals(200, result.code)
+        assertNull(chain.proceededRequests[0].header("Authorization"))
+        assertEquals("Bearer fresh-token", chain.proceededRequests[1].header("Authorization"))
+        coVerify(exactly = 1) { authTokenProvider.refresh("") }
+        coVerify(exactly = 0) { invalidator.invalidate() }
+    }
+
+    @Test
     fun `401 with transient refresh failure returns original buffered response and preserves session`() {
         every { authTokenProvider.currentAccessToken() } returns "expired-token"
         coEvery { authTokenProvider.refresh("expired-token") } returns AuthTokenProvider.RefreshResult.Failed

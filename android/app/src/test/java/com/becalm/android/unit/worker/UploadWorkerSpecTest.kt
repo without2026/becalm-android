@@ -21,6 +21,7 @@ import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.RawIngestionRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -30,6 +31,7 @@ import com.becalm.android.worker.WorkScheduler
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.coEvery
+import io.mockk.coVerify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -145,21 +147,70 @@ class UploadWorkerSpecTest {
     }
 
     @Test
-    fun `raw ingestion upload uses small pages so email extraction batches do not monopolize one request`() = runTest {
+    fun `raw upload transport exhaustion leaves rows pending instead of quarantining`() = runTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         val state = FakeState(
             session = fakeSession,
-            pendingRaw = (1..45).map { index -> rawEvent(id = "raw-$index") },
+            pendingRaw = listOf(rawEvent(id = "raw-1")),
+            rawUploadResult = BecalmResult.Failure(BecalmError.ServerError(503, "service unavailable")),
+        )
+
+        val result = state.buildWorker(
+            inputData = Data.Builder()
+                .putInt(UploadWorker.INPUT_KEY_ATTEMPT, 10)
+                .build(),
+        ).doWork()
+
+        assertEquals(ListenableWorker.Result.failure().javaClass, result.javaClass)
+        assertEquals(1, state.rawFindPendingCalls)
+        assertEquals(1, state.rawUploadCalls)
+        assertEquals(0, state.rawMarkFailedCalls)
+        assertEquals(0, state.rawMarkSyncedCalls)
+    }
+
+    @Test
+    fun `raw ingestion upload uses bounded pages so large email imports avoid excessive request churn`() = runTest {
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        val state = FakeState(
+            session = fakeSession,
+            pendingRaw = (1..120).map { index -> rawEvent(id = "raw-$index") },
             rawUploadResult = BecalmResult.Success(
-                BatchUploadResponse(acknowledged = 20, failed = emptyList<FailedEventDto>()),
+                BatchUploadResponse(acknowledged = 50, failed = emptyList<FailedEventDto>()),
             ),
         )
 
         val result = state.buildWorker().doWork()
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
-        assertEquals(listOf(20, 20, 5), state.rawUploadBatchSizes)
+        assertEquals(listOf(50, 50, 20), state.rawUploadBatchSizes)
         assertEquals(3, state.rawMarkSyncedCalls)
+    }
+
+    @Test
+    fun `raw upload records source processing completion so IMAP progress does not stay active`() = runTest {
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        val state = FakeState(
+            session = fakeSession,
+            pendingRaw = listOf(rawEvent(id = "raw-1", sourceType = "naver_imap")),
+            rawUploadResult = BecalmResult.Success(
+                BatchUploadResponse(acknowledged = 1, failed = emptyList<FailedEventDto>()),
+            ),
+        )
+
+        val result = state.buildWorker(recordProcessingStatus = true).doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        coVerify {
+            state.processingStatusRepository.recordUploading(
+                sourceType = "naver_imap",
+                message = any(),
+            )
+            state.processingStatusRepository.recordSynced(
+                sourceType = "naver_imap",
+                itemCount = 1,
+                message = "1개 반영됨",
+            )
+        }
     }
 
     @Test
@@ -200,12 +251,14 @@ class UploadWorkerSpecTest {
         var recordSyncStartCalls = 0
         var recordSyncSuccessCalls = 0
         var recordSyncErrorCalls = 0
+        val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
         private var rawRemaining: List<RawIngestionEventEntity> = pendingRaw
         private var commitmentRemaining: List<CommitmentEntity> = pendingCommitments
 
         fun buildWorker(
             inputData: Data = Data.EMPTY,
             runAttemptCount: Int = 0,
+            recordProcessingStatus: Boolean = false,
         ): UploadWorker = UploadWorker(
             appContext,
             workerParams(inputData, runAttemptCount),
@@ -218,6 +271,7 @@ class UploadWorkerSpecTest {
             workScheduler(),
             processingPauseGate,
             logger,
+            processingStatusRepository.takeIf { recordProcessingStatus },
         )
 
         private fun authRepository(): AuthRepository = proxy(AuthRepository::class.java) { name, _ ->
@@ -368,11 +422,11 @@ class UploadWorkerSpecTest {
             }
     }
 
-    private fun rawEvent(id: String): RawIngestionEventEntity = RawIngestionEventEntity(
+    private fun rawEvent(id: String, sourceType: String = "voice"): RawIngestionEventEntity = RawIngestionEventEntity(
         id = id,
         userId = "user-1",
         clientEventId = "client-$id",
-        sourceType = "voice",
+        sourceType = sourceType,
         sourceRef = "content://raw/$id",
         eventTitle = "raw-$id",
         timestamp = Instant.parse("2026-04-23T00:00:00Z"),

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -53,8 +54,11 @@ class OnboardingScreenTest {
             BecalmTheme {
                 RecordingFolderContent(
                     displayPath = "/Recordings",
+                    targetPath = string(R.string.onb_recording_folder_target_common),
+                    sourceSpecific = false,
                     voiceFolderDetected = true,
                     callFolderDetected = false,
+                    meetingFolderDetected = false,
                     requiresManualPicker = true,
                     onGrant = { grantClicks += 1 },
                     onSkip = { skipClicks += 1 },
@@ -65,22 +69,35 @@ class OnboardingScreenTest {
         composeTestRule.onNodeWithText(
             string(R.string.onb_recording_folder_detected_path_fmt, "/Recordings"),
         ).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_picker_instruction))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_picker_target))
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText(
             string(
                 R.string.onb_recording_folder_voice_status_fmt,
+                string(R.string.onb_recording_folder_voice_path),
                 string(R.string.onb_recording_folder_status_detected),
             ),
         ).assertIsDisplayed()
         composeTestRule.onNodeWithText(
             string(
                 R.string.onb_recording_folder_call_status_fmt,
+                string(R.string.onb_recording_folder_call_path),
                 string(R.string.onb_recording_folder_status_missing),
+            ),
+        ).assertIsDisplayed()
+        composeTestRule.onNodeWithText(
+            string(
+                R.string.onb_recording_folder_meeting_status_fmt,
+                string(R.string.onb_recording_folder_meeting_path),
+                string(R.string.onb_recording_folder_status_created_later),
             ),
         ).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.onb_recording_folder_manual_picker_fallback))
             .assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.action_grant)).performClick()
-        composeTestRule.onNodeWithText(string(R.string.action_skip)).performClick()
+        composeTestRule.onNodeWithText(string(R.string.action_grant)).performScrollTo().performClick()
+        composeTestRule.onNodeWithText(string(R.string.action_skip)).performScrollTo().performClick()
 
         composeTestRule.runOnIdle {
             assertEquals(1, grantClicks)
@@ -102,6 +119,7 @@ class OnboardingScreenTest {
                         preferredDocumentId = "primary:Recordings",
                         voiceFolderDetected = true,
                         callFolderDetected = false,
+                        meetingFolderDetected = false,
                         usedFallbackPath = false,
                         requiresManualPicker = true,
                     ),
@@ -301,6 +319,29 @@ class OnboardingScreenTest {
             assertEquals("daum_imap", savedProvider)
             assertEquals("user@daum.net", savedUsername)
             assertEquals("app-password", savedPassword)
+        }
+    }
+
+    @Test
+    fun imap_form_honors_initial_provider_for_settings_reconnect() {
+        var savedProvider: String? = null
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                ImapForm(
+                    onSave = { provider, _, _ -> savedProvider = provider.sourceType },
+                    onSkip = {},
+                    initialProvider = ImapProvider.Daum,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("imap-username").performTextInput("user@daum.net")
+        composeTestRule.onNodeWithTag("imap-password").performTextInput("app-password")
+        composeTestRule.onNodeWithText(string(R.string.onb_imap_cta)).performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals("daum_imap", savedProvider)
         }
     }
 
@@ -775,6 +816,71 @@ class OnboardingScreenTest {
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle {
             assertEquals(2, doneClicks)
+        }
+    }
+
+    @Test
+    fun settings_source_connections_can_scope_to_one_source() {
+        val emailEvents = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        val calendarEvents = MutableSharedFlow<CalendarConnectEvent>(extraBufferCapacity = 1)
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SettingsSourceConnectionsScreen(
+                    navController = rememberNavController(),
+                    targetProviderSlug = "google_calendar",
+                    emailEventsOverride = emailEvents,
+                    calendarEventsOverride = calendarEvents,
+                    stateOverride = OnboardingUiState(),
+                    onConnectSource = { _, _ -> },
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onNavigateDone = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText(string(R.string.onb_gcal_title)).assertIsDisplayed()
+        composeTestRule.onAllNodesWithText(string(R.string.onb_gmail_title)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.onb_outlook_mail_title)).assertCountEquals(0)
+        composeTestRule.onAllNodesWithText(string(R.string.onb_outlook_cal_title)).assertCountEquals(0)
+    }
+
+    @Test
+    fun targeted_settings_source_connections_ignores_other_source_connect_events() {
+        val emailEvents = MutableSharedFlow<EmailConnectEvent>(extraBufferCapacity = 1)
+        val calendarEvents = MutableSharedFlow<CalendarConnectEvent>(extraBufferCapacity = 1)
+        var doneClicks = 0
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                SettingsSourceConnectionsScreen(
+                    navController = rememberNavController(),
+                    targetProviderSlug = "google_calendar",
+                    emailEventsOverride = emailEvents,
+                    calendarEventsOverride = calendarEvents,
+                    stateOverride = OnboardingUiState(),
+                    onConnectSource = { _, _ -> },
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onNavigateDone = { doneClicks += 1 },
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeTestRule.runOnIdle {
+            emailEvents.tryEmit(EmailConnectEvent.Connected(EmailPipaProvider.GMAIL))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(0, doneClicks)
+            calendarEvents.tryEmit(CalendarConnectEvent.Connected(CalendarOAuthProvider.GOOGLE_CALENDAR))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.runOnIdle {
+            assertEquals(1, doneClicks)
         }
     }
 

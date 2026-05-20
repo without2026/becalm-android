@@ -158,8 +158,9 @@ internal fun ImapForm(
     onSave: (ImapProvider, username: String, appPassword: String) -> Unit,
     onSkip: () -> Unit,
     header: @Composable ColumnScope.() -> Unit = { ImapFormHeader() },
+    initialProvider: ImapProvider = ImapProvider.Naver,
 ) {
-    var selectedProvider: ImapProvider by remember { mutableStateOf(ImapProvider.Naver) }
+    var selectedProvider: ImapProvider by remember(initialProvider) { mutableStateOf(initialProvider) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val canSave by remember {

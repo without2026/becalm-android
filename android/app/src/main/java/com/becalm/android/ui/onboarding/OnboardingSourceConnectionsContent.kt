@@ -19,6 +19,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
+import com.becalm.android.ui.components.QuietPanel
 import com.becalm.android.ui.theme.BecalmTheme
 
 @Composable
@@ -40,10 +41,14 @@ internal fun SourceConnectionsContent(
     onSelfAliasChange: (String) -> Unit = {},
     onSaveSelfIdentity: () -> Unit = {},
     sourceOwnerships: List<OnboardingSourceOwnershipUi> = emptyList(),
+    sourceOwnershipsReady: Boolean = true,
     updatingSourceOwnershipId: String? = null,
     onSourceOwnership: (String, String) -> Unit = { _, _ -> },
     onConnectSetupItem: (OnboardingSetupItem) -> Unit = {},
     onSkipSetupItem: (OnboardingSetupItem) -> Unit = {},
+    continueEnabled: Boolean = true,
+    continueLoading: Boolean = false,
+    showImapLaterNotice: Boolean = false,
 ) {
     val requiredSection = stringResource(R.string.onb_setup_required_section)
     val recommendedSection = stringResource(R.string.onb_setup_recommended_section)
@@ -53,9 +58,10 @@ internal fun SourceConnectionsContent(
     val mailItems = items.filter { it.category == SourceConnectionCategory.Mail }
     val calendarItems = items.filter { it.category == SourceConnectionCategory.Calendar }
     val selfIdentityGateOpen = selfIdentity?.confirmed != false
-    val sourceOwnershipGateOpen = sourceOwnerships.none { it.ownership == "unknown" }
+    val sourceOwnershipGateOpen = sourceOwnershipsReady && sourceOwnerships.none { it.ownership == "unknown" }
     val showRequiredSetup = setupItems.isNotEmpty() || selfIdentity != null
     val showSetupRecommendedCalendar = setupItems.isNotEmpty() && calendarItems.isNotEmpty() && selfIdentityGateOpen
+    val showImapLaterNoticePanel = showImapLaterNotice && selfIdentityGateOpen && mailItems.isNotEmpty()
     LazyColumn(
         modifier = modifier.testTag("source-connections-list"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
@@ -143,6 +149,11 @@ internal fun SourceConnectionsContent(
                 onSkip = onSkip,
                 skipLabel = skipLabel,
             )
+            if (showImapLaterNoticePanel) {
+                item(key = "imap-later-notice") {
+                    ImapLaterNotice()
+                }
+            }
         }
         if (selfIdentityGateOpen && !showSetupRecommendedCalendar && calendarItems.isNotEmpty()) {
             sourceSection(
@@ -184,12 +195,30 @@ internal fun SourceConnectionsContent(
             BecalmButton(
                 text = continueLabel,
                 onClick = onContinue,
-                enabled = selfIdentityGateOpen && sourceOwnershipGateOpen,
+                enabled = continueEnabled && selfIdentityGateOpen && sourceOwnershipGateOpen,
+                loading = continueLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("source-connections-continue"),
             )
         }
+    }
+}
+
+@Composable
+private fun ImapLaterNotice() {
+    QuietPanel(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.onb_sources_imap_later_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.onb_sources_imap_later_body),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

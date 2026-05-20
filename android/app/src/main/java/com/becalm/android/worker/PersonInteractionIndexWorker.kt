@@ -12,6 +12,7 @@ import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.dao.CommitmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
@@ -19,10 +20,14 @@ import com.becalm.android.data.local.db.entity.PersonIndexDirtySourceEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
+import com.becalm.android.data.repository.coalesceSourceEventParticipantPersons
+import com.becalm.android.data.repository.preferStrongestIdentityRows
+import com.becalm.android.data.repository.preferStrongestPersonRows
 import com.becalm.android.data.repository.toPersonEntityOrNull
-import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
+import com.becalm.android.data.repository.toPersonIdentityEntities
 import com.becalm.android.domain.person.PersonIdentityResolver
 import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.domain.person.PersonMatchingEventPolicy
@@ -38,6 +43,15 @@ import kotlinx.datetime.Clock
 
 private fun interactionKindFor(sourceType: String): String = SourceInteractionKind.forSourceType(sourceType)
 
+private fun SourceEventParticipantEntity.isSourceLocalSpeakerLabelOnly(): Boolean {
+    val sourceLocalIdentity = identityType?.let(PersonIdentityTypes::isSourceLocal) == true
+    if (!sourceLocalIdentity) return false
+    val hasRealContact = !emailRaw.isNullOrBlank() || !phoneRaw.isNullOrBlank() || !organizationRaw.isNullOrBlank()
+    val hasRealDisplayName = !displayNameRaw.isNullOrBlank() &&
+        !PersonIdentityResolver.isSpeakerLabelValue(displayNameRaw)
+    return !hasRealContact && !hasRealDisplayName
+}
+
 @HiltWorker
 public class PersonInteractionIndexWorker @AssistedInject constructor(
     @Assisted appContext: Context,
@@ -46,6 +60,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private val rawDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
+    private val selfIdentityAnchorDaoProvider: Provider<SelfIdentityAnchorDao>,
     private val userPrefsStore: UserPrefsStore,
     private val workScheduler: WorkScheduler,
     private val logger: Logger,
@@ -66,11 +81,12 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             userId = userId,
             dirtySources = dirtySources,
         )
+        val sourceParticipants = projectionInput.sourceParticipants.coalesceSourceEventParticipantPersons()
 
         val sourceRecords = buildSourceRecords(
             rawEvents = projectionInput.rawEvents,
             commitments = projectionInput.commitments,
-            sourceParticipants = projectionInput.sourceParticipants,
+            sourceParticipants = sourceParticipants,
             commitmentParticipants = projectionInput.commitmentParticipants,
         )
         val changedRecords = sourceRecords
@@ -98,15 +114,43 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             return@withContext Result.success()
         }
 
+        val incomingRepairedPersons = sourceParticipants
+            .mapNotNull { it.toPersonEntityOrNull() }
+            .preferStrongestPersonRows()
+        val existingRepairedPersons = incomingRepairedPersons
+            .map { it.id }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { dao.findPersonsByIds(userId = userId, personIds = it) }
+            .orEmpty()
+        val repairedPersons = (existingRepairedPersons + incomingRepairedPersons).preferStrongestPersonRows()
+
+        val incomingRepairedIdentities = sourceParticipants
+            .flatMap { it.toPersonIdentityEntities() }
+            .preferStrongestIdentityRows()
+        val existingRepairedIdentities = incomingRepairedIdentities
+            .map { it.id }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { dao.findIdentitiesByIds(userId = userId, identityIds = it) }
+            .orEmpty()
+        val repairedIdentities = (existingRepairedIdentities + incomingRepairedIdentities).preferStrongestIdentityRows()
+        val learnedIdentityRules = LearnedIdentityRules.from(
+            userId = userId,
+            identities = projectionInput.personIdentities + repairedIdentities,
+            sourceParticipants = sourceParticipants,
+            selfAnchors = projectionInput.selfIdentityAnchors,
+        )
+        val commitmentLinkedSourcePeople = projectionInput.commitmentLinkedSourcePeople()
         val builder = PersonIndexBuild(
             userId = userId,
             blockedPersonRefs = blockedPersonRefs,
+            learnedIdentityRules = learnedIdentityRules,
+            commitmentLinkedSourcePeople = commitmentLinkedSourcePeople,
         )
         changedRecords.forEach { it.applyTo(builder) }
 
         val snapshot = builder.snapshot()
-        val repairedPersons = projectionInput.sourceParticipants.mapNotNull { it.toPersonEntityOrNull() }
-        val repairedIdentities = projectionInput.sourceParticipants.mapNotNull { it.toPersonIdentityEntityOrNull() }
         val affectedPersonIds = (
             previousAffectedPersonIds +
                 repairedPersons.map { it.id } +
@@ -189,6 +233,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 commitments = commitmentDaoProvider.get().findLiveForPersonIndex(userId),
                 sourceParticipants = personIndexDaoProvider.get().findSourceEventParticipantsForUser(userId),
                 commitmentParticipants = personIndexDaoProvider.get().findCommitmentParticipantsForUser(userId),
+                personIdentities = personIndexDaoProvider.get().findIdentitiesForUser(userId),
+                selfIdentityAnchors = selfIdentityAnchorDaoProvider.get().observeActive(userId).first(),
             )
         }
 
@@ -201,21 +247,41 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     .takeIf { id -> it.sourceRef.startsWith("commitment:") && id.isNotBlank() }
             }
             .distinct()
+        val dirtyCommitments = commitmentIds.takeIf { it.isNotEmpty() }
+            ?.let { commitmentDaoProvider.get().findLiveByIdsForPersonIndex(userId, it) }
+            ?: emptyList()
+        val rawEventsByIds = rawEventIds.takeIf { it.isNotEmpty() }
+            ?.let { rawDaoProvider.get().findByIdsForUser(userId, it) }
+            ?: emptyList()
+        val rawEventsByCommitmentSourceRefs = dirtyCommitments
+            .mapNotNull { it.sourceRef?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { rawDaoProvider.get().findBySourceRefsForUser(userId, it) }
+            ?: emptyList()
+        val sourceParticipantRawEventIds = (rawEventIds + rawEventsByCommitmentSourceRefs.map { it.id })
+            .distinct()
+        val dirtySourceParticipants = sourceParticipantRawEventIds.takeIf { it.isNotEmpty() }
+            ?.let { personIndexDaoProvider.get().findSourceEventParticipantsForUserAndEventIds(userId, it) }
+            ?: emptyList()
+        val rawEventsBySourceParticipantRefs = dirtySourceParticipants
+            .mapNotNull { it.sourceRef?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.let { rawDaoProvider.get().findBySourceRefsForUser(userId, it) }
+            ?: emptyList()
         return ProjectionInput(
             mode = "dirty",
             dirtySources = dirtySources,
-            rawEvents = rawEventIds.takeIf { it.isNotEmpty() }
-                ?.let { rawDaoProvider.get().findByIdsForUser(userId, it) }
-                ?: emptyList(),
-            commitments = commitmentIds.takeIf { it.isNotEmpty() }
-                ?.let { commitmentDaoProvider.get().findLiveByIdsForPersonIndex(userId, it) }
-                ?: emptyList(),
-            sourceParticipants = rawEventIds.takeIf { it.isNotEmpty() }
-                ?.let { personIndexDaoProvider.get().findSourceEventParticipantsForUserAndEventIds(userId, it) }
-                ?: emptyList(),
+            rawEvents = (rawEventsByIds + rawEventsByCommitmentSourceRefs + rawEventsBySourceParticipantRefs)
+                .distinctBy { it.id },
+            commitments = dirtyCommitments,
+            sourceParticipants = dirtySourceParticipants,
             commitmentParticipants = commitmentIds.takeIf { it.isNotEmpty() }
                 ?.let { personIndexDaoProvider.get().findCommitmentParticipantsForUserAndCommitmentIds(userId, it) }
                 ?: emptyList(),
+            personIdentities = personIndexDaoProvider.get().findIdentitiesForUser(userId),
+            selfIdentityAnchors = selfIdentityAnchorDaoProvider.get().observeActive(userId).first(),
         )
     }
 
@@ -237,15 +303,21 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     ): List<SourceRecord> {
         val records = mutableListOf<SourceRecord>()
         val rawById = rawEvents.associateBy { it.id }
+        val rawBySourceRef = rawEvents
+            .mapNotNull { raw -> raw.sourceRef?.let { (raw.sourceType to it) to raw } }
+            .toMap()
         val commitmentsById = commitments.associateBy { it.id }
 
         sourceParticipants
             .groupBy { it.sourceType to it.sourceEventId }
             .forEach { (sourceKey, participants) ->
-                val raw = rawById[sourceKey.second]
+                val raw = rawById[sourceKey.second] ?: participants.firstNotNullOfOrNull { participant ->
+                    participant.sourceRef?.let { sourceRef -> rawBySourceRef[participant.sourceType to sourceRef] }
+                }
+                val localSourceEventId = raw?.id ?: sourceKey.second
                 val key = SourceKey(
                     sourceType = sourceKey.first,
-                    sourceRef = "raw:${sourceKey.second}",
+                    sourceRef = "raw:$localSourceEventId",
                     interactionKind = interactionKindFor(sourceKey.first),
                 )
                 records += SourceRecord(
@@ -271,7 +343,12 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     key = key,
                     applyTo = { builder ->
                         participants.forEach { participant ->
-                            builder.addCommitmentParticipant(participant, commitment)
+                            val commitmentSourceRef = commitment.sourceRef
+                            builder.addCommitmentParticipant(
+                                participant = participant,
+                                commitment = commitment,
+                                raw = commitmentSourceRef?.let { rawBySourceRef[commitment.sourceType to it] },
+                            )
                         }
                     },
                 )
@@ -289,6 +366,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
     private class PersonIndexBuild(
         private val userId: String,
         private val blockedPersonRefs: Set<String>,
+        private val learnedIdentityRules: LearnedIdentityRules,
+        private val commitmentLinkedSourcePeople: Set<SourcePersonKey>,
     ) {
         private val now = Clock.System.now()
         private val identities = linkedMapOf<String, PersonIdentityEntity>()
@@ -299,7 +378,9 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             participant: SourceEventParticipantEntity,
             raw: RawIngestionEventEntity?,
         ) {
-            val sourceRef = "raw:${participant.sourceEventId}"
+            if (participant.isSourceLocalSpeakerLabelOnly()) return
+            val localSourceEventId = raw?.id ?: participant.sourceEventId
+            val sourceRef = "raw:$localSourceEventId"
             val kind = interactionKindFor(participant.sourceType)
             val anchor = participant.emailRaw
                 ?: participant.phoneRaw
@@ -307,9 +388,38 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 ?: participant.displayNameRaw
                 ?: participant.organizationRaw
             if (shouldSuppress(anchor)) return
-            if (shouldSuppressServiceLifecyclePersonProjection(participant, raw, anchor)) return
+            if (
+                shouldSuppressServiceLifecyclePersonProjection(participant, raw, anchor) &&
+                participant.toSourcePersonKey() !in commitmentLinkedSourcePeople
+            ) {
+                return
+            }
             val occurredAt = raw?.timestamp ?: participant.createdAt
             if (participant.personId.isNullOrBlank()) {
+                if (participant.resolutionStatus == "suggested_self" && participant.relationToUser == "self") return
+                when (val selfMatch = learnedIdentityRules.matchSelf(participant)) {
+                    SelfIdentityRuleMatch.SELF_RESOLVED -> return
+                    SelfIdentityRuleMatch.SUGGESTED_SELF -> {
+                        if (participant.resolutionStatus !in REVIEWABLE_PARTICIPANT_STATUSES) return
+                    }
+                    null -> Unit
+                }
+                learnedIdentityRules.matchPerson(participant)?.let { learnedPerson ->
+                    upsertInteraction(
+                        personId = learnedPerson.personId,
+                        sourceType = participant.sourceType,
+                        sourceRef = sourceRef,
+                        kind = kind,
+                        role = participant.role,
+                        direction = raw?.folder?.let(::folderDirection),
+                        status = null,
+                        occurredAt = occurredAt,
+                        title = raw?.eventTitle,
+                        snippet = raw?.eventSnippet ?: participant.evidence,
+                        confidence = maxOf(participant.confidence, learnedPerson.confidence),
+                    )
+                    return
+                }
                 if (participant.resolutionStatus in REVIEWABLE_PARTICIPANT_STATUSES) {
                     val suggestedLabel = participant.displayNameRaw
                         ?: participant.emailRaw
@@ -347,6 +457,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         fun addCommitmentParticipant(
             participant: CommitmentParticipantEntity,
             commitment: CommitmentEntity,
+            raw: RawIngestionEventEntity?,
         ) {
             if (participant.personId.isBlank()) return
             upsertInteraction(
@@ -361,6 +472,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                     CommitmentItemType.DECISION -> commitment.decisionStatus
                     else -> commitment.actionState
                 },
+                sourceEventId = raw?.id ?: commitment.sourceEventIdForInteraction(),
+                commitmentId = commitment.id,
                 occurredAt = commitment.sourceEventOccurredAt,
                 title = commitment.title,
                 snippet = commitment.quote,
@@ -382,7 +495,15 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             val personId = participant.personId ?: return
             val identityType = participant.identityType ?: return
             if (PersonIdentityTypes.isSourceLocal(identityType)) return
-            val normalized = participant.normalizedValue ?: return
+            val normalized = when (identityType) {
+                "email" -> PersonIdentityResolver.normalizeRelationEmailAnchor(participant.emailRaw)
+                    ?: PersonIdentityResolver.normalizeRelationEmailAnchor(participant.normalizedValue)
+                    ?: return
+                "phone" -> PersonIdentityResolver.normalizePhoneAnchor(participant.phoneRaw)
+                    ?: PersonIdentityResolver.normalizePhoneAnchor(participant.normalizedValue)
+                    ?: return
+                else -> participant.normalizedValue ?: return
+            }
             val identityKey = "$identityType:$normalized"
             val rawValue = when (identityType) {
                 "email" -> participant.emailRaw ?: normalized
@@ -392,7 +513,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 else -> normalized
             }
             val previous = identities[identityKey]
-            identities[identityKey] = PersonIdentityEntity(
+            val candidate = PersonIdentityEntity(
                 id = PersonIdentityResolver.stableIdentityId(userId, identityKey),
                 userId = userId,
                 personId = personId,
@@ -411,6 +532,14 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 lastSeenAt = maxOf(previous?.lastSeenAt ?: lastSeenAt, lastSeenAt),
                 createdAt = previous?.createdAt ?: participant.createdAt,
                 updatedAt = maxOf(previous?.updatedAt ?: participant.createdAt, participant.createdAt),
+            )
+            val strongest = listOfNotNull(previous, candidate).preferStrongestIdentityRows().single()
+            identities[identityKey] = strongest.copy(
+                confidence = maxOf(previous?.confidence ?: 0.0, candidate.confidence),
+                verified = previous?.verified == true || candidate.verified,
+                lastSeenAt = maxOf(previous?.lastSeenAt ?: lastSeenAt, lastSeenAt),
+                createdAt = previous?.createdAt ?: candidate.createdAt,
+                updatedAt = maxOf(previous?.updatedAt ?: candidate.updatedAt, candidate.updatedAt),
             )
         }
 
@@ -440,6 +569,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             role: String,
             direction: String?,
             status: String?,
+            sourceEventId: String? = sourceRef.removePrefix("raw:").takeIf { sourceRef.startsWith("raw:") },
+            commitmentId: String? = sourceRef.removePrefix("commitment:").takeIf { sourceRef.startsWith("commitment:") },
             occurredAt: kotlinx.datetime.Instant,
             title: String?,
             snippet: String?,
@@ -455,6 +586,8 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
                 sourceType = sourceType,
                 sourceRef = sourceRef,
                 interactionKind = kind,
+                sourceEventId = sourceEventId,
+                commitmentId = commitmentId,
                 role = role,
                 direction = direction,
                 status = status,
@@ -476,6 +609,7 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         ) {
             val hasUserVisibleContent = listOf(title, snippet, suggestedLabel).any { !it.isNullOrBlank() }
             if (!hasUserVisibleContent) return
+            if (PersonIdentityResolver.isSpeakerLabelValue(suggestedLabel)) return
             if (PersonMatchingEventPolicy.isLikelyServiceAccountNotification(title, snippet, suggestedLabel)) return
             val id = UUID.nameUUIDFromBytes(
                 "unmatched:$userId:$sourceType:$sourceRef:$kind".toByteArray(Charsets.UTF_8),
@@ -500,6 +634,21 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
             else -> null
         }
 
+        private fun CommitmentEntity.sourceEventIdForInteraction(): String? =
+            sourceRef?.trim()
+                ?.takeIf { it.startsWith("raw:") }
+                ?.removePrefix("raw:")
+                ?.takeIf { it.isNotBlank() }
+
+        private fun SourceEventParticipantEntity.toSourcePersonKey(): SourcePersonKey? {
+            val participantPersonId = personId ?: return null
+            return SourcePersonKey(
+                sourceType = sourceType,
+                sourceEventId = sourceEventId,
+                personId = participantPersonId,
+            )
+        }
+
     }
 
     private data class Snapshot(
@@ -515,7 +664,191 @@ public class PersonInteractionIndexWorker @AssistedInject constructor(
         val commitments: List<CommitmentEntity>,
         val sourceParticipants: List<SourceEventParticipantEntity>,
         val commitmentParticipants: List<CommitmentParticipantEntity>,
+        val personIdentities: List<PersonIdentityEntity>,
+        val selfIdentityAnchors: List<SelfIdentityAnchorEntity>,
     )
+
+    private fun ProjectionInput.commitmentLinkedSourcePeople(): Set<SourcePersonKey> {
+        if (commitments.isEmpty() || commitmentParticipants.isEmpty()) return emptySet()
+        val rawBySourceRef = rawEvents
+            .mapNotNull { raw -> raw.sourceRef?.let { (raw.sourceType to it) to raw } }
+            .toMap()
+        val commitmentsById = commitments.associateBy { it.id }
+        return commitmentParticipants.mapNotNull { participant ->
+            val commitment = commitmentsById[participant.commitmentId] ?: return@mapNotNull null
+            val sourceEventId = commitment.sourceRef
+                ?.let { rawBySourceRef[commitment.sourceType to it]?.id }
+                ?: commitment.sourceRef
+                    ?.trim()
+                    ?.takeIf { it.startsWith("raw:") }
+                    ?.removePrefix("raw:")
+                    ?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            SourcePersonKey(
+                sourceType = commitment.sourceType,
+                sourceEventId = sourceEventId,
+                personId = participant.personId,
+            )
+        }.toSet()
+    }
+
+    private data class SourcePersonKey(
+        val sourceType: String,
+        val sourceEventId: String,
+        val personId: String,
+    )
+
+    private data class LearnedPersonIdentityRule(
+        val personId: String,
+        val identityType: String,
+        val normalizedValue: String,
+        val confidence: Double,
+    )
+
+    private enum class SelfIdentityRuleMatch {
+        SELF_RESOLVED,
+        SUGGESTED_SELF,
+    }
+
+    private data class LearnedSelfIdentityRule(
+        val identityType: String,
+        val normalizedValue: String,
+        val match: SelfIdentityRuleMatch,
+    )
+
+    private class LearnedIdentityRules(
+        private val personRulesByKey: Map<String, LearnedPersonIdentityRule>,
+        private val selfRulesByKey: Map<String, SelfIdentityRuleMatch>,
+    ) {
+        fun matchPerson(participant: SourceEventParticipantEntity): LearnedPersonIdentityRule? =
+            identityKeysForRuleMatching(participant, AUTO_PERSON_IDENTITY_TYPES)
+                .firstNotNullOfOrNull { personRulesByKey[it] }
+
+        fun matchSelf(participant: SourceEventParticipantEntity): SelfIdentityRuleMatch? =
+            identityKeysForRuleMatching(participant, AUTO_SELF_IDENTITY_TYPES)
+                .firstNotNullOfOrNull { selfRulesByKey[it] }
+
+        companion object {
+            private val AUTO_PERSON_IDENTITY_TYPES = setOf("email", "phone")
+            private val AUTO_SELF_IDENTITY_TYPES = setOf("email", "phone", "alias")
+            private val STRONG_SELF_IDENTITY_TYPES = setOf("email", "phone")
+
+            fun from(
+                userId: String,
+                identities: List<PersonIdentityEntity>,
+                sourceParticipants: List<SourceEventParticipantEntity>,
+                selfAnchors: List<SelfIdentityAnchorEntity>,
+            ): LearnedIdentityRules {
+                val personRules = linkedMapOf<String, LearnedPersonIdentityRule>()
+                identities.asSequence()
+                    .filter { it.userId == userId && it.identityType in AUTO_PERSON_IDENTITY_TYPES }
+                    .forEach { identity ->
+                        val normalized = normalizeIdentityForRule(identity.identityType, identity.normalizedValue)
+                            ?: return@forEach
+                        val key = identityRuleKey(identity.identityType, normalized)
+                        val previous = personRules[key]
+                        if (previous == null || identity.confidence > previous.confidence) {
+                            personRules[key] = LearnedPersonIdentityRule(
+                                personId = identity.personId,
+                                identityType = identity.identityType,
+                                normalizedValue = normalized,
+                                confidence = identity.confidence,
+                            )
+                        }
+                    }
+
+                val selfRules = linkedMapOf<String, SelfIdentityRuleMatch>()
+                selfAnchors.asSequence()
+                    .filter { it.userId == userId && it.status == "active" && it.scope != "source_event" }
+                    .mapNotNull { it.toLearnedSelfIdentityRule() }
+                    .forEach { rule ->
+                        selfRules[identityRuleKey(rule.identityType, rule.normalizedValue)] = rule.match
+                    }
+                sourceParticipants.asSequence()
+                    .filter { it.userId == userId && it.resolutionStatus == "self_resolved" }
+                    .flatMap { identityKeysForRuleMatching(it, AUTO_SELF_IDENTITY_TYPES).asSequence() }
+                    .forEach { key -> selfRules[key] = SelfIdentityRuleMatch.SELF_RESOLVED }
+
+                return LearnedIdentityRules(
+                    personRulesByKey = personRules,
+                    selfRulesByKey = selfRules,
+                )
+            }
+
+            private fun identityKeysForRuleMatching(
+                participant: SourceEventParticipantEntity,
+                types: Set<String>,
+            ): List<String> =
+                buildList {
+                    if ("email" in types) {
+                        PersonIdentityResolver.normalizeRelationEmailAnchor(participant.emailRaw)
+                            ?.let { add(identityRuleKey("email", it)) }
+                        participant.normalizedValue
+                            .takeIf { participant.identityType == "email" }
+                            ?.let(PersonIdentityResolver::normalizeRelationEmailAnchor)
+                            ?.let { add(identityRuleKey("email", it)) }
+                    }
+                    if ("phone" in types) {
+                        PersonIdentityResolver.normalizePhoneAnchor(participant.phoneRaw)
+                            ?.let { add(identityRuleKey("phone", it)) }
+                        participant.normalizedValue
+                            .takeIf { participant.identityType == "phone" }
+                            ?.let(PersonIdentityResolver::normalizePhoneAnchor)
+                            ?.let { add(identityRuleKey("phone", it)) }
+                    }
+                    if ("alias" in types) {
+                        participant.normalizedValue
+                            .takeIf { participant.identityType in setOf("alias", "name") }
+                            ?.let(PersonIdentityResolver::normalizeAlias)
+                            ?.let { add(identityRuleKey("alias", it)) }
+                        participant.displayNameRaw
+                            ?.let(PersonIdentityResolver::normalizeAlias)
+                            ?.let { add(identityRuleKey("alias", it)) }
+                    }
+                }.distinct()
+
+            private fun SelfIdentityAnchorEntity.toLearnedSelfIdentityRule(): LearnedSelfIdentityRule? {
+                val identityType = when (anchorType) {
+                    "auth_email",
+                    "provider_email",
+                    "email",
+                    -> "email"
+
+                    "phone" -> "phone"
+                    "alias",
+                    "name",
+                    -> "alias"
+
+                    else -> return null
+                }
+                val normalized = normalizeIdentityForRule(identityType, normalizedValue) ?: return null
+                val match = if (identityType in STRONG_SELF_IDENTITY_TYPES || trust == "user_confirmed") {
+                    SelfIdentityRuleMatch.SELF_RESOLVED
+                } else {
+                    SelfIdentityRuleMatch.SUGGESTED_SELF
+                }
+                return LearnedSelfIdentityRule(
+                    identityType = identityType,
+                    normalizedValue = normalized,
+                    match = match,
+                )
+            }
+
+            private fun normalizeIdentityForRule(identityType: String, value: String?): String? =
+                when (identityType) {
+                    "email" -> PersonIdentityResolver.normalizeRelationEmailAnchor(value)
+                    "phone" -> PersonIdentityResolver.normalizePhoneAnchor(value)
+                    "alias",
+                    "name",
+                    -> PersonIdentityResolver.normalizeAlias(value)
+
+                    else -> null
+                }
+
+            private fun identityRuleKey(identityType: String, normalizedValue: String): String =
+                "$identityType:$normalizedValue"
+        }
+    }
 
     private data class SourceKey(
         val sourceType: String,

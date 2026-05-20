@@ -2,6 +2,8 @@ package com.becalm.android.ui.evidence
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.ui.components.uiMessageStringResource
 
 @Stable
@@ -102,6 +105,7 @@ public fun EvidenceImportSheetHost(
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onMeetingPreviewLoadingCancelled: () -> Unit = {},
     onReviewRequiredClick: (() -> Unit)? = null,
 ) {
     state.statusMessage?.let { message ->
@@ -120,7 +124,10 @@ public fun EvidenceImportSheetHost(
         )
     }
     if (state.loadingMessage != null) {
-        EvidenceImportLoadingSheet(message = stringResource(R.string.evidence_import_meeting_preview_loading))
+        EvidenceImportLoadingSheet(
+            message = uiMessageStringResource(state.loadingMessage),
+            onDismiss = onMeetingPreviewLoadingCancelled,
+        )
     }
     if (controller.isSheetVisible) {
         EvidenceImportSheet(
@@ -174,21 +181,33 @@ private fun EvidenceImportStatusBanner(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EvidenceImportLoadingSheet(message: String) {
-    ModalBottomSheet(onDismissRequest = {}) {
-        Row(
+private fun EvidenceImportLoadingSheet(
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 28.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.width(14.dp))
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(14.dp))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(text = stringResource(R.string.action_cancel))
+            }
         }
     }
 }
@@ -201,20 +220,34 @@ private fun MeetingSpeakerReviewSheet(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val isCall = review.sourceType == SourceType.CALL_RECORDING
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
         ) {
             Text(
-                text = stringResource(R.string.evidence_import_meeting_review_title),
+                text = stringResource(
+                    if (isCall) {
+                        R.string.evidence_import_call_review_title
+                    } else {
+                        R.string.evidence_import_meeting_review_title
+                    },
+                ),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = stringResource(R.string.evidence_import_meeting_review_body),
+                text = stringResource(
+                    if (isCall) {
+                        R.string.evidence_import_call_review_body
+                    } else {
+                        R.string.evidence_import_meeting_review_body
+                    },
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -237,7 +270,7 @@ private fun MeetingSpeakerReviewSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(
-                            selected = review.selectedSelfSpeakerId == speaker.speakerId,
+                            selected = review.selectedSpeakerId == speaker.speakerId,
                             onClick = { onSelect(speaker.speakerId) },
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -275,10 +308,18 @@ private fun MeetingSpeakerReviewSheet(
                 Spacer(modifier = Modifier.width(10.dp))
                 Button(
                     onClick = onConfirm,
-                    enabled = review.selectedSelfSpeakerId != null,
+                    enabled = review.selectedSpeakerId != null,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(stringResource(R.string.evidence_import_meeting_review_confirm))
+                    Text(
+                        stringResource(
+                            if (isCall) {
+                                R.string.evidence_import_call_review_confirm
+                            } else {
+                                R.string.evidence_import_meeting_review_confirm
+                            },
+                        ),
+                    )
                 }
             }
         }
@@ -383,7 +424,7 @@ private fun EvidenceImportActionRow(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

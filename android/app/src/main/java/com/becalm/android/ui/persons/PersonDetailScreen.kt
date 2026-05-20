@@ -52,7 +52,8 @@ import com.becalm.android.ui.theme.BecalmTheme
 
 /**
  * Person detail screen — renders a [PersonHeader] plus a source-filtered unified
- * timeline built from commitments, raw events, and meetings.
+ * timeline of original interaction records. Extracted give/take/schedule items are
+ * shown after opening a source record, not inline in the timeline.
  *
  * spec: SRC-003, SRC-004, SRC-005, SRC-008, ENR-006
  *
@@ -274,7 +275,6 @@ private enum class PersonTimelineFilter {
     EMAIL,
     CALL,
     MEETING,
-    COMMITMENT,
 }
 
 @Composable
@@ -288,7 +288,6 @@ private fun TimelineFilterRow(
         PersonTimelineFilter.EMAIL to stringResource(R.string.person_detail_filter_email),
         PersonTimelineFilter.CALL to stringResource(R.string.person_detail_filter_call),
         PersonTimelineFilter.MEETING to stringResource(R.string.person_detail_filter_meeting),
-        PersonTimelineFilter.COMMITMENT to stringResource(R.string.person_detail_filter_commitment),
     )
     LazyRow(
         modifier = modifier
@@ -315,8 +314,6 @@ private fun PersonTimelineFilter.matches(card: SourceEventCardProjection): Boole
     PersonTimelineFilter.EMAIL -> card.sourceType.isEmailSource()
     PersonTimelineFilter.CALL -> card.sourceType.isCallSource()
     PersonTimelineFilter.MEETING -> card.sourceType.isMeetingTimelineSource()
-    PersonTimelineFilter.COMMITMENT ->
-        card.myActions.isNotEmpty() || card.theirActions.isNotEmpty() || card.schedules.isNotEmpty()
 }
 
 @Composable

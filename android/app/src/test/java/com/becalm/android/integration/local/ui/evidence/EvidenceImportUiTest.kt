@@ -89,7 +89,8 @@ class EvidenceImportUiTest {
                     onMeetingAudioImport = {},
                     state = EvidenceImportUiState(
                         meetingReview = MeetingSpeakerReviewUiState(
-                            audioUri = android.net.Uri.parse("content://meeting/audio"),
+                            rawEventId = "raw-meeting-1",
+                            sourceRef = "content://meeting/audio",
                             speakerPreviewId = "preview-1",
                             speakers = listOf(
                                 MeetingSpeakerPreviewDto("SPEAKER_01", listOf("제가 자료 보낼게요."), 0.0, 12.0),

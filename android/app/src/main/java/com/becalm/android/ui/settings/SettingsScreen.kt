@@ -40,8 +40,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -374,10 +376,21 @@ internal fun SettingsToggleRow(
     modifier: Modifier = Modifier,
     toggleTestTag: String? = null,
 ) {
+    val stateLabel = if (checked) {
+        stringResource(R.string.settings_toggle_on)
+    } else {
+        stringResource(R.string.settings_toggle_off)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp)
+            .semantics(mergeDescendants = true) {
+                role = Role.Switch
+                contentDescription = label
+                stateDescription = stateLabel
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -389,7 +402,11 @@ internal fun SettingsToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            modifier = if (toggleTestTag != null) Modifier.testTag(toggleTestTag) else Modifier,
+            modifier = (if (toggleTestTag != null) Modifier.testTag(toggleTestTag) else Modifier)
+                .semantics {
+                    contentDescription = label
+                    stateDescription = stateLabel
+                },
         )
     }
 }

@@ -69,6 +69,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -81,8 +82,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             personAnchor = NAVER_EMAIL,
             nickname = NAVER_NICKNAME,
         )
-        assertTrue(result is BecalmResult.Success)
-        assertEquals(1, scheduler.personIndexEnqueueCount)
+        assertTrue(result is BecalmResult.Failure)
+        assertEquals(0, scheduler.personIndexEnqueueCount)
 
         newWorker().doWork()
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
@@ -123,6 +124,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         } returns Response.success(sourceParticipantResponse("participant-unresolved-1"))
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -154,6 +156,80 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals("email", patchSlot.captured.identityType)
         assertEquals(CUSTOMER_EMAIL, patchSlot.captured.normalizedValue)
         assertEquals("resolved", patchSlot.captured.resolutionStatus)
+    }
+
+    @Test
+    fun `manual match is reused for later unresolved participant with same email`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-relation-1", snippet = "Steve 검토 필요"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-unresolved-1",
+                    sourceEventId = "raw-relation-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-1",
+                    displayName = "Steve",
+                ),
+            ),
+        )
+        newWorker().doWork()
+
+        val api = mockk<RailwayApi>()
+        val patchSlot = slot<SourceEventParticipantPatchRequestDto>()
+        coEvery {
+            api.patchSourceEventParticipant(
+                participantId = "participant-unresolved-1",
+                request = capture(patchSlot),
+            )
+        } returns Response.success(sourceParticipantResponse("participant-unresolved-1"))
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            workScheduler = scheduler,
+            apiProvider = Provider { api },
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        assertTrue(
+            repository.matchInteraction(
+                userId = USER_ID,
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw:raw-relation-1",
+                interactionKind = "email",
+                personAnchor = CUSTOMER_EMAIL,
+                nickname = "Customer",
+            ) is BecalmResult.Success,
+        )
+        newWorker().doWork()
+
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-relation-2", snippet = "Customer 추가 검토 필요"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-future-1",
+                    sourceEventId = "raw-relation-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-2",
+                    displayName = "Customer",
+                ).copy(
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = CUSTOMER_EMAIL,
+                    emailRaw = CUSTOMER_EMAIL,
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 10).first()
+        assertEquals(
+            listOf("raw:raw-relation-1", "raw:raw-relation-2"),
+            interactions.map { it.sourceRef }.sorted(),
+        )
     }
 
     @Test
@@ -199,10 +275,11 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         )
 
         newWorker().doWork()
-        assertEquals(1, db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).size)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -231,6 +308,54 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         val identities = db.personIndexDao().findIdentitiesForMemory(USER_ID, personId)
         assertTrue(identities.none { it.identityType == "speaker_label" })
         assertEquals(1, scheduler.personIndexEnqueueCount)
+    }
+
+    @Test
+    fun `manual match rejects raw speaker label as person anchor`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-speaker-reject", snippet = "금요일까지 자료 공유"))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-speaker-reject",
+                    sourceEventId = "raw-speaker-reject",
+                    sourceType = SourceType.CALL_RECORDING,
+                    sourceRef = "call-file-1",
+                    displayName = "SPEAKER_02",
+                ).copy(
+                    role = "speaker",
+                    relationToUser = "counterparty",
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    confidence = 0.0,
+                ),
+            ),
+        )
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+
+        val result = repository.matchInteraction(
+            userId = USER_ID,
+            sourceType = SourceType.CALL_RECORDING,
+            sourceRef = "raw:raw-speaker-reject",
+            interactionKind = "call",
+            personAnchor = "SPEAKER_02",
+            nickname = null,
+        )
+
+        assertTrue(result is BecalmResult.Failure)
+        val participants = db.personIndexDao().findSourceEventParticipantsForUserAndEventIds(
+            userId = USER_ID,
+            sourceEventIds = listOf("raw-speaker-reject"),
+        )
+        assertEquals(null, participants.single().personId)
+        assertEquals("speaker_label", participants.single().identityType)
     }
 
     @Test
@@ -267,6 +392,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         } returns Response.success(sourceParticipantResponse("participant-self-1"))
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -287,6 +413,8 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals("self", participant.relationToUser)
         assertEquals("self_resolved", participant.resolutionStatus)
         assertEquals(null, participant.personId)
+        val selfAnchors = db.selfIdentityAnchorDao().observeActive(USER_ID).first()
+        assertTrue(selfAnchors.any { it.anchorType == "email" && it.normalizedValue == "me@example.com" })
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
         assertEquals(1, scheduler.personIndexEnqueueCount)
 
@@ -303,6 +431,69 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals("me@example.com", selfPatchSlot.captured.emailRaw)
         assertEquals("self", selfPatchSlot.captured.relationToUser)
         assertEquals("self_resolved", selfPatchSlot.captured.resolutionStatus)
+    }
+
+    @Test
+    fun `self match is reused for later unresolved participant with same email`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-self-1", snippet = "제가 금요일까지 보내겠습니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-self-1",
+                    sourceEventId = "raw-self-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-self",
+                    displayName = "me@example.com",
+                ).copy(
+                    relationToUser = "participant",
+                    identityType = "email",
+                    normalizedValue = "me@example.com",
+                    emailRaw = "me@example.com",
+                ),
+            ),
+        )
+        newWorker().doWork()
+
+        val repository = PersonManualMatchRepositoryImpl(
+            personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
+            workScheduler = scheduler,
+            logger = logger,
+            ioDispatcher = dispatcher,
+        )
+        assertTrue(
+            repository.matchInteractionAsSelf(
+                userId = USER_ID,
+                sourceType = SourceType.GMAIL,
+                sourceRef = "raw:raw-self-1",
+                interactionKind = "email",
+            ) is BecalmResult.Success,
+        )
+        newWorker().doWork()
+
+        db.rawIngestionEventDao().insert(rawEvent(id = "raw-self-2", snippet = "제가 다음 주까지 공유하겠습니다."))
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-self-2",
+                    sourceEventId = "raw-self-2",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-self-2",
+                    displayName = "me@example.com",
+                ).copy(
+                    relationToUser = "participant",
+                    identityType = "email",
+                    normalizedValue = "me@example.com",
+                    emailRaw = "me@example.com",
+                ),
+            ),
+        )
+
+        newWorker().doWork()
+
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 10).isEmpty())
+        assertTrue(db.personIndexDao().observeAggregates(USER_ID, limit = 10).first().isEmpty())
     }
 
     @Test
@@ -333,6 +524,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
 
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             logger = logger,
             ioDispatcher = dispatcher,
@@ -387,6 +579,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         } returns Response.success(sourceParticipantResponse("participant-not-self-1"))
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -446,6 +639,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         } throws IOException("offline")
         val repository = PersonManualMatchRepositoryImpl(
             personIndexDao = db.personIndexDao(),
+            selfIdentityAnchorDao = db.selfIdentityAnchorDao(),
             workScheduler = scheduler,
             apiProvider = Provider { api },
             logger = logger,
@@ -468,10 +662,11 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         assertEquals("resolved", pending.resolutionStatus)
         assertEquals(CUSTOMER_EMAIL, pending.normalizedValue)
 
+        val retryWorkerPatchSlot = slot<SourceEventParticipantPatchRequestDto>()
         coEvery {
             api.patchSourceEventParticipant(
                 participantId = "participant-retry-1",
-                request = retryPatchSlot.captured,
+                request = capture(retryWorkerPatchSlot),
             )
         } returns Response.success(sourceParticipantResponse("participant-retry-1"))
 
@@ -488,6 +683,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             rawDaoProvider = Provider { db.rawIngestionEventDao() },
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
+            selfIdentityAnchorDaoProvider = Provider { db.selfIdentityAnchorDao() },
             userPrefsStore = userPrefsStore,
             workScheduler = scheduler,
             logger = logger,
@@ -630,6 +826,7 @@ class PersonManualMatchPipelineLocalIntegrationTest {
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
+        override fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -638,9 +835,13 @@ class PersonManualMatchPipelineLocalIntegrationTest {
             selfSpeakerId: String?,
             speakerMappingsJson: String?,
             speakerPreviewId: String?,
+            extractionJobId: String?,
+            extractionJobPollAttempt: Int,
         ) = Unit
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit
+        override fun enqueueProcessDone(initialDelaySeconds: Long) = Unit
+        override fun scheduleProcessDoneSweep() = Unit
         override fun enqueueDeferredColdSyncStage1() = Unit
         override fun enqueueColdSyncStage2() = Unit
         override fun cancelColdSyncStage2() = Unit

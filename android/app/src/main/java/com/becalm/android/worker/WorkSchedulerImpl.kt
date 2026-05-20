@@ -139,6 +139,10 @@ public class WorkSchedulerImpl @Inject constructor(
         oneShotEnqueuer.enqueueMessageScreenshotUpload(rawEventId)
     }
 
+    override fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) {
+        oneShotEnqueuer.enqueueMeetingSpeakerPreview(rawEventId = rawEventId, audioUri = audioUri)
+    }
+
     override fun enqueueVoiceUploadWithDelay(
         rawEventId: String,
         audioUri: String,
@@ -147,6 +151,8 @@ public class WorkSchedulerImpl @Inject constructor(
         selfSpeakerId: String?,
         speakerMappingsJson: String?,
         speakerPreviewId: String?,
+        extractionJobId: String?,
+        extractionJobPollAttempt: Int,
     ) {
         enqueueVoiceUploadInternal(
             rawEventId = rawEventId,
@@ -156,6 +162,8 @@ public class WorkSchedulerImpl @Inject constructor(
             selfSpeakerId = selfSpeakerId,
             speakerMappingsJson = speakerMappingsJson,
             speakerPreviewId = speakerPreviewId,
+            extractionJobId = extractionJobId,
+            extractionJobPollAttempt = extractionJobPollAttempt.coerceAtLeast(0),
         )
     }
 
@@ -167,6 +175,8 @@ public class WorkSchedulerImpl @Inject constructor(
         selfSpeakerId: String? = null,
         speakerMappingsJson: String? = null,
         speakerPreviewId: String? = null,
+        extractionJobId: String? = null,
+        extractionJobPollAttempt: Int = 0,
     ) {
         oneShotEnqueuer.enqueueVoiceUpload(
             rawEventId = rawEventId,
@@ -176,6 +186,8 @@ public class WorkSchedulerImpl @Inject constructor(
             selfSpeakerId = selfSpeakerId,
             speakerMappingsJson = speakerMappingsJson,
             speakerPreviewId = speakerPreviewId,
+            extractionJobId = extractionJobId,
+            extractionJobPollAttempt = extractionJobPollAttempt,
         )
     }
 
@@ -207,6 +219,14 @@ public class WorkSchedulerImpl @Inject constructor(
         planRunner.run(WorkSchedulerRequests.overdueSweepPlan())
     }
 
+    override fun enqueueProcessDone(initialDelaySeconds: Long) {
+        planRunner.run(WorkSchedulerRequests.processDonePlan(initialDelaySeconds))
+    }
+
+    override fun scheduleProcessDoneSweep() {
+        planRunner.run(WorkSchedulerRequests.processDoneSweepPlan())
+    }
+
     override fun enqueueDeferredColdSyncStage1() {
         planRunner.run(WorkSchedulerRequests.deferredColdSyncStage1Plan())
     }
@@ -224,6 +244,7 @@ public class WorkSchedulerImpl @Inject constructor(
             workManager.cancelUniqueWork(key)
         }
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_VOICE_UPLOAD)
+        workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MEETING_SPEAKER_PREVIEW)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_MESSAGE_SCREENSHOT_UPLOAD)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.TAG_PROFILE_MEMORY)
         workManager.cancelAllWorkByTag(WorkSchedulerRequests.LEGACY_TAG_COMMITMENT_EXTRACTION)

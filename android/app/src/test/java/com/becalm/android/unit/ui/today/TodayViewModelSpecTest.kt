@@ -1,6 +1,7 @@
 package com.becalm.android.unit.ui.today
 
 import app.cash.turbine.test
+import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.FakeClock
 import com.becalm.android.core.util.Logger
@@ -12,6 +13,8 @@ import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
 import com.becalm.android.data.local.db.entity.CommitmentScheduleStatus
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
+import com.becalm.android.data.local.db.entity.ScheduleEventLinkResolutionChoice
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.remote.supabase.SupabaseSession
 import com.becalm.android.data.repository.AuthRepository
@@ -19,6 +22,9 @@ import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.ProcessingPhase
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.data.repository.SourceConnectionStatus
@@ -45,11 +51,13 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.datetime.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -68,6 +76,7 @@ class TodayViewModelSpecTest {
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository = mockk(relaxed = true)
     private val workScheduler: WorkScheduler = mockk(relaxed = true)
     private val sourceStatusRepository: SourceStatusRepository = mockk(relaxed = true)
+    private val processingStatusRepository: ProcessingStatusRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
     private val authRepository: AuthRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
@@ -86,6 +95,7 @@ class TodayViewModelSpecTest {
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(emptyList())
         every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(emptyList())
         every { userPrefsStore.observeProcessingPaused() } returns flowOf(false)
+        every { processingStatusRepository.observeAll() } returns flowOf(emptyList())
         coEvery { sourceEventParticipantRepository.refreshSince(any(), any(), any()) } returns
             BecalmResult.Success(
                 SourceEventParticipantRepository.RefreshStats(
@@ -181,6 +191,38 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `schedule without person stays on timeline but not in person focus`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "schedule-no-person",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:30:00Z"),
+                    counterpartyRef = null,
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(1, emission.timeline.size)
+            assertTrue(emission.timeline.single() is TimelineItem.Commitment)
+            assertEquals(CommitmentItemType.SCHEDULE, (emission.timeline.single() as TimelineItem.Commitment).itemType)
+            assertEquals(null, (emission.timeline.single() as TimelineItem.Commitment).counterpartyDisplayName)
+            assertTrue(emission.personFocus.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `calendar event is hidden from today timeline when mirrored as schedule commitment`() = runTest {
         coEvery { authRepository.currentSession() } returns session()
         every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
@@ -216,6 +258,242 @@ class TodayViewModelSpecTest {
             assertTrue(emission.timeline.single() is TimelineItem.Commitment)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `calendar all day event stays calendar typed and untimed while source schedule remains proposal typed`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "mail-schedule",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T03:00:00Z"),
+                    counterpartyRef = null,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-1",
+                    dueAt = Instant.parse("2026-04-18T03:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(
+                calendarEvent(
+                    id = "all-day-calendar",
+                    startAt = Instant.parse("2026-04-17T15:00:00Z"),
+                    attendeesRaw = null,
+                    isAllDay = true,
+                    location = "Seoul HQ",
+                    availability = "free",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading || emission.timeline.size < 2) emission = awaitItem()
+
+            val sourceSchedule = emission.timeline.filterIsInstance<TimelineItem.Commitment>().single()
+            val calendar = emission.timeline.filterIsInstance<TimelineItem.CalendarEvent>().single()
+            assertEquals(SourceType.GMAIL, sourceSchedule.sourceType)
+            assertFalse(calendar.isTimed)
+            assertTrue(calendar.isAllDay)
+            assertEquals("Seoul HQ", calendar.location)
+            assertEquals("free", calendar.availability)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `conflicting schedule link exposes calendar first review action`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "source-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CHANGED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = "lee@corp.com",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-1",
+                    dueAt = Instant.parse("2026-04-18T02:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(
+                calendarEvent(
+                    id = "calendar-1",
+                    startAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    attendeesRaw = "lee@corp.com",
+                ),
+            ),
+        )
+        every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(
+            listOf(
+                scheduleLink(
+                    id = "link-1",
+                    commitmentId = "source-schedule-1",
+                    relationType = "conflicts",
+                    status = "needs_review",
+                    proposedStartAt = Instant.parse("2026-04-18T02:00:00Z"),
+                    proposedTitle = "메일에서 온 변경 일정",
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            val review = emission.scheduleConflictReviewItems.single()
+            assertEquals("link-1", review.linkId)
+            assertEquals("calendar-calendar-1", review.calendarTitle)
+            assertEquals("메일에서 온 변경 일정", review.sourceTitle)
+            assertEquals(SourceType.GMAIL, review.sourceType)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `same schedule resolution absorbs source schedule into calendar schedule`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "source-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = null,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-1",
+                    dueAt = Instant.parse("2026-04-18T02:00:00Z"),
+                ),
+                commitment(
+                    id = "calendar-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = null,
+                    sourceType = SourceType.GOOGLE_CALENDAR,
+                    sourceRef = "calendar-1",
+                    dueAt = Instant.parse("2026-04-18T01:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(calendarEvent(id = "calendar-1", startAt = Instant.parse("2026-04-18T01:00:00Z"), attendeesRaw = null)),
+        )
+        every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(
+            listOf(
+                scheduleLink(
+                    id = "link-1",
+                    relationType = "conflicts",
+                    status = "approved",
+                    resolutionChoice = ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            val commitmentIds = emission.timeline.filterIsInstance<TimelineItem.Commitment>().map { it.id }
+            assertEquals(listOf("calendar-schedule-1"), commitmentIds)
+            assertTrue(emission.scheduleConflictReviewItems.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `schedule adjustment resolution keeps source and calendar schedules`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observeTimelineForToday(any(), any(), any()) } returns flowOf(
+            todayRows(
+                commitment(
+                    id = "source-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = null,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-1",
+                    dueAt = Instant.parse("2026-04-18T02:00:00Z"),
+                ),
+                commitment(
+                    id = "calendar-schedule-1",
+                    itemType = CommitmentItemType.SCHEDULE,
+                    direction = null,
+                    scheduleStatus = CommitmentScheduleStatus.CONFIRMED,
+                    occurredAt = Instant.parse("2026-04-18T01:00:00Z"),
+                    counterpartyRef = null,
+                    sourceType = SourceType.GOOGLE_CALENDAR,
+                    sourceRef = "calendar-1",
+                    dueAt = Instant.parse("2026-04-18T01:00:00Z"),
+                ),
+            ),
+        )
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(
+            listOf(calendarEvent(id = "calendar-1", startAt = Instant.parse("2026-04-18T01:00:00Z"), attendeesRaw = null)),
+        )
+        every { scheduleEventLinkRepository.observeForTodayRange(any(), any(), any(), any(), any()) } returns flowOf(
+            listOf(
+                scheduleLink(
+                    id = "link-1",
+                    relationType = "conflicts",
+                    status = "approved",
+                    resolutionChoice = ScheduleEventLinkResolutionChoice.SCHEDULE_ADJUSTMENT_NEEDED,
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            val commitmentIds = emission.timeline.filterIsInstance<TimelineItem.Commitment>().map { it.id }.toSet()
+            assertEquals(setOf("calendar-schedule-1", "source-schedule-1"), commitmentIds)
+            assertTrue(emission.scheduleConflictReviewItems.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `schedule conflict resolution calls repository with selected choice`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        coEvery {
+            scheduleEventLinkRepository.resolve("user-1", "link-1", ScheduleEventLinkResolutionChoice.SAME_SCHEDULE)
+        } returns BecalmResult.Success(
+            scheduleLink(
+                id = "link-1",
+                relationType = "conflicts",
+                status = "approved",
+                resolutionChoice = ScheduleEventLinkResolutionChoice.SAME_SCHEDULE,
+            ),
+        )
+        val viewModel = buildViewModel()
+
+        viewModel.onResolveScheduleConflict("link-1", ScheduleEventLinkResolutionChoice.SAME_SCHEDULE)
+        advanceUntilIdle()
+
+        coVerify { scheduleEventLinkRepository.resolve("user-1", "link-1", ScheduleEventLinkResolutionChoice.SAME_SCHEDULE) }
     }
 
     @Test
@@ -659,6 +937,113 @@ class TodayViewModelSpecTest {
     }
 
     @Test
+    fun `processing status summarizes active and action-needed source work`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.GEMINI,
+                    itemCount = 3,
+                    updatedAt = now,
+                ),
+                ProcessingSourceState(
+                    sourceType = SourceType.OUTLOOK_MAIL,
+                    phase = ProcessingPhase.ERROR,
+                    itemCount = 1,
+                    updatedAt = Instant.parse("2026-04-18T08:30:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(1, emission.processingStatus.activeCount)
+            assertEquals(1, emission.processingStatus.actionCount)
+            assertEquals(3, emission.processingStatus.activeItemCount)
+            assertEquals(ProcessingPhase.GEMINI, emission.processingStatus.latestPhase)
+            assertTrue(emission.processingStatus.visible)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `processing status hides stale non-action work from today surface`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.GMAIL,
+                    phase = ProcessingPhase.GEMINI,
+                    itemCount = 3,
+                    updatedAt = Instant.parse("2026-04-18T08:20:00Z"),
+                ),
+                ProcessingSourceState(
+                    sourceType = SourceType.MEETING,
+                    phase = ProcessingPhase.SYNCED,
+                    itemCount = 1,
+                    updatedAt = Instant.parse("2026-04-18T08:45:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(0, emission.processingStatus.activeCount)
+            assertEquals(0, emission.processingStatus.actionCount)
+            assertEquals(0, emission.processingStatus.activeItemCount)
+            assertEquals(null, emission.processingStatus.latestPhase)
+            assertFalse(emission.processingStatus.visible)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `processing status keeps stale error visible because user action is needed`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        every { processingStatusRepository.observeAll() } returns flowOf(
+            listOf(
+                ProcessingSourceState(
+                    sourceType = SourceType.OUTLOOK_MAIL,
+                    phase = ProcessingPhase.ERROR,
+                    itemCount = 0,
+                    updatedAt = Instant.parse("2026-04-18T07:00:00Z"),
+                ),
+            ),
+        )
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            var emission = awaitItem()
+            while (emission.loading) emission = awaitItem()
+
+            assertEquals(0, emission.processingStatus.activeCount)
+            assertEquals(1, emission.processingStatus.actionCount)
+            assertEquals(ProcessingPhase.ERROR, emission.processingStatus.latestPhase)
+            assertTrue(emission.processingStatus.visible)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `TDY-009 pull refresh always triggers catch-up and skips repository refresh when unauthenticated`() = runTest {
         coEvery { authRepository.currentSession() } returns null
         every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
@@ -681,6 +1066,33 @@ class TodayViewModelSpecTest {
         assertEquals(false, viewModel.state.value.refreshing)
     }
 
+    @Test
+    fun `pull refresh failure surfaces a retryable message and stops the spinner`() = runTest {
+        coEvery { authRepository.currentSession() } returns session()
+        every { commitmentRepository.observePendingForToday(any(), any(), any()) } returns flowOf(emptyList())
+        every { calendarEventRepository.observeForUser(any(), any(), any()) } returns flowOf(emptyList())
+        every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        coEvery { sourceStatusRepository.refreshFromServer() } returns
+            BecalmResult.Failure(BecalmError.Network(503, "unavailable"))
+
+        val viewModel = buildViewModel()
+
+        viewModel.state.test {
+            awaitItem()
+            viewModel.onPullRefresh()
+            runCurrent()
+
+            var emission = awaitItem()
+            while (emission.message == null) {
+                emission = awaitItem()
+            }
+            assertEquals(false, emission.refreshing)
+            assertEquals(com.becalm.android.R.string.today_refresh_failed, emission.message?.resId)
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+    }
+
     private fun buildViewModel(): TodayViewModel = TodayViewModel(
         commitmentRepository = commitmentRepository,
         calendarEventRepository = calendarEventRepository,
@@ -689,6 +1101,7 @@ class TodayViewModelSpecTest {
         scheduleEventLinkRepository = scheduleEventLinkRepository,
         workScheduler = workScheduler,
         sourceStatusRepository = sourceStatusRepository,
+        processingStatusRepository = processingStatusRepository,
         authRepository = authRepository,
         userPrefsStore = userPrefsStore,
         foregroundCatchUpScheduler = foregroundCatchUpScheduler,
@@ -780,6 +1193,9 @@ class TodayViewModelSpecTest {
         id: String,
         startAt: Instant,
         attendeesRaw: String?,
+        isAllDay: Boolean = false,
+        location: String? = null,
+        availability: String? = null,
     ): CalendarEventEntity = CalendarEventEntity(
         id = id,
         userId = "user-1",
@@ -788,7 +1204,40 @@ class TodayViewModelSpecTest {
         title = "calendar-$id",
         startAt = startAt,
         endAt = startAt,
+        isAllDay = isAllDay,
         attendeesRaw = attendeesRaw,
+        availability = availability,
+        location = location,
         syncStatus = "synced",
+    )
+
+    private fun scheduleLink(
+        id: String,
+        commitmentId: String = "source-schedule-1",
+        relationType: String = "conflicts",
+        status: String = "needs_review",
+        proposedStartAt: Instant? = Instant.parse("2026-04-18T02:00:00Z"),
+        proposedTitle: String? = "source-title",
+        resolutionChoice: String? = null,
+    ): ScheduleEventLinkEntity = ScheduleEventLinkEntity(
+        id = id,
+        userId = "user-1",
+        calendarEventId = "calendar-1",
+        calendarSourceType = "google_calendar",
+        calendarSourceRef = "calendar-ref-1",
+        sourceType = SourceType.GMAIL,
+        sourceRef = "mail-1",
+        rawEventId = "raw-1",
+        commitmentId = commitmentId,
+        relationType = relationType,
+        status = status,
+        confidence = 0.8,
+        proposedStartAt = proposedStartAt,
+        proposedEndAt = null,
+        proposedTitle = proposedTitle,
+        evidence = "메일 본문 근거",
+        resolutionChoice = resolutionChoice,
+        createdAt = Instant.parse("2026-04-18T00:00:00Z"),
+        updatedAt = Instant.parse("2026-04-18T00:00:00Z"),
     )
 }

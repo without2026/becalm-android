@@ -25,6 +25,7 @@ public object ProductAnalyticsEvents {
     public const val SCREEN_VIEWED: String = "screen_viewed"
     public const val SCREEN_EXITED: String = "screen_exited"
     public const val PERSON_MATCH_COMPLETED: String = "person_match_completed"
+    public const val PERSON_MATCH_REVIEW_SUBMITTED: String = "person_match_review_submitted"
     public const val HISTORICAL_ITEM_VIEWED: String = "historical_item_viewed"
     public const val SEARCH_TO_DETAIL: String = "search_to_detail"
     public const val SEARCH_PERFORMED: String = "search_performed"
@@ -44,6 +45,7 @@ public object ProductAnalyticsEvents {
     public const val EXTRACTION_COMPLETED: String = "extraction_completed"
     public const val EXTRACTION_FAILED: String = "extraction_failed"
     public const val COMMITMENT_CORRECTION_SUBMITTED: String = "commitment_correction_submitted"
+    public const val COMMITMENT_QUALITY_REVIEW_SUBMITTED: String = "commitment_quality_review_submitted"
     public const val PERSON_MERGE_COMPLETED: String = "person_merge_completed"
     public const val PERSON_SPLIT_COMPLETED: String = "person_split_completed"
     public const val CONSENT_WITHDRAWN: String = "consent_withdrawn"
@@ -58,6 +60,7 @@ public object ProductAnalyticsEvents {
         SCREEN_VIEWED,
         SCREEN_EXITED,
         PERSON_MATCH_COMPLETED,
+        PERSON_MATCH_REVIEW_SUBMITTED,
         HISTORICAL_ITEM_VIEWED,
         SEARCH_TO_DETAIL,
         SEARCH_PERFORMED,
@@ -77,6 +80,7 @@ public object ProductAnalyticsEvents {
         EXTRACTION_COMPLETED,
         EXTRACTION_FAILED,
         COMMITMENT_CORRECTION_SUBMITTED,
+        COMMITMENT_QUALITY_REVIEW_SUBMITTED,
         PERSON_MERGE_COMPLETED,
         PERSON_SPLIT_COMPLETED,
         CONSENT_WITHDRAWN,

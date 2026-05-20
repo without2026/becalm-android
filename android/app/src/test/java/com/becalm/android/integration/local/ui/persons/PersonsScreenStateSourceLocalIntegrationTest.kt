@@ -223,7 +223,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `SRC-001 first page exposes hasMorePages and nextCursor when more than twenty rows exist`() = runTest {
+    fun `SRC-001 people list keeps rows beyond first twenty searchable and visible`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -255,13 +255,72 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         }
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
             var state = awaitItem()
-            while (state.people.size < 20) {
+            while (state.people.size < 21) {
                 state = awaitItem()
             }
-            assertEquals(20, state.people.size)
-            assertTrue(state.hasMorePages)
-            assertFalse(state.nextCursor.isNullOrBlank())
+            assertEquals(21, state.people.size)
+            assertFalse(state.hasMorePages)
+            assertTrue(state.nextCursor.isNullOrBlank())
             assertEquals("person-21@corp.com", state.people.first().displayLabel)
+            assertTrue(state.people.any { it.displayLabel == "person-1@corp.com" })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SRC-001 aggregate display falls back to source participant display when identity was degraded`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val anchor = "gogo20043@hnu.kr"
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, anchor)).personId
+        val occurredAt = Instant.parse("2026-05-08T05:18:20Z")
+
+        upsertIdentityAndInteraction(
+            anchor = anchor,
+            sourceType = SourceType.NAVER_IMAP,
+            sourceRef = "raw:naver-gogo",
+            kind = "commitment",
+            role = "attendee",
+            occurredAt = occurredAt,
+            title = "MINI 모두의 창업 발표 참석",
+            snippet = "수요일 예정되어 있는 MINI 모두의 창업 발표",
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                SourceEventParticipantEntity(
+                    id = "source-participant-gogo",
+                    userId = USER_ID,
+                    sourceEventId = "naver-gogo",
+                    sourceType = SourceType.NAVER_IMAP,
+                    sourceRef = "naver-gogo",
+                    personId = personId,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    identityType = "email",
+                    normalizedValue = anchor,
+                    displayNameRaw = "고주영",
+                    emailRaw = anchor,
+                    phoneRaw = null,
+                    organizationRaw = "한남대학교 창업지원단",
+                    titleRaw = null,
+                    evidence = "고주영 <gogo20043@hnu.kr>",
+                    confidence = 1.0,
+                    resolutionStatus = "resolved",
+                    createdAt = occurredAt,
+                ),
+            ),
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            var state = awaitItem()
+            while (state.people.none { it.personId == personId }) {
+                state = awaitItem()
+            }
+            val row = state.people.single { it.personId == personId }
+            assertEquals("고주영", row.displayLabel)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -503,7 +562,7 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `unassigned meeting candidates exclude resolved self speaker rows`() = runTest {
+    fun `unassigned meeting candidates hide source local speaker labels`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -575,12 +634,8 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         )
 
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
-            var state = awaitItem()
-            while (state.unassignedEvents.firstOrNull()?.candidates?.isEmpty() != false) {
-                state = awaitItem()
-            }
-
-            assertEquals(listOf("SPEAKER_02"), state.unassignedEvents.single().candidates.map { it.anchor })
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.none { it.suggestedLabel == "SPEAKER_02" })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -661,6 +716,70 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
+    fun `terminal source participant statuses are hidden from manual person review`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        val terminalStatuses = listOf(
+            "resolved",
+            "person_resolved",
+            "self_resolved",
+            "ignored",
+        )
+
+        db.personIndexDao().upsertUnmatchedInteractions(
+            terminalStatuses.map { status ->
+                UnmatchedPersonInteractionEntity(
+                    id = "unmatched-$status",
+                    userId = USER_ID,
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "raw:raw-$status",
+                    interactionKind = "email",
+                    title = "이미 확인된 메일",
+                    snippet = "사용자 확인 또는 자동 확정이 끝난 참여자입니다.",
+                    suggestedLabel = "박서연",
+                    occurredAt = occurredAt,
+                    createdAt = occurredAt,
+                )
+            },
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            terminalStatuses.map { status ->
+                SourceEventParticipantEntity(
+                    id = "participant-$status",
+                    userId = USER_ID,
+                    sourceEventId = "raw-$status",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "mail-$status",
+                    personId = "person-$status".takeUnless { status == "self_resolved" || status == "ignored" },
+                    role = "sender",
+                    relationToUser = if (status == "self_resolved") "self" else "counterparty",
+                    identityType = "name",
+                    normalizedValue = "박서연",
+                    displayNameRaw = "박서연",
+                    emailRaw = null,
+                    phoneRaw = null,
+                    organizationRaw = null,
+                    titleRaw = null,
+                    evidence = "박서연님이 일정 확인을 요청했습니다.",
+                    confidence = 0.95,
+                    resolutionStatus = status,
+                    createdAt = occurredAt,
+                )
+            },
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.unassignedEvents.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `service account verification unmatched rows are hidden from person review`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
@@ -725,7 +844,33 @@ class PersonsScreenStateSourceLocalIntegrationTest {
     }
 
     @Test
-    fun `program application service senders are hidden from people list`() = runTest {
+    fun `program application service senders without commitments are hidden from people list`() = runTest {
+        val stateSource = PersonsScreenStateSource(
+            userPrefsStore = userPrefsStore,
+            projectionPort = projectionPort,
+        )
+        val query = MutableStateFlow("")
+        val occurredAt = Instant.parse("2026-04-23T04:00:00Z")
+        upsertIdentityAndInteraction(
+            anchor = "startup@asan-nanum.org",
+            sourceType = SourceType.GMAIL,
+            sourceRef = "raw:raw-asan-doers",
+            kind = "email",
+            role = "sender",
+            occurredAt = occurredAt,
+            title = "[아산 두어스] 2026 아산 두어스 지원서 제출이 완료되었습니다.",
+            snippet = "아산나눔재단입니다. 지원서가 정상적으로 제출되었습니다. 서류 결과 안내: 4.30(목) 17:00",
+        )
+
+        stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
+            val state = awaitItem()
+            assertTrue(state.people.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `program application participant with pending commitments stays visible in people list`() = runTest {
         val stateSource = PersonsScreenStateSource(
             userPrefsStore = userPrefsStore,
             projectionPort = projectionPort,
@@ -754,8 +899,11 @@ class PersonsScreenStateSourceLocalIntegrationTest {
         )
 
         stateSource.observe(query, pageSize = 20, queryDebounceMs = 0L).test {
-            val state = awaitItem()
-            assertTrue(state.people.isEmpty())
+            var state = awaitItem()
+            while (state.people.isEmpty()) {
+                state = awaitItem()
+            }
+            assertEquals(1, state.people.single().pendingCommitmentCount)
             cancelAndIgnoreRemainingEvents()
         }
     }

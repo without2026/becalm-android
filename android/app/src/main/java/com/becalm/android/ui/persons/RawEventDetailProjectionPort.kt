@@ -2,6 +2,7 @@ package com.becalm.android.ui.persons
 
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.RawEventCommitmentRow
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.remote.dto.SourceType
 import dagger.Binds
@@ -20,6 +21,11 @@ public interface RawEventDetailProjectionPort {
         userId: String,
         event: RawIngestionEventEntity,
     ): List<String>
+
+    public suspend fun loadCommitmentSummaries(
+        userId: String,
+        event: RawIngestionEventEntity,
+    ): List<RawEventCommitmentSummary>
 
     public suspend fun loadCalendarAttendeesRaw(
         userId: String,
@@ -43,6 +49,18 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
         )
     }
 
+    override suspend fun loadCommitmentSummaries(
+        userId: String,
+        event: RawIngestionEventEntity,
+    ): List<RawEventCommitmentSummary> {
+        val sourceRefs = event.commitmentSourceRefs()
+        if (sourceRefs.isEmpty()) return emptyList()
+        return commitmentDao.findRawEventCommitmentsBySourceRefsForUser(
+            userId = userId,
+            sourceRefs = sourceRefs,
+        ).map { it.toUiSummary() }
+    }
+
     override suspend fun loadCalendarAttendeesRaw(
         userId: String,
         event: RawIngestionEventEntity,
@@ -57,6 +75,26 @@ public class RoomBackedRawEventDetailProjectionPort @Inject constructor(
             sourceRef = sourceRef,
         )?.attendeesRaw
     }
+
+    private fun RawIngestionEventEntity.commitmentSourceRefs(): List<String> =
+        listOfNotNull(
+            sourceRef,
+            "raw:$id",
+            id,
+            clientEventId,
+        ).map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+    private fun RawEventCommitmentRow.toUiSummary(): RawEventCommitmentSummary =
+        RawEventCommitmentSummary(
+            id = id,
+            title = title,
+            itemType = itemType,
+            direction = direction,
+            status = status,
+            quote = quote,
+        )
 }
 
 @Module

@@ -8,7 +8,7 @@ internal fun sourceConnectionTitle(provider: String, capability: String): String
         provider == "google" && capability == "calendar" -> "Google Calendar"
         provider == "outlook" && capability == "mail" -> "Outlook Mail"
         provider == "outlook" && capability == "calendar" -> "Outlook Calendar"
-        provider == SourceType.NAVER_IMAP -> "Naver Mail"
-        provider == SourceType.DAUM_IMAP -> "Daum Mail"
+        provider == SourceType.NAVER_IMAP -> "Naver Email"
+        provider == SourceType.DAUM_IMAP -> "Daum Email"
         else -> "$provider · $capability"
     }

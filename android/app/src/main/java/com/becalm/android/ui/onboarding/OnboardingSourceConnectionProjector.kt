@@ -26,6 +26,7 @@ internal object SourceConnectionProjector {
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean = true,
+        respectConnectedStepStates: Boolean = respectStepStates,
         includeCalendarSources: Boolean = true,
         includedProviders: Set<OnboardingSourceProvider>? = null,
         stringFor: (Int) -> String,
@@ -47,6 +48,7 @@ internal object SourceConnectionProjector {
                         stepStates = stepStates,
                         transientStates = transientStates,
                         respectStepStates = respectStepStates,
+                        respectConnectedStepStates = respectConnectedStepStates,
                         defaultState = spec.defaultState,
                     ),
                 )
@@ -57,10 +59,15 @@ internal object SourceConnectionProjector {
         stepStates: Map<OnboardingStep, StepStatus>,
         transientStates: Map<OnboardingSourceProvider, SourceConnectionState>,
         respectStepStates: Boolean,
+        respectConnectedStepStates: Boolean = respectStepStates,
         defaultState: SourceConnectionState = SourceConnectionState.Idle,
     ): SourceConnectionState {
+        val stepStatus = stepStates[provider.step] ?: StepStatus.NOT_STARTED
+        if (respectConnectedStepStates && stepStatus in setOf(StepStatus.GRANTED, StepStatus.COMPLETE)) {
+            return SourceConnectionState.Connected
+        }
         if (!respectStepStates) return transientStates[provider] ?: defaultState
-        return when (stepStates[provider.step] ?: StepStatus.NOT_STARTED) {
+        return when (stepStatus) {
             StepStatus.GRANTED,
             StepStatus.COMPLETE,
             -> SourceConnectionState.Connected

@@ -15,6 +15,9 @@ import androidx.compose.ui.test.performClick
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.becalm.android.ui.sources.SourceDetailEffect
+import com.becalm.android.ui.sources.SourceReconnectDestination
+import com.becalm.android.ui.sources.SourcesListNavigation
 import com.becalm.android.ui.theme.BecalmTheme
 import org.junit.Rule
 import org.junit.Test
@@ -111,6 +114,19 @@ class BecalmNavHostTest {
     }
 
     @Test
+    fun settings_source_connection_route_parses_provider_argument() {
+        setNavHost(startDestination = BecalmRoute.SettingsSourceConnection("google_calendar").path) {
+            mapOf(
+                BecalmRoute.SettingsSourceConnection.PATH to { entry ->
+                    Text("provider:${entry.arguments?.getString(BecalmRoute.SettingsSourceConnection.ARG_PROVIDER)}")
+                },
+            )
+        }
+
+        composeTestRule.onNodeWithText("provider:google_calendar").assertIsDisplayed()
+    }
+
+    @Test
     fun commitment_detail_route_parses_id_argument() {
         setNavHost(startDestination = BecalmRoute.CommitmentDetail("cmt-77").path) {
             mapOf(
@@ -143,6 +159,7 @@ class BecalmNavHostTest {
                 StaticRouteCase(BecalmRoute.Splash.path, BecalmRoute.Splash.path, "splash-screen"),
                 StaticRouteCase(BecalmRoute.Terms.path, BecalmRoute.Terms.path, "terms-screen"),
                 StaticRouteCase(BecalmRoute.Login.path, BecalmRoute.Login.path, "login-screen"),
+                StaticRouteCase(BecalmRoute.SignUp.path, BecalmRoute.SignUp.path, "signup-screen"),
             ),
         )
     }
@@ -180,9 +197,132 @@ class BecalmNavHostTest {
                 StaticRouteCase(BecalmRoute.ActivityLog.path, BecalmRoute.ActivityLog.path, "activity-log-screen"),
                 StaticRouteCase(BecalmRoute.SettingsSources.path, BecalmRoute.SettingsSources.path, "sources-screen"),
                 StaticRouteCase(BecalmRoute.SettingsSourceConnections.path, BecalmRoute.SettingsSourceConnections.path, "source-connections-screen"),
+                StaticRouteCase(
+                    BecalmRoute.SettingsSourceConnection("gmail").path,
+                    BecalmRoute.SettingsSourceConnection.PATH,
+                    "gmail-connection-screen",
+                ),
                 StaticRouteCase(BecalmRoute.ContactsSourceDetail.path, BecalmRoute.ContactsSourceDetail.path, "contacts-detail-screen"),
+                StaticRouteCase(
+                    BecalmRoute.SettingsContactsPermission.path,
+                    BecalmRoute.SettingsContactsPermission.path,
+                    "contacts-permission-screen",
+                ),
                 StaticRouteCase(BecalmRoute.Commitments.path, BecalmRoute.Commitments.path, "commitments-screen"),
             ),
+        )
+    }
+
+    @Test
+    fun settings_contacts_permission_navigation_uses_settings_route() {
+        composeTestRule.setContent {
+            BecalmTheme {
+                val navController = rememberNavController()
+                val backStackEntry by navController.currentBackStackEntryAsState()
+
+                Column {
+                    Text("route:${backStackEntry?.destination?.route.orEmpty()}")
+                    Button(onClick = { navController.dispatchSourcesListNavigation(SourcesListNavigation.ContactsPermission) }) {
+                        Text("open-contacts-permission")
+                    }
+                    BecalmNavHost(
+                        navController = navController,
+                        startDestination = BecalmRoute.SettingsSources.path,
+                        routeOverrides = mapOf(
+                            BecalmRoute.SettingsSources.path to { Text("settings-sources-screen") },
+                            BecalmRoute.SettingsContactsPermission.path to { Text("settings-contacts-permission-screen") },
+                            BecalmRoute.OnboardingContacts.path to { Text("onboarding-contacts-screen") },
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("settings-sources-screen").assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("open-contacts-permission").performClick()
+
+        composeTestRule.onNodeWithText("settings-contacts-permission-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:${BecalmRoute.SettingsContactsPermission.path}").assertIsDisplayed()
+    }
+
+    @Test
+    fun settings_oauth_source_reconnect_navigation_uses_scoped_settings_routes() {
+        val cases = listOf(
+            SourceReconnectDestination.GMAIL to BecalmRoute.SettingsSourceConnection("gmail").path,
+            SourceReconnectDestination.OUTLOOK_MAIL to BecalmRoute.SettingsSourceConnection("outlook_mail").path,
+            SourceReconnectDestination.GOOGLE_CALENDAR to BecalmRoute.SettingsSourceConnection("google_calendar").path,
+            SourceReconnectDestination.OUTLOOK_CALENDAR to BecalmRoute.SettingsSourceConnection("outlook_calendar").path,
+        )
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                var index by remember { mutableStateOf(0) }
+                val case = cases[index]
+
+                key(index) {
+                    val navController = rememberNavController()
+                    val backStackEntry by navController.currentBackStackEntryAsState()
+
+                    Column {
+                        Text("route:${backStackEntry?.destination?.route.orEmpty()}")
+                        Button(
+                            onClick = {
+                                navController.dispatchSourceDetailEffect(
+                                    SourceDetailEffect.OpenReconnect(case.first),
+                                )
+                            },
+                        ) {
+                            Text("reconnect-source")
+                        }
+                        Button(onClick = { if (index < cases.lastIndex) index += 1 }) {
+                            Text("next-case")
+                        }
+                        BecalmNavHost(
+                            navController = navController,
+                            startDestination = BecalmRoute.SourceDetail("source").path,
+                            routeOverrides = mapOf(
+                                BecalmRoute.SourceDetail.PATH to { Text("source-detail-screen") },
+                                BecalmRoute.SettingsSourceConnection.PATH to { entry ->
+                                    Text(
+                                        "settings-provider:" +
+                                            "${entry.arguments?.getString(BecalmRoute.SettingsSourceConnection.ARG_PROVIDER)}",
+                                    )
+                                },
+                                BecalmRoute.OnboardingSources.path to { Text("onboarding-sources-screen") },
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        cases.forEachIndexed { index, case ->
+            composeTestRule.onNodeWithText("source-detail-screen").assertIsDisplayed()
+            composeTestRule.onNodeWithText("reconnect-source").performClick()
+            composeTestRule.onNodeWithText("route:${BecalmRoute.SettingsSourceConnection.PATH}").assertIsDisplayed()
+            composeTestRule.onNodeWithText("settings-provider:${case.second.substringAfterLast('/')}").assertIsDisplayed()
+            if (index < cases.lastIndex) {
+                composeTestRule.onNodeWithText("next-case").performClick()
+            }
+        }
+    }
+
+    @Test
+    fun settings_imap_reconnect_completion_returns_to_settings_sources() {
+        assertSettingsReconnectCompletionReturns(
+            destination = SourceReconnectDestination.NAVER_IMAP,
+            destinationRoute = BecalmRoute.OnboardingEmailPipa.PATH,
+            completionFallbackRoute = BecalmRoute.OnboardingGoogleCalendar.path,
+        )
+    }
+
+    @Test
+    fun settings_recording_reconnect_completion_returns_to_settings_sources() {
+        assertSettingsReconnectCompletionReturns(
+            destination = SourceReconnectDestination.RECORDING_FOLDER,
+            destinationRoute = BecalmRoute.OnboardingRecordingFolder.path,
+            completionFallbackRoute = BecalmRoute.OnboardingContacts.path,
         )
     }
 
@@ -225,6 +365,68 @@ class BecalmNavHostTest {
         composeTestRule.onNodeWithText("go-back").performClick()
         composeTestRule.onNodeWithText("today-screen").assertIsDisplayed()
         composeTestRule.onNodeWithText("route:today").assertIsDisplayed()
+    }
+
+    private fun assertSettingsReconnectCompletionReturns(
+        destination: SourceReconnectDestination,
+        destinationRoute: String,
+        completionFallbackRoute: String,
+    ) {
+        composeTestRule.setContent {
+            BecalmTheme {
+                val navController = rememberNavController()
+                val backStackEntry by navController.currentBackStackEntryAsState()
+
+                Column {
+                    Text("route:${backStackEntry?.destination?.route.orEmpty()}")
+                    Button(onClick = { navController.navigate(BecalmRoute.SourceDetail("source").path) }) {
+                        Text("open-source-detail")
+                    }
+                    BecalmNavHost(
+                        navController = navController,
+                        startDestination = BecalmRoute.SettingsSources.path,
+                        routeOverrides = mapOf(
+                            BecalmRoute.SettingsSources.path to { Text("settings-sources-screen") },
+                            BecalmRoute.SourceDetail.PATH to {
+                                Column {
+                                    Text("source-detail-screen")
+                                    Button(
+                                        onClick = {
+                                            navController.dispatchSourceDetailEffect(
+                                                SourceDetailEffect.OpenReconnect(destination),
+                                            )
+                                        },
+                                    ) {
+                                        Text("reconnect-source")
+                                    }
+                                }
+                            },
+                            destinationRoute to {
+                                Column {
+                                    Text("reconnect-screen")
+                                    Button(
+                                        onClick = {
+                                            navController.navigateAfterSourceReconnectOr(completionFallbackRoute)
+                                        },
+                                    ) {
+                                        Text("complete-reconnect")
+                                    }
+                                }
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("settings-sources-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("open-source-detail").performClick()
+        composeTestRule.onNodeWithText("source-detail-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("reconnect-source").performClick()
+        composeTestRule.onNodeWithText("route:$destinationRoute").assertIsDisplayed()
+        composeTestRule.onNodeWithText("complete-reconnect").performClick()
+        composeTestRule.onNodeWithText("settings-sources-screen").assertIsDisplayed()
+        composeTestRule.onNodeWithText("route:${BecalmRoute.SettingsSources.path}").assertIsDisplayed()
     }
 
     private fun setNavHost(

@@ -11,12 +11,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,6 +30,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
 import com.becalm.android.ui.components.BecalmButton
@@ -33,6 +38,7 @@ import com.becalm.android.ui.components.BecalmButtonVariant
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.CollectFlowEffect
 import com.becalm.android.ui.components.QuietPanel
+import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
 
@@ -74,6 +80,14 @@ public fun TermsScreen(
     val resolvedFinishApp = onFinishApp ?: {
         (context as? android.app.Activity)?.finish()
     }
+    val state = if (resolvedAuthViewModel != null) {
+        val collectedState by resolvedAuthViewModel.uiState.collectAsStateWithLifecycle()
+        collectedState
+    } else {
+        AuthUiState.SignedOut()
+    }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val errorMessage = (state as? AuthUiState.Error)?.message?.let { uiMessageStringResource(it) }
 
     CollectFlowEffect(authEffects ?: requireNotNull(resolvedAuthViewModel).effects) { effect ->
         when (effect) {
@@ -82,12 +96,22 @@ public fun TermsScreen(
         }
     }
 
-    BecalmScaffold(title = stringResource(R.string.terms_title)) { padding ->
+    LaunchedEffect(errorMessage) {
+        if (!errorMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(errorMessage)
+        }
+    }
+
+    BecalmScaffold(
+        title = stringResource(R.string.terms_title),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { padding ->
         TermsContent(
             accepted = accepted,
             onAcceptedChange = { accepted = it },
             onContinue = resolvedOnContinue,
             onDecline = resolvedOnDecline,
+            isLoading = state is AuthUiState.Loading,
             modifier = Modifier.padding(padding),
         )
     }
@@ -99,6 +123,7 @@ internal fun TermsContent(
     onAcceptedChange: (Boolean) -> Unit,
     onContinue: () -> Unit,
     onDecline: () -> Unit,
+    isLoading: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -130,6 +155,7 @@ internal fun TermsContent(
                 Checkbox(
                     checked = accepted,
                     onCheckedChange = onAcceptedChange,
+                    enabled = !isLoading,
                     modifier = Modifier.testTag("terms-checkbox"),
                 )
                 Text(
@@ -142,7 +168,8 @@ internal fun TermsContent(
             BecalmButton(
                 text = stringResource(R.string.terms_cta),
                 onClick = onContinue,
-                enabled = accepted,
+                enabled = accepted && !isLoading,
+                loading = isLoading,
                 variant = BecalmButtonVariant.Primary,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -151,6 +178,7 @@ internal fun TermsContent(
                 text = stringResource(R.string.terms_decline_cta),
                 onClick = onDecline,
                 variant = BecalmButtonVariant.Secondary,
+                enabled = !isLoading,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

@@ -68,7 +68,9 @@ class MediaStoreWorkerSpecTest {
             ContextCompat.checkSelfPermission(any(), any())
         } returns android.content.pm.PackageManager.PERMISSION_GRANTED
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
+        every { userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING) } returns flowOf(false)
         every { userPrefsStore.observeSourceEnabled(SourceType.MEETING) } returns flowOf(false)
+        every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
     }
 
     @After
@@ -80,6 +82,9 @@ class MediaStoreWorkerSpecTest {
     fun `ING-001 blocks without retry when SAF recordings tree grant is missing`() = runTest {
         coEvery { processingPauseGate.shouldSkip(any()) } returns false
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING) } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING) } returns flowOf(null)
 
         val result = buildWorker().doWork()
 

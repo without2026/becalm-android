@@ -44,6 +44,15 @@ internal fun CalendarOAuthProvider.onboardingSourceProvider(): OnboardingSourceP
         CalendarOAuthProvider.OUTLOOK_CALENDAR -> OnboardingSourceProvider.OUTLOOK_CALENDAR
     }
 
+internal fun onboardingSourceProviderFromSettingsRouteSlug(slug: String?): OnboardingSourceProvider? =
+    when (slug) {
+        "gmail" -> OnboardingSourceProvider.GMAIL
+        "outlook_mail" -> OnboardingSourceProvider.OUTLOOK_MAIL
+        "google_calendar" -> OnboardingSourceProvider.GOOGLE_CALENDAR
+        "outlook_calendar" -> OnboardingSourceProvider.OUTLOOK_CALENDAR
+        else -> null
+    }
+
 public enum class SourceConnectionCategory {
     Mail,
     Calendar,

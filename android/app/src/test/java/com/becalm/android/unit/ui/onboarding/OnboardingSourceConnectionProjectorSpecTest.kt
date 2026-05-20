@@ -41,15 +41,33 @@ class OnboardingSourceConnectionProjectorSpecTest {
 
     @Test
     fun `settings source entry ignores old step states so sources can reconnect`() {
-        val state = SourceConnectionProjector.sourceStateFor(
+        val skipped = SourceConnectionProjector.sourceStateFor(
             provider = OnboardingSourceProvider.GMAIL,
             stepStates = mapOf(OnboardingStep.LINK_GMAIL to StepStatus.SKIPPED),
             transientStates = emptyMap(),
             respectStepStates = false,
             defaultState = SourceConnectionState.ConsentRequired,
         )
+        val connected = SourceConnectionProjector.sourceStateFor(
+            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+            stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE),
+            transientStates = emptyMap(),
+            respectStepStates = false,
+            respectConnectedStepStates = true,
+            defaultState = SourceConnectionState.Idle,
+        )
+        val reconnect = SourceConnectionProjector.sourceStateFor(
+            provider = OnboardingSourceProvider.GOOGLE_CALENDAR,
+            stepStates = mapOf(OnboardingStep.LINK_GOOGLE_CALENDAR to StepStatus.COMPLETE),
+            transientStates = emptyMap(),
+            respectStepStates = false,
+            respectConnectedStepStates = false,
+            defaultState = SourceConnectionState.Idle,
+        )
 
-        assertEquals(SourceConnectionState.ConsentRequired, state)
+        assertEquals(SourceConnectionState.ConsentRequired, skipped)
+        assertEquals(SourceConnectionState.Connected, connected)
+        assertEquals(SourceConnectionState.Idle, reconnect)
     }
 
     @Test

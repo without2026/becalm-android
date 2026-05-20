@@ -27,6 +27,7 @@ class RuntimeSyncSourceResolverSpecTest {
         stubSourceFlags()
         every { userPrefsStore.observeSourceEnabled(SourceType.VOICE) } returns flowOf(true)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf("content://tree/recordings")
+        every { userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE) } returns flowOf("content://tree/voice")
         every { mediaAudioPermissionChecker.isGranted() } returns true
         every { userPrefsStore.observeSourceEnabled(SourceType.GOOGLE_CALENDAR) } returns flowOf(true)
         every { userPrefsStore.observeSourceEnabled(SourceType.OUTLOOK_CALENDAR) } returns flowOf(false)
@@ -62,6 +63,7 @@ class RuntimeSyncSourceResolverSpecTest {
     private fun stubSourceFlags() {
         every { userPrefsStore.observeSourceEnabled(any()) } returns flowOf(false)
         every { userPrefsStore.observeRecordingFolderTreeUri() } returns flowOf(null)
+        every { userPrefsStore.observeRecordingFolderTreeUri(any()) } returns flowOf(null)
         every { mediaAudioPermissionChecker.isGranted() } returns false
         EmailPipaProvider.entries.forEach { provider ->
             every { userPrefsStore.observeEmailSourceConnected(provider) } returns flowOf(false)

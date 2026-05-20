@@ -29,6 +29,11 @@ public interface UserProfileRepository {
         displayName: String?,
         phoneE164Self: String?,
     ): BecalmResult<UserProfileEntity>
+    public suspend fun upsertLocal(
+        userId: String,
+        displayName: String?,
+        phoneE164Self: String?,
+    ): UserProfileEntity
     public suspend fun bootstrapIfMissing(
         userId: String,
         timezone: String,
@@ -101,6 +106,26 @@ public class UserProfileRepositoryImpl @Inject constructor(
             logger.e(TAG, "profile update failed", t)
             BecalmResult.Failure(BecalmError.Unknown(t))
         }
+    }
+
+    override suspend fun upsertLocal(
+        userId: String,
+        displayName: String?,
+        phoneE164Self: String?,
+    ): UserProfileEntity = withContext(ioDispatcher) {
+        val existing = dao.findByUserId(userId)
+        val now = Clock.System.now()
+        val entity = UserProfileEntity(
+            userId = userId,
+            displayNameOverride = displayName?.trim()?.takeIf { it.isNotEmpty() },
+            phoneE164Self = phoneE164Self?.trim()?.takeIf { it.isNotEmpty() },
+            timezone = existing?.timezone ?: "Asia/Seoul",
+            preferredLocale = existing?.preferredLocale ?: "ko",
+            createdAt = existing?.createdAt ?: now,
+            updatedAt = now,
+        )
+        dao.upsert(entity)
+        entity
     }
 
     override suspend fun bootstrapIfMissing(

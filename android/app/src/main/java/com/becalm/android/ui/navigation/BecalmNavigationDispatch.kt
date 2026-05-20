@@ -14,6 +14,7 @@ import com.becalm.android.ui.today.TodayEffect
 
 private const val SOURCE_RECONNECT_RETURN_KEY = "source_reconnect_return"
 private const val SOURCE_RECONNECT_RETURN_ROUTE_KEY = "source_reconnect_return_route"
+private const val SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY = "source_reconnect_target_source_type"
 
 internal fun NavHostController.dispatchTodayEffect(effect: TodayEffect) {
     when (effect) {
@@ -24,7 +25,7 @@ internal fun NavHostController.dispatchTodayEffect(effect: TodayEffect) {
 internal fun NavHostController.dispatchSourcesListNavigation(target: SourcesListNavigation) {
     when (target) {
         is SourcesListNavigation.SourceDetail -> navigate(BecalmRoute.SourceDetail(target.sourceType).path)
-        SourcesListNavigation.ContactsPermission -> navigate(BecalmRoute.OnboardingContacts.path)
+        SourcesListNavigation.ContactsPermission -> navigate(BecalmRoute.SettingsContactsPermission.path)
         SourcesListNavigation.ContactsDetail -> navigate(BecalmRoute.ContactsSourceDetail.path)
     }
 }
@@ -34,21 +35,37 @@ internal fun NavHostController.dispatchSourceDetailEffect(effect: SourceDetailEf
         is SourceDetailEffect.OpenReconnect -> {
             val destinationRoute = when (effect.destination) {
                 SourceReconnectDestination.RECORDING_FOLDER -> BecalmRoute.OnboardingRecordingFolder.path
-                SourceReconnectDestination.GMAIL -> BecalmRoute.SettingsSourceConnections.path
-                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.SettingsSourceConnections.path
-                SourceReconnectDestination.IMAP -> BecalmRoute.OnboardingEmailPipa("imap").path
-                SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
-                SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.SettingsSourceConnections.path
+                SourceReconnectDestination.GMAIL -> BecalmRoute.SettingsSourceConnection("gmail").path
+                SourceReconnectDestination.OUTLOOK_MAIL -> BecalmRoute.SettingsSourceConnection("outlook_mail").path
+                SourceReconnectDestination.NAVER_IMAP -> BecalmRoute.OnboardingEmailPipa("imap_naver").path
+                SourceReconnectDestination.DAUM_IMAP -> BecalmRoute.OnboardingEmailPipa("imap_daum").path
+                SourceReconnectDestination.GOOGLE_CALENDAR -> BecalmRoute.SettingsSourceConnection("google_calendar").path
+                SourceReconnectDestination.OUTLOOK_CALENDAR -> BecalmRoute.SettingsSourceConnection("outlook_calendar").path
             }
             currentBackStackEntry?.savedStateHandle?.set(
                 SOURCE_RECONNECT_RETURN_ROUTE_KEY,
                 BecalmRoute.SettingsSources.path,
             )
             currentBackStackEntry?.savedStateHandle?.set(SOURCE_RECONNECT_RETURN_KEY, true)
+            if (effect.destination == SourceReconnectDestination.RECORDING_FOLDER) {
+                if (effect.sourceType.isNullOrBlank()) {
+                    currentBackStackEntry?.savedStateHandle?.remove<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
+                } else {
+                    currentBackStackEntry?.savedStateHandle?.set(
+                        SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY,
+                        effect.sourceType,
+                    )
+                }
+            } else {
+                currentBackStackEntry?.savedStateHandle?.remove<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
+            }
             navigate(destinationRoute)
         }
     }
 }
+
+internal fun NavHostController.sourceReconnectTargetSourceType(): String? =
+    previousBackStackEntry?.savedStateHandle?.get<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
 
 internal fun NavHostController.navigateAfterSourceReconnectOr(route: String) {
     val previousHandle = previousBackStackEntry?.savedStateHandle
@@ -56,11 +73,13 @@ internal fun NavHostController.navigateAfterSourceReconnectOr(route: String) {
     if (returnRoute != null) {
         previousHandle.remove<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
         previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        previousHandle.remove<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
         if (popBackStack(returnRoute, inclusive = false)) return
         if (popBackStack()) return
     }
     if (previousHandle?.get<Boolean>(SOURCE_RECONNECT_RETURN_KEY) == true) {
         previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        previousHandle.remove<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
         if (popBackStack()) return
     }
     navigate(route)
@@ -72,6 +91,7 @@ internal fun NavHostController.returnToSettingsSourcesAfterSourceConnect() {
     if (returnRoute != null) {
         previousHandle.remove<String>(SOURCE_RECONNECT_RETURN_ROUTE_KEY)
         previousHandle.remove<Boolean>(SOURCE_RECONNECT_RETURN_KEY)
+        previousHandle.remove<String>(SOURCE_RECONNECT_TARGET_SOURCE_TYPE_KEY)
         if (popBackStack(returnRoute, inclusive = false)) return
     }
     if (!popBackStack(BecalmRoute.SettingsSources.path, inclusive = false)) {
@@ -108,7 +128,7 @@ internal fun dispatchContactsSourceDetailEffect(
             context.startActivity(intent)
         }
         ContactsSourceDetailEffect.OpenContactsPermissionScreen -> {
-            navController.navigate(BecalmRoute.OnboardingContacts.path)
+            navController.navigate(BecalmRoute.SettingsContactsPermission.path)
         }
     }
 }

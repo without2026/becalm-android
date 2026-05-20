@@ -18,8 +18,8 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  *
  * 2. **Attach bearer token** — for Railway requests, the current access token is read via
  *    [AuthTokenProvider.currentAccessToken] (synchronous, no suspension) and attached as
- *    `Authorization: Bearer <token>`. If no token is available an empty string is used so
- *    the header is always present; the server returns 401 which triggers step 3.
+ *    `Authorization: Bearer <token>` only when a non-blank token exists. Signed-out calls
+ *    are forwarded without an auth header so a 401 does not create a cleanup loop.
  *
  * 3. **401 refresh-and-retry** — on receiving an HTTP 401 response:
  *    a. The 401 response body is buffered into memory via `body.bytes()` and the response
@@ -30,8 +30,9 @@ import okhttp3.ResponseBody.Companion.toResponseBody
  *    c. If refresh reports [AuthTokenProvider.RefreshResult.Failed], the buffered 401 is
  *       returned unchanged — the failure was transient, so local auth state is preserved.
  *    d. If refresh reports [AuthTokenProvider.RefreshResult.Unauthenticated], the buffered
- *       401 is returned and the local session is collapsed to signed-out via
- *       [authFailureSessionInvalidator].
+ *       401 is returned. The local session is collapsed only when the failed request carried
+ *       a non-blank bearer token; no-token requests are already signed-out and must not wipe
+ *       credentials repeatedly.
  *    e. If refresh reports [AuthTokenProvider.RefreshResult.Refreshed], the buffered 401
  *       response is closed, the request is rebuilt with the new bearer token, and executed
  *       exactly **once**. If that retry also returns 401, local auth state is invalidated.
@@ -61,9 +62,14 @@ public class AuthInterceptor(
 
         // Step 2: attach current access token
         val token = authTokenProvider.currentAccessToken().orEmpty()
-        val authenticatedRequest = originalRequest.newBuilder()
-            .header("Authorization", "Bearer $token")
-            .build()
+        val hadToken = token.isNotBlank()
+        val authenticatedRequest = if (hadToken) {
+            originalRequest.newBuilder()
+                .header("Authorization", "Bearer $token")
+                .build()
+        } else {
+            originalRequest
+        }
 
         val response = chain.proceed(authenticatedRequest)
 
@@ -86,7 +92,9 @@ public class AuthInterceptor(
         when (val refresh = refreshWithTimeout(token)) {
             is AuthTokenProvider.RefreshResult.Failed -> return bufferedResponse
             is AuthTokenProvider.RefreshResult.Unauthenticated -> {
-                invalidateWithTimeout()
+                if (hadToken) {
+                    invalidateWithTimeout()
+                }
                 return bufferedResponse
             }
             is AuthTokenProvider.RefreshResult.Refreshed -> {

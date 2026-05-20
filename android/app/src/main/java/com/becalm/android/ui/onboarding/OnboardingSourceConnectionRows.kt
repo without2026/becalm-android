@@ -105,6 +105,8 @@ internal fun SelfIdentitySetupPanel(
                 value = state.displayName,
                 onValueChange = onDisplayNameChange,
                 label = stringResource(R.string.onb_setup_identity_display_name_label),
+                placeholder = stringResource(R.string.onb_setup_identity_display_name_placeholder),
+                supportingText = stringResource(R.string.onb_setup_identity_display_name_help),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-display-name"),
@@ -113,6 +115,8 @@ internal fun SelfIdentitySetupPanel(
                 value = state.email,
                 onValueChange = onEmailChange,
                 label = stringResource(R.string.onb_setup_identity_email_label),
+                placeholder = stringResource(R.string.onb_setup_identity_email_placeholder),
+                supportingText = stringResource(R.string.onb_setup_identity_email_help),
                 keyboardType = KeyboardType.Email,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -123,6 +127,7 @@ internal fun SelfIdentitySetupPanel(
                 onValueChange = onPhoneChange,
                 label = stringResource(R.string.onb_setup_identity_phone_label),
                 placeholder = "+82 10 0000 0000",
+                supportingText = stringResource(R.string.onb_setup_identity_phone_help),
                 keyboardType = KeyboardType.Phone,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -132,6 +137,8 @@ internal fun SelfIdentitySetupPanel(
                 value = state.alias,
                 onValueChange = onAliasChange,
                 label = stringResource(R.string.onb_setup_identity_alias_label),
+                placeholder = stringResource(R.string.onb_setup_identity_alias_placeholder),
+                supportingText = stringResource(R.string.onb_setup_identity_alias_help),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding-self-alias"),
@@ -188,7 +195,7 @@ internal fun SetupConnectionRow(
                 }
                 SourceConnectionStatusPill(state = item.state)
             }
-            if (!item.state.isTerminal) {
+            if (!item.state.hidesActions) {
                 SourceConnectionActions(
                     primaryLabel = connectLabel(item.state, requiresConsent = false),
                     onPrimary = onConnect,
@@ -304,7 +311,7 @@ private fun SourceConnectionRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!item.state.isTerminal) {
+            if (!item.state.hidesActions) {
                 SourceConnectionActions(
                     primaryLabel = connectLabel(item.state, item.consentCopy != null),
                     onPrimary = onConnect,
@@ -313,6 +320,8 @@ private fun SourceConnectionRow(
                     primaryLoading = item.state == SourceConnectionState.Connecting ||
                         item.state == SourceConnectionState.PendingExternalAuth,
                     onSkip = onSkip,
+                    skipEnabled = item.state != SourceConnectionState.Connecting &&
+                        item.state != SourceConnectionState.PendingExternalAuth,
                     skipLabel = skipLabel,
                 )
             }
@@ -328,6 +337,7 @@ private fun SourceConnectionActions(
     skipLabel: String,
     primaryEnabled: Boolean = true,
     primaryLoading: Boolean = false,
+    skipEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -346,6 +356,7 @@ private fun SourceConnectionActions(
             text = skipLabel,
             onClick = onSkip,
             variant = BecalmButtonVariant.Text,
+            enabled = skipEnabled,
             modifier = Modifier.testTag("source-connection-skip"),
         )
     }
@@ -370,5 +381,5 @@ private fun connectLabel(state: SourceConnectionState, requiresConsent: Boolean)
     return stringResource(resId)
 }
 
-private val SourceConnectionState.isTerminal: Boolean
-    get() = this == SourceConnectionState.Connected || this == SourceConnectionState.Skipped
+private val SourceConnectionState.hidesActions: Boolean
+    get() = this == SourceConnectionState.Connected

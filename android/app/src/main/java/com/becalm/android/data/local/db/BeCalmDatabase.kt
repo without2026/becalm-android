@@ -7,7 +7,10 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
@@ -19,7 +22,10 @@ import com.becalm.android.data.local.db.dao.UserProfileDao
 import com.becalm.android.data.local.db.entity.CalendarEventEntity
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentParticipantEntity
+import com.becalm.android.data.local.db.entity.CommitmentProgressEventEntity
 import com.becalm.android.data.local.db.entity.EmailBodyEntity
+import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
 import com.becalm.android.data.local.db.entity.PersonEnrichmentEntity
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
@@ -73,6 +79,15 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
  *   These rows let Android render and patch the authenticated user's identity/source
  *   ownership state without deriving it from raw events on hot UI paths.
  * - v23: adds a durable retry queue for backend source-participant manual/self match mirrors.
+ * - v25: preserves calendar status/location/provider-updated fields and schedule-link
+ *   conflict resolution snapshots.
+ * - v26: keeps provider calendar semantics separate from LLM-derived schedule proposals by
+ *   adding all-day/timezone/availability/structured attendee metadata to calendar events.
+ * - v27: adds durable meeting speaker previews so long CLOVA preview work can run in the
+ *   background and survive process death before the user chooses their own speaker.
+ * - v28: adds local meeting speaker display aliases for transcript rendering.
+ * - v29: adds `raw_ingestion_events.conversation_ref` plus local
+ *   `commitment_progress_events` for high-confidence completion evidence.
  *
  * ## Type converters
  * [Converters] is applied at the database level so that every DAO and entity
@@ -128,8 +143,11 @@ import com.becalm.android.data.local.db.migration.MIGRATIONS
         SelfIdentityAnchorEntity::class,
         SourceConnectionEntity::class,
         PendingSourceParticipantMirrorEntity::class,
+        MeetingSpeakerPreviewEntity::class,
+        MeetingSpeakerAliasEntity::class,
+        CommitmentProgressEventEntity::class,
     ],
-    version = 23,
+    version = 29,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -139,8 +157,8 @@ public abstract class BeCalmDatabase : RoomDatabase() {
         // with [DATABASE_VERSION] below. KSP2 cannot resolve the const reference at the
         // annotation site (ksp#2439), so both sites must be bumped together on every schema
         // migration. Plan: docs/plans/db-commitment-due-at-hint-approximate.md §Migration Impact.
-        require(DATABASE_VERSION == 23) {
-            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 23) literal"
+        require(DATABASE_VERSION == 29) {
+            "DATABASE_VERSION ($DATABASE_VERSION) drifted from @Database(version = 29) literal"
         }
     }
 
@@ -187,6 +205,15 @@ public abstract class BeCalmDatabase : RoomDatabase() {
     /** Returns the DAO for backend-owned source account connections. */
     public abstract fun sourceConnectionDao(): SourceConnectionDao
 
+    /** Returns the DAO for durable meeting speaker preview/review state. */
+    public abstract fun meetingSpeakerPreviewDao(): MeetingSpeakerPreviewDao
+
+    /** Returns the DAO for local meeting speaker display aliases. */
+    public abstract fun meetingSpeakerAliasDao(): MeetingSpeakerAliasDao
+
+    /** Returns completion evidence rows consumed by ProcessDoneWorker. */
+    public abstract fun commitmentProgressEventDao(): CommitmentProgressEventDao
+
     public companion object {
 
         /**
@@ -227,7 +254,7 @@ public abstract class BeCalmDatabase : RoomDatabase() {
          * Current schema version. Increment this integer whenever the schema changes and add
          * a corresponding [androidx.room.migration.Migration] to [MIGRATIONS].
          */
-        public const val DATABASE_VERSION: Int = 23
+        public const val DATABASE_VERSION: Int = 29
 
         /**
          * Returns the per-user SQLite filename for the given [userIdHash].

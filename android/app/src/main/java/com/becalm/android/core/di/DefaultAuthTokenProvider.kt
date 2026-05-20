@@ -46,13 +46,18 @@ public class DefaultAuthTokenProvider @Inject constructor(
         refreshMutex.withLock {
             val current = sessionStore.load()
                 ?: return@withLock AuthTokenProvider.RefreshResult.Unauthenticated
+            if (current.refreshToken.isBlank()) {
+                sessionStore.clear()
+                updateCache(null)
+                return@withLock AuthTokenProvider.RefreshResult.Unauthenticated
+            }
 
             val cached = cachedAccessToken.get()
             if (cached != null && cached != previousAccessToken) {
                 return@withLock AuthTokenProvider.RefreshResult.Refreshed(cached)
             }
 
-            val result = authClientProvider.get().refresh(current.refreshToken)
+            val result = authClientProvider.get().refresh(current)
             val refreshed = result.getOrNull()
             if (refreshed != null) {
                 sessionStore.save(refreshed)

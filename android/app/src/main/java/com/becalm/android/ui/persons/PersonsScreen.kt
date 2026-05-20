@@ -106,12 +106,18 @@ public fun PersonsScreen(
         },
         headerState = headerState,
         onOpenSettings = { navController.navigate(BecalmRoute.Settings.path) },
+        onOpenSources = {
+            navController.navigate(BecalmRoute.SettingsSources.path) {
+                launchSingleTop = true
+            }
+        },
         onMessageScreenshotImport = evidenceImportActions.openMessageScreenshotPicker,
         onMeetingAudioImport = evidenceImportActions.openMeetingAudioPicker,
         evidenceImportState = evidenceImportState,
         onMeetingSelfSpeakerSelected = evidenceImportViewModel::onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = evidenceImportViewModel::onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = evidenceImportViewModel::onMeetingSpeakerReviewCancelled,
+        onMeetingPreviewLoadingCancelled = evidenceImportViewModel::onMeetingPreviewLoadingCancelled,
     )
 }
 
@@ -125,12 +131,14 @@ public fun PersonsScreenContent(
     onOpenUnassigned: () -> Unit = {},
     headerState: MainTabHeaderState = MainTabHeaderState(),
     onOpenSettings: () -> Unit = {},
+    onOpenSources: () -> Unit = onOpenSettings,
     onMessageScreenshotImport: () -> Unit = {},
     onMeetingAudioImport: () -> Unit = {},
     evidenceImportState: EvidenceImportUiState = EvidenceImportUiState(),
     onMeetingSelfSpeakerSelected: (String) -> Unit = {},
     onMeetingSpeakerReviewConfirmed: () -> Unit = {},
     onMeetingSpeakerReviewCancelled: () -> Unit = {},
+    onMeetingPreviewLoadingCancelled: () -> Unit = {},
 ) {
     val evidenceImportController = rememberEvidenceImportSheetController()
     val hasUnassignedEvents = state.unassignedEvents.isNotEmpty()
@@ -155,6 +163,7 @@ public fun PersonsScreenContent(
             MainTabStatusHeader(
                 state = headerState,
                 onOpenSettings = onOpenSettings,
+                onOpenSources = onOpenSources,
             )
             if (state.showOfflineBadge) {
                 OfflineBadge(lastSyncAt = state.offlineLastSyncAt)
@@ -210,6 +219,7 @@ public fun PersonsScreenContent(
         onMeetingSelfSpeakerSelected = onMeetingSelfSpeakerSelected,
         onMeetingSpeakerReviewConfirmed = onMeetingSpeakerReviewConfirmed,
         onMeetingSpeakerReviewCancelled = onMeetingSpeakerReviewCancelled,
+        onMeetingPreviewLoadingCancelled = onMeetingPreviewLoadingCancelled,
         onReviewRequiredClick = onOpenUnassigned,
     )
 }

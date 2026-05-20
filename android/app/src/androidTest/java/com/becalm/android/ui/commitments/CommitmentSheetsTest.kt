@@ -87,7 +87,7 @@ class CommitmentSheetsTest {
         composeTestRule.onNodeWithText("Send proposal").assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitment_item_type_action)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitments_filter_give)).assertIsDisplayed()
-        composeTestRule.onNodeWithText("PENDING").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.commitment_action_state_pending)).assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.commitment_detail_llm_source_fmt, "voice", "4/24 10:00"))
             .assertIsDisplayed()
         composeTestRule.onAllNodesWithText(string(R.string.commitment_detail_last_edited_fmt, "4/24 10:30"))

@@ -45,6 +45,8 @@ internal class WorkSchedulerOneShotEnqueuer(
         selfSpeakerId: String? = null,
         speakerMappingsJson: String? = null,
         speakerPreviewId: String? = null,
+        extractionJobId: String? = null,
+        extractionJobPollAttempt: Int = 0,
     ) {
         planRunner.run(
             UniqueOneTimeWorkPlan(
@@ -58,10 +60,12 @@ internal class WorkSchedulerOneShotEnqueuer(
                     selfSpeakerId = selfSpeakerId,
                     speakerMappingsJson = speakerMappingsJson,
                     speakerPreviewId = speakerPreviewId,
+                    extractionJobId = extractionJobId,
+                    extractionJobPollAttempt = extractionJobPollAttempt,
                 ),
                 logMessage = "enqueueVoiceUpload rawEventId_hash=${redact(rawEventId)} " +
                     "key=${UniqueWorkKeys.voiceUpload(rawEventId)} delaySec=$initialDelaySec " +
-                    "rateLimitedAttempt=$rateLimitedAttempt",
+                    "rateLimitedAttempt=$rateLimitedAttempt jobPollAttempt=$extractionJobPollAttempt",
             ),
         )
     }
@@ -78,4 +82,18 @@ internal class WorkSchedulerOneShotEnqueuer(
         )
     }
 
+    fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) {
+        planRunner.run(
+            UniqueOneTimeWorkPlan(
+                uniqueKey = UniqueWorkKeys.meetingSpeakerPreview(rawEventId),
+                policy = ExistingWorkPolicy.REPLACE,
+                request = WorkSchedulerRequests.meetingSpeakerPreviewRequest(
+                    rawEventId = rawEventId,
+                    audioUri = audioUri,
+                ),
+                logMessage = "enqueueMeetingSpeakerPreview rawEventId_hash=${redact(rawEventId)} " +
+                    "key=${UniqueWorkKeys.meetingSpeakerPreview(rawEventId)}",
+            ),
+        )
+    }
 }

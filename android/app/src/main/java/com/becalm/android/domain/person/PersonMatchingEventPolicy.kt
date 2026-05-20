@@ -19,7 +19,7 @@ public object PersonMatchingEventPolicy {
         val hasProgramApplicationContext = PROGRAM_APPLICATION_CONTEXT_MARKERS.any { it in text }
         val hasProgramApplicationNotice = PROGRAM_APPLICATION_NOTICE_MARKERS.any { it in text }
         val hasPersonToPersonSignal = PERSON_TO_PERSON_SIGNAL_MARKERS.any { it in text }
-        return (hasServiceContext && (hasAccountAction || hasVerificationPhrase)) ||
+        return (hasServiceContext && (hasAccountAction || hasVerificationPhrase) && !hasPersonToPersonSignal) ||
             (hasProgramApplicationContext && hasProgramApplicationNotice && !hasPersonToPersonSignal)
     }
 

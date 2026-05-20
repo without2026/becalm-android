@@ -132,6 +132,7 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
         coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GMAIL, any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 
@@ -213,6 +214,7 @@ class SourceSyncPortSpecTest {
         coVerify(exactly = 1) { sourceConnectionRepository.refresh("user-1") }
         coVerify(exactly = 1) { selfIdentityRepository.refresh("user-1") }
         coVerify(exactly = 1) { sourceStatusRepository.refreshFromServer() }
+        coVerify(exactly = 1) { sourceStatusRepository.recordSyncSuccess(SourceType.GOOGLE_CALENDAR, any()) }
         coVerify(exactly = 1) { workScheduler.enqueuePersonInteractionIndex() }
     }
 

@@ -16,6 +16,7 @@ import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -39,6 +40,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -63,6 +65,7 @@ class VoiceUploadWorkerNotificationSpecTest {
     private val parsedUri: Uri = mockk(relaxed = true)
     private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
     private val commitmentDao: CommitmentDao = mockk(relaxed = true)
+    private val commitmentProgressEventDao: CommitmentProgressEventDao = mockk(relaxed = true)
     private val personIndexDao: PersonIndexDao = mockk(relaxed = true)
     private val selfIdentityAnchorDao: SelfIdentityAnchorDao = mockk(relaxed = true)
     private val sourceExtractionApi: SourceExtractionApi = mockk()
@@ -293,11 +296,159 @@ class VoiceUploadWorkerNotificationSpecTest {
         assertEquals(3L, secondWrite.size)
     }
 
-    private fun buildWorker(): VoiceUploadWorker = VoiceUploadWorker(
+    @Test
+    fun `long audio 202 response re-enqueues polling work instead of re-upload retry`() = runTest {
+        val entity = RawIngestionEventEntity(
+            id = "raw-1",
+            userId = "user-1",
+            clientEventId = "client-1",
+            sourceType = SourceType.MEETING,
+            sourceRef = "content://voice/raw-1",
+            eventTitle = "긴 회의 녹음",
+            durationSeconds = 600,
+            timestamp = Instant.parse("2026-04-23T00:00:00Z"),
+            syncStatus = "pending",
+        )
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
+        coEvery {
+            sourceExtractionApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns Response.success(
+            202,
+            SourceExtractionResponse(
+                rawEventId = "raw-1",
+                items = emptyList(),
+                sourceEventParticipants = emptyList(),
+                model = "pending",
+                region = "pending",
+                rawModelText = null,
+                jobId = "job-1",
+                status = "pending",
+                retryAfterSeconds = 12,
+            ),
+        )
+
+        val result = buildWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        verify(exactly = 1) {
+            workScheduler.enqueueVoiceUploadWithDelay(
+                rawEventId = "raw-1",
+                audioUri = "content://voice/raw-1",
+                initialDelaySec = 12,
+                rateLimitedAttempt = 0,
+                selfSpeakerId = null,
+                speakerMappingsJson = null,
+                speakerPreviewId = null,
+                extractionJobId = "job-1",
+                extractionJobPollAttempt = 1,
+            )
+        }
+    }
+
+    @Test
+    fun `polling accepted audio job persists succeeded extraction without re-uploading audio`() = runTest {
+        val entity = RawIngestionEventEntity(
+            id = "raw-1",
+            userId = "user-1",
+            clientEventId = "client-1",
+            sourceType = SourceType.MEETING,
+            sourceRef = "content://voice/raw-1",
+            eventTitle = "긴 회의 녹음",
+            durationSeconds = 600,
+            timestamp = Instant.parse("2026-04-23T00:00:00Z"),
+            syncStatus = "synced",
+        )
+        every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
+        every { userPrefsStore.observeThirdPartyProvisionConsent() } returns flowOf(true)
+        every { userPrefsStore.observeNotificationsEnabled() } returns flowOf(false)
+        coEvery { processingPauseGate.shouldSkip(any()) } returns false
+        coEvery { rawIngestionEventDao.findById("raw-1", "user-1") } returns entity
+        coEvery { sourceExtractionApi.commitmentExtractionJob("job-1") } returns Response.success(
+            SourceExtractionResponse(
+                rawEventId = "raw-1",
+                items = emptyList(),
+                sourceEventParticipants = emptyList(),
+                model = "clova-speech+gemini-2.5-flash",
+                region = "us-central1",
+                rawModelText = """{"items":[],"source_event_participants":[]}""",
+                jobId = "job-1",
+                status = "succeeded",
+                retryAfterSeconds = 10,
+            ),
+        )
+
+        val inputData = Data.Builder()
+            .putString(VoiceUploadWorker.KEY_RAW_EVENT_ID, "raw-1")
+            .putString(VoiceUploadWorker.KEY_AUDIO_URI, "content://voice/raw-1")
+            .putString(VoiceUploadWorker.KEY_EXTRACTION_JOB_ID, "job-1")
+            .putInt(VoiceUploadWorker.KEY_EXTRACTION_JOB_POLL_ATTEMPT, 1)
+            .build()
+        val result = buildWorker(inputData = inputData).doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        coVerify(exactly = 1) { sourceExtractionApi.commitmentExtractionJob("job-1") }
+        coVerify(exactly = 0) {
+            sourceExtractionApi.commitmentExtract(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        }
+        verify(exactly = 0) {
+            workScheduler.enqueueVoiceUploadWithDelay(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    private fun buildWorker(inputData: Data = defaultInputData()): VoiceUploadWorker = VoiceUploadWorker(
         appContext = appContext,
-        workerParams = workerParams(),
+        workerParams = workerParams(inputData),
         rawIngestionEventDao = rawIngestionEventDao,
         commitmentDao = commitmentDao,
+        commitmentProgressEventDao = commitmentProgressEventDao,
         personIndexDao = personIndexDao,
         selfIdentityAnchorDao = selfIdentityAnchorDao,
         sourceExtractionApi = sourceExtractionApi,
@@ -313,14 +464,9 @@ class VoiceUploadWorkerNotificationSpecTest {
         ioDispatcher = kotlinx.coroutines.Dispatchers.IO,
     )
 
-    private fun workerParams(): WorkerParameters = mockk<WorkerParameters>().also { params ->
+    private fun workerParams(inputData: Data): WorkerParameters = mockk<WorkerParameters>().also { params ->
         every { params.id } returns UUID.randomUUID()
-        every {
-            params.inputData
-        } returns Data.Builder()
-            .putString(VoiceUploadWorker.KEY_RAW_EVENT_ID, "raw-1")
-            .putString(VoiceUploadWorker.KEY_AUDIO_URI, "content://voice/raw-1")
-            .build()
+        every { params.inputData } returns inputData
         every { params.tags } returns emptySet()
         every { params.triggeredContentUris } returns emptyList()
         every { params.triggeredContentAuthorities } returns emptyList()
@@ -332,4 +478,9 @@ class VoiceUploadWorkerNotificationSpecTest {
         every { params.progressUpdater } returns progressUpdater
         every { params.foregroundUpdater } returns foregroundUpdater
     }
+
+    private fun defaultInputData(): Data = Data.Builder()
+        .putString(VoiceUploadWorker.KEY_RAW_EVENT_ID, "raw-1")
+        .putString(VoiceUploadWorker.KEY_AUDIO_URI, "content://voice/raw-1")
+        .build()
 }

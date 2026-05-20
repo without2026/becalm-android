@@ -5,15 +5,26 @@ import app.cash.turbine.test
 import com.becalm.android.R
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
 import com.becalm.android.data.local.db.entity.CommitmentItemType
 import com.becalm.android.data.local.db.entity.CommitmentLifecycleLegacy
+import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
+import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
+import com.becalm.android.data.local.db.entity.SourceArtifactEntity
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.repository.ArchivedOriginal
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.ui.commitments.CommitmentDetailViewModel
 import com.becalm.android.ui.navigation.BecalmRoute
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
@@ -38,6 +49,9 @@ class CommitmentDetailViewModelSpecTest {
     private val testDispatcher = StandardTestDispatcher()
     private val commitmentRepository: CommitmentRepository = mockk(relaxed = true)
     private val personEnrichmentRepository: PersonEnrichmentRepository = mockk(relaxed = true)
+    private val rawIngestionEventDao: RawIngestionEventDao = mockk(relaxed = true)
+    private val meetingSpeakerAliasDao: MeetingSpeakerAliasDao = mockk(relaxed = true)
+    private val sourceArtifactRepository: SourceArtifactRepository = mockk(relaxed = true)
     private val userPrefsStore: UserPrefsStore = mockk(relaxed = true)
     private val logger: Logger = mockk(relaxed = true)
 
@@ -46,6 +60,7 @@ class CommitmentDetailViewModelSpecTest {
         Dispatchers.setMain(testDispatcher)
         every { userPrefsStore.observeCurrentUserId() } returns flowOf("user-1")
         every { personEnrichmentRepository.observeEnrichmentMap() } returns flowOf(emptyMap())
+        coEvery { meetingSpeakerAliasDao.findForRawEvent(any(), any()) } returns emptyList()
     }
 
     @After
@@ -214,9 +229,104 @@ class CommitmentDetailViewModelSpecTest {
         assertEquals(CommitmentItemType.SCHEDULE, state.entity?.itemType)
     }
 
+    @Test
+    fun `meeting schedule detail includes archived transcript`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "meeting-schedule") } returns flowOf(
+            entity(
+                id = "meeting-schedule",
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                sourceType = SourceType.MEETING,
+                sourceRef = "content://meeting/audio",
+            ),
+        )
+        coEvery {
+            rawIngestionEventDao.findBySourceRefsForUser("user-1", listOf("content://meeting/audio"))
+        } returns listOf(
+            RawIngestionEventEntity(
+                id = "raw-meeting-1",
+                userId = "user-1",
+                clientEventId = "client-raw-meeting-1",
+                sourceType = SourceType.MEETING,
+                sourceRef = "content://meeting/audio",
+                eventTitle = "standup.m4a",
+                timestamp = Instant.parse("2026-05-19T01:00:00Z"),
+            ),
+        )
+        coEvery { sourceArtifactRepository.findMarkdownOriginal("user-1", "raw-meeting-1") } returns
+            ArchivedOriginal(
+                artifact = sourceArtifact("raw-meeting-1"),
+                markdown = "SPEAKER_01: 제가 자료 보낼게요.",
+                markdownTruncated = false,
+            )
+        coEvery { meetingSpeakerAliasDao.findForRawEvent("user-1", "raw-meeting-1") } returns listOf(
+            MeetingSpeakerAliasEntity(
+                userId = "user-1",
+                rawEventId = "raw-meeting-1",
+                speakerId = "SPEAKER_01",
+                displayName = "Jake",
+                updatedAt = Instant.parse("2026-05-19T01:00:00Z"),
+            ),
+        )
+
+        val viewModel = buildViewModel("meeting-schedule")
+        advanceUntilIdle()
+
+        assertEquals("Jake: 제가 자료 보낼게요.", viewModel.uiState.value.meetingTranscript?.bodyText)
+        assertEquals(listOf("SPEAKER_01"), viewModel.uiState.value.meetingTranscript?.speakerIds)
+    }
+
+    @Test
+    fun `meeting schedule detail lets user rename transcript speakers`() = runTest {
+        every { commitmentRepository.observeByIdForUser("user-1", "meeting-alias") } returns flowOf(
+            entity(
+                id = "meeting-alias",
+                itemType = CommitmentItemType.SCHEDULE,
+                direction = null,
+                sourceType = SourceType.MEETING,
+                sourceRef = "content://meeting/audio",
+            ),
+        )
+        coEvery {
+            rawIngestionEventDao.findBySourceRefsForUser("user-1", listOf("content://meeting/audio"))
+        } returns listOf(
+            RawIngestionEventEntity(
+                id = "raw-meeting-2",
+                userId = "user-1",
+                clientEventId = "client-raw-meeting-2",
+                sourceType = SourceType.MEETING,
+                sourceRef = "content://meeting/audio",
+                eventTitle = "standup.m4a",
+                timestamp = Instant.parse("2026-05-19T01:00:00Z"),
+            ),
+        )
+        coEvery { sourceArtifactRepository.findMarkdownOriginal("user-1", "raw-meeting-2") } returns
+            ArchivedOriginal(
+                artifact = sourceArtifact("raw-meeting-2"),
+                markdown = "SPEAKER_01: 제가 자료 보낼게요.",
+                markdownTruncated = false,
+            )
+        val aliasSlot = slot<MeetingSpeakerAliasEntity>()
+
+        val viewModel = buildViewModel("meeting-alias")
+        advanceUntilIdle()
+        viewModel.onSpeakerAliasChange("SPEAKER_01", "나")
+        advanceUntilIdle()
+
+        coVerify { meetingSpeakerAliasDao.upsert(capture(aliasSlot)) }
+        assertEquals("raw-meeting-2", aliasSlot.captured.rawEventId)
+        assertEquals("SPEAKER_01", aliasSlot.captured.speakerId)
+        assertEquals("나", aliasSlot.captured.displayName)
+        assertEquals("나: 제가 자료 보낼게요.", viewModel.uiState.value.meetingTranscript?.bodyText)
+    }
+
+
     private fun buildViewModel(id: String): CommitmentDetailViewModel = CommitmentDetailViewModel(
         commitmentRepository = commitmentRepository,
         personEnrichmentRepository = personEnrichmentRepository,
+        rawIngestionEventDao = rawIngestionEventDao,
+        meetingSpeakerAliasDao = meetingSpeakerAliasDao,
+        sourceArtifactRepository = sourceArtifactRepository,
         userPrefsStore = userPrefsStore,
         savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to id)),
         logger = logger,
@@ -235,6 +345,7 @@ class CommitmentDetailViewModelSpecTest {
         sourceEventOccurredAt: Instant = Instant.parse("2026-04-18T06:00:00Z"),
         actionState: String = "pending",
         sourceType: String = "voice",
+        sourceRef: String? = null,
         createdAt: Instant = Instant.parse("2026-04-18T05:00:00Z"),
         lastEditedAt: Instant? = null,
         quoteDisputed: Boolean = false,
@@ -260,7 +371,7 @@ class CommitmentDetailViewModelSpecTest {
         dueIsApproximate = false,
         actionState = actionState,
         sourceType = sourceType,
-        sourceRef = null,
+        sourceRef = sourceRef,
         confidence = 0.8,
         commitmentState = CommitmentLifecycleLegacy.DRAFT,
         syncStatus = "synced",
@@ -272,5 +383,20 @@ class CommitmentDetailViewModelSpecTest {
         quoteDisputedAt = quoteDisputedAt,
         deletedAt = deletedAt,
         supersedesCommitmentId = supersedesCommitmentId,
+    )
+
+    private fun sourceArtifact(rawEventId: String): SourceArtifactEntity = SourceArtifactEntity(
+        id = "artifact-$rawEventId",
+        userId = "user-1",
+        rawEventId = rawEventId,
+        sourceType = SourceType.MEETING,
+        sourceRef = "content://meeting/audio",
+        artifactType = "markdown_original",
+        localPath = "source_archive/user-1/meeting/$rawEventId.md",
+        sha256 = "abc",
+        byteSize = 32,
+        occurredAt = Instant.parse("2026-05-19T01:00:00Z"),
+        createdAt = Instant.parse("2026-05-19T01:00:00Z"),
+        updatedAt = Instant.parse("2026-05-19T01:00:00Z"),
     )
 }

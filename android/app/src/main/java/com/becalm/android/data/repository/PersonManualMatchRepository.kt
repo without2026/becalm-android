@@ -4,16 +4,20 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
+import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
 import com.becalm.android.data.local.db.entity.PersonEntity
 import com.becalm.android.data.local.db.entity.PersonIdentityEntity
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.entity.PendingSourceParticipantMirrorEntity
+import com.becalm.android.data.local.db.entity.SelfIdentityAnchorEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceEventParticipantPatchRequestDto
 import com.becalm.android.domain.person.PersonIdentityResolver
+import com.becalm.android.domain.person.PersonIdentityTypes
 import com.becalm.android.worker.WorkScheduler
 import java.io.IOException
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Provider
 import kotlinx.coroutines.CancellationException
@@ -57,6 +61,7 @@ public interface PersonManualMatchRepository {
 
 public class PersonManualMatchRepositoryImpl @Inject constructor(
     private val personIndexDao: PersonIndexDao,
+    private val selfIdentityAnchorDao: SelfIdentityAnchorDao,
     private val workScheduler: WorkScheduler,
     private val apiProvider: Provider<RailwayApi>,
     private val logger: Logger,
@@ -68,11 +73,13 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
 
     public constructor(
         personIndexDao: PersonIndexDao,
+        selfIdentityAnchorDao: SelfIdentityAnchorDao,
         workScheduler: WorkScheduler,
         logger: Logger,
         ioDispatcher: CoroutineDispatcher,
     ) : this(
         personIndexDao = personIndexDao,
+        selfIdentityAnchorDao = selfIdentityAnchorDao,
         workScheduler = workScheduler,
         apiProvider = Provider { error("RailwayApi is not configured for this test repository") },
         logger = logger,
@@ -88,13 +95,15 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         nickname: String?,
     ): BecalmResult<Unit> = withContext(ioDispatcher) {
         val cleanedNickname = nickname?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanedAnchor = personAnchor.trim()
+        if (PersonIdentityResolver.isSpeakerLabelValue(cleanedAnchor)) {
+            return@withContext speakerLabelFailure()
+        }
         val resolved = resolveManualMatch(userId, personAnchor, cleanedNickname)
-            ?: return@withContext BecalmResult.Failure(
-                BecalmError.Validation(
-                    field = "personAnchor",
-                    message = "person anchor must contain a resolvable name, email, or phone",
-                ),
-            )
+            ?: return@withContext speakerLabelFailure()
+        val displayNameHint = cleanedNickname
+            ?.takeUnless { PersonIdentityResolver.isSpeakerLabelValue(it) }
+            ?: resolved.displayNameHint?.takeUnless { PersonIdentityResolver.isSpeakerLabelValue(it) }
 
         try {
             val sourceEventId = sourceRef.removePrefix("raw:")
@@ -107,11 +116,12 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                 identityType = resolved.identityType,
                 normalizedValue = resolved.normalizedValue,
                 rawValue = resolved.rawValue,
-                displayNameHint = cleanedNickname ?: resolved.displayNameHint,
+                displayNameHint = displayNameHint,
                 confidence = resolved.confidence,
             )
             if (updated == 0) {
                 logger.w(TAG, "manual match found no unresolved source participant source=$sourceType ref=$sourceRef")
+                return@withContext noParticipantFailure("manual_match")
             } else {
                 personIndexDao.upsertDirtySources(
                     listOf(
@@ -129,7 +139,7 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
                     sourceType = sourceType,
                     sourceEventId = sourceEventId,
                     resolved = resolved,
-                    displayNameHint = cleanedNickname ?: resolved.displayNameHint,
+                    displayNameHint = displayNameHint,
                 )
             }
             workScheduler.enqueuePersonInteractionIndex(initialDelaySeconds = 0L)
@@ -165,7 +175,13 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             )
             if (updated == 0 && deleted == 0) {
                 logger.w(TAG, "self match found no unresolved source participant source=$sourceType ref=$sourceRef")
+                return@withContext noParticipantFailure("self_match")
             } else {
+                upsertSelfIdentityAnchors(
+                    userId = userId,
+                    sourceType = sourceType,
+                    sourceEventId = sourceEventId,
+                )
                 personIndexDao.upsertDirtySources(
                     listOf(
                         PersonIndexDirtySources.rawEvent(
@@ -210,6 +226,7 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             )
             if (updated == 0) {
                 logger.w(TAG, "not-self review found no suggested self participant source=$sourceType ref=$sourceRef")
+                return@withContext noParticipantFailure("not_self")
             } else {
                 personIndexDao.upsertDirtySources(
                     listOf(
@@ -256,7 +273,11 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         }
         participants.forEach { participant ->
             val request = SourceEventParticipantPatchRequestDto(
+                sourceEventId = participant.sourceEventId,
+                sourceType = participant.sourceType,
+                sourceRef = participant.sourceRef,
                 personId = resolved.personId,
+                role = participant.role,
                 identityType = resolved.identityType,
                 normalizedValue = resolved.normalizedValue,
                 displayNameRaw = displayNameHint ?: participant.displayNameRaw,
@@ -291,6 +312,26 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             } else {
                 personIndexDao.deletePendingSourceParticipantMirrors(userId, listOf(participant.id))
             }
+        }
+    }
+
+    private suspend fun upsertSelfIdentityAnchors(
+        userId: String,
+        sourceType: String,
+        sourceEventId: String,
+    ) {
+        val now = Clock.System.now()
+        val participants = personIndexDao.findSourceEventParticipantsForUserAndEventIds(
+            userId = userId,
+            sourceEventIds = listOf(sourceEventId),
+        ).filter {
+            it.sourceType == sourceType && it.resolutionStatus == "self_resolved"
+        }
+        val anchors = participants
+            .flatMap { it.toUserConfirmedSelfAnchors(now) }
+            .distinctBy { "${it.anchorType}:${it.normalizedValue}" }
+        if (anchors.isNotEmpty()) {
+            selfIdentityAnchorDao.insertAll(anchors)
         }
     }
 
@@ -412,6 +453,10 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
 
     private fun SourceEventParticipantEntity.toSelfPatchRequest(): SourceEventParticipantPatchRequestDto =
         SourceEventParticipantPatchRequestDto(
+            sourceEventId = sourceEventId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            role = role,
             identityType = identityType,
             normalizedValue = normalizedValue,
             displayNameRaw = displayNameRaw,
@@ -426,6 +471,10 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
 
     private fun SourceEventParticipantEntity.toNotSelfPatchRequest(): SourceEventParticipantPatchRequestDto =
         SourceEventParticipantPatchRequestDto(
+            sourceEventId = sourceEventId,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+            role = role,
             identityType = identityType,
             normalizedValue = normalizedValue,
             displayNameRaw = displayNameRaw,
@@ -438,8 +487,63 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             resolutionStatus = "unresolved",
         )
 
+    private fun SourceEventParticipantEntity.toUserConfirmedSelfAnchors(now: kotlinx.datetime.Instant): List<SelfIdentityAnchorEntity> =
+        buildList {
+            val email = PersonIdentityResolver.normalizeEmailAnchor(emailRaw)
+                ?: normalizedValue.takeIf { identityType == "email" }
+                    ?.let(PersonIdentityResolver::normalizeEmailAnchor)
+            email?.let { normalized ->
+                add(toSelfAnchor(anchorType = "email", normalized = normalized, displayValue = emailRaw ?: normalized, now = now))
+            }
+            val phone = PersonIdentityResolver.normalizePhoneAnchor(phoneRaw)
+                ?: normalizedValue.takeIf { identityType == "phone" }
+                    ?.let(PersonIdentityResolver::normalizePhoneAnchor)
+            phone?.let { normalized ->
+                add(toSelfAnchor(anchorType = "phone", normalized = normalized, displayValue = phoneRaw ?: normalized, now = now))
+            }
+            listOf(displayNameRaw, normalizedValue.takeIf { identityType in setOf("name", "alias") })
+                .firstNotNullOfOrNull(PersonIdentityResolver::normalizeAlias)
+                ?.let { normalized ->
+                    add(toSelfAnchor(anchorType = "alias", normalized = normalized, displayValue = displayNameRaw ?: normalized, now = now))
+                }
+        }
+
+    private fun SourceEventParticipantEntity.toSelfAnchor(
+        anchorType: String,
+        normalized: String,
+        displayValue: String,
+        now: kotlinx.datetime.Instant,
+    ): SelfIdentityAnchorEntity =
+        SelfIdentityAnchorEntity(
+            id = UUID.nameUUIDFromBytes("self-anchor:$userId:$anchorType:$normalized:manual_match".toByteArray(Charsets.UTF_8))
+                .toString(),
+            userId = userId,
+            anchorType = anchorType,
+            normalizedValue = normalized,
+            displayValue = displayValue,
+            source = "manual_match",
+            scope = "global",
+            sourceConnectionId = null,
+            sourceEventId = null,
+            trust = "user_confirmed",
+            status = "active",
+            createdAt = now,
+            updatedAt = now,
+        )
+
     private fun Int.isRetryableMirrorStatus(): Boolean =
         this == 401 || this == 408 || this == 429 || this in 500..599
+
+    private fun noParticipantFailure(action: String): BecalmResult.Failure =
+        BecalmResult.Failure(BecalmError.NotFound("source_event_participant:$action"))
+
+    private fun speakerLabelFailure(): BecalmResult.Failure =
+        BecalmResult.Failure(
+            BecalmError.Validation(
+                field = "personAnchor",
+                message = "speaker labels must be matched to a real person name, email, phone, or existing person",
+            ),
+        )
 
     private suspend fun resolveManualMatch(
         userId: String,
@@ -447,7 +551,9 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         nickname: String?,
     ): ManualMatchResolution? {
         val anchor = personAnchor.trim().takeIf { it.isNotEmpty() } ?: return null
+        if (PersonIdentityResolver.isSpeakerLabelValue(anchor)) return null
         personIndexDao.findPersonForMemory(userId, anchor)?.let { person ->
+            if (person.isSpeakerLabelPerson()) return null
             return resolveExistingPerson(userId = userId, person = person, nickname = nickname)
         }
         return PersonIdentityResolver.resolve(userId, anchor)?.let { resolved ->
@@ -466,9 +572,13 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         userId: String,
         person: PersonEntity,
         nickname: String?,
-    ): ManualMatchResolution {
+    ): ManualMatchResolution? {
         val identity = personIndexDao.findIdentitiesForMemory(userId, person.id)
-            .firstOrNull { it.identityType in MATCHABLE_IDENTITY_TYPES && it.normalizedValue.isNotBlank() }
+            .firstOrNull {
+                it.identityType in MATCHABLE_IDENTITY_TYPES &&
+                    it.normalizedValue.isNotBlank() &&
+                    !it.isSpeakerLabelIdentity()
+            }
         if (identity != null) {
             return identity.toManualMatchResolution(personId = person.id, displayNameFallback = nickname ?: person.displayName)
         }
@@ -498,7 +608,9 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
             }
         }
 
-        val nameResolution = PersonIdentityResolver.resolve(userId, nickname ?: person.displayName)
+        val displayName = nickname ?: person.displayName
+        if (PersonIdentityResolver.isSpeakerLabelValue(displayName)) return null
+        val nameResolution = PersonIdentityResolver.resolve(userId, displayName)
         return ManualMatchResolution(
             personId = person.id,
             identityType = nameResolution?.identityType ?: "name",
@@ -533,6 +645,18 @@ public class PersonManualMatchRepositoryImpl @Inject constructor(
         private val MATCHABLE_IDENTITY_TYPES = setOf("email", "phone", "alias", "name")
     }
 }
+
+private fun PersonEntity.isSpeakerLabelPerson(): Boolean =
+    PersonIdentityResolver.isSpeakerLabelValue(displayName) ||
+        PersonIdentityResolver.isSpeakerLabelValue(primaryEmail) ||
+        PersonIdentityResolver.isSpeakerLabelValue(primaryPhone)
+
+private fun PersonIdentityEntity.isSpeakerLabelIdentity(): Boolean =
+    identityType == PersonIdentityTypes.SPEAKER_LABEL ||
+        PersonIdentityResolver.isSpeakerLabelValue(normalizedValue) ||
+        PersonIdentityResolver.isSpeakerLabelValue(rawValue) ||
+        PersonIdentityResolver.isSpeakerLabelValue(displayName) ||
+        PersonIdentityResolver.isSpeakerLabelValue(displayNameHint)
 
 private data class ManualMatchResolution(
     val personId: String,

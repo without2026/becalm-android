@@ -6,17 +6,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
-import com.becalm.android.core.util.Clock
-import com.becalm.android.core.util.KST
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.PersonIndexDao
-import com.becalm.android.data.local.db.entity.PersonInteractionEntity
 import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
 import com.becalm.android.ui.components.UiMessage
-import com.becalm.android.ui.components.isCalendarSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -32,10 +28,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
-import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.plus
 
 // ─── UI models ────────────────────────────────────────────────────────────────
 
@@ -54,8 +47,9 @@ public data class PersonDetailNextAction(
 )
 
 /**
- * A PersonDetail timeline card. One card represents one source event, and the
- * extracted give/take/schedule items from that source render inside it.
+ * A PersonDetail timeline card. One card represents one original source event.
+ * Extracted give/take/schedule items are kept for derived badges and drill-down
+ * state, but they do not render inline in the person timeline.
  */
 public data class SourceEventCardProjection(
     val sourceEventKey: String,
@@ -128,7 +122,6 @@ public class PersonDetailViewModel @Inject constructor(
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
-    private val clock: Clock,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
 ) : ViewModel() {
 
@@ -165,7 +158,6 @@ public class PersonDetailViewModel @Inject constructor(
                     if (userId == null) {
                         flowOf(PersonDetailUiState(personId = personId, loading = false))
                     } else {
-                        val calendarCutoff = calendarHistoryCutoff()
                         combine(
                             personIndexDao.observeIdentitiesForPerson(userId, personId),
                             personEnrichmentRepository.observeAll(),
@@ -173,14 +165,13 @@ public class PersonDetailViewModel @Inject constructor(
                         ) { identities, enrichmentRows, interactions ->
                             Triple(identities, enrichmentRows, interactions)
                         }.flatMapLatest { (identities, enrichmentRows, interactions) ->
-                            val filteredInteractions = interactions.filterRecentCalendarHistory(calendarCutoff)
                             val linksFlow = scheduleEventLinkRepository?.observeForProjectionRefs(
                                 userId = userId,
-                                commitmentIds = filteredInteractions.mapNotNull { it.commitmentId },
-                                rawEventIds = filteredInteractions.mapNotNull { it.sourceEventId },
+                                commitmentIds = interactions.mapNotNull { it.commitmentId },
+                                rawEventIds = interactions.mapNotNull { it.sourceEventId },
                                 calendarEventIds = emptyList(),
                             ) ?: flowOf(emptyList<ScheduleEventLinkEntity>())
-                            linksFlow.combine(flowOf(Triple(identities, enrichmentRows, filteredInteractions))) { links, triple ->
+                            linksFlow.combine(flowOf(Triple(identities, enrichmentRows, interactions))) { links, triple ->
                                 Quad(triple.first, triple.second, triple.third, links)
                             }
                         }.flatMapLatest { (identities, enrichmentRows, interactions, scheduleLinks) ->
@@ -220,17 +211,4 @@ public class PersonDetailViewModel @Inject constructor(
         val third: C,
         val fourth: D,
     )
-
-    private fun calendarHistoryCutoff(): Instant =
-        clock.today(KST).plus(DatePeriod(days = -1)).atStartOfDayIn(KST)
-
-    private fun List<PersonInteractionEntity>.filterRecentCalendarHistory(
-        cutoff: Instant,
-    ): List<PersonInteractionEntity> =
-        filterNot { interaction ->
-            interaction.isCalendarLike() && interaction.occurredAt < cutoff
-        }
-
-    private fun PersonInteractionEntity.isCalendarLike(): Boolean =
-        interactionKind == "calendar" || sourceType.isCalendarSource()
 }

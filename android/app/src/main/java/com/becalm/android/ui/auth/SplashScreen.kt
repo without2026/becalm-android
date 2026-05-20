@@ -106,7 +106,9 @@ internal fun splashDestinationFor(state: AuthUiState): String? =
             } else {
                 BecalmRoute.Terms.path
             }
-        is AuthUiState.Error -> BecalmRoute.Terms.path
+        is AuthUiState.SignUpEmailConfirmationRequired -> BecalmRoute.Login.path
+        is AuthUiState.RecoveryRequired -> BecalmRoute.AuthRecovery(state.termsAccepted).path
+        is AuthUiState.Error -> BecalmRoute.AuthRecovery(termsAccepted = false).path
         is AuthUiState.Loading -> null
     }
 

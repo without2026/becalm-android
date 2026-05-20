@@ -157,32 +157,49 @@ public class MediaStoreWorker @AssistedInject constructor(
             .takeIf { it > 0 }
 
         val voiceEnabled = userPrefsStore.observeSourceEnabled(SourceType.VOICE).first()
+        val callRecordingEnabled = userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING).first()
         val meetingEnabled = userPrefsStore.observeSourceEnabled(SourceType.MEETING).first()
 
-        if (audioMissing && voiceEnabled) {
+        if (audioMissing && (voiceEnabled || callRecordingEnabled)) {
             logger.w(TAG, "audio permission missing — blocked until user grants permission")
-            processingStatusRepository.recordBlocked(SourceType.VOICE, "Audio permission missing")
-            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Audio permission missing")
+            if (voiceEnabled) {
+                processingStatusRepository.recordBlocked(SourceType.VOICE, "Audio permission missing")
+            }
+            if (callRecordingEnabled) {
+                processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Audio permission missing")
+            }
         }
 
-        val recordingsTreeUri = userPrefsStore.observeRecordingFolderTreeUri().first()
-        if (recordingsTreeUri.isNullOrBlank()) {
-            logger.w(TAG, "recordings tree grant missing — blocked until user grants folder access")
-            if (voiceEnabled) {
-                processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
-                processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
-            }
-            if (meetingEnabled) {
-                processingStatusRepository.recordBlocked(SourceType.MEETING, "Recording folder permission missing")
-            }
+        val voiceTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.VOICE).first()
+        val callRecordingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.CALL_RECORDING).first()
+        val meetingTreeUri = userPrefsStore.observeRecordingFolderTreeUri(SourceType.MEETING).first()
+        val voiceHasTree = !voiceTreeUri.isNullOrBlank()
+        val callRecordingHasTree = !callRecordingTreeUri.isNullOrBlank()
+        val meetingHasTree = !meetingTreeUri.isNullOrBlank()
+        if (voiceEnabled && !voiceHasTree) {
+            processingStatusRepository.recordBlocked(SourceType.VOICE, "Recording folder permission missing")
+        }
+        if (callRecordingEnabled && !callRecordingHasTree) {
+            processingStatusRepository.recordBlocked(SourceType.CALL_RECORDING, "Recording folder permission missing")
+        }
+        if (meetingEnabled && !meetingHasTree) {
+            processingStatusRepository.recordBlocked(SourceType.MEETING, "Recording folder permission missing")
+        }
+        val hasRunnableRecordingSource =
+            (voiceEnabled && voiceHasTree) ||
+                (callRecordingEnabled && callRecordingHasTree) ||
+                (meetingEnabled && meetingHasTree)
+        if (!hasRunnableRecordingSource && (voiceEnabled || callRecordingEnabled || meetingEnabled)) {
+            logger.w(TAG, "all enabled recording sources are blocked until user grants their folder access")
             return@withContext Result.success()
         }
 
         val scanResult = runScanTasks(
             now = Clock.System.now(),
             lookbackDays = lookbackDays,
-            voiceEnabled = voiceEnabled,
-            meetingEnabled = meetingEnabled,
+            voiceEnabled = voiceEnabled && voiceHasTree,
+            callRecordingEnabled = callRecordingEnabled && callRecordingHasTree,
+            meetingEnabled = meetingEnabled && meetingHasTree,
             audioMissing = audioMissing,
         )
         if (scanResult.shouldRetry) return@withContext Result.retry()
@@ -199,6 +216,7 @@ public class MediaStoreWorker @AssistedInject constructor(
         now: kotlinx.datetime.Instant,
         lookbackDays: Int?,
         voiceEnabled: Boolean,
+        callRecordingEnabled: Boolean,
         meetingEnabled: Boolean,
         audioMissing: Boolean,
     ): LocalFileScanResult {
@@ -212,7 +230,7 @@ public class MediaStoreWorker @AssistedInject constructor(
             ),
             LocalFileScanTask(
                 sourceType = SourceType.CALL_RECORDING,
-                enabled = voiceEnabled && !audioMissing,
+                enabled = callRecordingEnabled && !audioMissing,
                 scanMessage = "Queued upload",
                 onScan = {
                     when (val outcome = voiceProbe.ingestCallRecordings(now, lookbackDays)) {

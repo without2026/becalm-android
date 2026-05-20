@@ -118,6 +118,23 @@ class AuthViewModelSpecTest {
     }
 
     @Test
+    fun `AUTH-002 unconfirmed email maps to confirmation guidance`() = runTest {
+        coEvery { authRepository.signInWithEmail("new@example.com", "ValidPass1!") } returns
+            BecalmResult.Failure(BecalmError.Validation(field = "email", message = "email_not_confirmed"))
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onEmailSignIn("new@example.com", "ValidPass1!")
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.auth_error_email_not_confirmed,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
+    }
+
+    @Test
     fun `AUTH-001 email sign-in success maps returned session without waiting for observer`() = runTest {
         every { userPrefsStore.observeOnboardingCompleted() } returns flowOf(false)
         coEvery { authRepository.signInWithEmail("user@example.com", "ValidPass1!") } coAnswers {
@@ -158,7 +175,7 @@ class AuthViewModelSpecTest {
     }
 
     @Test
-    fun `AUTH-001A email sign-up confirmation requirement stays on login with stable message`() = runTest {
+    fun `AUTH-001A email sign-up confirmation requirement shows waiting state`() = runTest {
         coEvery { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") } returns
             BecalmResult.Failure(
                 BecalmError.Validation(field = "email", message = "email_confirmation_required"),
@@ -171,10 +188,48 @@ class AuthViewModelSpecTest {
         advanceUntilIdle()
 
         assertEquals(
-            R.string.auth_error_email_confirmation_required,
-            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+            AuthUiState.SignUpEmailConfirmationRequired(email = "new@example.com"),
+            viewModel.uiState.value,
         )
         coVerify(exactly = 1) { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") }
+    }
+
+    @Test
+    fun `AUTH-001A email sign-up already-registered failure shows login-oriented copy`() = runTest {
+        coEvery { authRepository.signUpWithEmail("new@example.com", "ValidPass1!") } returns
+            BecalmResult.Failure(
+                BecalmError.Validation(field = "email", message = "email_already_registered"),
+            )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onEmailSignUp("new@example.com", "ValidPass1!")
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.auth_error_email_already_registered,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
+    }
+
+    @Test
+    fun `AUTH-001A email sign-up weak password failure shows password-specific copy`() = runTest {
+        coEvery { authRepository.signUpWithEmail("new@example.com", "weakpass") } returns
+            BecalmResult.Failure(
+                BecalmError.Validation(field = "password", message = "weak_password"),
+            )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onEmailSignUp("new@example.com", "weakpass")
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.auth_error_weak_password,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
     }
 
     @Test
@@ -332,7 +387,27 @@ class AuthViewModelSpecTest {
         assertTrue(viewModel.uiState.value is AuthUiState.Error)
 
         viewModel.onErrorDismissed()
-        assertEquals(AuthUiState.SignedOut(), viewModel.uiState.value)
+        advanceUntilIdle()
+        assertEquals(AuthUiState.SignedOut(termsAccepted = true), viewModel.uiState.value)
+    }
+
+    @Test
+    fun `AUTH recovery preserves terms flag when startup session restore fails`() = runTest {
+        coEvery { sessionStore.load() } throws java.io.IOException("encrypted store unavailable")
+        every { userPrefsStore.observeTermsAccepted() } returns flowOf(true)
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            AuthUiState.RecoveryRequired(
+                message = com.becalm.android.ui.components.UiMessage.resource(
+                    R.string.auth_error_session_restore_failed,
+                ),
+                termsAccepted = true,
+            ),
+            viewModel.uiState.value,
+        )
     }
 
     @Test
@@ -381,6 +456,22 @@ class AuthViewModelSpecTest {
             cancelAndIgnoreRemainingEvents()
         }
 
+        coVerify(exactly = 1) { userPrefsStore.setTermsAccepted(true) }
+    }
+
+    @Test
+    fun `AUTH-011 accepting terms failure stays retryable with visible error state`() = runTest {
+        coEvery { userPrefsStore.setTermsAccepted(true) } throws java.io.IOException("disk")
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+
+        viewModel.onAcceptTermsAndContinue()
+        advanceUntilIdle()
+
+        assertEquals(
+            R.string.auth_error_terms_acceptance_failed,
+            (viewModel.uiState.value as AuthUiState.Error).message.resId,
+        )
         coVerify(exactly = 1) { userPrefsStore.setTermsAccepted(true) }
     }
 

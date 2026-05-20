@@ -2,6 +2,8 @@ package com.becalm.android.integration.local.ui.evidence
 
 import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.local.db.BeCalmDatabase
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewEntity
+import com.becalm.android.data.local.db.entity.MeetingSpeakerPreviewStatus
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.local.db.entity.SourceEventParticipantEntity
 import com.becalm.android.data.local.db.entity.UnmatchedPersonInteractionEntity
@@ -48,6 +50,32 @@ class EvidenceImportStatusProjectionPortTest {
         )
 
         assertEquals(EvidenceImportPersistentStatus.PROCESSING, projection().observeStatus().first())
+    }
+
+    @Test
+    fun `pending meeting speaker preview projects processing status`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.meetingSpeakerPreviewDao().upsert(
+            meetingPreview(
+                rawEventId = "raw-meeting-preview",
+                status = MeetingSpeakerPreviewStatus.PENDING,
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.PROCESSING, projection().observeStatus().first())
+    }
+
+    @Test
+    fun `meeting speaker preview ready projects review required status`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.meetingSpeakerPreviewDao().upsert(
+            meetingPreview(
+                rawEventId = "raw-meeting-review",
+                status = MeetingSpeakerPreviewStatus.REVIEW_REQUIRED,
+            ),
+        )
+
+        assertEquals(EvidenceImportPersistentStatus.REVIEW_REQUIRED, projection().observeStatus().first())
     }
 
     @Test
@@ -164,6 +192,7 @@ class EvidenceImportStatusProjectionPortTest {
         RoomEvidenceImportStatusProjectionPort(
             userPrefsStore = userPrefsStore,
             rawIngestionEventDao = db.rawIngestionEventDao(),
+            meetingSpeakerPreviewDao = db.meetingSpeakerPreviewDao(),
             personIndexDao = db.personIndexDao(),
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -178,6 +207,24 @@ class EvidenceImportStatusProjectionPortTest {
             eventTitle = id,
             timestamp = NOW,
             syncStatus = syncStatus,
+        )
+
+    private fun meetingPreview(rawEventId: String, status: String): MeetingSpeakerPreviewEntity =
+        MeetingSpeakerPreviewEntity(
+            id = "preview-$rawEventId",
+            userId = USER_ID,
+            rawEventId = rawEventId,
+            sourceRef = "content://meeting/$rawEventId",
+            speakerPreviewId = "speaker-preview-$rawEventId",
+            speakersJson = "[]",
+            transcriptSegmentsJson = "[]",
+            billableSeconds = 0,
+            status = status,
+            selectedSelfSpeakerId = null,
+            lastError = null,
+            expiresAt = null,
+            createdAt = NOW,
+            updatedAt = NOW,
         )
 
     private companion object {

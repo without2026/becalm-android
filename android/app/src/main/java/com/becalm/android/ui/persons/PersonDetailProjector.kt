@@ -62,38 +62,36 @@ internal object PersonDetailProjector {
         val linksByRawEventId = scheduleLinks.groupBy { it.rawEventId }
         val linksByCalendarSource = scheduleLinks.groupBy { it.calendarSourceType to it.calendarSourceRef }
         val buckets = linkedMapOf<String, MutableSourceEventCard>()
-        interactions.forEach { interaction ->
-            if (interaction.isDecisionCommitment()) return@forEach
-            val key = interaction.sourceEventKey()
-            val rawEventId = interaction.sourceEventId
-                ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
-            val raw = rawEventId?.let(rawById::get)
-            val bucket = buckets.getOrPut(key) {
-                val rawTitle = interaction.title ?: raw?.eventTitle
-                val rawSnippet = interaction.snippet ?: raw?.eventSnippet
-                val displayTitle = displayTitle(title = rawTitle, snippet = rawSnippet)
-                MutableSourceEventCard(
-                    sourceEventKey = key,
-                    sourceType = interaction.sourceType,
-                    rawEventId = rawEventId,
-                    occurredAt = interaction.occurredAt,
-                    title = displayTitle,
-                    snippet = displaySnippet(
-                        title = rawTitle,
-                        snippet = rawSnippet,
-                        displayTitle = displayTitle,
-                    ),
-                    commitmentsExtractedCount = raw?.commitmentsExtractedCount ?: 0,
-                    sourceRef = interaction.sourceRef,
+        interactions
+            .filterNot { it.interactionKind == "commitment" }
+            .forEach { interaction ->
+                val key = interaction.sourceEventKey()
+                val rawEventId = interaction.sourceEventId
+                    ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
+                val raw = rawEventId?.let(rawById::get)
+                val bucket = buckets.getOrPut(key) {
+                    val rawTitle = interaction.title ?: raw?.eventTitle
+                    val rawSnippet = interaction.snippet ?: raw?.eventSnippet
+                    val displayTitle = displayTitle(title = rawTitle, snippet = rawSnippet)
+                    MutableSourceEventCard(
+                        sourceEventKey = key,
+                        sourceType = interaction.sourceType,
+                        rawEventId = rawEventId,
+                        occurredAt = interaction.occurredAt,
+                        title = displayTitle,
+                        snippet = displaySnippet(
+                            title = rawTitle,
+                            snippet = rawSnippet,
+                            displayTitle = displayTitle,
+                        ),
+                        commitmentsExtractedCount = raw?.commitmentsExtractedCount ?: 0,
+                        sourceRef = interaction.sourceRef,
+                    )
+                }
+                bucket.applyScheduleLinks(
+                    linksByRawEventId[rawEventId].orEmpty() +
+                        linksByCalendarSource[interaction.sourceType to interaction.sourceRef].orEmpty(),
                 )
-            }
-            bucket.applyScheduleLinks(
-                linksByRawEventId[rawEventId].orEmpty() +
-                    linksByCalendarSource[interaction.sourceType to interaction.sourceRef].orEmpty(),
-            )
-            if (interaction.interactionKind == "commitment") {
-                bucket.addCommitment(interaction.toSummary())
-            } else {
                 val rawTitle = interaction.title ?: raw?.eventTitle
                 val rawSnippet = interaction.snippet ?: raw?.eventSnippet
                 val displayTitle = displayTitle(title = rawTitle, snippet = rawSnippet)
@@ -108,7 +106,20 @@ internal object PersonDetailProjector {
                     commitmentsExtractedCount = raw?.commitmentsExtractedCount,
                 )
             }
-        }
+        interactions
+            .filter { it.interactionKind == "commitment" }
+            .forEach { interaction ->
+                if (interaction.isDecisionCommitment()) return@forEach
+                val key = interaction.sourceEventKey()
+                val rawEventId = interaction.sourceEventId
+                    ?: interaction.sourceRef.takeIf { it.startsWith("raw:") }?.removePrefix("raw:")
+                val bucket = buckets[key] ?: return@forEach
+                bucket.applyScheduleLinks(
+                    linksByRawEventId[rawEventId].orEmpty() +
+                        linksByCalendarSource[interaction.sourceType to interaction.sourceRef].orEmpty(),
+                )
+                bucket.addCommitment(interaction.toSummary())
+            }
         return buckets.values
             .map(MutableSourceEventCard::toProjection)
             .sortedByDescending { it.occurredAt }
@@ -259,7 +270,8 @@ internal object PersonDetailProjector {
                 occurredAt = occurredAt,
                 title = title,
                 snippet = snippet,
-                commitmentsExtractedCount = commitmentsExtractedCount,
+                commitmentsExtractedCount = commitmentsExtractedCount.takeIf { it > 0 }
+                    ?: (myActions.size + theirActions.size + schedules.size),
                 myActions = myActions.toList(),
                 theirActions = theirActions.toList(),
                 schedules = schedules.toList(),

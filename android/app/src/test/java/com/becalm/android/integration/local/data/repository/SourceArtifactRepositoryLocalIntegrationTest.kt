@@ -1,8 +1,10 @@
 package com.becalm.android.integration.local.data.repository
 
 import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.data.remote.dto.MeetingTranscriptSegmentDto
 import com.becalm.android.data.local.db.entity.RawIngestionEventEntity
 import com.becalm.android.data.repository.EmailOriginalArchiveInput
+import com.becalm.android.data.repository.MeetingTranscriptArchiveInput
 import com.becalm.android.data.repository.SourceArchiveStore
 import com.becalm.android.data.repository.SourceArtifactRepositoryImpl
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -57,6 +59,32 @@ class SourceArtifactRepositoryLocalIntegrationTest {
         assertTrue(requireNotNull(archived.markdown).contains("내일까지 제안서를 보내주세요."))
         assertEquals(1, repository.summary(USER_ID).count)
         assertTrue(repository.summary(USER_ID).totalBytes > 0L)
+    }
+
+    @Test
+    fun `archiveMeetingTranscript writes speaker transcript markdown`() = runTest {
+        val artifact = repository.archiveMeetingTranscript(
+            MeetingTranscriptArchiveInput(
+                userId = USER_ID,
+                rawEventId = "raw-meeting-1",
+                sourceType = SourceType.MEETING,
+                sourceRef = "content://meeting/audio",
+                occurredAt = Instant.parse("2026-05-19T01:00:00Z"),
+                title = "standup.m4a",
+                segments = listOf(
+                    MeetingTranscriptSegmentDto("SPEAKER_01", 0.0, 5.0, "제가 자료 보낼게요."),
+                    MeetingTranscriptSegmentDto("SPEAKER_02", 5.0, 8.0, "금요일까지 부탁드립니다."),
+                ),
+            ),
+        )
+
+        assertNotNull(artifact)
+        val archived = repository.findMarkdownOriginal(USER_ID, "raw-meeting-1")
+        requireNotNull(archived)
+        val markdown = requireNotNull(archived.markdown)
+        assertTrue(markdown.contains("raw_event_id: raw-meeting-1"))
+        assertTrue(markdown.contains("SPEAKER_01: 제가 자료 보낼게요."))
+        assertTrue(markdown.contains("SPEAKER_02: 금요일까지 부탁드립니다."))
     }
 
     @Test

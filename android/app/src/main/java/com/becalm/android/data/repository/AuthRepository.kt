@@ -7,6 +7,7 @@ import com.becalm.android.core.analytics.NoopProductAnalyticsClient
 import com.becalm.android.core.analytics.ProductAnalyticsClient
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
+import com.becalm.android.core.util.coroutines.rethrowIfCancellation
 import com.becalm.android.data.local.datastore.SyncCursorStore
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.auth.ProcessRestarter
@@ -25,6 +26,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
@@ -189,19 +191,16 @@ public class AuthRepositoryImpl @Inject constructor(
         email: String,
         password: String,
     ): BecalmResult<SupabaseSession> =
-        authClient.signInWithEmail(email, password)
-            .onSuccess { value -> applySignInState(value) }
+        authClient.signInWithEmail(email, password).commitSignInState()
 
     override suspend fun signUpWithEmail(
         email: String,
         password: String,
     ): BecalmResult<SupabaseSession> =
-        authClient.signUpWithEmail(email, password)
-            .onSuccess { value -> applySignInState(value) }
+        authClient.signUpWithEmail(email, password).commitSignInState()
 
     override suspend fun signInWithGoogle(idToken: String): BecalmResult<SupabaseSession> =
-        authClient.signInWithGoogleIdToken(idToken)
-            .onSuccess { value -> applySignInState(value) }
+        authClient.signInWithGoogleIdToken(idToken).commitSignInState()
 
     /**
      * Shared post-authentication state update for [signInWithEmail] / [signInWithGoogle].
@@ -209,6 +208,9 @@ public class AuthRepositoryImpl @Inject constructor(
      * - Records the Supabase user id so [UserPrefsStore]'s user-scoped keys resolve
      *   to the right namespace (AUTH-008).
      * - Binds the per-user SQLite file (S6-A PIPA cross-account leak defence).
+     * - Persists the encrypted Supabase session only after user-scoped local state
+     *   has committed. This prevents a long-lived "session exists, but current user
+     *   and Room scope are incomplete" split-brain state.
      * - Detects an in-process **account swap** — a new user signing in while the
      *   provider still holds a different user's database handle — and hands off to
      *   [ProcessRestarter]. A restart is required because `@Singleton` repositories
@@ -222,18 +224,66 @@ public class AuthRepositoryImpl @Inject constructor(
      * Must not return to the caller on the swap branch — [ProcessRestarter.restart]
      * is declared `Nothing` so the compiler enforces that.
      */
-    private suspend fun applySignInState(session: SupabaseSession) {
-        val newHash = BeCalmDatabase.deriveUserIdHash(session.userId)
-        val priorHash = databaseProvider.currentUserIdHash()
-        userPrefsStore.setCurrentUserId(session.userId)
-        databaseProvider.ensureOpenFor(newHash)
-        sessionFlow.value = session
-        tokenProvider.primeCache()
-        productAnalytics.setUserScope(session.userId)
-        if (priorHash != null && priorHash != newHash) {
-            logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
-            processRestarter.restart()
+    private suspend fun BecalmResult<SupabaseSession>.commitSignInState(): BecalmResult<SupabaseSession> =
+        when (this) {
+            is BecalmResult.Failure -> this
+            is BecalmResult.Success -> when (val localCommit = applySignInState(value)) {
+                is BecalmResult.Success -> this
+                is BecalmResult.Failure -> localCommit
+            }
         }
+
+    private suspend fun applySignInState(session: SupabaseSession): BecalmResult<Unit> {
+        val priorSession = sessionFlow.value ?: sessionStore.load()
+        val priorUserId = userPrefsStore.observeCurrentUserId().firstOrNull()
+        return try {
+            if (session.userId.isBlank()) {
+                return BecalmResult.Failure(BecalmError.Validation(field = "user_id", message = "blank_user_id"))
+            }
+            val newHash = BeCalmDatabase.deriveUserIdHash(session.userId)
+            val priorHash = databaseProvider.currentUserIdHash()
+            userPrefsStore.setCurrentUserId(session.userId)
+            databaseProvider.ensureOpenFor(newHash)
+            sessionStore.save(session)
+            sessionFlow.value = session
+            tokenProvider.primeCache()
+            productAnalytics.setUserScope(session.userId)
+            if (priorHash != null && priorHash != newHash) {
+                logger.w(TAG, "account swap detected — restarting process to rebuild DAO graph")
+                processRestarter.restart()
+            }
+            BecalmResult.Success(Unit)
+        } catch (e: IOException) {
+            rollbackFailedSignIn(priorSession = priorSession, priorUserId = priorUserId)
+            logger.e(TAG, "post-auth local commit IOException", e)
+            BecalmResult.Failure(BecalmError.Io(e.message ?: "IO error"))
+        } catch (e: Throwable) {
+            e.rethrowIfCancellation()
+            rollbackFailedSignIn(priorSession = priorSession, priorUserId = priorUserId)
+            logger.e(TAG, "post-auth local commit failed", e)
+            BecalmResult.Failure(BecalmError.Unknown(e))
+        }
+    }
+
+    private suspend fun rollbackFailedSignIn(
+        priorSession: SupabaseSession?,
+        priorUserId: String?,
+    ) {
+        runCatching {
+            if (priorSession != null) {
+                sessionStore.save(priorSession)
+                sessionFlow.value = priorSession
+            } else {
+                sessionStore.clear()
+                sessionFlow.value = null
+            }
+        }.onFailure { logger.e(TAG, "post-auth rollback session restore failed", it) }
+        runCatching { userPrefsStore.setCurrentUserId(priorUserId) }
+            .onFailure { logger.e(TAG, "post-auth rollback currentUserId restore failed", it) }
+        runCatching { tokenProvider.invalidate() }
+            .onFailure { logger.e(TAG, "post-auth rollback token invalidation failed", it) }
+        runCatching { productAnalytics.setUserScope(priorSession?.userId) }
+            .onFailure { logger.e(TAG, "post-auth rollback analytics scope restore failed", it) }
     }
 
     override suspend fun signOut(): BecalmResult<Unit> {
@@ -306,7 +356,7 @@ public class AuthRepositoryImpl @Inject constructor(
         if (session == null || session.refreshToken.isBlank()) {
             return BecalmResult.Failure(BecalmError.Unauthorized)
         }
-        return authClient.refresh(session.refreshToken)
+        return authClient.refresh(session)
             .onSuccess {
                 // Keep the in-memory token cache in lockstep with the freshly-persisted
                 // session. Invalidate first so [primeCache] actually re-reads the new

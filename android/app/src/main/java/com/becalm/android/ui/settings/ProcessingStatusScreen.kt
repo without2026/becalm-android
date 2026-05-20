@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -33,18 +35,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.ProcessingPhase
 import com.becalm.android.data.repository.ProcessingSourceState
 import com.becalm.android.data.repository.ProcessingStatusRepository
+import com.becalm.android.data.repository.SourceConnectionStatus
+import com.becalm.android.data.repository.SourceStatus
+import com.becalm.android.data.repository.SourceStatusRepository
 import com.becalm.android.data.repository.isActive
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.EmptyState
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.sourcePresentationFor
+import com.becalm.android.ui.navigation.BecalmRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.datetime.Instant
@@ -63,17 +71,26 @@ public data class ProcessingStatusRow(
     val itemCount: Int,
     val message: String?,
     val updatedAt: Instant?,
+    val opensSourceDetail: Boolean = true,
 )
 
 @HiltViewModel
 public class ProcessingStatusViewModel @Inject constructor(
     processingStatusRepository: ProcessingStatusRepository,
+    sourceStatusRepository: SourceStatusRepository,
 ) : ViewModel() {
     public val state: StateFlow<ProcessingStatusUiState> =
-        processingStatusRepository.observeAll()
-            .map { states ->
+        combine(
+            processingStatusRepository.observeAll(),
+            sourceStatusRepository.observeSources(),
+        ) { states, sourceStatuses ->
                 ProcessingStatusUiState(
-                    rows = states.map(::toRow),
+                    rows = states.mapNotNull { state ->
+                        toRow(
+                            state = state,
+                            sourceStatus = sourceStatuses[state.sourceType],
+                        )
+                    },
                 )
             }
             .stateIn(
@@ -82,14 +99,27 @@ public class ProcessingStatusViewModel @Inject constructor(
                 initialValue = ProcessingStatusUiState(),
             )
 
-    private fun toRow(state: ProcessingSourceState): ProcessingStatusRow =
-        ProcessingStatusRow(
+    private fun toRow(
+        state: ProcessingSourceState,
+        sourceStatus: SourceStatus?,
+    ): ProcessingStatusRow? {
+        val isManualEvidence = state.sourceType == SourceType.MESSAGE_SCREENSHOT
+        if (
+            !isManualEvidence &&
+            state.phase != ProcessingPhase.IDLE &&
+            sourceStatus?.status == SourceConnectionStatus.NEVER_CONNECTED
+        ) {
+            return null
+        }
+        return ProcessingStatusRow(
             sourceType = state.sourceType,
             phase = state.phase,
             itemCount = state.itemCount,
             message = state.message,
             updatedAt = state.updatedAt,
+            opensSourceDetail = !isManualEvidence,
         )
+    }
 }
 
 @Composable
@@ -101,6 +131,9 @@ public fun ProcessingStatusScreen(
     ProcessingStatusContent(
         state = state,
         onBack = navController::popBackStack,
+        onOpenSource = { sourceType ->
+            navController.navigate(BecalmRoute.SourceDetail(sourceType).path)
+        },
     )
 }
 
@@ -109,6 +142,7 @@ internal fun ProcessingStatusContent(
     state: ProcessingStatusUiState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenSource: (String) -> Unit = {},
 ) {
     val visibleRows = state.rows.filter { it.phase != ProcessingPhase.IDLE }
     val activeRows = visibleRows.filter { it.phase.isActive }
@@ -154,16 +188,19 @@ internal fun ProcessingStatusContent(
                     key = "active",
                     title = activeTitle,
                     rows = activeRows,
+                    onOpenSource = onOpenSource,
                 )
                 processingGroup(
                     key = "action",
                     title = actionTitle,
                     rows = actionRows,
+                    onOpenSource = onOpenSource,
                 )
                 processingGroup(
                     key = "quiet",
                     title = quietTitle,
                     rows = quietRows,
+                    onOpenSource = onOpenSource,
                 )
             }
         }
@@ -174,6 +211,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
     key: String,
     title: String,
     rows: List<ProcessingStatusRow>,
+    onOpenSource: (String) -> Unit,
 ) {
     if (rows.isEmpty()) return
     item(key = "$key-title") {
@@ -185,7 +223,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.processingGroup(
         )
     }
     items(rows, key = { "$key-${it.sourceType}" }) { row ->
-        ProcessingStatusItem(row)
+        ProcessingStatusItem(
+            row = row,
+            onClick = {
+                if (row.opensSourceDetail) onOpenSource(row.sourceType)
+            },
+        )
     }
 }
 
@@ -211,10 +254,20 @@ private fun ProcessingSummary(activeCount: Int, actionCount: Int) {
 }
 
 @Composable
-private fun ProcessingStatusItem(row: ProcessingStatusRow) {
+private fun ProcessingStatusItem(
+    row: ProcessingStatusRow,
+    onClick: () -> Unit,
+) {
     EvidenceCard(
         modifier = Modifier
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .then(
+                if (row.opensSourceDetail) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -230,6 +283,14 @@ private fun ProcessingStatusItem(row: ProcessingStatusRow) {
                     text = row.statusText(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (row.opensSourceDetail) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
@@ -260,10 +321,21 @@ private fun ProcessingStatusRow.statusText(): String {
     } else {
         ""
     }
-    val messageText = message?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+    val messageText = userFacingMessage()?.let { " · $it" }.orEmpty()
     val timeText = updatedAt?.let { " · ${formatTimeHHmm(it)}" }.orEmpty()
     return stringResource(phaseLabelRes(phase)) + countText + messageText + timeText
 }
+
+@Composable
+private fun ProcessingStatusRow.userFacingMessage(): String? =
+    when {
+        phase == ProcessingPhase.ERROR && message?.startsWith("HTTP ") == true ->
+            stringResource(R.string.processing_status_error_server_temporary)
+        phase == ProcessingPhase.BLOCKED || phase == ProcessingPhase.ERROR ->
+            message?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.processing_status_error_reconnect_needed)
+        else -> message?.takeIf { it.isNotBlank() }
+    }
 
 private fun phaseLabelRes(phase: ProcessingPhase): Int = when (phase) {
     ProcessingPhase.IDLE -> R.string.processing_phase_idle

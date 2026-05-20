@@ -41,7 +41,7 @@ internal fun buildSourceStatusUiMap(statuses: List<SourceStatus>): Map<String, S
     }
 
 internal fun deriveOverallState(sources: List<SourceStatus>): OverallSyncState {
-    val chipSources = SourceType.PRODUCT_SOURCES.mapNotNull { source ->
+    val chipSources = CHIP_ORDER.mapNotNull { source ->
         sources.firstOrNull { it.sourceType == source }
     }.filter { source ->
         source.status != SourceConnectionStatus.NEVER_CONNECTED

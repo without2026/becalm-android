@@ -32,6 +32,14 @@ class SplashRouteResolverSpecTest {
     }
 
     @Test
+    fun `email confirmation waiting state falls back to login`() {
+        assertEquals(
+            BecalmRoute.Login.path,
+            splashDestinationFor(AuthUiState.SignUpEmailConfirmationRequired(email = "new@example.com")),
+        )
+    }
+
+    @Test
     fun `signed in without completed onboarding routes to onboarding setup`() {
         assertEquals(
             BecalmRoute.OnboardingSetup.path,
@@ -66,9 +74,22 @@ class SplashRouteResolverSpecTest {
     }
 
     @Test
-    fun `error routes to terms fallback`() {
+    fun `session recovery routes to auth recovery with terms flag`() {
         assertEquals(
-            BecalmRoute.Terms.path,
+            BecalmRoute.AuthRecovery(termsAccepted = true).path,
+            splashDestinationFor(
+                AuthUiState.RecoveryRequired(
+                    message = UiMessage.resource(R.string.auth_error_session_restore_failed),
+                    termsAccepted = true,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `generic error routes to auth recovery fallback`() {
+        assertEquals(
+            BecalmRoute.AuthRecovery(termsAccepted = false).path,
             splashDestinationFor(AuthUiState.Error(UiMessage.resource(R.string.auth_error_session_restore_failed))),
         )
     }

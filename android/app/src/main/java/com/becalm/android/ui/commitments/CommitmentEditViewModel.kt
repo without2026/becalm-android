@@ -55,6 +55,12 @@ public data class EditReadOnly(
     val sourceTitle: String? = null,
     val sourceOccurredAt: Instant? = null,
     val isManual: Boolean = false,
+    val originalTitle: String = "",
+    val originalDueAtMillis: Long? = null,
+    val originalDueIsApproximate: Boolean = false,
+    val originalDueHint: String = "",
+    val originalCounterpartyRef: String = "",
+    val originalDirection: String = CommitmentWire.DIRECTION_GIVE,
 )
 
 /**
@@ -225,6 +231,15 @@ public class CommitmentEditViewModel @Inject constructor(
             when (result) {
                 is BecalmResult.Success -> {
                     trackEditAction("edit", "corrected_extraction")
+                    val changedFields = changedFields(snap)
+                    trackCorrectionSubmitted(snap, changedFields)
+                    trackQualityReview(
+                        state = snap,
+                        qualityLabel = "corrected_commitment",
+                        isTrueCommitment = true,
+                        reviewSignal = "edit_saved",
+                        changedFields = changedFields,
+                    )
                     _dismiss.tryEmit(EditDismissEvent.Saved)
                 }
                 is BecalmResult.Failure -> {
@@ -248,6 +263,12 @@ public class CommitmentEditViewModel @Inject constructor(
             }
             when (result) {
                 is BecalmResult.Success -> {
+                    trackQualityReview(
+                        state = snap,
+                        qualityLabel = if (readOnly.quoteDisputed) "dispute_retracted" else "possible_false_positive",
+                        isTrueCommitment = readOnly.quoteDisputed,
+                        reviewSignal = if (readOnly.quoteDisputed) "quote_dispute_cleared" else "quote_disputed",
+                    )
                     trackEditAction(
                         action = if (readOnly.quoteDisputed) "quote_dispute_cleared" else "quote_disputed",
                         precisionSignal = if (readOnly.quoteDisputed) "dispute_retracted" else "possible_false_positive",
@@ -282,6 +303,12 @@ public class CommitmentEditViewModel @Inject constructor(
             _uiState.update { it.copy(saving = false) }
             when (result) {
                 is BecalmResult.Success -> {
+                    trackQualityReview(
+                        state = _uiState.value,
+                        qualityLabel = "false_positive",
+                        isTrueCommitment = false,
+                        reviewSignal = "soft_delete",
+                    )
                     trackEditAction("soft_delete", "false_positive_or_obsolete")
                     _dismiss.tryEmit(EditDismissEvent.Deleted)
                 }
@@ -313,6 +340,74 @@ public class CommitmentEditViewModel @Inject constructor(
                     "core_active" to true,
                     "high_intent" to (action == "edit"),
                     "precision_signal" to precisionSignal,
+                ),
+            ),
+        )
+    }
+
+    private fun changedFields(state: EditUiState): List<String> {
+        val readOnly = state.readOnly ?: return emptyList()
+        return buildList {
+            if (readOnly.originalTitle != state.title) add("title")
+            if (readOnly.originalDueAtMillis != state.dueAtMillis) add("due_at")
+            if (readOnly.originalDueIsApproximate != state.dueIsApproximate) add("due_is_approximate")
+            if (readOnly.originalDueHint != state.dueHint) add("due_hint")
+            if (readOnly.originalCounterpartyRef != state.counterpartyRef) add("counterparty_ref")
+            if (readOnly.originalDirection != state.direction) add("direction")
+        }
+    }
+
+    private fun trackCorrectionSubmitted(state: EditUiState, changedFields: List<String>) {
+        val readOnly = state.readOnly ?: return
+        if (changedFields.isEmpty()) return
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_CORRECTION_SUBMITTED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "commitment_id" to id,
+                    "source_type" to readOnly.sourceType,
+                    "is_manual" to readOnly.isManual,
+                    "changed_fields" to changedFields,
+                    "direction_changed" to ("direction" in changedFields),
+                    "previous_direction" to readOnly.originalDirection,
+                    "new_direction" to state.direction,
+                    "precision_signal" to "corrected_extraction",
+                    "core_active" to true,
+                    "high_intent" to true,
+                ),
+            ),
+        )
+    }
+
+    private fun trackQualityReview(
+        state: EditUiState,
+        qualityLabel: String,
+        isTrueCommitment: Boolean,
+        reviewSignal: String,
+        changedFields: List<String> = emptyList(),
+    ) {
+        val readOnly = state.readOnly
+        productAnalytics.track(
+            ProductAnalyticsEvent(
+                eventId = UUID.randomUUID().toString(),
+                eventName = ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED,
+                occurredAt = Clock.System.now(),
+                properties = mapOf(
+                    "commitment_id" to id,
+                    "source_type" to readOnly?.sourceType,
+                    "is_manual" to (readOnly?.isManual ?: false),
+                    "quality_label" to qualityLabel,
+                    "is_true_commitment" to isTrueCommitment,
+                    "review_signal" to reviewSignal,
+                    "changed_fields" to changedFields,
+                    "changed_field_count" to changedFields.size,
+                    "wrong_person" to ("counterparty_ref" in changedFields),
+                    "wrong_due_date" to ("due_at" in changedFields || "due_is_approximate" in changedFields || "due_hint" in changedFields),
+                    "wrong_direction" to ("direction" in changedFields),
+                    "core_active" to true,
+                    "high_intent" to true,
                 ),
             ),
         )

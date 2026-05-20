@@ -66,6 +66,8 @@ public interface ForegroundWorkScheduler : WorkSchedulerCompat {
  * | `google_calendar` | `GCalWorker`          |
  * | `outlook_calendar` | `OutlookCalWorker`   |
  * | `voice`         | `MediaStoreWorker`      |
+ * | `call_recording` | `MediaStoreWorker`    |
+ * | `meeting`       | `MediaStoreWorker`      |
  *
  * Unknown source-type strings are skipped with a WARN log.
  *
@@ -179,6 +181,8 @@ public class ForegroundCatchUpScheduler @Inject constructor(
             ("enqueueing OutlookCalWorker catch-up" to { workScheduler.enqueueOutlookCalOneShotNow() }),
         SourceType.VOICE to
             ("enqueueing MediaStoreWorker catch-up (voice)" to { workScheduler.enqueueMediaStoreOneShotNow() }),
+        SourceType.CALL_RECORDING to
+            ("enqueueing MediaStoreWorker catch-up (call_recording)" to { workScheduler.enqueueMediaStoreOneShotNow() }),
         SourceType.MEETING to
             ("enqueueing MediaStoreWorker catch-up (meeting)" to { workScheduler.enqueueMediaStoreOneShotNow() }),
     )

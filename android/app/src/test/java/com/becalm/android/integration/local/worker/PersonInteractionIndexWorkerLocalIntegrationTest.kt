@@ -66,7 +66,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
                     id = "commitment-1",
                     counterpartyRef = "legacy@example.com",
                     sourceType = SourceType.GMAIL,
-                    sourceRef = "raw:raw-mail-1",
+                    sourceRef = "${SourceType.GMAIL}-ref-raw-mail-1",
                 ),
             ),
         )
@@ -100,10 +100,52 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
         assertEquals(setOf("raw:raw-mail-1", "commitment:commitment-1"), interactions.map { it.sourceRef }.toSet())
+        val commitmentInteraction = interactions.single { it.sourceRef == "commitment:commitment-1" }
+        assertEquals("raw-mail-1", commitmentInteraction.sourceEventId)
+        assertEquals("commitment-1", commitmentInteraction.commitmentId)
         assertNotNull(db.personIndexDao().findPersonForMemory(USER_ID, personId))
         val legacyInteractions = db.personIndexDao().observeInteractionsForPerson(USER_ID, legacyPersonId, limit = 20).first()
         assertTrue(legacyInteractions.isEmpty())
         assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
+    }
+
+    @Test
+    fun `source local speaker labels do not create unmatched person review rows`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-call-speaker",
+                sourceType = SourceType.CALL_RECORDING,
+                counterpartyRef = null,
+                eventSnippet = "SPEAKER_02: 금요일 일정으로 바꿔주세요.",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-speaker",
+                    sourceEventId = "raw-call-speaker",
+                    sourceType = SourceType.CALL_RECORDING,
+                    sourceRef = "call-file",
+                    personId = null,
+                    email = null,
+                    displayName = "SPEAKER_02",
+                    role = "speaker",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "unresolved",
+                ).copy(
+                    identityType = "speaker_label",
+                    normalizedValue = "SPEAKER_02",
+                    evidence = "SPEAKER_02",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+        assertTrue(scheduler.profileMemoryPersonIds.isEmpty())
     }
 
     @Test
@@ -186,6 +228,165 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
         assertEquals(listOf("raw:raw-duplicate-1"), interactions.map { it.sourceRef })
         assertEquals(listOf(personId), scheduler.profileMemoryPersonIds)
+    }
+
+    @Test
+    fun `dirty source participant with server event id uses local raw event for person detail`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, CUSTOMER_EMAIL)).personId
+        val localRawEventId = "raw-local-naver-1"
+        val serverSourceEventId = "server-source-event-1"
+        val sourceRef = "naver-message-source-ref-1"
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = localRawEventId,
+                sourceType = SourceType.NAVER_IMAP,
+                sourceRef = sourceRef,
+                counterpartyRef = null,
+                eventTitle = "네이버 메일 제목",
+                eventSnippet = "네이버 메일 본문 요약",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-server-event-id",
+                    sourceEventId = serverSourceEventId,
+                    sourceType = SourceType.NAVER_IMAP,
+                    sourceRef = sourceRef,
+                    personId = personId,
+                    email = CUSTOMER_EMAIL,
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertDirtySources(
+            listOf(
+                PersonIndexDirtySources.rawEvent(
+                    userId = USER_ID,
+                    sourceType = SourceType.NAVER_IMAP,
+                    sourceEventId = serverSourceEventId,
+                    reason = "server-participant-refresh",
+                    now = Instant.parse("2026-04-29T05:00:00Z"),
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        val interaction = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first().single()
+        assertEquals("raw:$localRawEventId", interaction.sourceRef)
+        assertEquals(localRawEventId, interaction.sourceEventId)
+        assertEquals("네이버 메일 제목", interaction.title)
+        assertEquals("네이버 메일 본문 요약", interaction.snippet)
+    }
+
+    @Test
+    fun `dirty commitment rebuild also restores linked mail source interaction and strongest display name`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        assertDirtyCommitmentRestoresLinkedMailSource(
+            sourceType = SourceType.NAVER_IMAP,
+            rawEventId = "raw-naver-linked-1",
+            mail = "gogo-naver@example.test",
+        )
+        assertDirtyCommitmentRestoresLinkedMailSource(
+            sourceType = SourceType.GMAIL,
+            rawEventId = "raw-gmail-linked-1",
+            mail = "gogo-gmail@example.test",
+        )
+    }
+
+    private suspend fun assertDirtyCommitmentRestoresLinkedMailSource(
+        sourceType: String,
+        rawEventId: String,
+        mail: String,
+    ) {
+        val personId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, mail)).personId
+        val sourceRef = "$sourceType-ref-$rawEventId"
+        val commitmentId = "commitment-$rawEventId"
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = rawEventId,
+                sourceType = sourceType,
+                counterpartyRef = null,
+                eventTitle = "MINI 모두의 창업 발표 참석 안내",
+                eventSnippet = "한남대학교 창업지원단에서 행사 참석 일정을 안내드립니다.",
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-$rawEventId-strong-name",
+                    sourceEventId = rawEventId,
+                    sourceType = sourceType,
+                    sourceRef = sourceRef,
+                    personId = personId,
+                    email = mail,
+                    displayName = "고주영",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                ),
+                sourceParticipant(
+                    id = "participant-$rawEventId-weak-name",
+                    sourceEventId = rawEventId,
+                    sourceType = sourceType,
+                    sourceRef = sourceRef,
+                    personId = personId,
+                    email = mail,
+                    displayName = null,
+                    organization = "한남대",
+                    role = "mentioned",
+                    relationToUser = "referenced",
+                ),
+            ),
+        )
+        val commitment = commitment(
+            id = commitmentId,
+            counterpartyRef = null,
+            sourceType = sourceType,
+            sourceRef = sourceRef,
+        )
+        db.commitmentDao().insertAll(listOf(commitment))
+        db.personIndexDao().upsertCommitmentParticipants(
+            listOf(
+                commitmentParticipant(
+                    id = "commitment-participant-$rawEventId",
+                    commitmentId = commitment.id,
+                    personId = personId,
+                    role = "owner",
+                ),
+            ),
+        )
+        db.personIndexDao().upsertDirtySources(
+            listOf(
+                PersonIndexDirtySources.commitment(
+                    userId = USER_ID,
+                    commitmentId = commitment.id,
+                    reason = "test-linked-mail",
+                    now = Instant.parse("2026-04-29T05:00:00Z"),
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        val interactions = db.personIndexDao().observeInteractionsForPerson(USER_ID, personId, limit = 20).first()
+        assertEquals(
+            setOf("email", "commitment"),
+            interactions.map { it.interactionKind }.toSet(),
+        )
+        assertEquals(
+            setOf("raw:$rawEventId", "commitment:$commitmentId"),
+            interactions.map { it.sourceRef }.toSet(),
+        )
+        assertEquals("고주영", db.personIndexDao().findPersonForMemory(USER_ID, personId)?.displayName)
+        assertEquals(
+            listOf("고주영"),
+            db.personIndexDao().findIdentitiesForMemory(USER_ID, personId).map { it.displayNameHint }.distinct(),
+        )
     }
 
     @Test
@@ -319,6 +520,60 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
 
         assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
         assertTrue(db.personIndexDao().findUnmatchedInteractions(USER_ID, limit = 20).isEmpty())
+    }
+
+    @Test
+    fun `same source event email and phone participant rows project to one person`() = runTest {
+        userPrefsStore.setCurrentUserId(USER_ID)
+        val email = "minhong@example.com"
+        val phone = "+821012345678"
+        val emailPersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, email)).personId
+        val phonePersonId = requireNotNull(PersonIdentityResolver.resolve(USER_ID, phone)).personId
+        db.rawIngestionEventDao().insert(
+            rawEvent(
+                id = "raw-email-phone-1",
+                sourceType = SourceType.GMAIL,
+                counterpartyRef = null,
+            ),
+        )
+        db.personIndexDao().upsertSourceEventParticipants(
+            listOf(
+                sourceParticipant(
+                    id = "participant-email",
+                    sourceEventId = "raw-email-phone-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-email-phone",
+                    personId = emailPersonId,
+                    email = email,
+                    displayName = "김민홍",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "person_resolved",
+                ),
+                sourceParticipant(
+                    id = "participant-phone",
+                    sourceEventId = "raw-email-phone-1",
+                    sourceType = SourceType.GMAIL,
+                    sourceRef = "gmail-message-email-phone",
+                    personId = phonePersonId,
+                    email = null,
+                    phone = phone,
+                    displayName = "김민홍",
+                    role = "sender",
+                    relationToUser = "counterparty",
+                    resolutionStatus = "person_resolved",
+                ),
+            ),
+        )
+
+        val result = newWorker().doWork()
+
+        assertEquals(ListenableWorker.Result.success().javaClass, result.javaClass)
+        val aggregates = db.personIndexDao().observeAggregates(USER_ID, limit = 20).first()
+        assertEquals(listOf(emailPersonId), aggregates.map { it.personId })
+        assertTrue(db.personIndexDao().observeInteractionsForPerson(USER_ID, phonePersonId, limit = 20).first().isEmpty())
+        val identities = db.personIndexDao().findIdentitiesForMemory(USER_ID, emailPersonId)
+        assertEquals(setOf("email", "phone"), identities.map { it.identityType }.toSet())
     }
 
     @Test
@@ -530,6 +785,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             rawDaoProvider = Provider { db.rawIngestionEventDao() },
             commitmentDaoProvider = Provider { db.commitmentDao() },
             personIndexDaoProvider = Provider { db.personIndexDao() },
+            selfIdentityAnchorDaoProvider = Provider { db.selfIdentityAnchorDao() },
             userPrefsStore = userPrefsStore,
             workScheduler = scheduler,
             logger = logger,
@@ -559,6 +815,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
+        override fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -567,9 +824,13 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             selfSpeakerId: String?,
             speakerMappingsJson: String?,
             speakerPreviewId: String?,
+            extractionJobId: String?,
+            extractionJobPollAttempt: Int,
         ) = Unit
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit
+        override fun enqueueProcessDone(initialDelaySeconds: Long) = Unit
+        override fun scheduleProcessDoneSweep() = Unit
         override fun enqueueDeferredColdSyncStage1() = Unit
         override fun enqueueColdSyncStage2() = Unit
         override fun cancelColdSyncStage2() = Unit
@@ -582,6 +843,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
     private fun rawEvent(
         id: String,
         sourceType: String,
+        sourceRef: String = "$sourceType-ref-$id",
         counterpartyRef: String?,
         eventTitle: String = "event-$id",
         eventSnippet: String = "snippet-$id",
@@ -591,7 +853,7 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             userId = USER_ID,
             clientEventId = "client-$id",
             sourceType = sourceType,
-            sourceRef = "$sourceType-ref-$id",
+            sourceRef = sourceRef,
             counterpartyRef = counterpartyRef,
             eventTitle = eventTitle,
             eventSnippet = eventSnippet,
@@ -645,7 +907,9 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
         sourceRef: String,
         personId: String?,
         email: String?,
+        phone: String? = null,
         displayName: String? = "Customer",
+        organization: String? = null,
         role: String,
         relationToUser: String,
         resolutionStatus: String = if (personId == null) "unresolved" else "resolved",
@@ -659,14 +923,18 @@ class PersonInteractionIndexWorkerLocalIntegrationTest {
             personId = personId,
             role = role,
             relationToUser = relationToUser,
-            identityType = email?.let { "email" },
-            normalizedValue = email,
+            identityType = when {
+                email != null -> "email"
+                phone != null -> "phone"
+                else -> null
+            },
+            normalizedValue = email ?: phone,
             displayNameRaw = displayName,
             emailRaw = email,
-            phoneRaw = null,
-            organizationRaw = null,
+            phoneRaw = phone,
+            organizationRaw = organization,
             titleRaw = null,
-            evidence = email ?: displayName,
+            evidence = email ?: phone ?: displayName,
             confidence = 0.95,
             resolutionStatus = resolutionStatus,
             createdAt = Instant.parse("2026-04-29T04:00:00Z"),

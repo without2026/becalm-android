@@ -112,6 +112,13 @@ public interface WorkScheduler {
     public fun enqueueMessageScreenshotUpload(rawEventId: String)
 
     /**
+     * Enqueues speaker-preview transcription for meeting or call audio. This runs before
+     * [VoiceUploadWorker] so the user can confirm the speaker mapping without blocking the
+     * foreground UI.
+     */
+    public fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String)
+
+    /**
      * Enqueues a one-shot [VoiceUploadWorker] that waits at least [initialDelaySec] seconds
      * before its first run.
      *
@@ -141,6 +148,8 @@ public interface WorkScheduler {
         selfSpeakerId: String? = null,
         speakerMappingsJson: String? = null,
         speakerPreviewId: String? = null,
+        extractionJobId: String? = null,
+        extractionJobPollAttempt: Int = 0,
     )
 
     /**
@@ -165,6 +174,19 @@ public interface WorkScheduler {
      * repeated cold-start enrollment does not reset the timer.
      */
     public fun scheduleOverdueSweep()
+
+    /**
+     * Enqueues one [ProcessDoneWorker] pass for newly persisted completion evidence.
+     *
+     * The default delay coalesces bursts from batch source extraction. The worker itself
+     * remains local-only and hands server mirroring to [UploadWorker].
+     */
+    public fun enqueueProcessDone(initialDelaySeconds: Long = PROCESS_DONE_DEBOUNCE_SECONDS)
+
+    /**
+     * Enrolls the 6-hour safety sweep for completion evidence that missed a one-shot enqueue.
+     */
+    public fun scheduleProcessDoneSweep()
 
     /** Hands an in-progress Stage 1 cold sync off to WorkManager after [나중에 하기]. */
     public fun enqueueDeferredColdSyncStage1()
@@ -216,5 +238,6 @@ public interface WorkScheduler {
     public companion object {
         public const val PERSON_INDEX_DEBOUNCE_SECONDS: Long = 10L
         public const val PROFILE_MEMORY_DEBOUNCE_SECONDS: Long = 5L
+        public const val PROCESS_DONE_DEBOUNCE_SECONDS: Long = 10L
     }
 }

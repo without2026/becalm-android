@@ -15,6 +15,8 @@ internal object SourceDetailProjector {
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
         actionError: UiMessage?,
+        actionMessage: UiMessage?,
+        manualSyncLoading: Boolean,
     ): SourceDetailUiState {
         val eventSummaries = sourceEvents.map { entity ->
             RecentEventSummary(
@@ -23,7 +25,7 @@ internal object SourceDetailProjector {
                 title = entity.eventTitle,
             )
         }
-        val connectionButtons = buttonVisibilityFor(status?.status)
+        val connectionButtons = buttonVisibilityFor(sourceType, status?.status)
         return SourceDetailUiState(
             sourceType = sourceType,
             status = sourceSyncStatusFor(status?.status),
@@ -37,15 +39,24 @@ internal object SourceDetailProjector {
             showDisconnectConfirmDialog = showDisconnectConfirmDialog,
             disconnectOutcome = disconnectOutcome,
             actionError = actionError,
+            actionMessage = actionMessage,
+            manualSyncLoading = manualSyncLoading,
             recentEvents = eventSummaries,
             error = null,
         )
     }
 
     private fun buttonVisibilityFor(
+        sourceType: String,
         status: SourceConnectionStatus?,
     ): DetailButtonVisibility =
-        when (status) {
+        if (sourceType == SourceType.MESSAGE_SCREENSHOT) {
+            DetailButtonVisibility(
+                showReconnectButton = false,
+                showDisconnectButton = false,
+                showManualSyncButton = false,
+            )
+        } else when (status) {
             SourceConnectionStatus.CONNECTED,
             SourceConnectionStatus.SYNCING,
             -> DetailButtonVisibility(

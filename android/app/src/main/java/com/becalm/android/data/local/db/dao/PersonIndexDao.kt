@@ -28,6 +28,11 @@ public data class PersonIndexAggregateRow(
     val interactionText: String?,
 )
 
+public data class PersonIndexStaleLinkedSourceRow(
+    val sourceType: String,
+    val sourceEventId: String,
+)
+
 @Dao
 public interface PersonIndexDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -35,6 +40,24 @@ public interface PersonIndexDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertIdentities(rows: List<PersonIdentityEntity>)
+
+    @Query(
+        """
+        SELECT * FROM persons
+        WHERE user_id = :userId
+          AND id IN (:personIds)
+        """,
+    )
+    public suspend fun findPersonsByIds(userId: String, personIds: List<String>): List<PersonEntity>
+
+    @Query(
+        """
+        SELECT * FROM person_identities
+        WHERE user_id = :userId
+          AND id IN (:identityIds)
+        """,
+    )
+    public suspend fun findIdentitiesByIds(userId: String, identityIds: List<String>): List<PersonIdentityEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     public suspend fun upsertSourceEventParticipants(rows: List<SourceEventParticipantEntity>)
@@ -68,6 +91,15 @@ public interface PersonIndexDao {
 
     @Query("DELETE FROM commitment_participants WHERE user_id = :userId")
     public suspend fun deleteCommitmentParticipantsForUser(userId: String): Int
+
+    @Query(
+        """
+        DELETE FROM commitment_participants
+        WHERE user_id = :userId
+          AND id NOT IN (:keepIds)
+        """,
+    )
+    public suspend fun deleteCommitmentParticipantsForUserExcept(userId: String, keepIds: List<String>): Int
 
     @Query(
         """
@@ -219,14 +251,18 @@ public interface PersonIndexDao {
         SET
             person_id = :personId,
             identity_type = CASE
-                WHEN identity_type IS NULL OR identity_type = '' THEN :identityType
+                WHEN identity_type IS NULL OR identity_type = '' OR identity_type = 'speaker_label' THEN :identityType
                 ELSE identity_type
             END,
             normalized_value = CASE
-                WHEN normalized_value IS NULL OR normalized_value = '' THEN :normalizedValue
+                WHEN normalized_value IS NULL OR normalized_value = '' OR identity_type = 'speaker_label' THEN :normalizedValue
                 ELSE normalized_value
             END,
-            display_name_raw = COALESCE(display_name_raw, :displayNameHint),
+            display_name_raw = CASE
+                WHEN display_name_raw IS NULL OR display_name_raw = '' THEN :displayNameHint
+                WHEN LOWER(REPLACE(REPLACE(display_name_raw, ' ', '_'), '-', '_')) GLOB 'speaker_[0-9]*' THEN :displayNameHint
+                ELSE display_name_raw
+            END,
             email_raw = CASE
                 WHEN :identityType = 'email' AND (email_raw IS NULL OR email_raw = '') THEN :rawValue
                 ELSE email_raw
@@ -367,6 +403,72 @@ public interface PersonIndexDao {
 
     @Query(
         """
+        SELECT DISTINCT i.source_type AS sourceType,
+                        i.source_event_id AS sourceEventId
+        FROM person_interactions i
+        WHERE i.user_id = :userId
+          AND i.interaction_kind = 'commitment'
+          AND i.source_event_id IS NOT NULL
+          AND TRIM(i.source_event_id) != ''
+          AND EXISTS (
+              SELECT 1
+              FROM source_event_participants sep
+              WHERE sep.user_id = i.user_id
+                AND sep.person_id = i.person_id
+                AND sep.source_event_id = i.source_event_id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM person_interactions source_i
+              WHERE source_i.user_id = i.user_id
+                AND source_i.person_id = i.person_id
+                AND source_i.source_event_id = i.source_event_id
+                AND source_i.interaction_kind != 'commitment'
+          )
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findStaleLinkedSourceProjectionRows(
+        userId: String,
+        limit: Int,
+    ): List<PersonIndexStaleLinkedSourceRow>
+
+    @Query(
+        """
+        SELECT DISTINCT i.source_type AS sourceType,
+                        i.source_event_id AS sourceEventId
+        FROM person_interactions i
+        WHERE i.user_id = :userId
+          AND i.interaction_kind != 'commitment'
+          AND i.source_event_id IS NOT NULL
+          AND TRIM(i.source_event_id) != ''
+          AND NOT EXISTS (
+              SELECT 1
+              FROM raw_ingestion_events raw_by_id
+              WHERE raw_by_id.user_id = i.user_id
+                AND raw_by_id.id = i.source_event_id
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM source_event_participants sep
+              JOIN raw_ingestion_events raw_by_ref
+                ON raw_by_ref.user_id = sep.user_id
+               AND raw_by_ref.source_type = sep.source_type
+               AND raw_by_ref.source_ref = sep.source_ref
+              WHERE sep.user_id = i.user_id
+                AND sep.source_type = i.source_type
+                AND sep.source_event_id = i.source_event_id
+          )
+        LIMIT :limit
+        """,
+    )
+    public suspend fun findStaleRawSourceProjectionRows(
+        userId: String,
+        limit: Int,
+    ): List<PersonIndexStaleLinkedSourceRow>
+
+    @Query(
+        """
         UPDATE pending_source_participant_mirrors
         SET retry_count = retry_count + 1,
             last_error = :lastError,
@@ -456,7 +558,33 @@ public interface PersonIndexDao {
         """
         SELECT
             i.person_id AS personId,
-            MAX(idn.display_name_hint) AS displayNameHint,
+            COALESCE(
+                (
+                    SELECT sep.display_name_raw
+                    FROM source_event_participants sep
+                    WHERE sep.user_id = i.user_id
+                      AND sep.person_id = i.person_id
+                      AND sep.display_name_raw IS NOT NULL
+                      AND TRIM(sep.display_name_raw) != ''
+                      AND sep.display_name_raw NOT LIKE '%@%'
+                      AND sep.display_name_raw NOT IN ('담당자', '담당자님', '고객', '고객님')
+                    ORDER BY sep.confidence DESC, sep.created_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT p.display_name
+                    FROM persons p
+                    WHERE p.user_id = i.user_id
+                      AND p.id = i.person_id
+                      AND p.archived_at IS NULL
+                      AND p.display_name IS NOT NULL
+                      AND TRIM(p.display_name) != ''
+                      AND p.display_name NOT LIKE '%@%'
+                      AND p.display_name NOT IN ('담당자', '담당자님', '고객', '고객님')
+                    LIMIT 1
+                ),
+                MAX(idn.display_name_hint)
+            ) AS displayNameHint,
             MIN(idn.identity_key) AS primaryIdentityKey,
             SUM(CASE WHEN i.interaction_kind != 'commitment' THEN 1 ELSE 0 END) AS eventCount,
             SUM(
@@ -515,6 +643,15 @@ public interface PersonIndexDao {
         """,
     )
     public fun observeIdentitiesForUser(userId: String): Flow<List<PersonIdentityEntity>>
+
+    @Query(
+        """
+        SELECT * FROM person_identities
+        WHERE user_id = :userId
+        ORDER BY verified DESC, confidence DESC, last_seen_at DESC
+        """,
+    )
+    public suspend fun findIdentitiesForUser(userId: String): List<PersonIdentityEntity>
 
     @Query(
         """

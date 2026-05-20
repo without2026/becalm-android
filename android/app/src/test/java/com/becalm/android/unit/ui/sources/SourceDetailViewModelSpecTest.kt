@@ -167,7 +167,10 @@ class SourceDetailViewModelSpecTest {
             viewModel.onReconnect()
 
             assertEquals(
-                SourceDetailEffect.OpenReconnect(SourceReconnectDestination.OUTLOOK_MAIL),
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.OUTLOOK_MAIL,
+                    sourceType = SourceType.OUTLOOK_MAIL,
+                ),
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -175,7 +178,7 @@ class SourceDetailViewModelSpecTest {
     }
 
     @Test
-    fun `SMG-003 disconnected IMAP source reconnect routes to IMAP destination`() = runTest {
+    fun `SMG-003 disconnected Naver IMAP source reconnect routes to Naver IMAP destination`() = runTest {
         every { sourceStatusRepository.observeFor(SourceType.NAVER_IMAP) } returns
             flowOf(status(sourceType = SourceType.NAVER_IMAP, status = SourceConnectionStatus.NEVER_CONNECTED))
 
@@ -185,7 +188,31 @@ class SourceDetailViewModelSpecTest {
             viewModel.onReconnect()
 
             assertEquals(
-                SourceDetailEffect.OpenReconnect(SourceReconnectDestination.IMAP),
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.NAVER_IMAP,
+                    sourceType = SourceType.NAVER_IMAP,
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SMG-003 disconnected Daum IMAP source reconnect routes to Daum IMAP destination`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.DAUM_IMAP) } returns
+            flowOf(status(sourceType = SourceType.DAUM_IMAP, status = SourceConnectionStatus.NEVER_CONNECTED))
+
+        val viewModel = buildViewModel(SourceType.DAUM_IMAP)
+
+        viewModel.effects.test {
+            viewModel.onReconnect()
+
+            assertEquals(
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.DAUM_IMAP,
+                    sourceType = SourceType.DAUM_IMAP,
+                ),
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -203,7 +230,31 @@ class SourceDetailViewModelSpecTest {
             viewModel.onReconnect()
 
             assertEquals(
-                SourceDetailEffect.OpenReconnect(SourceReconnectDestination.RECORDING_FOLDER),
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.RECORDING_FOLDER,
+                    sourceType = SourceType.VOICE,
+                ),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SMG-003 disconnected call recording source reconnect routes to recording folder`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.CALL_RECORDING) } returns
+            flowOf(status(sourceType = SourceType.CALL_RECORDING, status = SourceConnectionStatus.NEVER_CONNECTED))
+
+        val viewModel = buildViewModel(SourceType.CALL_RECORDING)
+
+        viewModel.effects.test {
+            viewModel.onReconnect()
+
+            assertEquals(
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.RECORDING_FOLDER,
+                    sourceType = SourceType.CALL_RECORDING,
+                ),
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -221,7 +272,10 @@ class SourceDetailViewModelSpecTest {
             viewModel.onReconnect()
 
             assertEquals(
-                SourceDetailEffect.OpenReconnect(SourceReconnectDestination.RECORDING_FOLDER),
+                SourceDetailEffect.OpenReconnect(
+                    destination = SourceReconnectDestination.RECORDING_FOLDER,
+                    sourceType = SourceType.MEETING,
+                ),
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()
@@ -341,12 +395,52 @@ class SourceDetailViewModelSpecTest {
         coEvery { sourceSyncPort.requestManualSync(SourceType.GMAIL) } returns BecalmResult.Success(Unit)
 
         val viewModel = buildViewModel(SourceType.GMAIL)
-        viewModel.onManualSync()
-        advanceUntilIdle()
 
-        coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
-        coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
-        coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.GOOGLE_CALENDAR) }
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status == SourceSyncStatus.Unknown) {
+                state = awaitItem()
+            }
+
+            viewModel.onManualSync()
+            advanceUntilIdle()
+
+            while (state.actionMessage == null && state.actionError == null) {
+                state = awaitItem()
+            }
+            assertEquals(R.string.source_detail_manual_sync_started, state.actionMessage?.resId)
+            assertFalse(state.manualSyncLoading)
+            coVerify(exactly = 1) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
+            coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.OUTLOOK_MAIL) }
+            coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.GOOGLE_CALENDAR) }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SMG-005 manual sync is blocked while source is disconnected`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.GMAIL) } returns
+            flowOf(status(sourceType = SourceType.GMAIL, status = SourceConnectionStatus.NEVER_CONNECTED))
+
+        val viewModel = buildViewModel(SourceType.GMAIL)
+
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status == SourceSyncStatus.Unknown) {
+                state = awaitItem()
+            }
+
+            assertFalse(state.showManualSyncButton)
+            viewModel.onManualSync()
+            advanceUntilIdle()
+
+            while (state.actionError == null) {
+                state = awaitItem()
+            }
+            assertEquals(R.string.source_detail_error_manual_sync_requires_connection, state.actionError?.resId)
+            coVerify(exactly = 0) { sourceSyncPort.requestManualSync(SourceType.GMAIL) }
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -371,6 +465,27 @@ class SourceDetailViewModelSpecTest {
                 "content://tree/recordings/document/Recordings%2FBeCalm%20Meetings%2FAudio",
                 state.meetingAudioPickerInitialUri,
             )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `message screenshot source detail is not treated as a reconnectable account`() = runTest {
+        every { sourceStatusRepository.observeFor(SourceType.MESSAGE_SCREENSHOT) } returns
+            flowOf(status(sourceType = SourceType.MESSAGE_SCREENSHOT, status = SourceConnectionStatus.NEVER_CONNECTED))
+
+        val viewModel = buildViewModel(SourceType.MESSAGE_SCREENSHOT)
+
+        viewModel.state.test {
+            var state = awaitItem()
+            while (state.status == SourceSyncStatus.Unknown) {
+                state = awaitItem()
+            }
+
+            assertEquals(SourceType.MESSAGE_SCREENSHOT, state.sourceType)
+            assertFalse(state.showReconnectButton)
+            assertFalse(state.showManualSyncButton)
+            assertFalse(state.showDisconnectButton)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -412,7 +527,9 @@ class SourceDetailViewModelSpecTest {
                 errorMessage = null,
             )
             advanceUntilIdle()
-            state = awaitItem()
+            while (state.status != SourceSyncStatus.Syncing) {
+                state = awaitItem()
+            }
             assertEquals(SourceSyncStatus.Syncing, state.status)
             assertEquals(initialSyncAt, state.lastSyncAt)
 
@@ -423,7 +540,9 @@ class SourceDetailViewModelSpecTest {
                 errorMessage = null,
             )
             advanceUntilIdle()
-            state = awaitItem()
+            while (state.status != SourceSyncStatus.Connected || state.lastSyncAt != refreshedSyncAt) {
+                state = awaitItem()
+            }
             assertEquals(SourceSyncStatus.Connected, state.status)
             assertEquals(refreshedSyncAt, state.lastSyncAt)
             cancelAndIgnoreRemainingEvents()

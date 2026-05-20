@@ -5,6 +5,7 @@ public data class RecordingFolderDetection(
     val preferredDocumentId: String?,
     val voiceFolderDetected: Boolean,
     val callFolderDetected: Boolean,
+    val meetingFolderDetected: Boolean,
     val usedFallbackPath: Boolean,
     val requiresManualPicker: Boolean,
 )
@@ -13,6 +14,7 @@ internal object RecordingFolderDetector {
     private const val PRIMARY_PATH = "/storage/emulated/0/Recordings"
     private const val PRIMARY_VOICE_PATH = "/storage/emulated/0/Recordings/Voice Recorder"
     private const val PRIMARY_CALL_PATH = "/storage/emulated/0/Recordings/Call"
+    private const val PRIMARY_MEETING_PATH = "/storage/emulated/0/Recordings/BeCalm Meetings/Audio"
     private const val FALLBACK_PATH = "/storage/emulated/0/VoiceRecorder"
 
     fun fallback(): RecordingFolderDetection =
@@ -21,6 +23,7 @@ internal object RecordingFolderDetector {
             preferredDocumentId = "primary:Recordings",
             voiceFolderDetected = false,
             callFolderDetected = false,
+            meetingFolderDetected = false,
             usedFallbackPath = false,
             requiresManualPicker = true,
         )
@@ -32,6 +35,7 @@ internal object RecordingFolderDetector {
                 preferredDocumentId = "primary:Recordings",
                 voiceFolderDetected = pathExists(PRIMARY_VOICE_PATH),
                 callFolderDetected = pathExists(PRIMARY_CALL_PATH),
+                meetingFolderDetected = pathExists(PRIMARY_MEETING_PATH),
                 usedFallbackPath = false,
                 requiresManualPicker = false,
             )
@@ -43,6 +47,7 @@ internal object RecordingFolderDetector {
                 preferredDocumentId = "primary:VoiceRecorder",
                 voiceFolderDetected = true,
                 callFolderDetected = false,
+                meetingFolderDetected = false,
                 usedFallbackPath = true,
                 requiresManualPicker = false,
             )

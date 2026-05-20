@@ -1,12 +1,19 @@
 package com.becalm.android.ui.persons
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,15 +23,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.becalm.android.R
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.remote.dto.SourceType
+import com.becalm.android.domain.commitment.CommitmentDisplayPolicy
 import com.becalm.android.ui.components.BecalmScaffold
 import com.becalm.android.ui.components.BecalmSheetSkeleton
 import com.becalm.android.ui.components.EMAIL_SOURCE_TYPES
@@ -34,6 +48,7 @@ import com.becalm.android.ui.components.EventSourceBadge
 import com.becalm.android.ui.components.EventTitleText
 import com.becalm.android.ui.components.EvidenceCard
 import com.becalm.android.ui.components.IngestionTimestamp
+import com.becalm.android.ui.components.isTakeDirection
 import com.becalm.android.ui.components.uiMessageStringResource
 import com.becalm.android.ui.navigation.BecalmRoute
 import com.becalm.android.ui.theme.BecalmTheme
@@ -46,10 +61,9 @@ import com.becalm.android.ui.theme.glassPanel
  * - **Email sources** ([EMAIL_SOURCE_TYPES]) → [EmailEventDetailSection] which renders
  *   the six SRC-004 / EMAIL-003 / EMAIL-004 components (source badge, title, snippet,
  *   body, attachments pill, commitments-extracted badge, KST timestamp).
- * - **Non-email sources** (voice / calendar / call_recording) → a minimal common layout
- *   (source badge + title + KST timestamp). Voice and calendar extended fields
- *   (`duration_seconds`, `location`, `attendees_raw`) are deferred to their own plan
- *   docs and intentionally not rendered here.
+ * - **Non-email sources** (voice / meeting / call_recording / calendar) → a common
+ *   summary layout. Audio sources also render their archived transcript through the
+ *   same expandable source-body path as email originals.
  *
  * Named "Sheet" in the spec but implemented as a full screen for navigation consistency.
  *
@@ -109,24 +123,69 @@ internal fun RawEventDetailContent(
     state: RawEventDetailUiState,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    val visibleExtractedCommitments = visibleRawEventCommitments(state.extractedCommitments)
+
+    LazyColumn(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .fillMaxSize()
+            .testTag("raw-event-detail-list"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RawEventSyncStatusBanner(syncStatus = state.syncStatus)
-        EvidenceCard(
-            modifier = Modifier
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-        ) {
-            if (state.sourceType in EMAIL_SOURCE_TYPES) {
-                EmailEventDetailSection(
-                    state = state,
+        if (rawEventSyncStatusCopy(state.syncStatus) != null) {
+            item {
+                RawEventSyncStatusBanner(syncStatus = state.syncStatus)
+            }
+        }
+
+        if (state.sourceType in EMAIL_SOURCE_TYPES) {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    EmailEventSummarySection(state = state)
+                }
+            }
+        } else {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    NonEmailEventDetailSection(state = state)
+                }
+            }
+        }
+
+        if (visibleExtractedCommitments.isNotEmpty()) {
+            item {
+                RawEventExtractionSection(
+                    commitments = visibleExtractedCommitments,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            } else {
-                NonEmailEventDetailSection(state = state)
+            }
+        }
+
+        if (state.hasAudioTranscriptDetail()) {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    RawEventTranscriptSection(state = state)
+                }
+            }
+        }
+
+        if (state.sourceType in EMAIL_SOURCE_TYPES && state.hasEmailBodyDetail()) {
+            item {
+                EvidenceCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    EmailEventBodySection(state = state)
+                }
             }
         }
     }
@@ -134,11 +193,7 @@ internal fun RawEventDetailContent(
 
 @Composable
 private fun RawEventSyncStatusBanner(syncStatus: String?) {
-    val (titleRes, bodyRes) = when (syncStatus) {
-        "failed", "quarantined" -> R.string.raw_event_sync_failed_title to R.string.raw_event_sync_failed_body
-        "awaiting_consent" -> R.string.raw_event_sync_awaiting_consent_title to R.string.raw_event_sync_awaiting_consent_body
-        else -> return
-    }
+    val (titleRes, bodyRes) = rawEventSyncStatusCopy(syncStatus) ?: return
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -156,6 +211,136 @@ private fun RawEventSyncStatusBanner(syncStatus: String?) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+private fun rawEventSyncStatusCopy(syncStatus: String?): Pair<Int, Int>? =
+    when (syncStatus) {
+        "failed", "quarantined" -> R.string.raw_event_sync_failed_title to R.string.raw_event_sync_failed_body
+        "awaiting_consent" -> R.string.raw_event_sync_awaiting_consent_title to R.string.raw_event_sync_awaiting_consent_body
+        else -> null
+    }
+
+private fun visibleRawEventCommitments(commitments: List<RawEventCommitmentSummary>): List<RawEventCommitmentSummary> =
+    commitments.filterNot { CommitmentDisplayPolicy.isDecisionContextItem(it.itemType) }
+
+private fun RawEventDetailUiState.hasAudioTranscriptDetail(): Boolean =
+    sourceType != null &&
+        sourceType in RAW_EVENT_TRANSCRIPT_SOURCE_TYPES &&
+        hasArchivedOriginalDetail()
+
+private val RAW_EVENT_TRANSCRIPT_SOURCE_TYPES = setOf(
+    SourceType.VOICE,
+    SourceType.MEETING,
+    SourceType.CALL_RECORDING,
+)
+
+@Composable
+private fun RawEventTranscriptSection(state: RawEventDetailUiState) {
+    if (!state.hasAudioTranscriptDetail()) return
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = stringResource(R.string.raw_event_transcript_title),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+        )
+        SourceOriginalBodyBlock(
+            archivedOriginal = state.archivedOriginal,
+            body = null,
+        )
+    }
+}
+
+@Composable
+private fun RawEventExtractionSection(
+    commitments: List<RawEventCommitmentSummary>,
+    modifier: Modifier = Modifier,
+) {
+    if (commitments.isEmpty()) return
+    val myActions = commitments.filter {
+        it.itemType != CommitmentItemType.SCHEDULE && !isTakeDirection(it.direction)
+    }
+    val theirActions = commitments.filter {
+        it.itemType != CommitmentItemType.SCHEDULE && isTakeDirection(it.direction)
+    }
+    val schedules = commitments.filter { it.itemType == CommitmentItemType.SCHEDULE }
+
+    EvidenceCard(
+        modifier = modifier.testTag("raw-event-extracted-commitments"),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                )
+                Text(
+                    text = stringResource(R.string.raw_event_extracted_commitments_title),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            RawEventCommitmentBucket(
+                label = stringResource(R.string.person_detail_bucket_my_actions),
+                items = myActions,
+            )
+            RawEventCommitmentBucket(
+                label = stringResource(R.string.person_detail_bucket_their_actions),
+                items = theirActions,
+            )
+            RawEventCommitmentBucket(
+                label = stringResource(R.string.commitment_item_type_schedule),
+                items = schedules,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RawEventCommitmentBucket(
+    label: String,
+    items: List<RawEventCommitmentSummary>,
+) {
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.primary,
+        )
+        items.forEach { item ->
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .size(5.dp)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f), CircleShape)
+                        .alpha(0.9f),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = item.quote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 

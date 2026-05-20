@@ -14,6 +14,7 @@ import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentParticipantRepository
 import com.becalm.android.data.repository.CommitmentRepositoryImpl
 import com.becalm.android.data.repository.PersonEnrichmentRepositoryImpl
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.data.repository.SourceEventParticipantRepository
 import com.becalm.android.domain.reminder.ReminderScheduler
 import com.becalm.android.integration.local.LocalIntegrationSupport
@@ -68,6 +69,7 @@ class CommitmentLocalIntegrationTest {
     )
     private val sourceEventParticipantRepository = mockk<SourceEventParticipantRepository>(relaxed = true)
     private val commitmentParticipantRepository = mockk<CommitmentParticipantRepository>(relaxed = true)
+    private val sourceArtifactRepository = mockk<SourceArtifactRepository>(relaxed = true)
     private val workScheduler = mockk<WorkScheduler>(relaxed = true)
     private val reminderScheduler = mockk<ReminderScheduler>(relaxed = true)
 
@@ -227,6 +229,9 @@ class CommitmentLocalIntegrationTest {
         val viewModel = CommitmentDetailViewModel(
             commitmentRepository = commitmentRepository,
             personEnrichmentRepository = enrichmentRepository,
+            rawIngestionEventDao = db.rawIngestionEventDao(),
+            meetingSpeakerAliasDao = db.meetingSpeakerAliasDao(),
+            sourceArtifactRepository = sourceArtifactRepository,
             userPrefsStore = userPrefsStore,
             savedStateHandle = SavedStateHandle(mapOf(BecalmRoute.CommitmentDetail.ARG_ID to "manual-detail")),
             logger = logger,

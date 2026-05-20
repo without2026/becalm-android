@@ -13,12 +13,16 @@ import com.becalm.android.core.result.BecalmError
 import com.becalm.android.core.result.BecalmResult
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.coroutines.rethrowIfCancellation
+import com.becalm.android.data.local.datastore.EmailPipaProvider
 import com.becalm.android.data.local.datastore.SyncCursorStore
+import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.datastore.UserPrefsStoreImpl
 import com.becalm.android.data.remote.api.RailwayApi
 import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.internal.mergeServerState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -81,7 +85,8 @@ public interface SourceStatusRepository {
     /**
      * Emits the status list for every [SourceType.PRODUCT_SOURCES] entry whenever any
      * source's cursor or prefs change. Order follows [SourceType.PRODUCT_SOURCES] iteration
-     * order. Current product-facing set includes `VOICE` and excludes `CALL_RECORDING`.
+     * order. Current product-facing set includes `VOICE`, `CALL_RECORDING`, and `MEETING`
+     * as separate audio-backed sources.
      */
     public fun observeAll(): Flow<List<SourceStatus>>
 
@@ -195,6 +200,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
     private val apiProvider: Provider<RailwayApi>,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val logger: Logger,
+    private val userPrefsStore: UserPrefsStore,
     private val productAnalytics: ProductAnalyticsClient = NoopProductAnalyticsClient(),
 ) : SourceStatusRepository {
 
@@ -214,6 +220,7 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         apiProvider = Provider { api },
         ioDispatcher = ioDispatcher,
         logger = logger,
+        userPrefsStore = UserPrefsStoreImpl(userPrefs),
         productAnalytics = productAnalytics,
     )
 
@@ -221,14 +228,18 @@ public class SourceStatusRepositoryImpl @Inject constructor(
 
     override fun observeAll(): Flow<List<SourceStatus>> {
         // PRODUCT_SOURCES (user-facing sources) — NOT the schema-level ALL set.
-        // ALL still includes CALL_RECORDING, but that remains a schema-only carve-out
-        // and must not appear in the Sources strip or Today aggregate banner.
-        return userPrefs.data
-            .map { prefs ->
+        // Local audio sources are shown separately even though the MediaStore worker
+        // shares the same parent Recordings SAF grant.
+        return combine(
+            userPrefs.data.map { prefs ->
                 SourceType.PRODUCT_SOURCES.map { source ->
                     prefs.toSourceStatus(source)
                 }
-            }
+            },
+            observeConnectedSourceTypes(),
+        ) { statuses, connectedSourceTypes ->
+            statuses.map { status -> status.withConnectedSourceOverlay(connectedSourceTypes) }
+        }
             .distinctUntilChanged()
     }
 
@@ -236,8 +247,38 @@ public class SourceStatusRepositoryImpl @Inject constructor(
         observeAll().map { list -> list.associateBy { it.sourceType } }
 
     override fun observeFor(sourceType: String): Flow<SourceStatus> =
-        userPrefs.data.map { prefs ->
-            prefs.toSourceStatus(sourceType)
+        combine(
+            userPrefs.data.map { prefs -> prefs.toSourceStatus(sourceType) },
+            observeConnectedSourceTypes(),
+        ) { status, connectedSourceTypes ->
+            status.withConnectedSourceOverlay(connectedSourceTypes)
+        }.distinctUntilChanged()
+
+    private fun observeConnectedSourceTypes(): Flow<Set<String>> =
+        combine(
+            listOf(
+                userPrefsStore.observeSourceEnabled(SourceType.VOICE),
+                userPrefsStore.observeSourceEnabled(SourceType.CALL_RECORDING),
+                userPrefsStore.observeSourceEnabled(SourceType.MEETING),
+                userPrefsStore.observeEmailSourceConnected(EmailPipaProvider.GMAIL),
+                userPrefsStore.observeEmailSourceConnected(EmailPipaProvider.OUTLOOK_MAIL),
+                userPrefsStore.observeEmailSourceConnected(EmailPipaProvider.NAVER_IMAP),
+                userPrefsStore.observeEmailSourceConnected(EmailPipaProvider.DAUM_IMAP),
+                userPrefsStore.observeSourceEnabled(SourceType.GOOGLE_CALENDAR),
+                userPrefsStore.observeSourceEnabled(SourceType.OUTLOOK_CALENDAR),
+            ),
+        ) { flags ->
+            buildSet {
+                if (flags[0]) add(SourceType.VOICE)
+                if (flags[1]) add(SourceType.CALL_RECORDING)
+                if (flags[2]) add(SourceType.MEETING)
+                if (flags[3]) add(SourceType.GMAIL)
+                if (flags[4]) add(SourceType.OUTLOOK_MAIL)
+                if (flags[5]) add(SourceType.NAVER_IMAP)
+                if (flags[6]) add(SourceType.DAUM_IMAP)
+                if (flags[7]) add(SourceType.GOOGLE_CALENDAR)
+                if (flags[8]) add(SourceType.OUTLOOK_CALENDAR)
+            }
         }.distinctUntilChanged()
 
     private fun Preferences.toSourceStatus(sourceType: String): SourceStatus =
@@ -247,6 +288,13 @@ public class SourceStatusRepositoryImpl @Inject constructor(
             lastError = this[SourceStatusPrefsKeys.lastError(sourceType)],
             isInProgress = this[SourceStatusPrefsKeys.inProgress(sourceType)] ?: false,
         )
+
+    private fun SourceStatus.withConnectedSourceOverlay(connectedSourceTypes: Set<String>): SourceStatus =
+        if (sourceType in connectedSourceTypes && status == SourceConnectionStatus.NEVER_CONNECTED) {
+            copy(status = SourceConnectionStatus.CONNECTED)
+        } else {
+            this
+        }
 
     // ─── Server refresh (TDY-006 / TDY-008) ──────────────────────────────────
 

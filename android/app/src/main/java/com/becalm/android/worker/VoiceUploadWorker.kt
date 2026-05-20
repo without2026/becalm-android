@@ -14,6 +14,7 @@ import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.datastore.UserPrefsStore
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -87,6 +88,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val rawIngestionEventDaoProvider: Provider<RawIngestionEventDao>,
     private val commitmentDaoProvider: Provider<CommitmentDao>,
+    private val commitmentProgressEventDaoProvider: Provider<CommitmentProgressEventDao>,
     private val personIndexDaoProvider: Provider<PersonIndexDao>,
     private val selfIdentityAnchorDaoProvider: Provider<SelfIdentityAnchorDao>,
     private val sourceExtractionApiProvider: Provider<SourceExtractionApi>,
@@ -108,6 +110,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         workerParams: WorkerParameters,
         rawIngestionEventDao: RawIngestionEventDao,
         commitmentDao: CommitmentDao,
+        commitmentProgressEventDao: CommitmentProgressEventDao,
         personIndexDao: PersonIndexDao,
         sourceExtractionApi: SourceExtractionApi,
         rawIngestionRepository: RawIngestionRepository,
@@ -127,6 +130,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         workerParams = workerParams,
         rawIngestionEventDaoProvider = Provider { rawIngestionEventDao },
         commitmentDaoProvider = Provider { commitmentDao },
+        commitmentProgressEventDaoProvider = Provider { commitmentProgressEventDao },
         personIndexDaoProvider = Provider { personIndexDao },
         selfIdentityAnchorDaoProvider = Provider { selfIdentityAnchorDao },
         sourceExtractionApiProvider = Provider { sourceExtractionApi },
@@ -148,6 +152,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
 
     private val commitmentDao: CommitmentDao
         get() = commitmentDaoProvider.get()
+
+    private val commitmentProgressEventDao: CommitmentProgressEventDao
+        get() = commitmentProgressEventDaoProvider.get()
 
     private val personIndexDao: PersonIndexDao
         get() = personIndexDaoProvider.get()
@@ -173,6 +180,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
         val selfSpeakerId = inputData.getString(KEY_SELF_SPEAKER_ID)
         val speakerMappingsJson = inputData.getString(KEY_SPEAKER_MAPPINGS_JSON)
         val speakerPreviewId = inputData.getString(KEY_SPEAKER_PREVIEW_ID)
+        val extractionJobId = inputData.getString(KEY_EXTRACTION_JOB_ID)
+        val extractionJobPollAttempt = inputData.getInt(KEY_EXTRACTION_JOB_POLL_ATTEMPT, 0)
 
         if (rawEventId.isNullOrBlank() || audioUriString.isNullOrBlank()) {
             logger.e(TAG, "missing input keys rawEventId=${redact(rawEventId ?: "")} audioUri=${redact(audioUriString ?: "")}")
@@ -180,7 +189,8 @@ public class VoiceUploadWorker @AssistedInject constructor(
         }
 
         val hasServerPreview = !speakerPreviewId.isNullOrBlank()
-        if (!hasServerPreview) {
+        val hasExtractionJob = !extractionJobId.isNullOrBlank()
+        if (!hasServerPreview && !hasExtractionJob) {
             // VOI-005: permission gate — failure (not retry) because onboarding gates enqueue.
             val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 android.Manifest.permission.READ_MEDIA_AUDIO
@@ -207,6 +217,50 @@ public class VoiceUploadWorker @AssistedInject constructor(
         // VOI-004: PIPA consent gate (first check — pre-upload).
         if (delegate.parkIfConsentWithdrawn(entity, stage = "PIPA consent not granted")) {
             return@withContext Result.success()
+        }
+
+        if (hasExtractionJob) {
+            processingStatusRepository.recordGemini(entity.sourceType, "내용 정리 중")
+            return@withContext delegate.uploadRunner().pollJob(
+                request = SourceExtractionUploadRequest(
+                    userId = context.userId,
+                    entity = entity,
+                    rawEventId = rawEventId,
+                    inputModality = "audio",
+                    durationSecondsFallback = "0".toPlainRequestBody(),
+                    nonRetryableErrorMessage = "Upload rejected",
+                    onMarkFailed = { reasonCode -> markFailed(delegate, entity, reasonCode) },
+                    onJobAccepted = { jobId, retryAfterSec ->
+                        handleExtractionJobAccepted(
+                            delegate = delegate,
+                            entity = entity,
+                            rawEventId = rawEventId,
+                            audioUri = audioUriString,
+                            jobId = jobId,
+                            retryAfterSec = retryAfterSec,
+                            pollAttempt = extractionJobPollAttempt,
+                            rateLimitedAttempt = inputData.getInt(KEY_RATE_LIMITED_ATTEMPT, 0),
+                            selfSpeakerId = selfSpeakerId,
+                            speakerMappingsJson = speakerMappingsJson,
+                            speakerPreviewId = speakerPreviewId,
+                        )
+                    },
+                    onJobRetryableFailure = { retryAfterSec ->
+                        handleExtractionJobRetryableFailure(
+                            rawEventId = rawEventId,
+                            audioUri = audioUriString,
+                            retryAfterSec = retryAfterSec,
+                            selfSpeakerId = selfSpeakerId,
+                            speakerMappingsJson = speakerMappingsJson,
+                            speakerPreviewId = speakerPreviewId,
+                        )
+                    },
+                    selfSpeakerId = selfSpeakerId,
+                    speakerMappingsJson = speakerMappingsJson,
+                    speakerPreviewId = speakerPreviewId,
+                ),
+                jobId = extractionJobId.orEmpty(),
+            )
         }
 
         val audioUri = Uri.parse(audioUriString)
@@ -270,6 +324,21 @@ public class VoiceUploadWorker @AssistedInject constructor(
                         speakerPreviewId = speakerPreviewId,
                     )
                 },
+                onJobAccepted = { jobId, retryAfterSec ->
+                    handleExtractionJobAccepted(
+                        delegate = delegate,
+                        entity = entity,
+                        rawEventId = rawEventId,
+                        audioUri = audioUriString,
+                        jobId = jobId,
+                        retryAfterSec = retryAfterSec,
+                        pollAttempt = 0,
+                        rateLimitedAttempt = inputData.getInt(KEY_RATE_LIMITED_ATTEMPT, 0),
+                        selfSpeakerId = selfSpeakerId,
+                        speakerMappingsJson = speakerMappingsJson,
+                        speakerPreviewId = speakerPreviewId,
+                    )
+                },
                 selfSpeakerId = selfSpeakerId,
                 speakerMappingsJson = speakerMappingsJson,
                 speakerPreviewId = speakerPreviewId,
@@ -283,6 +352,7 @@ public class VoiceUploadWorker @AssistedInject constructor(
         LocalSourceExtractionDelegate(
             rawIngestionEventDao = rawIngestionEventDao,
             commitmentDao = commitmentDao,
+            commitmentProgressEventDao = commitmentProgressEventDao,
             personIndexDao = personIndexDao,
             selfIdentityAnchorDao = selfIdentityAnchorDao,
             sourceExtractionApi = sourceExtractionApi,
@@ -422,6 +492,79 @@ public class VoiceUploadWorker @AssistedInject constructor(
         }
     }
 
+    private suspend fun handleExtractionJobAccepted(
+        delegate: LocalSourceExtractionDelegate,
+        entity: RawIngestionEventEntity,
+        rawEventId: String,
+        audioUri: String,
+        jobId: String,
+        retryAfterSec: Long?,
+        pollAttempt: Int,
+        rateLimitedAttempt: Int,
+        selfSpeakerId: String?,
+        speakerMappingsJson: String?,
+        speakerPreviewId: String?,
+    ): Result {
+        val nextAttempt = pollAttempt + 1
+        return if (nextAttempt > MAX_EXTRACTION_JOB_POLL_ATTEMPTS) {
+            logger.w(
+                TAG,
+                "extraction job polling exhausted id=${redact(rawEventId)} job=${redact(jobId)} " +
+                    "pollAttempt=$pollAttempt",
+            )
+            processingStatusRepository.recordError(entity.sourceType, "Audio analysis timed out")
+            markFailed(delegate, entity, reasonCode = "extraction_job_timeout")
+            Result.success()
+        } else {
+            val delaySec = extractionJobPollDelaySeconds(retryAfterSec)
+            logger.d(
+                TAG,
+                "extraction job poll re-enqueue id=${redact(rawEventId)} job=${redact(jobId)} " +
+                    "delaySec=$delaySec pollAttempt=$pollAttempt → nextAttempt=$nextAttempt",
+            )
+            workScheduler.enqueueVoiceUploadWithDelay(
+                rawEventId = rawEventId,
+                audioUri = audioUri,
+                initialDelaySec = delaySec,
+                rateLimitedAttempt = rateLimitedAttempt,
+                selfSpeakerId = selfSpeakerId,
+                speakerMappingsJson = speakerMappingsJson,
+                speakerPreviewId = speakerPreviewId,
+                extractionJobId = jobId,
+                extractionJobPollAttempt = nextAttempt,
+            )
+            Result.success()
+        }
+    }
+
+    private fun handleExtractionJobRetryableFailure(
+        rawEventId: String,
+        audioUri: String,
+        retryAfterSec: Long?,
+        selfSpeakerId: String?,
+        speakerMappingsJson: String?,
+        speakerPreviewId: String?,
+    ): Result {
+        val delaySec = extractionJobPollDelaySeconds(retryAfterSec)
+        logger.d(TAG, "extraction job retryable failure re-upload id=${redact(rawEventId)} delaySec=$delaySec")
+        workScheduler.enqueueVoiceUploadWithDelay(
+            rawEventId = rawEventId,
+            audioUri = audioUri,
+            initialDelaySec = delaySec,
+            rateLimitedAttempt = 0,
+            selfSpeakerId = selfSpeakerId,
+            speakerMappingsJson = speakerMappingsJson,
+            speakerPreviewId = speakerPreviewId,
+            extractionJobId = null,
+            extractionJobPollAttempt = 0,
+        )
+        return Result.success()
+    }
+
+    private fun extractionJobPollDelaySeconds(retryAfterSec: Long?): Long =
+        (retryAfterSec ?: ASYNC_JOB_DEFAULT_POLL_DELAY_SECONDS)
+            .coerceIn(MIN_EXTRACTION_JOB_POLL_DELAY_SECONDS, MAX_EXTRACTION_JOB_POLL_DELAY_SECONDS)
+
     /**
      * Permanently quarantines the entity by setting [RawIngestionEventEntity.syncStatus] to
      * "failed" via the existing [RawIngestionEventDao.markFailed] query.
@@ -466,6 +609,11 @@ public class VoiceUploadWorker @AssistedInject constructor(
          */
         private const val MAX_RATE_LIMITED_ATTEMPTS = MAX_ATTEMPTS
 
+        private const val MAX_EXTRACTION_JOB_POLL_ATTEMPTS = 180
+        private const val ASYNC_JOB_DEFAULT_POLL_DELAY_SECONDS = 10L
+        private const val MIN_EXTRACTION_JOB_POLL_DELAY_SECONDS = 5L
+        private const val MAX_EXTRACTION_JOB_POLL_DELAY_SECONDS = 60L
+
         /** Streaming buffer size — 64 KiB chunks per VOI-007. */
         private const val STREAM_BUFFER_BYTES = 65536
 
@@ -487,5 +635,9 @@ public class VoiceUploadWorker @AssistedInject constructor(
         public const val KEY_SPEAKER_MAPPINGS_JSON: String = "speaker_mappings_json"
 
         public const val KEY_SPEAKER_PREVIEW_ID: String = "speaker_preview_id"
+
+        public const val KEY_EXTRACTION_JOB_ID: String = "extraction_job_id"
+
+        public const val KEY_EXTRACTION_JOB_POLL_ATTEMPT: String = "extraction_job_poll_attempt"
     }
 }

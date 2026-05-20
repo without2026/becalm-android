@@ -31,6 +31,8 @@ class ProductAnalyticsValidationSpecTest {
             ProductAnalyticsEvents.SOURCE_OAUTH_CALLBACK_RECEIVED,
             ProductAnalyticsEvents.EXTRACTION_FILTERED,
             ProductAnalyticsEvents.COMMITMENT_CORRECTION_SUBMITTED,
+            ProductAnalyticsEvents.COMMITMENT_QUALITY_REVIEW_SUBMITTED,
+            ProductAnalyticsEvents.PERSON_MATCH_REVIEW_SUBMITTED,
             ProductAnalyticsEvents.PERSON_MERGE_COMPLETED,
             ProductAnalyticsEvents.PERSON_SPLIT_COMPLETED,
             ProductAnalyticsEvents.CONSENT_WITHDRAWN,

@@ -7,9 +7,15 @@ import com.becalm.android.R
 import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.core.util.Logger
 import com.becalm.android.data.local.datastore.UserPrefsStore
+import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
+import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.entity.CommitmentEntity
+import com.becalm.android.data.local.db.entity.CommitmentItemType
+import com.becalm.android.data.local.db.entity.MeetingSpeakerAliasEntity
+import com.becalm.android.data.remote.dto.SourceType
 import com.becalm.android.data.repository.CommitmentRepository
 import com.becalm.android.data.repository.PersonEnrichmentRepository
+import com.becalm.android.data.repository.SourceArtifactRepository
 import com.becalm.android.domain.commitment.CommitmentState
 import com.becalm.android.ui.components.UiMessage
 import com.becalm.android.ui.navigation.BecalmRoute
@@ -27,6 +33,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
@@ -59,6 +66,15 @@ public data class CommitmentHistoryPresentation(
     val showSupersedeLink: Boolean = false,
 )
 
+public data class MeetingTranscriptPresentation(
+    val rawEventId: String,
+    val originalBodyText: String,
+    val bodyText: String,
+    val speakerIds: List<String>,
+    val aliases: Map<String, String>,
+    val truncated: Boolean,
+)
+
 public sealed interface CommitmentDetailEffect {
     public data class OpenEdit(val commitmentId: String) : CommitmentDetailEffect
 }
@@ -87,6 +103,7 @@ public data class DetailUiState(
     val source: CommitmentSourcePresentation = CommitmentSourcePresentation(),
     val actionButtons: CommitmentDetailActionState = CommitmentDetailActionState(),
     val history: CommitmentHistoryPresentation = CommitmentHistoryPresentation(),
+    val meetingTranscript: MeetingTranscriptPresentation? = null,
     val loading: Boolean = true,
     val error: UiMessage? = null,
 )
@@ -118,6 +135,9 @@ private const val TAG = "CommitmentDetailVM"
 public class CommitmentDetailViewModel @Inject constructor(
     private val commitmentRepository: CommitmentRepository,
     private val personEnrichmentRepository: PersonEnrichmentRepository,
+    private val rawIngestionEventDao: RawIngestionEventDao,
+    private val meetingSpeakerAliasDao: MeetingSpeakerAliasDao,
+    private val sourceArtifactRepository: SourceArtifactRepository,
     private val userPrefsStore: UserPrefsStore,
     savedStateHandle: SavedStateHandle,
     private val logger: Logger,
@@ -156,6 +176,35 @@ public class CommitmentDetailViewModel @Inject constructor(
         }
     }
 
+    public fun onSpeakerAliasChange(speakerId: String, displayName: String) {
+        val current = _uiState.value.meetingTranscript ?: return
+        val normalizedSpeakerId = speakerId.trim()
+        val normalizedDisplayName = displayName.trim().ifBlank { normalizedSpeakerId }
+        if (normalizedSpeakerId !in current.speakerIds) return
+        viewModelScope.launch(ioDispatcher) {
+            val userId = userPrefsStore.observeCurrentUserId().firstOrNull() ?: return@launch
+            meetingSpeakerAliasDao.upsert(
+                MeetingSpeakerAliasEntity(
+                    userId = userId,
+                    rawEventId = current.rawEventId,
+                    speakerId = normalizedSpeakerId,
+                    displayName = normalizedDisplayName,
+                    updatedAt = kotlinx.datetime.Clock.System.now(),
+                ),
+            )
+            _uiState.update { state ->
+                val transcript = state.meetingTranscript ?: return@update state
+                val aliases = transcript.aliases + (normalizedSpeakerId to normalizedDisplayName)
+                state.copy(
+                    meetingTranscript = transcript.copy(
+                        aliases = aliases,
+                        bodyText = applySpeakerAliases(transcript.originalBodyText, aliases),
+                    ),
+                )
+            }
+        }
+    }
+
     // ─── Private ──────────────────────────────────────────────────────────────
 
     private fun observe() {
@@ -165,20 +214,27 @@ public class CommitmentDetailViewModel @Inject constructor(
             // another account's row after account switching. Resolving the user
             // id here and switching to observeByIdForUser closes that gap
             // (cross-account leak guard, data-model.yml:476).
-            val commitmentFlow = userPrefsStore.observeCurrentUserId().flatMapLatest { userId ->
-                if (userId.isNullOrBlank()) flowOf(null)
-                else commitmentRepository.observeByIdForUser(userId, id)
-            }
-            combine(
-                commitmentFlow,
-                personEnrichmentRepository.observeEnrichmentMap(),
-            ) { entity, enrichment ->
-                if (entity == null) {
-                    CommitmentDetailProjector.buildMissingState()
-                } else {
-                    CommitmentDetailProjector.buildLoadedState(entity, enrichment)
+            userPrefsStore.observeCurrentUserId()
+                .flatMapLatest { userId ->
+                    if (userId.isNullOrBlank()) {
+                        flowOf(CommitmentDetailProjector.buildMissingState())
+                    } else {
+                        combine(
+                            commitmentRepository.observeByIdForUser(userId, id),
+                            personEnrichmentRepository.observeEnrichmentMap(),
+                        ) { entity, enrichment ->
+                            if (entity == null) {
+                                CommitmentDetailProjector.buildMissingState()
+                            } else {
+                                CommitmentDetailProjector.buildLoadedState(
+                                    entity = entity,
+                                    enrichment = enrichment,
+                                    meetingTranscript = loadMeetingTranscript(userId, entity),
+                                )
+                            }
+                        }
+                    }
                 }
-            }
                 .distinctUntilChanged()
                 .flowOn(ioDispatcher)
                 .catch { e ->
@@ -193,6 +249,45 @@ public class CommitmentDetailViewModel @Inject constructor(
         }
     }
 
+    private suspend fun loadMeetingTranscript(
+        userId: String,
+        entity: CommitmentEntity,
+    ): MeetingTranscriptPresentation? {
+        if (entity.sourceType != SourceType.MEETING || entity.itemType != CommitmentItemType.SCHEDULE) return null
+        val sourceRef = entity.sourceRef ?: return null
+        val rawEvent = rawIngestionEventDao.findBySourceRefsForUser(userId, listOf(sourceRef))
+            .firstOrNull { it.sourceType == SourceType.MEETING }
+            ?: return null
+        val archived = sourceArtifactRepository.findMarkdownOriginal(userId, rawEvent.id) ?: return null
+        val markdown = archived.markdown?.takeIf { it.isNotBlank() } ?: return null
+        val aliases = meetingSpeakerAliasDao.findForRawEvent(userId, rawEvent.id)
+            .associate { it.speakerId to it.displayName }
+        val speakerIds = extractSpeakerIds(markdown)
+        return MeetingTranscriptPresentation(
+            rawEventId = rawEvent.id,
+            originalBodyText = markdown,
+            bodyText = applySpeakerAliases(markdown, aliases),
+            speakerIds = speakerIds,
+            aliases = aliases,
+            truncated = archived.markdownTruncated,
+        )
+    }
+
+    private fun extractSpeakerIds(markdown: String): List<String> =
+        SPEAKER_ID_REGEX.findAll(markdown)
+            .map { it.value }
+            .distinct()
+            .sorted()
+            .toList()
+
+    private fun applySpeakerAliases(markdown: String, aliases: Map<String, String>): String =
+        aliases.entries.fold(markdown) { acc, (speakerId, alias) ->
+            acc.replace(Regex("\\b${Regex.escape(speakerId)}\\b"), alias)
+        }
+
     private fun hashId(id: String): String = "%08x".format(id.hashCode())
 
+    private companion object {
+        private val SPEAKER_ID_REGEX = Regex("\\bSPEAKER_\\d+\\b")
+    }
 }

@@ -172,11 +172,15 @@ private fun ButtonContent(
     loading: Boolean,
 ) {
     if (loading) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(ButtonLoadingIndicatorSize),
-            color = LocalContentColor.current,
-            strokeWidth = 2.dp,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(ButtonLoadingIndicatorSize),
+                color = LocalContentColor.current,
+                strokeWidth = 2.dp,
+            )
+            Spacer(modifier = Modifier.width(ButtonLeadingIconSpacing))
+            Text(text = text, style = MaterialTheme.typography.labelLarge)
+        }
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (leadingIcon != null) {

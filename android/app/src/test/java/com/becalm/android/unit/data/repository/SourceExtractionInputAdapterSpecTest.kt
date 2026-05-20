@@ -36,6 +36,14 @@ class SourceExtractionInputAdapterSpecTest {
                     fromAddress = "Me <me@example.com>",
                     toAddresses = """[{"email":"customer@example.com","name":"Customer"}]""",
                     bodyPlain = "내일까지 제안서를 보내겠습니다.",
+                    rawHeaders = """
+                        {
+                          "list-unsubscribe": "<mailto:unsubscribe@example.com>",
+                          "list-id": "updates.example.com",
+                          "auto-submitted": "auto-generated",
+                          "precedence": "bulk"
+                        }
+                    """.trimIndent(),
                     receivedAt = NOW,
                 ),
             ),
@@ -47,6 +55,10 @@ class SourceExtractionInputAdapterSpecTest {
         assertEquals("<message@example.com>", dto.messageIdHeader)
         assertEquals("<parent@example.com>", dto.inReplyToHeader)
         assertEquals("<root@example.com> <parent@example.com>", dto.referencesHeader)
+        assertEquals(true, dto.hasListUnsubscribe)
+        assertEquals(true, dto.hasListId)
+        assertEquals(true, dto.autoSubmitted)
+        assertEquals(true, dto.bulkPrecedence)
         assertEquals("self", dto.participants?.single { it.role == "sender" }?.relationToUser)
         assertEquals("counterparty", dto.participants?.single { it.role == "recipient" }?.relationToUser)
     }
@@ -75,6 +87,34 @@ class SourceExtractionInputAdapterSpecTest {
         assertNull(dto.emailBodyPlain)
         assertEquals("counterparty", dto.participants?.single { it.role == "sender" }?.relationToUser)
         assertEquals("self", dto.participants?.single { it.role == "recipient" }?.relationToUser)
+    }
+
+    @Test
+    fun `falls back to stripped html body for all email sources when plain body is empty`() = runTest {
+        val raw = rawEvent(sourceType = SourceType.DAUM_IMAP, folder = "INBOX")
+        val adapter = SourceExtractionInputAdapter(
+            emailBodyRepository = FakeEmailBodyRepository(
+                body = EmailBodyEntity(
+                    id = "body-1",
+                    rawEventId = raw.id,
+                    providerMessageId = "message@example.com",
+                    folder = "INBOX",
+                    fromAddress = "sender@example.com",
+                    toAddresses = """["me@example.com"]""",
+                    bodyPlain = "   ",
+                    bodyHtml = """
+                        <html><body>
+                          <p>내일까지 <b>요건 검토 확인서</b>를 제출해주세요.</p>
+                        </body></html>
+                    """.trimIndent(),
+                    receivedAt = NOW,
+                ),
+            ),
+        )
+
+        val dto = adapter.toUploadDto(raw)
+
+        assertEquals("내일까지 요건 검토 확인서를 제출해주세요.", dto.emailBodyPlain)
     }
 
     @Test

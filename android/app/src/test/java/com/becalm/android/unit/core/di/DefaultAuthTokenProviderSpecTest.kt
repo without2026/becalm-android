@@ -66,7 +66,25 @@ class DefaultAuthTokenProviderSpecTest {
         assertEquals(AuthTokenProvider.RefreshResult.Refreshed("access-2"), result)
         assertEquals(1, providerCalls)
         assertEquals(1, authClient.refreshCalls)
+        assertSame(session, authClient.refreshedFrom)
         assertSame(refreshed, store.saved)
+    }
+
+    @Test
+    fun `AUTH-004 blank refresh token clears session without calling Supabase`() = runTest {
+        val store = FakeSessionStore(initial = session.copy(refreshToken = ""))
+        val provider = DefaultAuthTokenProvider(
+            authClientProvider = Provider { error("SupabaseAuthClient must not be called with a blank refresh token") },
+            sessionStore = store,
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            applicationScope = backgroundScope,
+            logger = logger,
+        )
+
+        val result = provider.refresh(previousAccessToken = "access-1")
+
+        assertEquals(AuthTokenProvider.RefreshResult.Unauthenticated, result)
+        assertEquals(1, store.clearCount)
     }
 
     private class FakeSessionStore(initial: SupabaseSession?) : SupabaseSessionStore {
@@ -75,6 +93,8 @@ class DefaultAuthTokenProviderSpecTest {
         var loadCount = 0
             private set
         var saved: SupabaseSession? = null
+            private set
+        var clearCount = 0
             private set
 
         override suspend fun save(session: SupabaseSession) {
@@ -89,6 +109,7 @@ class DefaultAuthTokenProviderSpecTest {
         }
 
         override suspend fun clear() {
+            clearCount += 1
             current = null
             changes.emit(null)
         }
@@ -100,6 +121,8 @@ class DefaultAuthTokenProviderSpecTest {
         private val refreshResult: BecalmResult<SupabaseSession>? = null,
     ) : SupabaseAuthClient {
         var refreshCalls = 0
+            private set
+        var refreshedFrom: SupabaseSession? = null
             private set
 
         override suspend fun signInWithEmail(
@@ -115,8 +138,9 @@ class DefaultAuthTokenProviderSpecTest {
         override suspend fun signInWithGoogleIdToken(idToken: String): BecalmResult<SupabaseSession> =
             error("not expected")
 
-        override suspend fun refresh(refreshToken: String): BecalmResult<SupabaseSession> {
+        override suspend fun refresh(currentSession: SupabaseSession): BecalmResult<SupabaseSession> {
             refreshCalls += 1
+            refreshedFrom = currentSession
             return refreshResult ?: error("refresh not expected")
         }
 

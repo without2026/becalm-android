@@ -5,9 +5,11 @@ import com.becalm.android.data.remote.dto.MeetingSpeakerPreviewResponse
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
+import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
+import retrofit2.http.Path
 
 /**
  * Retrofit interface for Railway's source-neutral commitment extraction endpoint.
@@ -94,11 +96,17 @@ public interface SourceExtractionApi {
         @Part("speaker_preview_id") speakerPreviewId: RequestBody?,
     ): Response<SourceExtractionResponse>
 
+    @GET("v1/extractions/commitments/jobs/{job_id}")
+    public suspend fun commitmentExtractionJob(
+        @Path("job_id") jobId: String,
+    ): Response<SourceExtractionResponse>
+
     @Multipart
     @POST("v1/extractions/meeting_speaker_preview")
     public suspend fun meetingSpeakerPreview(
         @Part audio: MultipartBody.Part,
         @Part("raw_event_id") rawEventId: RequestBody,
         @Part("duration_seconds") durationSeconds: RequestBody,
+        @Part("source_type") sourceType: RequestBody,
     ): Response<MeetingSpeakerPreviewResponse>
 }

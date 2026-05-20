@@ -17,9 +17,11 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.R
 import com.becalm.android.ui.onboarding.BatteryOptimizationContent
@@ -31,10 +33,12 @@ import com.becalm.android.ui.onboarding.ImapForm
 import com.becalm.android.ui.onboarding.NotificationPermissionContent
 import com.becalm.android.ui.onboarding.OnboardingEmailPipaConsentContent
 import com.becalm.android.ui.onboarding.OnboardingSelfIdentityUi
+import com.becalm.android.ui.onboarding.OnboardingSetupScreen
 import com.becalm.android.ui.onboarding.OnboardingSourceOwnershipUi
 import com.becalm.android.ui.onboarding.OnboardingSetupItem
 import com.becalm.android.ui.onboarding.OnboardingSetupItemUi
 import com.becalm.android.ui.onboarding.OnboardingSourceProvider
+import com.becalm.android.ui.onboarding.OnboardingUiState
 import com.becalm.android.ui.onboarding.OutlookCalendarOAuthContent
 import com.becalm.android.ui.onboarding.OutlookMailOAuthContent
 import com.becalm.android.ui.onboarding.RecordingFolderContent
@@ -44,6 +48,7 @@ import com.becalm.android.ui.onboarding.SourceConnectionState
 import com.becalm.android.ui.onboarding.SourceConnectionsContent
 import com.becalm.android.ui.theme.BecalmTheme
 import com.becalm.android.ui.today.ColdSyncUiState
+import kotlinx.coroutines.flow.emptyFlow
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -57,6 +62,37 @@ class OnboardingUiTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun `compact setup exposes sign out escape before main screen`() {
+        var signOutClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                OnboardingSetupScreen(
+                    navController = rememberNavController(),
+                    emailEventsOverride = emptyFlow(),
+                    calendarEventsOverride = emptyFlow(),
+                    stateOverride = OnboardingUiState(sourceOwnershipsLoaded = true),
+                    onConnectSource = { _, _ -> },
+                    onSkipSource = {},
+                    onPersistEmailConsent = { true },
+                    onRefreshSource = {},
+                    onCompleteSetup = {},
+                    onNavigateToday = {},
+                    onChangeAccount = { signOutClicks += 1 },
+                    onNavigateAfterSignOut = {},
+                    onLaunchPendingIntent = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.action_sign_out)).performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, signOutClicks)
+        }
+    }
 
     @Test
     fun `compact setup content shows required recommended and optional sections`() {
@@ -158,16 +194,20 @@ class OnboardingUiTest {
         }
 
         composeRule.onAllNodesWithText("Gmail").assertCountEquals(0)
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_body)).assertIsDisplayed()
         composeRule.onNodeWithTag("onboarding-self-display-name").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_display_name_help)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("onboarding-self-email"))
         composeRule.onNodeWithTag("onboarding-self-email").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_email_help)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("onboarding-self-alias"))
         composeRule.onNodeWithTag("onboarding-self-alias").assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_setup_identity_alias_help)).assertIsDisplayed()
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("onboarding-self-save"))
-        composeRule.onNodeWithTag("onboarding-self-save").performClick()
+        composeRule.onNodeWithTag("onboarding-self-save").performScrollTo().performClick()
         composeRule.onNodeWithTag("source-connections-list")
             .performScrollToNode(hasTestTag("source-connections-continue"))
         composeRule.onNodeWithTag("source-connections-continue").assertIsNotEnabled()
@@ -232,6 +272,154 @@ class OnboardingUiTest {
     }
 
     @Test
+    fun `source connection row disables skip while external auth is pending`() {
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GMAIL,
+                            category = SourceConnectionCategory.Mail,
+                            title = "Gmail",
+                            description = "Mail copy",
+                            consentCopy = null,
+                            state = SourceConnectionState.PendingExternalAuth,
+                        ),
+                    ),
+                    headline = string(R.string.onb_sources_headline),
+                    body = string(R.string.onb_sources_body),
+                    continueLabel = string(R.string.onb_sources_skip_remaining),
+                    onConnect = {},
+                    onSkip = {},
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("source-connection-primary").assertIsNotEnabled()
+        composeRule.onNodeWithTag("source-connection-skip").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `source connections content tells naver and daum email can be connected later`() {
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GMAIL,
+                            category = SourceConnectionCategory.Mail,
+                            title = "Gmail",
+                            description = "Mail copy",
+                            consentCopy = string(R.string.onb_sources_mail_consent_body),
+                            state = SourceConnectionState.ConsentRequired,
+                        ),
+                    ),
+                    headline = string(R.string.onb_sources_headline),
+                    body = string(R.string.onb_sources_body),
+                    continueLabel = string(R.string.onb_sources_skip_remaining),
+                    onConnect = {},
+                    onSkip = {},
+                    onContinue = {},
+                    showImapLaterNotice = true,
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(string(R.string.onb_sources_imap_later_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_sources_imap_later_body)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `skipped setup item remains retryable in compact setup`() {
+        var connectClicks = 0
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = emptyList(),
+                    headline = string(R.string.onb_setup_headline),
+                    body = string(R.string.onb_setup_body),
+                    continueLabel = string(R.string.onb_setup_start),
+                    onConnect = {},
+                    onSkip = {},
+                    setupItems = listOf(
+                        OnboardingSetupItemUi(
+                            item = OnboardingSetupItem.Contacts,
+                            title = string(R.string.onb_setup_contacts_title),
+                            description = string(R.string.onb_setup_contacts_body),
+                            state = SourceConnectionState.Skipped,
+                        ),
+                    ),
+                    selfIdentity = OnboardingSelfIdentityUi(
+                        displayName = "민홍",
+                        email = "me@example.com",
+                        phone = "",
+                        alias = "",
+                        confirmed = true,
+                        saving = false,
+                    ),
+                    onConnectSetupItem = { connectClicks += 1 },
+                    onSkipSetupItem = {},
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connection-primary"))
+        composeRule.onNodeWithTag("source-connection-primary").assertIsEnabled().performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(1, connectClicks)
+        }
+    }
+
+    @Test
+    fun `skipped optional source remains retryable in compact setup`() {
+        var connectedProvider: OnboardingSourceProvider? = null
+
+        composeRule.setContent {
+            BecalmTheme {
+                SourceConnectionsContent(
+                    items = listOf(
+                        SourceConnectionItemUi(
+                            provider = OnboardingSourceProvider.GMAIL,
+                            category = SourceConnectionCategory.Mail,
+                            title = "Gmail",
+                            description = "Mail copy",
+                            consentCopy = string(R.string.onb_sources_mail_consent_body),
+                            state = SourceConnectionState.Skipped,
+                        ),
+                    ),
+                    headline = string(R.string.onb_setup_headline),
+                    body = string(R.string.onb_setup_body),
+                    continueLabel = string(R.string.onb_setup_start),
+                    onConnect = { connectedProvider = it },
+                    onSkip = {},
+                    selfIdentity = OnboardingSelfIdentityUi(
+                        displayName = "민홍",
+                        email = "me@example.com",
+                        phone = "",
+                        alias = "",
+                        confirmed = true,
+                        saving = false,
+                    ),
+                    onContinue = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("source-connections-list")
+            .performScrollToNode(hasTestTag("source-connection-primary"))
+        composeRule.onNodeWithTag("source-connection-primary").assertIsEnabled().performClick()
+
+        composeRule.runOnIdle {
+            assertEquals(OnboardingSourceProvider.GMAIL, connectedProvider)
+        }
+    }
+
+    @Test
     fun `recording folder content shows detection summary fallback and ctas`() {
         var grantClicks = 0
         var skipClicks = 0
@@ -240,8 +428,11 @@ class OnboardingUiTest {
             BecalmTheme {
                 RecordingFolderContent(
                     displayPath = "/Recordings",
+                    targetPath = string(R.string.onb_recording_folder_target_common),
+                    sourceSpecific = false,
                     voiceFolderDetected = true,
                     callFolderDetected = false,
+                    meetingFolderDetected = false,
                     requiresManualPicker = true,
                     onGrant = { grantClicks += 1 },
                     onSkip = { skipClicks += 1 },
@@ -250,11 +441,32 @@ class OnboardingUiTest {
         }
 
         composeRule.onNodeWithText(string(R.string.onb_recording_folder_detected_path_fmt, "/Recordings")).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.onb_recording_folder_voice_status_fmt, string(R.string.onb_recording_folder_status_detected))).assertExists()
-        composeRule.onNodeWithText(string(R.string.onb_recording_folder_call_status_fmt, string(R.string.onb_recording_folder_status_missing))).assertExists()
+        composeRule.onNodeWithText(string(R.string.onb_recording_folder_picker_instruction)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.onb_recording_folder_picker_target)).assertIsDisplayed()
+        composeRule.onNodeWithText(
+            string(
+                R.string.onb_recording_folder_voice_status_fmt,
+                string(R.string.onb_recording_folder_voice_path),
+                string(R.string.onb_recording_folder_status_detected),
+            ),
+        ).assertExists()
+        composeRule.onNodeWithText(
+            string(
+                R.string.onb_recording_folder_call_status_fmt,
+                string(R.string.onb_recording_folder_call_path),
+                string(R.string.onb_recording_folder_status_missing),
+            ),
+        ).assertExists()
+        composeRule.onNodeWithText(
+            string(
+                R.string.onb_recording_folder_meeting_status_fmt,
+                string(R.string.onb_recording_folder_meeting_path),
+                string(R.string.onb_recording_folder_status_created_later),
+            ),
+        ).assertExists()
         composeRule.onNodeWithText(string(R.string.onb_recording_folder_manual_picker_fallback)).assertIsDisplayed()
-        composeRule.onNodeWithText(string(R.string.action_grant)).performClick()
-        composeRule.onNodeWithText(string(R.string.action_skip)).performClick()
+        composeRule.onNodeWithText(string(R.string.action_grant)).performScrollTo().performClick()
+        composeRule.onNodeWithText(string(R.string.action_skip)).performScrollTo().performClick()
 
         composeRule.runOnIdle {
             assertEquals(1, grantClicks)

@@ -1,16 +1,22 @@
 package com.becalm.android.ui.persons
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.becalm.android.R
@@ -278,6 +284,24 @@ class PersonDetailSupplementScreenTest {
                         ),
                         attachmentCount = 2,
                         commitmentsExtractedCount = 3,
+                        extractedCommitments = listOf(
+                            RawEventCommitmentSummary(
+                                id = "commitment-1",
+                                title = "제안서 보내기",
+                                itemType = "action",
+                                direction = "give",
+                                status = "pending",
+                                quote = "다음 주까지 제안서를 보내겠습니다.",
+                            ),
+                            RawEventCommitmentSummary(
+                                id = "commitment-2",
+                                title = "자료 확인하기",
+                                itemType = "action",
+                                direction = "take",
+                                status = "pending",
+                                quote = "자료 확인 부탁드립니다.",
+                            ),
+                        ),
                         loading = false,
                     ),
                 )
@@ -289,11 +313,65 @@ class PersonDetailSupplementScreenTest {
             .assertIsDisplayed()
         composeTestRule.onNodeWithText(string(R.string.raw_event_commitments_extracted, 3))
             .assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_my_actions))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("제안서 보내기").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.person_detail_bucket_their_actions))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("자료 확인하기").assertIsDisplayed()
         composeTestRule.onNodeWithTag("raw-event-body").assertTextContains("AAAA", substring = true)
         composeTestRule.onNodeWithText(string(R.string.raw_event_body_expand)).performClick()
         composeTestRule.onNodeWithTag("raw-event-body").assertTextContains("TAIL", substring = true)
         composeTestRule.onNodeWithText(string(R.string.raw_event_body_collapse)).performClick()
         composeTestRule.onNodeWithText(string(R.string.raw_event_body_expand)).assertIsDisplayed()
+    }
+
+    @Test
+    fun raw_event_detail_content_shows_extracted_commitments_before_long_body_and_keeps_body_toggle_reachable() {
+        val longBody = buildString {
+            append("A".repeat(900))
+            append("TAIL")
+        }
+
+        composeTestRule.setContent {
+            BecalmTheme {
+                Box(modifier = Modifier.height(280.dp)) {
+                    RawEventDetailContent(
+                        state = RawEventDetailUiState(
+                            eventId = "event-1",
+                            sourceType = SourceType.GMAIL,
+                            eventTitle = "Proposal",
+                            timestamp = Instant.parse("2026-04-24T01:00:00Z"),
+                            snippet = "Summary",
+                            emailBody = EmailBodyUi(
+                                bodyPlain = longBody,
+                                bodyHtml = null,
+                            ),
+                            extractedCommitments = listOf(
+                                RawEventCommitmentSummary(
+                                    id = "commitment-1",
+                                    title = "Bottom commitment",
+                                    itemType = "action",
+                                    direction = "give",
+                                    status = "pending",
+                                    quote = "This must be reachable after scrolling.",
+                                ),
+                            ),
+                            loading = false,
+                        ),
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("raw-event-detail-list").assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.raw_event_extracted_commitments_title))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Bottom commitment").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("raw-event-detail-list")
+            .performScrollToNode(hasTestTag("raw-event-body-toggle"))
     }
 
     @Test

@@ -4,7 +4,10 @@ import com.becalm.android.data.local.db.BeCalmDatabase
 import com.becalm.android.data.local.db.BeCalmDatabaseProvider
 import com.becalm.android.data.local.db.dao.CalendarEventDao
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.EmailBodyDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerAliasDao
+import com.becalm.android.data.local.db.dao.MeetingSpeakerPreviewDao
 import com.becalm.android.data.local.db.dao.PersonEnrichmentDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
@@ -142,6 +145,24 @@ public object DatabaseModule {
         provider: BeCalmDatabaseProvider,
     ): SourceConnectionDao =
         lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::sourceConnectionDao)
+
+    @Provides
+    public fun provideMeetingSpeakerPreviewDao(
+        provider: BeCalmDatabaseProvider,
+    ): MeetingSpeakerPreviewDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::meetingSpeakerPreviewDao)
+
+    @Provides
+    public fun provideMeetingSpeakerAliasDao(
+        provider: BeCalmDatabaseProvider,
+    ): MeetingSpeakerAliasDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::meetingSpeakerAliasDao)
+
+    @Provides
+    public fun provideCommitmentProgressEventDao(
+        provider: BeCalmDatabaseProvider,
+    ): CommitmentProgressEventDao =
+        lazyDaoProxy(dbProvider = provider, eager = null, accessor = BeCalmDatabase::commitmentProgressEventDao)
 
     private inline fun <reified T : Any> lazyDaoProxy(
         dbProvider: BeCalmDatabaseProvider?,

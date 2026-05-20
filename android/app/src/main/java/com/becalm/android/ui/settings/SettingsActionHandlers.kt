@@ -93,6 +93,9 @@ internal class SettingsPipaConsentHandler(
                 entity.sourceType == SourceType.MESSAGE_SCREENSHOT -> {
                     workScheduler.enqueueMessageScreenshotUpload(rawEventId = id)
                 }
+                entity.sourceType == SourceType.CALL_RECORDING || entity.sourceType == SourceType.MEETING -> {
+                    workScheduler.enqueueMeetingSpeakerPreview(rawEventId = id, audioUri = sourceRef)
+                }
                 else -> {
                     workScheduler.enqueueVoiceUpload(rawEventId = id, audioUri = sourceRef)
                 }

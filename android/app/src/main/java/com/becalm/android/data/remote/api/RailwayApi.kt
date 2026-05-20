@@ -24,7 +24,7 @@ import com.becalm.android.data.remote.dto.PersonMemoryUploadResponseDto
 import com.becalm.android.data.remote.dto.ProductEventsBatchRequest
 import com.becalm.android.data.remote.dto.ProductEventsBatchResponse
 import com.becalm.android.data.remote.dto.RawIngestionEventsResponse
-import com.becalm.android.data.remote.dto.ScheduleEventLinkStatusPatchDto
+import com.becalm.android.data.remote.dto.ScheduleEventLinkPatchDto
 import com.becalm.android.data.remote.dto.ScheduleEventLinksResponse
 import com.becalm.android.data.remote.dto.SingleCommitmentResponse
 import com.becalm.android.data.remote.dto.SingleScheduleEventLinkResponse
@@ -173,7 +173,7 @@ public interface RailwayApi {
     public suspend fun patchScheduleEventLink(
         @Path("id") id: String,
         @Header("X-BeCalm-Idempotent") idem: String = "1",
-        @Body request: ScheduleEventLinkStatusPatchDto,
+        @Body request: ScheduleEventLinkPatchDto,
     ): Response<SingleScheduleEventLinkResponse>
 
     // =========================================================================

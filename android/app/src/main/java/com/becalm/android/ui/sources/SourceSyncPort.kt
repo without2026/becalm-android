@@ -87,6 +87,7 @@ public class DefaultSourceSyncPort @Inject constructor(
             -> syncBackendManagedCalendar(sourceType)
 
             SourceType.VOICE,
+            SourceType.CALL_RECORDING,
             SourceType.MEETING,
             -> {
                 workScheduler.enqueueExpedited(sourceType)
@@ -189,11 +190,15 @@ public class DefaultSourceSyncPort @Inject constructor(
 
     private suspend fun finalizeBackendSyncSuccess(userId: String, sourceType: String): BecalmResult<Unit> {
         refreshIdentityMirrorsAfterBackendSync(userId, sourceType)
+        val completedAt = Clock.System.now()
         return when (val refresh = sourceStatusRepository.refreshFromServer()) {
-            is BecalmResult.Success -> refresh
+            is BecalmResult.Success -> {
+                sourceStatusRepository.recordSyncSuccess(sourceType, completedAt)
+                refresh
+            }
             is BecalmResult.Failure -> {
                 logger.w(TAG, "source_status refresh failed after backend sync sourceType=$sourceType")
-                sourceStatusRepository.recordSyncSuccess(sourceType, Clock.System.now())
+                sourceStatusRepository.recordSyncSuccess(sourceType, completedAt)
                 BecalmResult.Success(Unit)
             }
         }

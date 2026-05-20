@@ -15,6 +15,7 @@ import com.becalm.android.domain.meeting.MeetingImportFolderKind
 import com.becalm.android.ui.components.SourceSyncStatus
 import com.becalm.android.ui.components.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,8 +26,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.datetime.Instant
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 // ─── Navigation argument key ──────────────────────────────────────────────────
@@ -76,6 +77,8 @@ public data class SourceDetailUiState(
     val showDisconnectConfirmDialog: Boolean = false,
     val disconnectOutcome: SourceDisconnectOutcome? = null,
     val actionError: UiMessage? = null,
+    val actionMessage: UiMessage? = null,
+    val manualSyncLoading: Boolean = false,
     val recentEvents: List<RecentEventSummary> = emptyList(),
     val error: UiMessage? = null,
 )
@@ -85,7 +88,8 @@ public enum class SourceReconnectDestination {
     RECORDING_FOLDER,
     GMAIL,
     OUTLOOK_MAIL,
-    IMAP,
+    NAVER_IMAP,
+    DAUM_IMAP,
     GOOGLE_CALENDAR,
     OUTLOOK_CALENDAR,
 }
@@ -95,6 +99,7 @@ public sealed interface SourceDetailEffect {
     /** Open the reconnect flow appropriate for the current source type. */
     public data class OpenReconnect(
         val destination: SourceReconnectDestination,
+        val sourceType: String? = null,
     ) : SourceDetailEffect
 }
 
@@ -159,23 +164,54 @@ public class SourceDetailViewModel @Inject constructor(
             logger.w(TAG, "onReconnect ignored for unsupported sourceType=$sourceType")
             return
         }
-        _effects.tryEmit(SourceDetailEffect.OpenReconnect(destination))
+        _effects.tryEmit(
+            SourceDetailEffect.OpenReconnect(
+                destination = destination,
+                sourceType = sourceType,
+            ),
+        )
     }
 
     /** Triggers an immediate manual sync through the active source owner for this source. */
     public fun onManualSync() {
+        if (_manualSyncLoading.value) return
+        if (!state.value.status.allowsManualSync()) {
+            _disconnectOutcome.value = null
+            _actionMessage.value = null
+            _actionError.value = UiMessage.resource(R.string.source_detail_error_manual_sync_requires_connection)
+            logger.w(TAG, "manual sync blocked because source is not connected sourceType=$sourceType")
+            return
+        }
         viewModelScope.launch {
-            when (
-                val result = actionHandler.requestManualSync(
-                    sourceType = sourceType,
-                    hasValidSourceType = hasValidSourceType,
-                )
-            ) {
-                is BecalmResult.Success -> _actionError.value = null
-                is BecalmResult.Failure -> {
-                    _disconnectOutcome.value = null
-                    _actionError.value = UiMessage.resource(R.string.source_detail_error_manual_sync_failed)
+            _manualSyncLoading.value = true
+            _actionError.value = null
+            _actionMessage.value = null
+            try {
+                when (
+                    val result = actionHandler.requestManualSync(
+                        sourceType = sourceType,
+                        hasValidSourceType = hasValidSourceType,
+                    )
+                ) {
+                    is BecalmResult.Success -> {
+                        _actionError.value = null
+                        _actionMessage.value = UiMessage.resource(R.string.source_detail_manual_sync_started)
+                    }
+                    is BecalmResult.Failure -> {
+                        _disconnectOutcome.value = null
+                        _actionMessage.value = null
+                        _actionError.value = UiMessage.resource(R.string.source_detail_error_manual_sync_failed)
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "manual sync failed: ${e.message}")
+                _disconnectOutcome.value = null
+                _actionMessage.value = null
+                _actionError.value = UiMessage.resource(R.string.source_detail_error_manual_sync_failed)
+            } finally {
+                _manualSyncLoading.value = false
             }
         }
     }
@@ -184,9 +220,15 @@ public class SourceDetailViewModel @Inject constructor(
     public fun onMeetingAudioSelected(uri: Uri?) {
         if (uri == null || sourceType != SourceType.MEETING) return
         viewModelScope.launch {
-            when (val result = meetingImportRepository.importAudio(uri)) {
-                is BecalmResult.Success -> _actionError.value = null
-                is BecalmResult.Failure -> _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed)
+            when (val result = meetingImportRepository.stageAudioForSpeakerPreview(uri)) {
+                is BecalmResult.Success -> {
+                    _actionError.value = null
+                    _actionMessage.value = null
+                }
+                is BecalmResult.Failure -> {
+                    _actionMessage.value = null
+                    _actionError.value = UiMessage.resource(R.string.source_detail_error_meeting_audio_import_failed)
+                }
             }
         }
     }
@@ -218,9 +260,11 @@ public class SourceDetailViewModel @Inject constructor(
                 onSuccess = { outcome ->
                     _disconnectOutcome.value = outcome
                     _actionError.value = null
+                    _actionMessage.value = null
                 },
                 onFailure = { message ->
                     _disconnectOutcome.value = null
+                    _actionMessage.value = null
                     _actionError.value = message
                 },
             )
@@ -243,12 +287,21 @@ public class SourceDetailViewModel @Inject constructor(
     private val _dialogState = MutableStateFlow(false)
     private val _disconnectOutcome = MutableStateFlow<SourceDisconnectOutcome?>(null)
     private val _actionError = MutableStateFlow<UiMessage?>(null)
+    private val _actionMessage = MutableStateFlow<UiMessage?>(null)
+    private val _manualSyncLoading = MutableStateFlow(false)
     private val _meetingPickerFolders = MutableStateFlow(MeetingPickerFolders())
     private val meetingPickerStateFlow = combine(
         _actionError,
+        _actionMessage,
+        _manualSyncLoading,
         _meetingPickerFolders,
-    ) { actionError, folders ->
-        actionError to folders
+    ) { actionError, actionMessage, manualSyncLoading, folders ->
+        SourceDetailTransientState(
+            actionError = actionError,
+            actionMessage = actionMessage,
+            manualSyncLoading = manualSyncLoading,
+            pickerFolders = folders,
+        )
     }
 
     /**
@@ -281,8 +334,7 @@ public class SourceDetailViewModel @Inject constructor(
                 sourceEvents = sourceEvents,
                 showDisconnectConfirmDialog = showDisconnectConfirmDialog,
                 disconnectOutcome = disconnectOutcome,
-                actionError = meetingPickerState.first,
-                pickerFolders = meetingPickerState.second,
+                transientState = meetingPickerState,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -312,8 +364,7 @@ public class SourceDetailViewModel @Inject constructor(
         sourceEvents: List<com.becalm.android.data.local.db.entity.RawIngestionEventEntity>,
         showDisconnectConfirmDialog: Boolean,
         disconnectOutcome: SourceDisconnectOutcome?,
-        actionError: UiMessage?,
-        pickerFolders: MeetingPickerFolders,
+        transientState: SourceDetailTransientState,
     ): SourceDetailUiState {
         val base = SourceDetailProjector.buildUiState(
             sourceType = sourceType,
@@ -321,13 +372,15 @@ public class SourceDetailViewModel @Inject constructor(
             sourceEvents = sourceEvents,
             showDisconnectConfirmDialog = showDisconnectConfirmDialog,
             disconnectOutcome = disconnectOutcome,
-            actionError = actionError,
+            actionError = transientState.actionError,
+            actionMessage = transientState.actionMessage,
+            manualSyncLoading = transientState.manualSyncLoading,
         )
         return if (sourceType != SourceType.MEETING) {
             base
         } else {
             base.copy(
-                meetingAudioPickerInitialUri = pickerFolders.audioUri,
+                meetingAudioPickerInitialUri = transientState.pickerFolders.audioUri,
             )
         }
     }
@@ -338,12 +391,25 @@ public class SourceDetailViewModel @Inject constructor(
             val audioUri = (audio as? BecalmResult.Success)?.value
             _meetingPickerFolders.value = MeetingPickerFolders(audioUri)
             if (audio is BecalmResult.Failure) {
+                _actionMessage.value = null
                 _actionError.value = UiMessage.resource(R.string.source_detail_error_folder_probe_failed)
             }
         }
     }
 
+    private data class SourceDetailTransientState(
+        val actionError: UiMessage?,
+        val actionMessage: UiMessage?,
+        val manualSyncLoading: Boolean,
+        val pickerFolders: MeetingPickerFolders,
+    )
+
     private data class MeetingPickerFolders(
         val audioUri: String? = null,
     )
 }
+
+private fun SourceSyncStatus.allowsManualSync(): Boolean =
+    this == SourceSyncStatus.Connected ||
+        this == SourceSyncStatus.Syncing ||
+        this == SourceSyncStatus.Error

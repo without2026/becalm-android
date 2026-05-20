@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,6 +117,9 @@ public fun UnassignedEventsScreen(
             onManualMatch = viewModel::onManualMatch,
             onSelfMatch = viewModel::onSelfMatch,
             onNotSelfMatch = viewModel::onNotSelfMatch,
+            savingMatchEventIds = state.savingMatchEventIds,
+            resolvedMatchEventIds = state.resolvedMatchEventIds,
+            notSelfMatchEventIds = state.notSelfMatchEventIds,
             modifier = Modifier.padding(padding),
         )
     }
@@ -130,12 +134,14 @@ internal fun UnassignedEventsContent(
     onManualMatch: (UnassignedEventSummary, String, String) -> Unit = { _, _, _ -> },
     onSelfMatch: (UnassignedEventSummary) -> Unit = {},
     onNotSelfMatch: (UnassignedEventSummary) -> Unit = {},
+    savingMatchEventIds: Set<String> = emptySet(),
+    resolvedMatchEventIds: Set<String> = emptySet(),
+    notSelfMatchEventIds: Set<String> = emptySet(),
 ) {
     var filter by remember { mutableStateOf(MatchQueueFilter.RECOMMENDED) }
-    var completedIds by remember { mutableStateOf(setOf<String>()) }
     var laterIds by remember { mutableStateOf(setOf<String>()) }
 
-    val activeEvents = unassignedEvents.filterNot { it.id in completedIds }
+    val activeEvents = unassignedEvents.filterNot { it.id in resolvedMatchEventIds }
     val recommendedCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() != null }
     val manualCount = activeEvents.count { it.id !in laterIds && it.bestCandidate() == null }
     val laterCount = activeEvents.count { it.id in laterIds }
@@ -192,9 +198,10 @@ internal fun UnassignedEventsContent(
                     PersonMatchReviewCard(
                         event = event,
                         matchChoices = matchChoices,
+                        saving = event.id in savingMatchEventIds,
+                        notSelfRejected = event.id in notSelfMatchEventIds,
                         onConfirm = { anchor, nickname ->
                             onManualMatch(event, anchor, nickname)
-                            completedIds = completedIds + event.id
                             laterIds = laterIds - event.id
                         },
                         onLater = {
@@ -205,7 +212,6 @@ internal fun UnassignedEventsContent(
                         },
                         onSelf = {
                             onSelfMatch(event)
-                            completedIds = completedIds + event.id
                             laterIds = laterIds - event.id
                         },
                         onNotSelf = {
@@ -308,6 +314,8 @@ private fun MatchReviewEmptyFilter(filter: MatchQueueFilter) {
 private fun PersonMatchReviewCard(
     event: UnassignedEventSummary,
     matchChoices: List<PersonMatchChoiceRow>,
+    saving: Boolean,
+    notSelfRejected: Boolean,
     onConfirm: (String, String) -> Unit,
     onLater: () -> Unit,
     onSelf: () -> Unit,
@@ -319,6 +327,14 @@ private fun PersonMatchReviewCard(
     var selectedNickname by remember(event.id) { mutableStateOf(candidate?.displayName.orEmpty()) }
     var nickname by remember(event.id) { mutableStateOf("") }
     val isSelfSuggestion = candidate?.isSelfSuggestion == true || candidate?.role == "suggested"
+
+    LaunchedEffect(event.id, notSelfRejected) {
+        if (notSelfRejected) {
+            personAnchor = ""
+            selectedNickname = ""
+            manualOpen = true
+        }
+    }
 
     EvidenceCard(
         modifier = Modifier
@@ -363,11 +379,10 @@ private fun PersonMatchReviewCard(
                 BecalmButton(
                     text = stringResource(R.string.person_match_not_self_action),
                     onClick = {
-                        personAnchor = ""
-                        selectedNickname = ""
                         onNotSelf()
-                        manualOpen = true
                     },
+                    enabled = !saving,
+                    loading = saving,
                     variant = BecalmButtonVariant.Secondary,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -378,6 +393,8 @@ private fun PersonMatchReviewCard(
             BecalmButton(
                 text = stringResource(R.string.person_match_self_action),
                 onClick = onSelf,
+                enabled = !saving,
+                loading = saving,
                 variant = BecalmButtonVariant.Secondary,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -388,11 +405,12 @@ private fun PersonMatchReviewCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.align(Alignment.End),
             ) {
-                TextButton(onClick = onLater) {
+                TextButton(onClick = onLater, enabled = !saving) {
                     Text(text = stringResource(R.string.person_match_later_action))
                 }
                 if (!isSelfSuggestion) {
                     OutlinedButton(
+                        enabled = !saving,
                         onClick = {
                             personAnchor = ""
                             selectedNickname = ""
@@ -405,6 +423,8 @@ private fun PersonMatchReviewCard(
                     BecalmButton(
                         text = stringResource(R.string.person_match_confirm_action),
                         modifier = Modifier.testTag("unassigned-match-confirm-${event.id}"),
+                        enabled = !saving,
+                        loading = saving,
                         onClick = {
                             onConfirm(
                                 candidate.anchor,
@@ -422,10 +442,12 @@ private fun PersonMatchReviewCard(
                 nickname = nickname,
                 eventCandidates = event.candidates,
                 matchChoices = matchChoices,
+                selfRejected = notSelfRejected,
                 onPersonAnchorChange = { personAnchor = it },
                 onNicknameChange = { nickname = it },
                 onLater = onLater,
                 onSelf = onSelf,
+                saving = saving,
                 onConfirm = {
                     onConfirm(
                         personAnchor,
@@ -508,10 +530,12 @@ private fun ManualMatchPanel(
     nickname: String,
     eventCandidates: List<PersonMatchCandidateSummary>,
     matchChoices: List<PersonMatchChoiceRow>,
+    selfRejected: Boolean,
     onPersonAnchorChange: (String) -> Unit,
     onNicknameChange: (String) -> Unit,
     onLater: () -> Unit,
     onSelf: () -> Unit,
+    saving: Boolean,
     onConfirm: () -> Unit,
 ) {
     val normalizedQuery = personAnchor.trim()
@@ -541,6 +565,15 @@ private fun ManualMatchPanel(
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (selfRejected) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.person_match_not_self_followup),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag("unassigned-match-not-self-followup-$eventId"),
+        )
+    }
     Spacer(modifier = Modifier.height(8.dp))
     BecalmTextField(
         value = personAnchor,
@@ -606,31 +639,36 @@ private fun ManualMatchPanel(
             .testTag("unassigned-match-nickname-$eventId"),
     )
     Spacer(modifier = Modifier.height(8.dp))
-    BecalmButton(
-        text = stringResource(R.string.person_match_self_action),
-        onClick = onSelf,
-        variant = BecalmButtonVariant.Secondary,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("unassigned-match-self-$eventId"),
-    )
-    Spacer(modifier = Modifier.height(8.dp))
+    if (!selfRejected) {
+        BecalmButton(
+            text = stringResource(R.string.person_match_self_action),
+            onClick = onSelf,
+            enabled = !saving,
+            loading = saving,
+            variant = BecalmButtonVariant.Secondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("unassigned-match-self-$eventId"),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        TextButton(onClick = onLater) {
+        TextButton(onClick = onLater, enabled = !saving) {
             Text(text = stringResource(R.string.person_match_later_action))
         }
         OutlinedButton(
-            enabled = personAnchor.isNotBlank(),
+            enabled = personAnchor.isNotBlank() && !saving,
             onClick = onConfirm,
         ) {
             Text(text = stringResource(R.string.persons_manual_add_person_action))
         }
         BecalmButton(
             text = stringResource(R.string.persons_manual_match_action),
-            enabled = personAnchor.isNotBlank(),
+            enabled = personAnchor.isNotBlank() && !saving,
+            loading = saving,
             onClick = onConfirm,
             variant = BecalmButtonVariant.Primary,
         )

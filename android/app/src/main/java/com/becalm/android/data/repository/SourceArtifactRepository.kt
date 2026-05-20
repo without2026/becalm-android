@@ -4,6 +4,7 @@ import com.becalm.android.core.di.IoDispatcher
 import com.becalm.android.data.local.db.dao.SourceArtifactDao
 import com.becalm.android.data.local.db.entity.SOURCE_ARTIFACT_TYPE_MARKDOWN_ORIGINAL
 import com.becalm.android.data.local.db.entity.SourceArtifactEntity
+import com.becalm.android.data.remote.dto.MeetingTranscriptSegmentDto
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,11 +33,22 @@ public data class ArchivedOriginal(
 
 public interface SourceArtifactRepository {
     public suspend fun archiveEmailOriginal(input: EmailOriginalArchiveInput): SourceArtifactEntity?
+    public suspend fun archiveMeetingTranscript(input: MeetingTranscriptArchiveInput): SourceArtifactEntity?
     public suspend fun findMarkdownOriginal(userId: String, rawEventId: String): ArchivedOriginal?
     public suspend fun summary(userId: String): SourceArchiveSummary
     public suspend fun deleteBefore(userId: String, cutoff: Instant): SourceArchiveDeleteResult
     public suspend fun deleteAllForUser(userId: String)
 }
+
+public data class MeetingTranscriptArchiveInput(
+    val userId: String,
+    val rawEventId: String,
+    val sourceType: String,
+    val sourceRef: String?,
+    val occurredAt: Instant,
+    val title: String?,
+    val segments: List<MeetingTranscriptSegmentDto>,
+)
 
 public data class EmailOriginalArchiveInput(
     val userId: String,
@@ -66,6 +78,42 @@ public class SourceArtifactRepositoryImpl @Inject constructor(
                 ?: input.bodyHtml?.takeIf { it.isNotBlank() }
                 ?: return@withContext null
             val markdown = buildEmailMarkdown(input, body)
+            val write = store.writeMarkdown(
+                userId = input.userId,
+                sourceType = input.sourceType,
+                rawEventId = input.rawEventId,
+                occurredAt = input.occurredAt,
+                markdown = markdown,
+            )
+            val now = Clock.System.now()
+            val entity = SourceArtifactEntity(
+                id = stableId(input.userId, input.sourceType, input.sourceRef, input.rawEventId),
+                userId = input.userId,
+                rawEventId = input.rawEventId,
+                sourceType = input.sourceType,
+                sourceRef = input.sourceRef,
+                artifactType = SOURCE_ARTIFACT_TYPE_MARKDOWN_ORIGINAL,
+                localPath = write.relativePath,
+                sha256 = write.sha256,
+                byteSize = write.byteSize,
+                occurredAt = input.occurredAt,
+                createdAt = now,
+                updatedAt = now,
+            )
+            try {
+                dao.upsert(entity)
+                entity
+            } catch (t: Throwable) {
+                store.delete(write.relativePath)
+                throw t
+            }
+        }
+
+    override suspend fun archiveMeetingTranscript(input: MeetingTranscriptArchiveInput): SourceArtifactEntity? =
+        withContext(ioDispatcher) {
+            val segments = input.segments.filter { it.text.isNotBlank() }
+            if (segments.isEmpty()) return@withContext null
+            val markdown = buildMeetingTranscriptMarkdown(input, segments)
             val write = store.writeMarkdown(
                 userId = input.userId,
                 sourceType = input.sourceType,
@@ -157,11 +205,41 @@ public class SourceArtifactRepositoryImpl @Inject constructor(
             appendLine(body.trim())
         }
 
+    private fun buildMeetingTranscriptMarkdown(
+        input: MeetingTranscriptArchiveInput,
+        segments: List<MeetingTranscriptSegmentDto>,
+    ): String =
+        buildString {
+            appendLine("---")
+            appendLine("raw_event_id: ${frontMatter(input.rawEventId)}")
+            appendLine("source_type: ${frontMatter(input.sourceType)}")
+            appendLine("source_ref: ${frontMatter(input.sourceRef ?: "null")}")
+            appendLine("occurred_at: ${frontMatter(input.occurredAt.toString())}")
+            appendLine("title: ${frontMatter(input.title ?: "회의 녹음")}")
+            appendLine("---")
+            appendLine()
+            appendLine("# ${heading(input.title ?: "회의 녹음")}")
+            appendLine()
+            segments.forEach { segment ->
+                appendLine(
+                    "[${formatSeconds(segment.startSeconds)}-${formatSeconds(segment.endSeconds)}] " +
+                        "${segment.speakerId}: ${segment.text.trim()}",
+                )
+            }
+        }
+
     private fun frontMatter(value: String): String =
         value.replace(Regex("[\\r\\n\\u0000-\\u001f]"), " ").trim()
 
     private fun heading(value: String?): String =
         value?.replace(Regex("[\\r\\n]"), " ")?.trim()?.takeIf { it.isNotEmpty() } ?: "(no subject)"
+
+    private fun formatSeconds(value: Double): String {
+        val totalSeconds = value.toLong().coerceAtLeast(0L)
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%02d:%02d".format(minutes, seconds)
+    }
 
     private fun stableId(userId: String, sourceType: String, sourceRef: String?, rawEventId: String): String =
         UUID.nameUUIDFromBytes(

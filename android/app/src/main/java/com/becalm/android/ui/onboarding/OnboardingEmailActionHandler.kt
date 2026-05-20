@@ -63,6 +63,7 @@ internal class OnboardingEmailActionHandler(
         updateState: ((OnboardingUiState) -> OnboardingUiState) -> Unit,
         emitEvent: suspend (EmailConnectEvent) -> Unit,
         reportStepFailed: (OnboardingStep, String) -> Unit,
+        onSaved: suspend () -> Unit = {},
     ) {
         val pipaProvider = imapProviderFor(sourceType)
         if (pipaProvider == null) {
@@ -98,6 +99,7 @@ internal class OnboardingEmailActionHandler(
                 message = "onboarding_email_connected",
                 tags = mapOf("provider" to pipaProvider.storageKey, "source_type" to sourceType),
             )
+            onSaved()
             emitEvent(EmailConnectEvent.Connected(pipaProvider))
         } else {
             val throwable = result.exceptionOrNull()

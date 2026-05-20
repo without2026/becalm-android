@@ -3,6 +3,7 @@ package com.becalm.android.unit.core.analytics
 import com.becalm.android.core.analytics.AmplitudeProductAnalyticsClient
 import com.becalm.android.core.analytics.BackendProductEventsMirrorClient
 import com.becalm.android.core.analytics.CompositeProductAnalyticsClient
+import com.becalm.android.core.analytics.ProductAnalyticsEventQueue
 import com.becalm.android.core.analytics.ProductAnalyticsContext
 import com.becalm.android.core.analytics.ProductAnalyticsEvent
 import com.becalm.android.core.analytics.ProductAnalyticsEvents
@@ -17,7 +18,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class CompositeProductAnalyticsClientSpecTest {
@@ -25,6 +25,7 @@ class CompositeProductAnalyticsClientSpecTest {
     private val amplitude: AmplitudeProductAnalyticsClient = mockk(relaxed = true)
     private val backendMirror: BackendProductEventsMirrorClient = mockk(relaxed = true)
     private val observability: ObservabilityClient = mockk(relaxed = true)
+    private val eventQueue = InMemoryProductAnalyticsEventQueue()
 
     @Test
     fun `invalid product event is dropped before vendor or backend calls`() = runTest {
@@ -84,6 +85,7 @@ class CompositeProductAnalyticsClientSpecTest {
 
         verify(exactly = BACKEND_BATCH_SIZE) { amplitude.track(any()) }
         coVerify(exactly = 1) { backendMirror.flush(match { it.size == BACKEND_BATCH_SIZE }) }
+        assertEquals(BACKEND_BATCH_SIZE, eventQueue.size)
         verify(exactly = 1) {
             observability.addBreadcrumb(
                 "analytics",
@@ -94,30 +96,29 @@ class CompositeProductAnalyticsClientSpecTest {
     }
 
     @Test
-    fun `bounded queue drops oldest events when producer outruns drain`() = runTest {
-        val flushed = mutableListOf<List<ProductAnalyticsEvent>>()
-        coEvery { backendMirror.flush(any()) } answers {
-            flushed += firstArg<List<ProductAnalyticsEvent>>()
-            true
-        }
+    fun `backend mirror retries durable queue and removes events only after success`() = runTest {
+        coEvery { backendMirror.flush(any()) } throws IllegalStateException("backend unavailable")
         val subject = subject(backgroundScope)
 
-        repeat(CHANNEL_CAPACITY + 50) { index ->
+        repeat(BACKEND_BATCH_SIZE) { index ->
             subject.track(event(id = "event-$index"))
         }
         runCurrent()
+        assertEquals(BACKEND_BATCH_SIZE, eventQueue.size)
 
-        val mirroredEvents = flushed.flatten()
-        assertEquals(CHANNEL_CAPACITY, mirroredEvents.size)
-        assertFalse(mirroredEvents.any { it.eventId == "event-0" })
-        assertEquals("event-50", mirroredEvents.first().eventId)
-        assertEquals("event-249", mirroredEvents.last().eventId)
+        coEvery { backendMirror.flush(any()) } returns true
+        subject.track(event(id = "event-retry-trigger"))
+        runCurrent()
+
+        assertEquals(0, eventQueue.size)
+        coVerify(atLeast = 1) { backendMirror.flush(match { it.any { event -> event.eventId == "event-0" } }) }
     }
 
     private fun subject(applicationScope: CoroutineScope): CompositeProductAnalyticsClient =
         CompositeProductAnalyticsClient(
             amplitude = amplitude,
             backendMirror = backendMirror,
+            eventQueue = eventQueue,
             observability = observability,
             analyticsContext = ProductAnalyticsContext(),
             applicationScope = applicationScope,
@@ -141,6 +142,22 @@ class CompositeProductAnalyticsClientSpecTest {
 
     private companion object {
         const val BACKEND_BATCH_SIZE = 20
-        const val CHANNEL_CAPACITY = 200
+    }
+
+    private class InMemoryProductAnalyticsEventQueue : ProductAnalyticsEventQueue {
+        private val queued = mutableListOf<ProductAnalyticsEvent>()
+        val size: Int
+            get() = queued.size
+
+        override suspend fun enqueue(events: List<ProductAnalyticsEvent>) {
+            queued += events
+        }
+
+        override suspend fun peek(limit: Int): List<ProductAnalyticsEvent> =
+            queued.take(limit)
+
+        override suspend fun remove(eventIds: Set<String>) {
+            queued.removeAll { it.eventId in eventIds }
+        }
     }
 }

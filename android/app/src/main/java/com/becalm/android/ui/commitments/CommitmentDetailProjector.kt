@@ -13,6 +13,7 @@ internal object CommitmentDetailProjector {
     fun buildLoadedState(
         entity: CommitmentEntity,
         enrichment: Map<String, PersonEnrichmentEntity>,
+        meetingTranscript: MeetingTranscriptPresentation? = null,
     ): DetailUiState = DetailUiState(
         entity = entity,
         quote = entity.quote,
@@ -21,6 +22,7 @@ internal object CommitmentDetailProjector {
         source = CommitmentDetailFormatter.buildSourcePresentation(entity),
         actionButtons = buildActionButtonState(entity),
         history = CommitmentDetailFormatter.buildHistoryPresentation(entity),
+        meetingTranscript = meetingTranscript,
         loading = false,
         error = null,
     )

@@ -3,6 +3,7 @@ package com.becalm.android.worker
 import com.becalm.android.core.util.Logger
 import com.becalm.android.core.util.redact
 import com.becalm.android.data.local.db.dao.CommitmentDao
+import com.becalm.android.data.local.db.dao.CommitmentProgressEventDao
 import com.becalm.android.data.local.db.dao.PersonIndexDao
 import com.becalm.android.data.local.db.dao.RawIngestionEventDao
 import com.becalm.android.data.local.db.dao.SelfIdentityAnchorDao
@@ -11,13 +12,17 @@ import com.becalm.android.data.remote.dto.SourceExtractionResponse
 import com.becalm.android.data.repository.PersonIndexDirtySources
 import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.SourceStatusRepository
+import com.becalm.android.data.repository.coalesceSourceEventParticipantPersons
+import com.becalm.android.data.repository.preferStrongestIdentityRows
+import com.becalm.android.data.repository.preferStrongestPersonRows
 import com.becalm.android.data.repository.toPersonEntityOrNull
-import com.becalm.android.data.repository.toPersonIdentityEntityOrNull
+import com.becalm.android.data.repository.toPersonIdentityEntities
 import kotlinx.datetime.Instant
 
 internal class StructuredExtractionPersister(
     private val rawIngestionEventDao: RawIngestionEventDao,
     private val commitmentDao: CommitmentDao,
+    private val commitmentProgressEventDao: CommitmentProgressEventDao,
     private val personIndexDao: PersonIndexDao,
     private val sourceStatusRepository: SourceStatusRepository,
     private val processingStatusRepository: ProcessingStatusRepository,
@@ -35,9 +40,10 @@ internal class StructuredExtractionPersister(
             userId = userId,
             sourceEventId = entity.id,
         )
+        val extractionParticipants = body.sourceEventParticipants.withCallRecordingCounterpartyFallback(entity)
         val relevantItems = body.items.filterUserRelevantItems(
             rawCounterpartyRef = entity.counterpartyRef,
-            participants = body.sourceEventParticipants,
+            participants = extractionParticipants,
             selfIdentityAnchors = selfIdentityAnchors,
         )
         val commitmentEntities = relevantItems.mapIndexed { index, dto ->
@@ -56,7 +62,7 @@ internal class StructuredExtractionPersister(
             commitmentDao.insertAll(commitmentEntities)
         }
 
-        val sourceParticipants = body.sourceEventParticipants.mapIndexed { index, dto ->
+        val sourceParticipants = extractionParticipants.mapIndexed { index, dto ->
             dto.toSourceEventParticipantEntity(
                 userId = userId,
                 sourceEventId = entity.id,
@@ -66,14 +72,44 @@ internal class StructuredExtractionPersister(
                 now = now,
                 selfIdentityAnchors = selfIdentityAnchors,
             )
-        }
+        }.coalesceSourceEventParticipantPersons()
         if (sourceParticipants.isNotEmpty()) {
-            personIndexDao.upsertPersons(sourceParticipants.mapNotNull { it.toPersonEntityOrNull() })
-            personIndexDao.upsertIdentities(sourceParticipants.mapNotNull { it.toPersonIdentityEntityOrNull() })
+            val incomingPersons = sourceParticipants.mapNotNull { it.toPersonEntityOrNull() }
+            val existingPersons = incomingPersons
+                .map { it.id }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { personIndexDao.findPersonsByIds(userId = userId, personIds = it) }
+                .orEmpty()
+            personIndexDao.upsertPersons((existingPersons + incomingPersons).preferStrongestPersonRows())
+
+            val incomingIdentities = sourceParticipants.flatMap { it.toPersonIdentityEntities() }
+            val existingIdentities = incomingIdentities
+                .map { it.id }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { personIndexDao.findIdentitiesByIds(userId = userId, identityIds = it) }
+                .orEmpty()
+            personIndexDao.upsertIdentities((existingIdentities + incomingIdentities).preferStrongestIdentityRows())
             personIndexDao.upsertSourceEventParticipants(sourceParticipants)
         }
 
         val fallbackPersonId = sourceParticipants.singleSourceCounterpartyPersonId()
+        val completionProgressEvents = body.completionSignals.mapIndexedNotNull { index, signal ->
+            signal.toCommitmentProgressEventEntity(
+                userId = userId,
+                sourceEvent = entity,
+                index = index,
+                sourceParticipants = sourceParticipants,
+                fallbackPersonId = fallbackPersonId,
+                now = now,
+                selfIdentityAnchors = selfIdentityAnchors,
+            )
+        }
+        if (completionProgressEvents.isNotEmpty()) {
+            commitmentProgressEventDao.upsertAll(completionProgressEvents)
+        }
+
         val commitmentParticipants = commitmentEntities.mapIndexedNotNull { index, commitment ->
             commitment.toCommitmentParticipantEntity(
                 userId = userId,
@@ -116,11 +152,19 @@ internal class StructuredExtractionPersister(
         sourceStatusRepository.recordSyncSuccess(entity.sourceType, now)
         processingStatusRepository.recordSynced(entity.sourceType, relevantItems.size)
         SourceGraphChangedNotifier(workScheduler).notifyChanged()
-        logger.d(TAG, "extraction persisted id=${redact(entity.id)} items=${relevantItems.size}")
+        if (completionProgressEvents.isNotEmpty()) {
+            workScheduler.enqueueProcessDone()
+        }
+        logger.d(
+            TAG,
+            "extraction persisted id=${redact(entity.id)} items=${relevantItems.size} " +
+                "completionSignals=${completionProgressEvents.size}",
+        )
         return StructuredExtractionPersistStats(
             itemCount = relevantItems.size,
             sourceParticipantCount = sourceParticipants.size,
             commitmentParticipantCount = commitmentParticipants.size,
+            completionSignalCount = completionProgressEvents.size,
         )
     }
 
@@ -134,4 +178,5 @@ internal data class StructuredExtractionPersistStats(
     val itemCount: Int,
     val sourceParticipantCount: Int,
     val commitmentParticipantCount: Int,
+    val completionSignalCount: Int = 0,
 )

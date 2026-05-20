@@ -75,9 +75,9 @@ public fun LoginScreen(
     onboardingViewModel: OnboardingViewModel? = null,
     stateOverride: AuthUiState? = null,
     onEmailSignIn: ((String, String) -> Unit)? = null,
-    onEmailSignUp: ((String, String) -> Unit)? = null,
     googleSignInEnabledOverride: Boolean? = null,
     onGoogleSignInLaunch: (() -> Unit)? = null,
+    onNavigateToSignUp: (() -> Unit)? = null,
     onSignedInNavigate: ((String) -> Unit)? = null,
     onGoogleIdToken: ((String) -> Unit)? = null,
     onErrorDismissed: (() -> Unit)? = null,
@@ -86,7 +86,6 @@ public fun LoginScreen(
 ) {
     val needsAuthViewModel = stateOverride == null ||
         onEmailSignIn == null ||
-        onEmailSignUp == null ||
         onGoogleIdToken == null ||
         onErrorDismissed == null ||
         (onGoogleSignInLaunch == null && googleSignInEnabledOverride == null)
@@ -120,7 +119,7 @@ public fun LoginScreen(
     val signedInState = state as? AuthUiState.SignedIn
     val authErrorMessage = (state as? AuthUiState.Error)?.message?.let { uiMessageStringResource(it) }
     if (signedInState != null) {
-        LoginSignedInNavigationEffect(
+        AuthSignedInNavigationEffect(
             signedIn = signedInState,
             navController = navController,
             onboardingViewModel = onboardingViewModel,
@@ -179,9 +178,10 @@ public fun LoginScreen(
                 onEmailSignIn?.invoke(email, password)
                     ?: requireNotNull(authViewModel).onEmailSignIn(email, password)
             },
-            onSignUp = { email, password ->
-                onEmailSignUp?.invoke(email, password)
-                    ?: requireNotNull(authViewModel).onEmailSignUp(email, password)
+            onSignUp = onNavigateToSignUp ?: {
+                navController.navigate(BecalmRoute.SignUp.path) {
+                    launchSingleTop = true
+                }
             },
             onGoogleSignIn = launchGoogleSignIn,
         )
@@ -189,12 +189,13 @@ public fun LoginScreen(
 }
 
 @Composable
-private fun LoginSignedInNavigationEffect(
+internal fun AuthSignedInNavigationEffect(
     signedIn: AuthUiState.SignedIn,
     navController: NavHostController,
     onboardingViewModel: OnboardingViewModel?,
     onMarkLoginGranted: (() -> Unit)?,
     onSignedInNavigate: ((String) -> Unit)?,
+    authRouteToRemove: String? = null,
 ) {
     val resolvedOnboardingViewModel = if (onMarkLoginGranted == null) {
         onboardingViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<OnboardingViewModel>()
@@ -213,7 +214,12 @@ private fun LoginSignedInNavigationEffect(
         }
         (onSignedInNavigate ?: { target ->
             navController.navigate(target) {
-                popUpTo(BecalmRoute.Login.path) { inclusive = true }
+                if (signedIn.onboardingCompleted) {
+                    popUpTo(BecalmRoute.Login.path) { inclusive = true }
+                } else if (authRouteToRemove != null) {
+                    popUpTo(authRouteToRemove) { inclusive = true }
+                }
+                launchSingleTop = true
             }
         })(destination)
     }
@@ -226,7 +232,7 @@ internal fun LoginForm(
     googleSignInEnabled: Boolean,
     authErrorMessage: String? = null,
     onSignIn: (String, String) -> Unit,
-    onSignUp: (String, String) -> Unit,
+    onSignUp: () -> Unit,
     onGoogleSignIn: () -> Unit,
 ) {
     // Local UI state only — no PII stored in remembered state
@@ -277,16 +283,10 @@ internal fun LoginForm(
                     val nextErrors = LoginInputValidator.validate(email, password)
                     validationErrors = nextErrors
                     if (nextErrors.isEmpty()) {
-                        onSignIn(email, password)
+                        onSignIn(email.trim(), password)
                     }
                 },
-                onSignUp = {
-                    val nextErrors = LoginInputValidator.validate(email, password)
-                    validationErrors = nextErrors
-                    if (nextErrors.isEmpty()) {
-                        onSignUp(email, password)
-                    }
-                },
+                onSignUp = onSignUp,
             )
         }
     }
@@ -458,7 +458,7 @@ private fun PreviewLoginScreen() {
                 isLoading = false,
                 googleSignInEnabled = true,
                 onSignIn = { _, _ -> },
-                onSignUp = { _, _ -> },
+                onSignUp = {},
                 onGoogleSignIn = {},
             )
         }

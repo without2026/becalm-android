@@ -196,6 +196,7 @@ class ColdSyncLocalIntegrationTest {
         override fun cancelEnrichmentSweep() = Unit
         override fun enqueueVoiceUpload(rawEventId: String, audioUri: String, selfSpeakerId: String?, speakerMappingsJson: String?, speakerPreviewId: String?) = Unit
         override fun enqueueMessageScreenshotUpload(rawEventId: String) = Unit
+        override fun enqueueMeetingSpeakerPreview(rawEventId: String, audioUri: String) = Unit
         override fun enqueueVoiceUploadWithDelay(
             rawEventId: String,
             audioUri: String,
@@ -204,10 +205,14 @@ class ColdSyncLocalIntegrationTest {
             selfSpeakerId: String?,
             speakerMappingsJson: String?,
             speakerPreviewId: String?,
+            extractionJobId: String?,
+            extractionJobPollAttempt: Int,
         ) = Unit
 
         override fun scheduleRetentionSweep() = Unit
         override fun scheduleOverdueSweep() = Unit
+        override fun enqueueProcessDone(initialDelaySeconds: Long) = Unit
+        override fun scheduleProcessDoneSweep() = Unit
 
         override fun enqueueDeferredColdSyncStage1() {
             deferredStage1EnqueueCount += 1

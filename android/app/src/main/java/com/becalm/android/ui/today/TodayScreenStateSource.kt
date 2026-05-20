@@ -12,6 +12,8 @@ import com.becalm.android.data.local.db.entity.ScheduleEventLinkEntity
 import com.becalm.android.data.repository.AuthRepository
 import com.becalm.android.data.repository.CalendarEventRepository
 import com.becalm.android.data.repository.CommitmentRepository
+import com.becalm.android.data.repository.ProcessingSourceState
+import com.becalm.android.data.repository.ProcessingStatusRepository
 import com.becalm.android.data.repository.ScheduleEventLinkRepository
 import com.becalm.android.data.repository.SourceStatus
 import com.becalm.android.data.repository.SourceStatusRepository
@@ -44,7 +46,14 @@ internal data class TodaySnapshot(
     val calendarEvents: List<CalendarEventEntity>,
     val scheduleLinks: List<ScheduleEventLinkEntity>,
     val sourceStatuses: List<SourceStatus>,
+    val processingStates: List<ProcessingSourceState>,
     val processingPaused: Boolean,
+    val now: Instant,
+)
+
+private data class TodaySourceProcessingSnapshot(
+    val sourceStatuses: List<SourceStatus>,
+    val processingStates: List<ProcessingSourceState>,
 )
 
 internal class TodayScreenStateSource @Inject constructor(
@@ -52,6 +61,7 @@ internal class TodayScreenStateSource @Inject constructor(
     private val calendarEventRepository: CalendarEventRepository,
     private val scheduleEventLinkRepository: ScheduleEventLinkRepository? = null,
     private val sourceStatusRepository: SourceStatusRepository,
+    private val processingStatusRepository: ProcessingStatusRepository? = null,
     private val authRepository: AuthRepository,
     private val userPrefsStore: UserPrefsStore,
     private val clock: Clock,
@@ -109,20 +119,32 @@ internal class TodayScreenStateSource @Inject constructor(
             }
         }
 
+        val sourceProcessingFlow = combine(
+            sourceStatusRepository.observeAll(),
+            processingStatusRepository?.observeAll() ?: flowOf(emptyList<ProcessingSourceState>()),
+        ) { sourceStatuses, processingStates ->
+            TodaySourceProcessingSnapshot(
+                sourceStatuses = sourceStatuses,
+                processingStates = processingStates,
+            )
+        }
+
         val baseSnapshotFlow = combine(
             userIdFlow,
             commitmentFlow,
             calendarFlow,
             scheduleLinkFlow,
-            sourceStatusRepository.observeAll(),
-        ) { userId, commitments, calendarEvents, scheduleLinks, sourceStatuses ->
+            sourceProcessingFlow,
+        ) { userId, commitments, calendarEvents, scheduleLinks, sourceProcessing ->
             TodaySnapshot(
                 userId = userId,
                 commitments = commitments,
                 calendarEvents = calendarEvents,
                 scheduleLinks = scheduleLinks,
-                sourceStatuses = sourceStatuses,
+                sourceStatuses = sourceProcessing.sourceStatuses,
+                processingStates = sourceProcessing.processingStates,
                 processingPaused = false,
+                now = clock.nowInstant(),
             )
         }
 

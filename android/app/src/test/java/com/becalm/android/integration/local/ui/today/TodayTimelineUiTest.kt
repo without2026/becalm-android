@@ -41,6 +41,7 @@ class TodayTimelineUiTest {
     @Test
     fun `today content shows processing banner active source chips source warning and settings action`() {
         var openSettingsCount = 0
+        var openSourcesCount = 0
 
         composeRule.setContent {
             BecalmTheme {
@@ -74,6 +75,7 @@ class TodayTimelineUiTest {
                         ),
                     ),
                     onOpenSettings = { openSettingsCount += 1 },
+                    onOpenSources = { openSourcesCount += 1 },
                     onPullRefresh = {},
                 )
             }
@@ -82,6 +84,7 @@ class TodayTimelineUiTest {
         composeRule.onNodeWithText(string(R.string.processing_paused_banner)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_syncing_fmt, 1, 7)).assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.today_source_attention_mixed_fmt, 1, 1)).assertIsDisplayed()
+        composeRule.onNodeWithText(string(R.string.today_source_attention_action)).performClick()
         composeRule.onNodeWithText(string(R.string.raw_event_source_badge_voice)).assertIsDisplayed()
         composeRule.onNodeWithText("Gmail").assertExists()
         composeRule.onAllNodesWithText(string(R.string.raw_event_source_badge_outlook_mail)).assertCountEquals(0)
@@ -90,6 +93,7 @@ class TodayTimelineUiTest {
 
         composeRule.runOnIdle {
             assertEquals(1, openSettingsCount)
+            assertEquals(1, openSourcesCount)
         }
     }
 

@@ -90,6 +90,13 @@
   Auth Google provider 활성화 후 fresh reset에서 Google CredentialManager account picker,
   계정 선택, 앱 복귀, Supabase Google sign-in이 통과했고, 앱은 onboarding source selection
   화면으로 진입했다.
+- Auth known follow-up. 2026-05-18 KST Samsung 실기기에서 이메일 로그인 시도 중
+  logcat에는 `email sign-in succeeded`와 `SignedIn(... onboardingResumeRoute=onboarding/setup)`가
+  찍혔고 `FATAL EXCEPTION`은 없었다. 사용자는 앱이 꺼진 것처럼 보였다고 보고했다.
+  같은 시점에 브라우저가 foreground였다가 앱이 다시 foreground로 복귀하는 WindowManager
+  전환 로그가 있어, crash가 아니라 auth 성공 직후 외부 activity/background 전환 또는
+  account-swap/restart 유사 UX일 가능성이 있다. 이번 slice의 blocker로 보지 않고 다음 auth
+  UX audit에서 재현/원인 확정 대상으로 남긴다.
 - Gmail OAuth 브라우저 동의 후 backend callback/status는 성공했다. Logcat 기준
   `/v1/oauth/mail/gmail:status`가 callback 완료 전에는 `connected=false`를 반환했지만,
   약 2초 뒤 `connected=true`, `LINK_GMAIL -> COMPLETE`, `source_connections` refresh,

@@ -2,12 +2,14 @@ package com.becalm.android.unit.ui.auth
 
 import android.app.PendingIntent
 import android.content.Context
+import android.os.Bundle
 import android.os.CancellationSignal
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CredentialManagerCallback
 import androidx.credentials.CreateCredentialRequest
 import androidx.credentials.CreateCredentialResponse
+import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.PrepareGetCredentialResponse
@@ -20,6 +22,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import androidx.test.core.app.ApplicationProvider
 import com.becalm.android.ui.auth.GoogleSignInHandle
 import com.becalm.android.ui.auth.GoogleSignInResult
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import java.util.concurrent.Executor
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -40,7 +43,7 @@ class GoogleSignInLauncherSpecTest {
     @Test
     fun `google sign-in launcher is no-op when web client id is blank`() = runTest {
         val credentialManager = RecordingCredentialManager(
-            result = GetCredentialCancellationException(),
+            exception = GetCredentialCancellationException(),
         )
         val results = mutableListOf<GoogleSignInResult>()
 
@@ -81,10 +84,61 @@ class GoogleSignInLauncherSpecTest {
         assertTrue(result is GoogleSignInResult.Error)
     }
 
+    @Test
+    fun `google sign-in launcher maps valid google credential to success`() = runTest {
+        val result = launchWith(
+            GetCredentialResponse(
+                GoogleIdTokenCredential(
+                    "google-account-id",
+                    "id-token",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                ),
+            ),
+        )
+
+        assertEquals(GoogleSignInResult.Success("id-token"), result)
+    }
+
+    @Test
+    fun `google sign-in launcher maps malformed google credential to recoverable error`() = runTest {
+        val result = launchWith(
+            GetCredentialResponse(
+                CustomCredential(
+                    GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL,
+                    Bundle(),
+                ),
+            ),
+        )
+
+        assertTrue(result is GoogleSignInResult.Error)
+    }
+
+    @Test
+    fun `google sign-in launcher maps unexpected credential type to recoverable error`() = runTest {
+        val result = launchWith(
+            GetCredentialResponse(
+                CustomCredential("unexpected-credential-type", Bundle()),
+            ),
+        )
+
+        assertTrue(result is GoogleSignInResult.Error)
+    }
+
     private suspend fun TestScope.launchWith(
         exception: GetCredentialException,
+    ): GoogleSignInResult = launchWith(RecordingCredentialManager(exception = exception))
+
+    private suspend fun TestScope.launchWith(
+        response: GetCredentialResponse,
+    ): GoogleSignInResult = launchWith(RecordingCredentialManager(response = response))
+
+    private suspend fun TestScope.launchWith(
+        credentialManager: RecordingCredentialManager,
     ): GoogleSignInResult {
-        val credentialManager = RecordingCredentialManager(result = exception)
         val results = mutableListOf<GoogleSignInResult>()
         val handle = GoogleSignInHandle(
             scope = this,
@@ -103,7 +157,8 @@ class GoogleSignInLauncherSpecTest {
     }
 
     private class RecordingCredentialManager(
-        private val result: GetCredentialException,
+        private val response: GetCredentialResponse? = null,
+        private val exception: GetCredentialException? = null,
     ) : CredentialManager {
         var getCredentialCalls = 0
             private set
@@ -116,7 +171,13 @@ class GoogleSignInLauncherSpecTest {
             callback: CredentialManagerCallback<GetCredentialResponse, GetCredentialException>,
         ) {
             getCredentialCalls += 1
-            executor.execute { callback.onError(result) }
+            executor.execute {
+                when {
+                    response != null -> callback.onResult(response)
+                    exception != null -> callback.onError(exception)
+                    else -> error("response or exception required")
+                }
+            }
         }
 
         override fun getCredentialAsync(

@@ -9,13 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -91,6 +91,7 @@ public fun CommitmentDetailSheet(
     onFollowUp: (() -> Unit)? = null,
     onComplete: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    onSpeakerAliasChange: ((String, String) -> Unit)? = null,
 ) {
     val resolvedDetailViewModel = if (stateOverride == null || effectsOverride == null) {
         detailViewModel ?: androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel<CommitmentDetailViewModel>()
@@ -110,7 +111,7 @@ public fun CommitmentDetailSheet(
         val collectedState by requireNotNull(resolvedDetailViewModel).uiState.collectAsStateWithLifecycle()
         collectedState
     }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val entity = state.entity
 
     LaunchedEffect(effectsOverride, resolvedDetailViewModel) {
@@ -151,6 +152,7 @@ public fun CommitmentDetailSheet(
                     actionState = state.actionState,
                     source = state.source,
                     history = state.history,
+                    meetingTranscript = state.meetingTranscript,
                     actionButtons = state.actionButtons,
                     counterpartyDisplayName = state.counterpartyDisplayName,
                     onRemind = onRemind ?: {
@@ -172,6 +174,11 @@ public fun CommitmentDetailSheet(
                     onEdit = {
                         requireNotNull(resolvedDetailViewModel).onEditClick()
                     },
+                    onSpeakerAliasChange = onSpeakerAliasChange ?: { speakerId, displayName ->
+                        if (resolvedDetailViewModel != null) {
+                            resolvedDetailViewModel.onSpeakerAliasChange(speakerId, displayName)
+                        }
+                    },
                 )
             }
         }
@@ -187,6 +194,7 @@ internal fun DetailSheetContent(
     actionState: CommitmentState,
     source: CommitmentSourcePresentation,
     history: CommitmentHistoryPresentation,
+    meetingTranscript: MeetingTranscriptPresentation? = null,
     actionButtons: CommitmentDetailActionState,
     counterpartyDisplayName: String?,
     onRemind: () -> Unit,
@@ -194,6 +202,7 @@ internal fun DetailSheetContent(
     onComplete: () -> Unit,
     onCancel: () -> Unit,
     onEdit: () -> Unit,
+    onSpeakerAliasChange: (String, String) -> Unit = { _, _ -> },
 ) {
     val scrollState = rememberScrollState()
     Column(
@@ -285,6 +294,55 @@ internal fun DetailSheetContent(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
+        if (meetingTranscript != null) {
+            SectionLabel(text = stringResource(R.string.commitment_detail_meeting_transcript_label))
+            Spacer(modifier = Modifier.height(4.dp))
+            if (meetingTranscript.speakerIds.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    meetingTranscript.speakerIds.forEach { speakerId ->
+                        OutlinedTextField(
+                            value = meetingTranscript.aliases[speakerId] ?: speakerId,
+                            onValueChange = { value -> onSpeakerAliasChange(speakerId, value) },
+                            label = {
+                                Text(
+                                    text = stringResource(
+                                        R.string.commitment_detail_speaker_alias_label,
+                                        speakerId,
+                                    ),
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("meeting-speaker-alias-$speakerId"),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            Text(
+                text = meetingTranscript.bodyText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .testTag("commitment-meeting-transcript"),
+            )
+            if (meetingTranscript.truncated) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.commitment_detail_meeting_transcript_truncated),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // 7. Action button strip
         if (actionButtons.availableActions.isNotEmpty() || actionButtons.editEnabled) {
             ActionButtonRow(
@@ -358,39 +416,49 @@ private fun ActionButtonRow(
     val cancelEnabled = completeEnabled
     val editEnabled = actionButtons.editEnabled && !isDeleted
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedButton(
-            onClick = onRemind,
-            enabled = remindEnabled,
-            modifier = Modifier
-                .widthIn(min = 0.dp)
-                .testTag("commitment-detail-remind"),
-        ) { Text(text = stringResource(R.string.commitment_action_remind)) }
-        OutlinedButton(
-            onClick = onFollowUp,
-            enabled = followUpEnabled,
-            modifier = Modifier.widthIn(min = 0.dp),
-        ) { Text(text = stringResource(R.string.commitment_action_follow_up)) }
-        OutlinedButton(
-            onClick = onComplete,
-            enabled = completeEnabled,
-            modifier = Modifier.widthIn(min = 0.dp),
-        ) { Text(text = stringResource(R.string.commitment_action_complete)) }
-        OutlinedButton(
-            onClick = onCancel,
-            enabled = cancelEnabled,
-            modifier = Modifier.widthIn(min = 0.dp),
-        ) { Text(text = stringResource(R.string.commitment_action_cancel)) }
-        OutlinedButton(
-            onClick = onEdit,
-            enabled = editEnabled,
-            modifier = Modifier
-                .widthIn(min = 0.dp)
-                .testTag("commitment-detail-edit"),
-        ) { Text(text = stringResource(R.string.commitment_action_edit)) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = onRemind,
+                enabled = remindEnabled,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("commitment-detail-remind"),
+            ) { Text(text = stringResource(R.string.commitment_action_remind)) }
+            OutlinedButton(
+                onClick = onFollowUp,
+                enabled = followUpEnabled,
+                modifier = Modifier.weight(1f),
+            ) { Text(text = stringResource(R.string.commitment_action_follow_up)) }
+            OutlinedButton(
+                onClick = onComplete,
+                enabled = completeEnabled,
+                modifier = Modifier.weight(1f),
+            ) { Text(text = stringResource(R.string.commitment_action_complete)) }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = cancelEnabled,
+                modifier = Modifier.weight(1f),
+            ) { Text(text = stringResource(R.string.commitment_action_cancel)) }
+            OutlinedButton(
+                onClick = onEdit,
+                enabled = editEnabled,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("commitment-detail-edit"),
+            ) { Text(text = stringResource(R.string.commitment_action_edit)) }
+        }
     }
 }
 
@@ -416,13 +484,14 @@ private fun SimpleChip(text: String) {
     )
 }
 
+@Composable
 private fun stringForActionState(state: CommitmentState): String = when (state) {
-    CommitmentState.PENDING -> CommitmentWire.ACTION_PENDING_UPPER
-    CommitmentState.REMINDED -> CommitmentWire.ACTION_REMINDED_UPPER
-    CommitmentState.FOLLOWED_UP -> CommitmentWire.ACTION_FOLLOWED_UPPER
-    CommitmentState.COMPLETED -> CommitmentWire.ACTION_COMPLETED_UPPER
-    CommitmentState.OVERDUE -> CommitmentWire.ACTION_OVERDUE_UPPER
-    CommitmentState.CANCELLED -> CommitmentWire.ACTION_CANCELLED_UPPER
+    CommitmentState.PENDING -> stringResource(R.string.commitment_action_state_pending)
+    CommitmentState.REMINDED -> stringResource(R.string.commitment_action_state_reminded)
+    CommitmentState.FOLLOWED_UP -> stringResource(R.string.commitment_action_state_followed_up)
+    CommitmentState.COMPLETED -> stringResource(R.string.commitment_action_state_completed)
+    CommitmentState.OVERDUE -> stringResource(R.string.commitment_action_state_overdue)
+    CommitmentState.CANCELLED -> stringResource(R.string.commitment_action_state_cancelled)
 }
 
 @Composable

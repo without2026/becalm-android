@@ -380,6 +380,7 @@ private fun ImapConsentConnectContent(
             Spacer(modifier = Modifier.height(24.dp))
             ImapFormHeader()
         },
+        initialProvider = copy.initialImapProvider,
     )
 }
 
@@ -518,6 +519,7 @@ private data class EmailPipaCopy(
     @StringRes val recipientRes: Int,
     val skipAheadRoute: String,
     val connectionTarget: EmailPipaConnectionTarget,
+    val initialImapProvider: ImapProvider = ImapProvider.Naver,
 )
 
 private sealed interface EmailPipaConnectionTarget {
@@ -545,13 +547,25 @@ private fun pipaCopyForSlug(slug: String): EmailPipaCopy? = when (slug) {
         skipAheadRoute = BecalmRoute.OnboardingEmailPipa("imap").path,
         connectionTarget = EmailPipaConnectionTarget.OAuth(EmailPipaProvider.OUTLOOK_MAIL),
     )
-    "imap" -> EmailPipaCopy(
+    "imap",
+    "imap_naver",
+    -> EmailPipaCopy(
         recipients = EmailPipaProvider.IMAP_GROUP,
         titleRes = R.string.onb_pipa_email_title_imap,
         headlineRes = R.string.onb_pipa_email_headline_imap,
         recipientRes = R.string.onb_pipa_email_recipient_imap,
         skipAheadRoute = BecalmRoute.OnboardingGoogleCalendar.path,
         connectionTarget = EmailPipaConnectionTarget.Imap,
+        initialImapProvider = ImapProvider.Naver,
+    )
+    "imap_daum" -> EmailPipaCopy(
+        recipients = EmailPipaProvider.IMAP_GROUP,
+        titleRes = R.string.onb_pipa_email_title_imap,
+        headlineRes = R.string.onb_pipa_email_headline_imap,
+        recipientRes = R.string.onb_pipa_email_recipient_imap,
+        skipAheadRoute = BecalmRoute.OnboardingGoogleCalendar.path,
+        connectionTarget = EmailPipaConnectionTarget.Imap,
+        initialImapProvider = ImapProvider.Daum,
     )
     else -> null
 }
